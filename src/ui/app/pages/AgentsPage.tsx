@@ -1607,7 +1607,7 @@ export function AgentsPage() {
     if (!supportsInlineRightPanel) {
       const runtimeEntityId = resolveRuntimeEntityId(nodeId);
       navigateToSecondaryPage(
-        `/agents/chat/${encodeURIComponent(runtimeEntityId)}`,
+        `/agents/agent/${encodeURIComponent(runtimeEntityId)}`,
       );
       return;
     }
@@ -9141,7 +9141,6 @@ export function AgentsPage() {
           if (node?.type === "agent") openAgentDetail(nodeId);
           else if (node?.type === "actor") openActorDetail(nodeId);
           else openSignalDetail(nodeId);
-          // TODO(issue-354-mobile-sheet): <lg 视口点击节点后改为底部详情 Sheet。
         }}
         onClearSelection={() => {
           closeRightPanel();

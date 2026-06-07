@@ -60,9 +60,38 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
     expect(screen.getByTestId('agent-detail-back-button')).toBeInTheDocument();
     expect(screen.getByText('触发规则')).toBeInTheDocument();
     expect(screen.getByText('输出目标')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '行动日志' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '身份' })).toBeInTheDocument();
     expect(screen.getByTestId('agent-detail-chat-button')).toBeInTheDocument();
     expect(screen.getByTestId('agent-detail-page').className).toContain('bg-surface');
     expect(screen.getByTestId('agent-detail-page').className).toContain('text-foreground');
+  });
+
+  it('keeps long runtime stats wrapped on mobile detail cards（移动端长路由统计不溢出）', async () => {
+    serviceMocks.getAgentDetail.mockResolvedValueOnce({
+      ...AGENT_HUB_MOCK_FIXTURE.agentDetails['agent-daily'],
+      stats: [
+        { label: '状态', value: '可用' },
+        {
+          label: '订阅信号',
+          value: 'timeblock.replication.completed、timeblock.replication.active_upserted',
+        },
+      ],
+    });
+
+    render(<AgentDetailPage agentId="agent-summary" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-detail-stats-grid')).toBeInTheDocument();
+    });
+
+    const statsGrid = screen.getByTestId('agent-detail-stats-grid');
+    expect(statsGrid.className).toContain('grid-cols-2');
+    expect(statsGrid.className).not.toContain('grid-cols-3');
+    expect(screen.getByText('状态')).toBeInTheDocument();
+    expect(screen.getByText('可用')).toBeInTheDocument();
+    expect(screen.getByText('订阅信号')).toBeInTheDocument();
+    expect(screen.getByText(/timeblock\.replication\.completed/).className).toContain('[overflow-wrap:anywhere]');
   });
 
   it('renders actor detail sections（Actor 详情区块）', async () => {
@@ -113,7 +142,10 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
     });
 
     expect(screen.queryByText('Agent 详情加载中...')).not.toBeInTheDocument();
-    expect(screen.getByText('未找到 Agent 详情')).toBeInTheDocument();
+    expect(screen.getByText('基础详情暂不可用')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '行动日志' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '身份' })).toBeInTheDocument();
+    expect(screen.getByTestId('agent-detail-chat-button')).toBeInTheDocument();
   });
 
   it('renders actor empty state when detail is missing（Actor 空详情应展示空态）', async () => {

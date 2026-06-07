@@ -23,6 +23,23 @@ type AgentEnvironmentLike = {
   agent: IAgentPort;
 };
 
+const RUNTIME_AGENT_STATUS_LABELS: Record<string, string> = {
+  available: '可用',
+  running: '运行中',
+  idle: '空闲',
+  busy: '忙碌',
+  offline: '离线',
+  error: '异常',
+  unknown: '未知',
+};
+
+function formatRuntimeAgentStatus(status: unknown): string {
+  if (typeof status !== 'string' || status.length === 0) {
+    return RUNTIME_AGENT_STATUS_LABELS.unknown;
+  }
+  return RUNTIME_AGENT_STATUS_LABELS[status] ?? status;
+}
+
 export interface AgentHubService {
   getTopology(): Promise<AgentHubTopologyData>;
   getListView(): Promise<AgentHubListSection[]>;
@@ -149,9 +166,9 @@ export class AgentHubServiceImpl implements AgentHubService {
               icon: 'brain',
               tintColor: '#0D9488',
               stats: [
-                { label: 'Status', value: match.status || 'unknown' },
+                { label: '状态', value: formatRuntimeAgentStatus(match.status) },
                 ...(match.subscriptions?.length
-                  ? [{ label: 'Subscriptions', value: match.subscriptions.join(', ') }]
+                  ? [{ label: '订阅信号', value: match.subscriptions.join('、') }]
                   : []),
               ],
               triggerRules: [],
