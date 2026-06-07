@@ -7,7 +7,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use chrono::{TimeZone, Utc};
+use chrono::Utc;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
@@ -18,7 +18,8 @@ use tokio::time::{Duration, Instant};
 use crate::AppState;
 use crate::auth::AuthenticatedPeerIdentity;
 use crate::eventlog::{EventListFilter, EventRecord, EventRef, sanitize_user_id};
-use crate::signal::types::SignalEvent;
+#[cfg(test)]
+use crate::eventlog_appender::eventlog_created_at;
 
 const EVENTLOG_REVISION_HEADER: &str = "x-exomind-eventlog-revision";
 const EVENTLOG_LIST_SEMANTICS_HEADER: &str = "x-exomind-eventlog-list-semantics";
@@ -204,76 +205,6 @@ fn resolve_watch_since_id(
     Ok(latest.first().map(|event| event.id.clone()))
 }
 
-fn eventlog_replication_seq(event: &EventRecord) -> i64 {
-    if event.timestamp > 0 {
-        return event.timestamp;
-    }
-
-    Utc::now().timestamp_millis().max(1)
-}
-
-fn eventlog_created_at(timestamp: i64) -> String {
-    Utc.timestamp_millis_opt(timestamp)
-        .single()
-        .unwrap_or_else(Utc::now)
-        .to_rfc3339()
-}
-
-fn build_eventlog_replication_payload(
-    event: &EventRecord,
-    user_id: Option<&str>,
-) -> serde_json::Value {
-    let replication_seq = eventlog_replication_seq(event);
-    let event_type = event
-        .tags
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "note".to_string());
-    let scope_key = sanitize_user_id(user_id);
-
-    serde_json::json!({
-        "schemaVersion": 1,
-        "scopeKey": scope_key,
-        "replicationSeq": replication_seq,
-        "cursor": {
-            "kind": "replication_seq",
-            "value": replication_seq,
-        },
-        "event": {
-            "id": event.id,
-            "content": event.content,
-            "createdAt": eventlog_created_at(event.timestamp),
-            "type": event_type,
-            "metadata": event.metadata,
-            "replicationSeq": replication_seq,
-        },
-        "record": event,
-    })
-}
-
-pub(crate) async fn publish_eventlog_replication_append(
-    state: &AppState,
-    user_id: Option<&str>,
-    event: &EventRecord,
-) {
-    let signal = SignalEvent {
-        schema_version: 1,
-        id: uuid::Uuid::new_v4().to_string(),
-        topic: "eventlog.replication.appended".to_string(),
-        ts: Utc::now().timestamp_millis() as u64,
-        source: "runtime:eventlog".to_string(),
-        origin_host_id: state.host_id.clone(),
-        hop: 0,
-        trace_id: Some(format!("eventlog:{}", event.id)),
-        payload: build_eventlog_replication_payload(event, user_id),
-    };
-
-    state.signal_pool.publish(signal.clone());
-    if let Some(mesh_relay) = &state.mesh_relay {
-        mesh_relay.forward_event_to_peers(signal).await;
-    }
-}
-
 // ── Handlers ────────────────────────────────────────────────────
 
 /// GET /eventlog — list all events (optionally filtered by user_id, limit, since_id).
@@ -341,10 +272,10 @@ async fn append_event(
     };
 
     state
-        .eventlog_store
+        .eventlog_appender()
         .append_event(query.user_id.as_deref(), event.clone())
+        .await
         .map_err(internal_error)?;
-    publish_eventlog_replication_append(&state, query.user_id.as_deref(), &event).await;
     Ok((StatusCode::CREATED, Json(event)))
 }
 

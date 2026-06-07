@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use futures_util::stream::{self, BoxStream, StreamExt};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 
 use crate::timeblock::BlockPhase;
 
@@ -15,19 +15,20 @@ use crate::agent::broker::{self, AgentTurnBroker, AgentTurnRequest, AgentTurnRes
 use crate::agent::session::{AgentSessionRecord, AgentSessionRuntime};
 use crate::agent::tools::ToolRegistry;
 use crate::agent::{Agent, ChatChunk, ChatRequest, SessionInfo};
-use crate::config::types::PutConfigEntryInput;
 use crate::config::ConfigStore;
+use crate::config::types::PutConfigEntryInput;
 use crate::energy::{AgentEnergySnapshot, EnergyRegistry};
 use crate::eventlog::{EventLogStore, EventRecord};
-use crate::signal::types::SignalEvent;
+use crate::eventlog_appender::EventLogAppender;
 use crate::signal::SignalPool;
+use crate::signal::types::SignalEvent;
 use crate::timeblock::TimeBlockData;
 
 use context::collect_context;
 use templates::{
     build_end_prompt, build_feedback_review_prompt, build_start_prompt, system_prompt,
 };
-use tools::{submit_timeblock_summary_tool, AgentSourceMetadata, SUBMIT_TIMEBLOCK_SUMMARY_TOOL};
+use tools::{AgentSourceMetadata, SUBMIT_TIMEBLOCK_SUMMARY_TOOL, submit_timeblock_summary_tool};
 
 const CONFIG_KEY_ENABLED: &str = "builtin.timeblock_summary.enabled";
 const CONFIG_KEY_SUBSCRIPTIONS: &str = "builtin.timeblock_summary.subscriptions";
@@ -147,7 +148,14 @@ fn has_existing_summary(
         ..Default::default()
     };
     eventlog_store
-        .list_events_filtered(if user_id.is_empty() { None } else { Some(user_id) }, &filter)
+        .list_events_filtered(
+            if user_id.is_empty() {
+                None
+            } else {
+                Some(user_id)
+            },
+            &filter,
+        )
         .map(|events| !events.is_empty())
         .unwrap_or(false)
 }
@@ -161,6 +169,7 @@ pub struct TimeblockSummaryAgentService {
     signal_pool: Arc<SignalPool>,
     config_store: Arc<ConfigStore>,
     eventlog_store: Arc<EventLogStore>,
+    eventlog_appender: EventLogAppender,
     session_runtime: AgentSessionRuntime,
     energy_registry: Arc<EnergyRegistry>,
     sessions: Arc<RwLock<Vec<AgentSessionRecord>>>,
@@ -177,6 +186,7 @@ impl TimeblockSummaryAgentService {
         signal_pool: Arc<SignalPool>,
         config_store: Arc<ConfigStore>,
         eventlog_store: Arc<EventLogStore>,
+        eventlog_appender: EventLogAppender,
         session_runtime: AgentSessionRuntime,
         energy_registry: Arc<EnergyRegistry>,
     ) -> Self {
@@ -193,6 +203,7 @@ impl TimeblockSummaryAgentService {
             signal_pool,
             config_store,
             eventlog_store,
+            eventlog_appender,
             session_runtime,
             energy_registry,
             sessions: Arc::new(RwLock::new(Vec::new())),
@@ -430,10 +441,14 @@ impl TimeblockSummaryAgentService {
             limit: Some(1000),
             ..Default::default()
         };
-        if let Ok(events) = self
-            .eventlog_store
-            .list_events_filtered(if user_id_ref.is_empty() { None } else { Some(user_id_ref) }, &events_filter)
-        {
+        if let Ok(events) = self.eventlog_store.list_events_filtered(
+            if user_id_ref.is_empty() {
+                None
+            } else {
+                Some(user_id_ref)
+            },
+            &events_filter,
+        ) {
             let energy_gain = calculate_event_energy_gain(&events);
             if energy_gain > 0 {
                 if let Some(energy) = self.energy_registry.get("timeblock_summary") {
@@ -451,7 +466,10 @@ impl TimeblockSummaryAgentService {
             }
         }
 
-        if let Err(e) = self.run_summary_loop(block, SummaryKind::End, None, user_id_ref).await {
+        if let Err(e) = self
+            .run_summary_loop(block, SummaryKind::End, None, user_id_ref)
+            .await
+        {
             tracing::error!("timeblock_summary: summary loop failed: {e}");
         }
     }
@@ -534,7 +552,14 @@ impl TimeblockSummaryAgentService {
             limit: Some(1),
             ..Default::default()
         };
-        if let Ok(events) = self.eventlog_store.list_events_filtered(if user_id_ref.is_empty() { None } else { Some(user_id_ref) }, &filter) {
+        if let Ok(events) = self.eventlog_store.list_events_filtered(
+            if user_id_ref.is_empty() {
+                None
+            } else {
+                Some(user_id_ref)
+            },
+            &filter,
+        ) {
             if !events.is_empty() {
                 tracing::info!(
                     block_id = %block.start_id,
@@ -625,11 +650,20 @@ impl TimeblockSummaryAgentService {
             .unwrap_or("");
 
         // 📌【2026-06-06 06:51:42】人写：如果已有「时间块停止」那就不需要独立的「时间块结束」
-        let has_stopped = has_existing_summary(&self.eventlog_store, &block, &SummaryKind::Stop, user_id_ref);
+        let has_stopped = has_existing_summary(
+            &self.eventlog_store,
+            &block,
+            &SummaryKind::Stop,
+            user_id_ref,
+        );
 
         // Idempotency check: query eventlog for any summary in this time block
-        if has_existing_summary(&self.eventlog_store, &block, &SummaryKind::FeedbackReview, user_id_ref)
-            || has_existing_summary(&self.eventlog_store, &block, &SummaryKind::End, user_id_ref)
+        if has_existing_summary(
+            &self.eventlog_store,
+            &block,
+            &SummaryKind::FeedbackReview,
+            user_id_ref,
+        ) || has_existing_summary(&self.eventlog_store, &block, &SummaryKind::End, user_id_ref)
         {
             tracing::debug!(
                 block_id = %block.start_id,
@@ -666,7 +700,10 @@ impl TimeblockSummaryAgentService {
         }
 
         // Run the summary loop with the determined kind
-        if let Err(e) = self.run_summary_loop(block, summary_kind, None, user_id_ref).await {
+        if let Err(e) = self
+            .run_summary_loop(block, summary_kind, None, user_id_ref)
+            .await
+        {
             tracing::error!("timeblock_summary: block_feedback summary failed: {e}");
         }
     }
@@ -701,7 +738,14 @@ impl TimeblockSummaryAgentService {
             .as_ref()
             .map(|s| s.max)
             .unwrap_or(ENERGY_MAX);
-        let ctx = collect_context(&self.eventlog_store, &block, energy_current, energy_max, user_id).await;
+        let ctx = collect_context(
+            &self.eventlog_store,
+            &block,
+            energy_current,
+            energy_max,
+            user_id,
+        )
+        .await;
 
         // 2. Load provider profile
         let provider = match crate::agent::session::resolve_provider_profile_from_runtime(
@@ -711,30 +755,37 @@ impl TimeblockSummaryAgentService {
             Err(e) => {
                 tracing::warn!("timeblock_summary: cannot resolve provider profile: {e}");
                 // Write error to eventlog
-                let opt_uid = if user_id.is_empty() { None } else { Some(user_id) };
-                let _ = self.eventlog_store.append_event(
-                    opt_uid,
-                    EventRecord {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        timestamp: chrono::Utc::now().timestamp_millis(),
-                        content: format!(
-                            "⚠️ 时间块总结 Agent 无法启动：未配置 LLM provider。块ID={}",
-                            block.start_id
-                        ),
-                        tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
-                        refs: vec![],
-                        metadata: Some(serde_json::json!({
-                            "agent": "timeblock_summary",
-                            "block_id": block.start_id,
-                            "status": "missing_provider",
-                            "source": {
-                                "deviceName": crate::routes::topology::read_hostname_export(),
-                                "platform": crate::routes::topology::read_os_export(),
-                                "app": "ExoMind",
-                            },
-                        })),
-                    },
-                );
+                let opt_uid = if user_id.is_empty() {
+                    None
+                } else {
+                    Some(user_id)
+                };
+                let _ = self
+                    .eventlog_appender
+                    .append_event(
+                        opt_uid,
+                        EventRecord {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            timestamp: chrono::Utc::now().timestamp_millis(),
+                            content: format!(
+                                "⚠️ 时间块总结 Agent 无法启动：未配置 LLM provider。块ID={}",
+                                block.start_id
+                            ),
+                            tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
+                            refs: vec![],
+                            metadata: Some(serde_json::json!({
+                                "agent": "timeblock_summary",
+                                "block_id": block.start_id,
+                                "status": "missing_provider",
+                                "source": {
+                                    "deviceName": crate::routes::topology::read_hostname_export(),
+                                    "platform": crate::routes::topology::read_os_export(),
+                                    "app": "ExoMind",
+                                },
+                            })),
+                        },
+                    )
+                    .await;
                 return Err(format!("missing provider: {e}"));
             }
         };
@@ -749,7 +800,7 @@ impl TimeblockSummaryAgentService {
         let (tool_def, tool_fn) = submit_timeblock_summary_tool(
             block.clone(),
             kind.clone(),
-            Arc::clone(&self.eventlog_store),
+            self.eventlog_appender.clone(),
             Arc::clone(&source_meta),
             user_id.to_string(),
         );
@@ -757,9 +808,11 @@ impl TimeblockSummaryAgentService {
         tool_registry.register(tool_def, tool_fn);
 
         // Register exploration tools
-        for (explorer_def, explorer_fn) in
-            tools::exploration_tools(block.clone(), Arc::clone(&self.eventlog_store), user_id.to_string())
-        {
+        for (explorer_def, explorer_fn) in tools::exploration_tools(
+            block.clone(),
+            Arc::clone(&self.eventlog_store),
+            user_id.to_string(),
+        ) {
             tool_registry.register(explorer_def, explorer_fn);
         }
 
@@ -1097,7 +1150,8 @@ impl TimeblockSummaryAgentService {
                         &e.to_string(),
                         &source_meta,
                         user_id,
-                    ).await;
+                    )
+                    .await;
                     break;
                 }
             }
@@ -1359,30 +1413,37 @@ impl TimeblockSummaryAgentService {
             truncate(last_message, 100),
         );
 
-        let opt_uid = if user_id.is_empty() { None } else { Some(user_id) };
-        let _ = self.eventlog_store.append_event(
-            opt_uid,
-            EventRecord {
-                id: uuid::Uuid::new_v4().to_string(),
-                timestamp: chrono::Utc::now().timestamp_millis(),
-                content,
-                tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
-                refs: vec![],
-                metadata: Some(serde_json::json!({
-                    "agent": "timeblock_summary",
-                    "block_id": block.start_id,
-                    "total_rounds": total_rounds,
-                    "status": "energy_depleted",
-                    "source": {
-                        "deviceName": source_meta.device_name,
-                        "platform": source_meta.platform,
-                        "provider": source_meta.provider,
-                        "model": source_meta.model,
-                        "app": "ExoMind",
-                    },
-                })),
-            },
-        );
+        let opt_uid = if user_id.is_empty() {
+            None
+        } else {
+            Some(user_id)
+        };
+        let _ = self
+            .eventlog_appender
+            .append_event(
+                opt_uid,
+                EventRecord {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: chrono::Utc::now().timestamp_millis(),
+                    content,
+                    tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
+                    refs: vec![],
+                    metadata: Some(serde_json::json!({
+                        "agent": "timeblock_summary",
+                        "block_id": block.start_id,
+                        "total_rounds": total_rounds,
+                        "status": "energy_depleted",
+                        "source": {
+                            "deviceName": source_meta.device_name,
+                            "platform": source_meta.platform,
+                            "provider": source_meta.provider,
+                            "model": source_meta.model,
+                            "app": "ExoMind",
+                        },
+                    })),
+                },
+            )
+            .await;
     }
 
     async fn write_broker_error_event(
@@ -1398,36 +1459,41 @@ impl TimeblockSummaryAgentService {
              **块 ID**: {}\n\
              **对话轮数**: {}\n\
              **错误信息**: {}",
-            block.start_id,
-            total_rounds,
-            error,
+            block.start_id, total_rounds, error,
         );
 
-        let opt_uid = if user_id.is_empty() { None } else { Some(user_id) };
-        let _ = self.eventlog_store.append_event(
-            opt_uid,
-            EventRecord {
-                id: uuid::Uuid::new_v4().to_string(),
-                timestamp: chrono::Utc::now().timestamp_millis(),
-                content,
-                tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
-                refs: vec![],
-                metadata: Some(serde_json::json!({
-                    "agent": "timeblock_summary",
-                    "block_id": block.start_id,
-                    "total_rounds": total_rounds,
-                    "status": "broker_error",
-                    "error": error,
-                    "source": {
-                        "deviceName": source_meta.device_name,
-                        "platform": source_meta.platform,
-                        "provider": source_meta.provider,
-                        "model": source_meta.model,
-                        "app": "ExoMind",
-                    },
-                })),
-            },
-        );
+        let opt_uid = if user_id.is_empty() {
+            None
+        } else {
+            Some(user_id)
+        };
+        let _ = self
+            .eventlog_appender
+            .append_event(
+                opt_uid,
+                EventRecord {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: chrono::Utc::now().timestamp_millis(),
+                    content,
+                    tags: vec!["agent_feedback".to_string(), "agent_error".to_string()],
+                    refs: vec![],
+                    metadata: Some(serde_json::json!({
+                        "agent": "timeblock_summary",
+                        "block_id": block.start_id,
+                        "total_rounds": total_rounds,
+                        "status": "broker_error",
+                        "error": error,
+                        "source": {
+                            "deviceName": source_meta.device_name,
+                            "platform": source_meta.platform,
+                            "provider": source_meta.provider,
+                            "model": source_meta.model,
+                            "app": "ExoMind",
+                        },
+                    })),
+                },
+            )
+            .await;
     }
 }
 
@@ -2018,6 +2084,7 @@ mod tests {
             recent_completed: None,
             energy_current: 100,
             energy_max: 120,
+            user_id: "profile-test".to_string(),
         };
 
         let gap = TimeBlockData {

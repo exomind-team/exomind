@@ -4,11 +4,11 @@ use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
+use crate::AppState;
 use crate::timeblock::{
     ActiveBlockData, BreakWindowKind, PlannedSegmentData, PlannedSegmentKind, RhythmPresetData,
     SchedulingWindowData,
 };
-use crate::AppState;
 
 #[derive(Debug, Deserialize)]
 struct ScopeQuery {
@@ -650,12 +650,13 @@ async fn write_timeblock_eventlog(
         })),
     };
 
-    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
+    if let Err(error) = state
+        .eventlog_appender()
+        .append_event(scope_key, event.clone())
+        .await
+    {
         tracing::warn!(error = %error, "failed to write today planner eventlog");
-        return;
     }
-
-    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
 }
 
 pub fn router() -> Router<AppState> {

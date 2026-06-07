@@ -23,6 +23,7 @@ pub mod config;
 pub mod discovery;
 pub mod energy;
 pub mod eventlog;
+pub mod eventlog_appender;
 pub mod eventlog_sqlite;
 pub mod mesh;
 pub mod pairing;
@@ -746,10 +747,13 @@ pub async fn start_with_options(
             Arc::clone(&state.signal_pool),
             Arc::clone(&state.config_store),
             Arc::clone(&state.eventlog_store),
+            state.eventlog_appender(),
             session_runtime,
             Arc::new(state.energy_registry.clone()),
         ));
-        state.registry.register(tb_summary.clone() as Arc<dyn agent::Agent>);
+        state
+            .registry
+            .register(tb_summary.clone() as Arc<dyn agent::Agent>);
         state.energy_registry.register(
             "timeblock_summary",
             crate::energy::AgentEnergy::new(crate::energy::AgentEnergy::DEFAULT_MAX, 1),
@@ -1108,6 +1112,15 @@ fn runtime_storage_paths_for_persistent_start(data_dir: Option<PathBuf>) -> Runt
 }
 
 impl AppState {
+    pub fn eventlog_appender(&self) -> eventlog_appender::EventLogAppender {
+        eventlog_appender::EventLogAppender::new(
+            Arc::clone(&self.eventlog_store),
+            self.host_id.clone(),
+            Arc::clone(&self.signal_pool),
+            self.mesh_relay.clone(),
+        )
+    }
+
     pub fn new(port: u16) -> Self {
         Self::new_runtime(port, default_runtime_host_id(port), None, None, false, None)
     }

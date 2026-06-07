@@ -230,6 +230,10 @@ impl EventLogStore {
         Ok((events, false))
     }
 
+    /// Append to the local eventlog store only.
+    ///
+    /// Business writes must go through `EventLogAppender` so the same mutation
+    /// also emits `eventlog.replication.appended` for mesh propagation.
     pub fn append_event(&self, user_id: Option<&str>, event: EventRecord) -> Result<(), String> {
         let normalized_user = sanitize_user_id(user_id);
         let result = match &self.backend {
@@ -436,9 +440,12 @@ fn apply_event_filters(events: &mut Vec<EventRecord>, filter: &EventListFilter) 
     }
 
     if !filter.task_ids.is_empty() {
-        let ids: std::collections::HashSet<_> = filter.task_ids.iter().map(|s| s.as_str()).collect();
+        let ids: std::collections::HashSet<_> =
+            filter.task_ids.iter().map(|s| s.as_str()).collect();
         events.retain(|event| {
-            event.metadata.as_ref()
+            event
+                .metadata
+                .as_ref()
                 .and_then(|m| m.get("taskId").or_else(|| m.get("task_id")))
                 .and_then(|v| v.as_str())
                 .map_or(false, |s| ids.contains(s))

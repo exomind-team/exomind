@@ -1,7 +1,8 @@
 use crate::agent::tools::{ToolDef, ToolError, ToolFn};
 use crate::eventlog::{EventListFilter, EventLogStore};
+use crate::eventlog_appender::EventLogAppender;
 use crate::timeblock::TimeBlockData;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 use super::SummaryKind;
@@ -91,7 +92,11 @@ pub fn exploration_tools(
                     filter.tags = vec![t];
                 }
 
-                let opt_uid = if uid.is_empty() { None } else { Some(uid.as_str()) };
+                let opt_uid = if uid.is_empty() {
+                    None
+                } else {
+                    Some(uid.as_str())
+                };
                 let events = store
                     .list_events_filtered(opt_uid, &filter)
                     .unwrap_or_default();
@@ -148,7 +153,11 @@ pub fn exploration_tools(
                     limit: Some(1),
                     ..Default::default()
                 };
-                let opt_uid = if uid.is_empty() { None } else { Some(uid.as_str()) };
+                let opt_uid = if uid.is_empty() {
+                    None
+                } else {
+                    Some(uid.as_str())
+                };
                 let events = store
                     .list_events_filtered(opt_uid, &filter)
                     .unwrap_or_default();
@@ -183,7 +192,7 @@ pub struct AgentSourceMetadata {
 pub fn submit_timeblock_summary_tool(
     block: TimeBlockData,
     kind: SummaryKind,
-    eventlog_store: Arc<EventLogStore>,
+    eventlog_appender: EventLogAppender,
     source: Arc<AgentSourceMetadata>,
     user_id: String,
 ) -> (ToolDef, ToolFn) {
@@ -264,7 +273,7 @@ pub fn submit_timeblock_summary_tool(
     let tool_fn: ToolFn = Box::new(move |input: Value| {
         let block_id_expected = expected_block_id.clone();
         let kind_expected = expected_kind.clone();
-        let store = Arc::clone(&eventlog_store);
+        let appender = eventlog_appender.clone();
         let src = Arc::clone(&source_meta);
         let uid = captured_user_id.clone();
         Box::pin(async move {
@@ -416,8 +425,12 @@ pub fn submit_timeblock_summary_tool(
                 })),
             };
 
-            let opt_uid = if uid.is_empty() { None } else { Some(uid.as_str()) };
-            match store.append_event(opt_uid, event.clone()) {
+            let opt_uid = if uid.is_empty() {
+                None
+            } else {
+                Some(uid.as_str())
+            };
+            match appender.append_event(opt_uid, event.clone()).await {
                 Ok(_) => Ok(format!("已写入 agent_feedback 事件，event_id={}", event.id)),
                 Err(e) => Err(ToolError::ExecutionFailed(format!(
                     "failed to write eventlog: {e}"

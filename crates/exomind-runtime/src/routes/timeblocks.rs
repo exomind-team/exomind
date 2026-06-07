@@ -2,7 +2,7 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::TimeZone;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use crate::timeblock::BlockPhase;
 
 use super::tasks::transition_task_in_scope_with_context;
+use crate::AppState;
 use crate::auth::AuthenticatedPeerIdentity;
 use crate::config::types::USER_CONFIG_SCOPE;
 use crate::eventlog::PERF_LOGGING_ENABLED_CONFIG_KEY;
@@ -20,7 +21,6 @@ use crate::timeblock::{
     ActiveBlockData, BlockTaskAssociationEvent, BlockTransition, BlockTransitionType,
     TimeBlockData, TimeBlockStore,
 };
-use crate::AppState;
 
 const TIMEBLOCK_SCOPE_GRANT_DOMAIN: &str = "timeblocks";
 
@@ -1840,12 +1840,13 @@ async fn write_timeblock_eventlog(
         })),
     };
 
-    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
+    if let Err(error) = state
+        .eventlog_appender()
+        .append_event(scope_key, event.clone())
+        .await
+    {
         tracing::warn!(error = %error, "failed to write timeblock eventlog");
-        return;
     }
-
-    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
 }
 
 fn format_feedback_duration(ms: u64) -> String {
@@ -2132,12 +2133,14 @@ async fn write_timeblock_feedback_eventlog(
         })),
     };
 
-    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
+    if let Err(error) = state
+        .eventlog_appender()
+        .append_event(scope_key, event.clone())
+        .await
+    {
         tracing::warn!(error = %error, "failed to write timeblock feedback eventlog");
         return;
     }
-
-    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
 
     // Publish block_feedback.created signal so downstream agents (e.g. timeblock_summary)
     // can react to user feedback submission without waiting for replication.completed.
@@ -3412,12 +3415,16 @@ mod tests {
 
         let events = eventlog_store.list_events(None).unwrap();
         assert_eq!(events.len(), 3);
-        assert!(events
-            .iter()
-            .any(|event| event.tags == vec!["block_pause".to_string()]));
-        assert!(events
-            .iter()
-            .any(|event| event.tags == vec!["task_suspended".to_string()]));
+        assert!(
+            events
+                .iter()
+                .any(|event| event.tags == vec!["block_pause".to_string()])
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event.tags == vec!["task_suspended".to_string()])
+        );
         let paused_task = state
             .task_store
             .get(&task.id)

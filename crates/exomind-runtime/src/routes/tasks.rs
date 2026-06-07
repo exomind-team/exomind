@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 use crate::AppState;
-use crate::eventlog::EventListFilter;
 use crate::auth::AuthenticatedPeerIdentity;
+use crate::eventlog::EventListFilter;
 use crate::signal::types::SignalEvent;
 use crate::task::store::{
     TaskStoreError, append_task_status_transition, build_initial_task_status_transition,
@@ -1532,12 +1532,13 @@ async fn write_task_transition_eventlog(
         })),
     };
 
-    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
+    if let Err(error) = state
+        .eventlog_appender()
+        .append_event(scope_key, event.clone())
+        .await
+    {
         tracing::warn!(error = %error, "failed to write task transition eventlog");
-        return;
     }
-
-    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
 }
 
 fn task_transition_event_content(tag: &str) -> &'static str {
@@ -1672,12 +1673,21 @@ fn build_task_sqlite_snapshot_bytes(
     tasks: &[Task],
 ) -> Result<Vec<u8>, (StatusCode, String)> {
     let exomind_temp = std::env::temp_dir().join("exomind");
-    std::fs::create_dir_all(&exomind_temp)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create exomind temp dir: {error}")))?;
+    std::fs::create_dir_all(&exomind_temp).map_err(|error| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to create exomind temp dir: {error}"),
+        )
+    })?;
     let temp_dir = tempfile::Builder::new()
         .prefix("task-export-")
         .tempdir_in(&exomind_temp)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create task export temp dir: {error}")))?;
+        .map_err(|error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to create task export temp dir: {error}"),
+            )
+        })?;
     let sqlite_path = temp_dir.path().join("tasks-export.sqlite");
     let store = crate::task::TaskStore::with_sqlite_path(&sqlite_path)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
@@ -1705,12 +1715,21 @@ fn read_tasks_from_sqlite_snapshot(
     scope_key: Option<&str>,
 ) -> Result<Vec<Task>, (StatusCode, String)> {
     let exomind_temp = std::env::temp_dir().join("exomind");
-    std::fs::create_dir_all(&exomind_temp)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create exomind temp dir: {error}")))?;
+    std::fs::create_dir_all(&exomind_temp).map_err(|error| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to create exomind temp dir: {error}"),
+        )
+    })?;
     let temp_dir = tempfile::Builder::new()
         .prefix("task-import-")
         .tempdir_in(&exomind_temp)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create task import temp dir: {error}")))?;
+        .map_err(|error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to create task import temp dir: {error}"),
+            )
+        })?;
     let sqlite_path = temp_dir.path().join("tasks-import.sqlite");
     std::fs::write(&sqlite_path, bytes)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;

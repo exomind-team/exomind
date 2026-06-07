@@ -18,28 +18,19 @@ async fn publish_execution_outcome_signals(
     outcome: &ExecutionOutcome,
 ) {
     match outcome {
-        ExecutionOutcome::TaskCreated { task, event } => {
+        ExecutionOutcome::TaskCreated { task, event: _ } => {
             crate::routes::tasks::publish_task_signal(state, "task.created", task);
             crate::routes::tasks::publish_task_replication_signal(state, scope_key, task);
-            crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, event)
-                .await;
         }
-        ExecutionOutcome::TaskUpdated { task, event } => {
+        ExecutionOutcome::TaskUpdated { task, event: _ } => {
             crate::routes::tasks::publish_task_signal(state, "task.updated", task);
             crate::routes::tasks::publish_task_replication_signal(state, scope_key, task);
-            crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, event)
-                .await;
         }
-        ExecutionOutcome::EventAppended { event } => {
-            crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, event)
-                .await;
-        }
-        ExecutionOutcome::TimeblockStarted { result, event } => {
+        ExecutionOutcome::EventAppended { event: _ } => {}
+        ExecutionOutcome::TimeblockStarted { result, event: _ } => {
             crate::routes::timeblocks::publish_new_block_replication_signals(
                 state, scope_key, result,
             );
-            crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, event)
-                .await;
         }
     }
 }
@@ -211,10 +202,10 @@ async fn update_proposal(
     if before.status != ProposalStatus::Approved && proposal.status == ProposalStatus::Approved {
         let executor = ProposalExecutor::new(
             state.task_store.clone(),
-            state.eventlog_store.clone(),
+            state.eventlog_appender(),
             state.timeblock_store.clone(),
         );
-        match executor.execute_scoped(scope_key, &proposal) {
+        match executor.execute_scoped(scope_key, &proposal).await {
             Ok(outcome) => {
                 publish_execution_outcome_signals(&state, scope_key, &outcome).await;
             }
