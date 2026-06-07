@@ -38,10 +38,12 @@ describe('voice runtime settings registry（语音运行时设置注册）', () 
     const baseCtx = getBaseCtx();
     const omniCompatibleCtx = {
       ...getBaseCtx(),
+      developerMode: true,
       voiceRuntimeProvider: 'qwen-omni-compatible',
     } satisfies SettingsContext;
     const omniRealtimeCtx = {
       ...getBaseCtx(),
+      developerMode: true,
       voiceRuntimeProvider: 'qwen-omni-realtime',
     } satisfies SettingsContext;
     const baseItems = getVisibleSettings(baseCtx);

@@ -100,25 +100,40 @@ describe('settings registry coverage audit', () => {
     const volcanoIds = flattenVisible(getVisibleSettings(volcanoCtx), volcanoCtx).map((item) => item.id);
     const qwenCtx = { ...getBaseCtx(), voiceShortcutAsrProvider: 'qwen-omni' };
     const qwenIds = flattenVisible(getVisibleSettings(qwenCtx), qwenCtx).map((item) => item.id);
+    const developerQwenCtx = { ...qwenCtx, developerMode: true };
+    const developerQwenIds = flattenVisible(getVisibleSettings(developerQwenCtx), developerQwenCtx).map((item) => item.id);
 
     expect(mossIds).toContain('moss-api-token');
     expect(mossIds).not.toContain('volcano-engine-key');
     expect(volcanoIds).toContain('volcano-engine-key');
     expect(volcanoIds).toContain('volcano-endpoint');
     expect(volcanoIds).not.toContain('moss-api-token');
-    expect(qwenIds).toContain('voice-omni-profile');
-    expect(qwenIds).toContain('voice-omni-model');
+    expect(qwenIds).not.toContain('voice-omni-profile');
+    expect(qwenIds).not.toContain('voice-omni-model');
     expect(qwenIds).not.toContain('volcano-engine-key');
+    expect(developerQwenIds).toContain('voice-omni-profile');
+    expect(developerQwenIds).toContain('voice-omni-model');
+    expect(developerQwenIds).not.toContain('volcano-engine-key');
   });
 
   it('switches provider config by runtime provider and keeps diagnostics out of registry children（provider 配置可切换且诊断入口不再挂在 registry 子项）', () => {
     const baseCtx = getBaseCtx();
     const omniCompatibleCtx = { ...getBaseCtx(), voiceRuntimeProvider: 'qwen-omni-compatible' };
     const omniRealtimeCtx = { ...getBaseCtx(), voiceRuntimeProvider: 'qwen-omni-realtime' };
+    const developerOmniCompatibleCtx = { ...omniCompatibleCtx, developerMode: true };
+    const developerOmniRealtimeCtx = { ...omniRealtimeCtx, developerMode: true };
 
     const baseIds = flattenVisible(getVisibleSettings(baseCtx), baseCtx).map((item) => item.id);
     const omniCompatibleIds = flattenVisible(getVisibleSettings(omniCompatibleCtx), omniCompatibleCtx).map((item) => item.id);
     const omniRealtimeIds = flattenVisible(getVisibleSettings(omniRealtimeCtx), omniRealtimeCtx).map((item) => item.id);
+    const developerOmniCompatibleIds = flattenVisible(
+      getVisibleSettings(developerOmniCompatibleCtx),
+      developerOmniCompatibleCtx,
+    ).map((item) => item.id);
+    const developerOmniRealtimeIds = flattenVisible(
+      getVisibleSettings(developerOmniRealtimeCtx),
+      developerOmniRealtimeCtx,
+    ).map((item) => item.id);
 
     expect(baseIds).not.toContain('voice-runtime-lab-nav-enabled');
     expect(baseIds).not.toContain('open-voice-runtime-lab');
@@ -126,10 +141,14 @@ describe('settings registry coverage audit', () => {
     expect(omniRealtimeIds).not.toContain('open-voice-runtime-lab');
 
     expect(baseIds).toContain('voice-runtime-doubao-app-id');
-    expect(omniCompatibleIds).toContain('voice-runtime-omni-compatible-model');
+    expect(omniCompatibleIds).not.toContain('voice-runtime-omni-compatible-model');
     expect(omniCompatibleIds).not.toContain('voice-runtime-doubao-app-id');
-    expect(omniRealtimeIds).toContain('voice-runtime-omni-api-key');
-    expect(omniRealtimeIds).toContain('voice-runtime-omni-model');
+    expect(omniRealtimeIds).not.toContain('voice-runtime-omni-api-key');
+    expect(omniRealtimeIds).not.toContain('voice-runtime-omni-model');
+    expect(developerOmniCompatibleIds).toContain('voice-runtime-omni-compatible-model');
+    expect(developerOmniCompatibleIds).not.toContain('voice-runtime-doubao-app-id');
+    expect(developerOmniRealtimeIds).toContain('voice-runtime-omni-api-key');
+    expect(developerOmniRealtimeIds).toContain('voice-runtime-omni-model');
   });
 
   it('keeps the inline developer toggle checklist in sync with its audited child settings（开发者分组内联开关清单与审计项保持一致）', async () => {

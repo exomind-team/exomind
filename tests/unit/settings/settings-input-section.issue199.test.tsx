@@ -57,6 +57,8 @@ describe('SettingsPage voice section（语音分组设置）', () => {
   });
 
   it('shows assistant settings inline and reflects mode/provider changes（常驻语音助手在当前页直接展示并反映模式与 provider 切换）', async () => {
+    settingsPagePreferenceState.developerMode = true;
+
     render(<SettingsPage />);
 
     expect(screen.getByText('启用常驻语音助手')).toBeInTheDocument();

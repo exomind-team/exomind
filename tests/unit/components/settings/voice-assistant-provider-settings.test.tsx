@@ -7,16 +7,20 @@ import {
   VoiceAssistantProviderSettings,
   type VoiceAssistantProviderSettingsValue,
 } from '@/ui/app/components/settings/voice-assistant-provider-settings';
+import type { SettingsContext } from '@/ui/app/config/settings/settings-types';
 
 function ControlledStory({
+  ctx,
   initialValue,
   onChange,
 }: {
+  ctx?: SettingsContext;
   initialValue?: Partial<VoiceAssistantProviderSettingsValue>;
   onChange?: (value: VoiceAssistantProviderSettingsValue) => void;
 }) {
   return (
     <VoiceAssistantProviderSettings
+      ctx={ctx}
       defaultValue={initialValue}
       onChange={onChange}
     />
@@ -73,7 +77,12 @@ describe('VoiceAssistantProviderSettings（常驻语音助手 Provider 设置）
   it('switches provider between Doubao, Omni Compatible and Omni Realtime（支持三种 Provider 切换）', async () => {
     const user = userEvent.setup();
 
-    render(<ControlledStory initialValue={{ enabled: true }} />);
+    render(
+      <ControlledStory
+        ctx={{ isDesktop: true, developerMode: true }}
+        initialValue={{ enabled: true }}
+      />,
+    );
 
     const doubaoRadio = screen.getByRole('radio', { name: 'Doubao' });
     const omniCompatibleRadio = screen.getByRole('radio', { name: 'Omni Compatible' });
@@ -92,7 +101,12 @@ describe('VoiceAssistantProviderSettings（常驻语音助手 Provider 设置）
   it('shows unsupported hint for Omni Compatible plus ambient mode（Omni Compatible + 环境监听显示不支持提示）', async () => {
     const user = userEvent.setup();
 
-    render(<ControlledStory initialValue={{ enabled: true }} />);
+    render(
+      <ControlledStory
+        ctx={{ isDesktop: true, developerMode: true }}
+        initialValue={{ enabled: true }}
+      />,
+    );
 
     await user.click(screen.getByRole('radio', { name: 'Omni Compatible' }));
     await user.click(screen.getByRole('radio', { name: '环境监听' }));
@@ -104,6 +118,14 @@ describe('VoiceAssistantProviderSettings（常驻语音助手 Provider 设置）
     await user.click(screen.getByRole('radio', { name: '按键说话' }));
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('hides Omni providers outside developer mode（非开发者模式隐藏 Omni Provider）', () => {
+    render(<ControlledStory initialValue={{ enabled: true }} />);
+
+    expect(screen.getByRole('radio', { name: 'Doubao' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Omni Compatible' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Omni Realtime' })).not.toBeInTheDocument();
   });
 
   it('shows diagnostics only in developer mode and anchors them to active provider（诊断入口仅在开发者模式出现并跟随当前 provider）', async () => {
