@@ -35,7 +35,9 @@ type VoiceInputProviderSettingsProps = {
   ctx?: SettingsContext;
 };
 
-const PROVIDER_OPTIONS: VoiceInputProviderId[] = ['moss', 'volcano', 'qwen-omni'];
+const ALL_PROVIDER_OPTIONS: VoiceInputProviderId[] = ['moss', 'volcano', 'qwen-omni'];
+
+const SIMPLE_PROVIDER_OPTIONS: VoiceInputProviderId[] = ['moss', 'volcano'];
 
 function useSubscribedValue<T>(
   getValue: () => T,
@@ -92,8 +94,17 @@ function DiagnosticRow({
   );
 }
 
-export function VoiceInputProviderSettings(_props: VoiceInputProviderSettingsProps = {}) {
+export function VoiceInputProviderSettings({ ctx }: VoiceInputProviderSettingsProps = {}) {
   const provider = useSubscribedValue(getVoiceShortcutAsrProvider, subscribeVoiceShortcutAsrProviderChanges);
+  const developerMode = Boolean(ctx?.developerMode);
+
+  const providerOptions = developerMode ? ALL_PROVIDER_OPTIONS : SIMPLE_PROVIDER_OPTIONS;
+
+  useEffect(() => {
+    if (!developerMode && provider === 'qwen-omni') {
+      setVoiceShortcutAsrProvider('moss');
+    }
+  }, [developerMode, provider]);
   const volcanoAppKey = useSubscribedValue(getVolcanoAppKey, subscribeVolcanoAppKeyChanges);
   const volcanoAccessKey = useSubscribedValue(getVolcanoAccessKey, subscribeVolcanoAccessKeyChanges);
   const volcanoResourceId = useSubscribedValue(getVolcanoResourceIdSetting, subscribeVolcanoResourceIdChanges);
@@ -139,7 +150,7 @@ export function VoiceInputProviderSettings(_props: VoiceInputProviderSettingsPro
         </div>
 
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="快捷语音输入 provider 切换">
-          {PROVIDER_OPTIONS.map((providerId) => (
+          {providerOptions.map((providerId) => (
             <ProviderToggleButton
               key={providerId}
               providerId={providerId}
