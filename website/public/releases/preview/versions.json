@@ -1,97 +1,1239 @@
 {
   "channel": "preview",
-  "generated_at": "2026-04-09T14:51:38.430Z",
+  "generated_at": "2026-06-07T22:56:16.996Z",
   "latest": {
-    "version": "0.4.5",
-    "tag": "v0.4.5",
-    "published_at": "2026-04-08T17:11:47Z",
-    "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.5",
+    "version": "0.4.18",
+    "tag": "v0.4.18",
+    "published_at": "2026-06-07T12:58:18Z",
+    "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.18",
     "assets": {
       "windows-x64-setup": {
-        "name": "ExoMind-0.4.5-windows-x64-setup.exe",
-        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.5/ExoMind-0.4.5-windows-x64-setup.exe",
-        "size": 15223296,
-        "sha256": "c8ccb9ee544f739410077141f8d2e174869945c30e82cca98205b90553c9de3c"
+        "name": "ExoMind-0.4.18-windows-x64-setup.exe",
+        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-windows-x64-setup.exe",
+        "size": 16561664,
+        "sha256": "35764878dd796d79ff03900ee7dbfbcf7651cc461463f747e91e4d7044b420b2"
       },
       "windows-x64-installer": {
-        "name": "ExoMind-0.4.5-windows-x64-installer.msi",
-        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.5/ExoMind-0.4.5-windows-x64-installer.msi",
-        "size": 10375168,
-        "sha256": "9781336618b7287e69240431c834fd8257e5a44e274b65198b49af4e757ea895"
+        "name": "ExoMind-0.4.18-windows-x64-installer.msi",
+        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-windows-x64-installer.msi",
+        "size": 10969088,
+        "sha256": "05b4ee0338b9910ecf9b99c1218e9a13aab9301133c58c23fd3a36592df375c5"
       },
       "android-arm64": {
-        "name": "ExoMind-0.4.5-android-arm64.apk",
-        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.5/ExoMind-0.4.5-android-arm64.apk",
-        "size": 19797335,
-        "sha256": "8dde12482de63dddcb086edc7313e36f5d57b3a00c066ac448711ff79eb52655"
+        "name": "ExoMind-0.4.18-android-arm64.apk",
+        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-android-arm64.apk",
+        "size": 21251415,
+        "sha256": "15525b3b8b249b23d73fcb4b02a6b779956f5c1fd294ce493ad3e029d6d84225"
       },
       "android-x86": {
-        "name": "ExoMind-0.4.5-android-x86.apk",
-        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.5/ExoMind-0.4.5-android-x86.apk",
-        "size": 21443921,
-        "sha256": "6c45c0bd0f6d3b5cf10d234313b1d99a243bdfaef9f1af745640fbe1a8b0bb85"
+        "name": "ExoMind-0.4.18-android-x86.apk",
+        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-android-x86.apk",
+        "size": 23250257,
+        "sha256": "9a7c082fe70d4da7e549e1effca0c1a277040ed40bc16cffd4b94831f630dcd8"
       },
       "macos-aarch64": {
-        "name": "ExoMind-0.4.5-macos-aarch64.dmg",
-        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.5/ExoMind-0.4.5-macos-aarch64.dmg",
-        "size": 10369710,
-        "sha256": "f2a0eaf2956c16020df6298b9830fa21efb2a651b3da433622b8827cd7e9e87d"
+        "name": "ExoMind-0.4.18-macos-aarch64.dmg",
+        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-macos-aarch64.dmg",
+        "size": 10923882,
+        "sha256": "39451eecfa4b5e8758be6e86f97f141bc4411acd4ac5c2781567d42db2062a26"
       },
       "linux-x64-appimage": {
-        "name": "ExoMind-0.4.5-linux-x64.AppImage",
-        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.5/ExoMind-0.4.5-linux-x64.AppImage",
-        "size": 87632376,
-        "sha256": "0b960f808e7ce7f621c973d0e8747625c22528c0204c1cc246d6b1a1d52ee7af"
+        "name": "ExoMind-0.4.18-linux-x64.AppImage",
+        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-linux-x64.AppImage",
+        "size": 88214008,
+        "sha256": "e9f42de60da6562b2ba186524be6636f77a6d7d25bd6e8f3e84b927f5d3054b3"
       },
       "linux-x64-deb": {
-        "name": "ExoMind-0.4.5-linux-x64.deb",
-        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.5/ExoMind-0.4.5-linux-x64.deb",
-        "size": 10275876,
-        "sha256": "05c60792312ee340190328af2a41e652e2486dd091391546b730b0389a574f30"
+        "name": "ExoMind-0.4.18-linux-x64.deb",
+        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-linux-x64.deb",
+        "size": 10920510,
+        "sha256": "710321ae2235313a20fd26dbc11e1306209b552a28cec119a156be87f56d4e90"
       },
       "runtime-windows-x64": {
-        "name": "ExoMind-RT-0.4.5-windows-x64.exe",
-        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.5/ExoMind-RT-0.4.5-windows-x64.exe",
-        "size": 6370304,
-        "sha256": "506dab8c92047e8b1c88ab60b0d9709a5dba266f5af7284f5a901936b34f9efc"
+        "name": "ExoMind-RT-0.4.18-windows-x64.exe",
+        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-RT-0.4.18-windows-x64.exe",
+        "size": 7365120,
+        "sha256": "4160005e08899b7f3e753e3e27186b09eb0891a87823713bec2908e578b02623"
       },
       "runtime-macos-aarch64": {
-        "name": "ExoMind-RT-0.4.5-macos-aarch64.tar.gz",
-        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.5/ExoMind-RT-0.4.5-macos-aarch64.tar.gz",
-        "size": 2969691,
-        "sha256": "12953b47390e04174a75bbdf5e00317e1463ec12191dff87951cc82ec299b38c"
+        "name": "ExoMind-RT-0.4.18-macos-aarch64.tar.gz",
+        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-RT-0.4.18-macos-aarch64.tar.gz",
+        "size": 3338329,
+        "sha256": "d35f972877957233cfc3bf68e5db201187997c36e9d7927b4938ac2263e359b8"
       },
       "runtime-linux-x64": {
-        "name": "ExoMind-RT-0.4.5-linux-x64.tar.gz",
-        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.5/ExoMind-RT-0.4.5-linux-x64.tar.gz",
-        "size": 3279221,
-        "sha256": "236eb965f2d94fecbdd99c712e1ef4dfa0c6ca5c79ff9974db4e500bf90732b2"
+        "name": "ExoMind-RT-0.4.18-linux-x64.tar.gz",
+        "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-RT-0.4.18-linux-x64.tar.gz",
+        "size": 3714443,
+        "sha256": "fc1057072fcf325b2466bfaadef94d6d16adc8e83cbfcba3588931bbcb64807f"
       }
     },
     "highlights": [
       {
-        "kind": "added",
-        "text": "enforce remote-truth build release flow"
+        "kind": "fixed",
+        "text": "replicate agent eventlog writes"
       },
       {
         "kind": "maintenance",
-        "text": "support GitHub Pages base path in prod smoke"
-      },
-      {
-        "kind": "maintenance",
-        "text": "pin Bun version for website tests"
-      },
-      {
-        "kind": "maintenance",
-        "text": "install root deps without frozen lockfile"
-      },
-      {
-        "kind": "maintenance",
-        "text": "bump version to 0.4.5"
+        "text": "bump version to 0.4.18"
       }
     ]
   },
   "versions": [
+    {
+      "version": "0.4.18",
+      "tag": "v0.4.18",
+      "published_at": "2026-06-07T12:58:18Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.18",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.18-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-windows-x64-setup.exe",
+          "size": 16561664,
+          "sha256": "35764878dd796d79ff03900ee7dbfbcf7651cc461463f747e91e4d7044b420b2"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.18-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-windows-x64-installer.msi",
+          "size": 10969088,
+          "sha256": "05b4ee0338b9910ecf9b99c1218e9a13aab9301133c58c23fd3a36592df375c5"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.18-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-android-arm64.apk",
+          "size": 21251415,
+          "sha256": "15525b3b8b249b23d73fcb4b02a6b779956f5c1fd294ce493ad3e029d6d84225"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.18-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-android-x86.apk",
+          "size": 23250257,
+          "sha256": "9a7c082fe70d4da7e549e1effca0c1a277040ed40bc16cffd4b94831f630dcd8"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.18-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-macos-aarch64.dmg",
+          "size": 10923882,
+          "sha256": "39451eecfa4b5e8758be6e86f97f141bc4411acd4ac5c2781567d42db2062a26"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.18-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-linux-x64.AppImage",
+          "size": 88214008,
+          "sha256": "e9f42de60da6562b2ba186524be6636f77a6d7d25bd6e8f3e84b927f5d3054b3"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.18-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-0.4.18-linux-x64.deb",
+          "size": 10920510,
+          "sha256": "710321ae2235313a20fd26dbc11e1306209b552a28cec119a156be87f56d4e90"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.18-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-RT-0.4.18-windows-x64.exe",
+          "size": 7365120,
+          "sha256": "4160005e08899b7f3e753e3e27186b09eb0891a87823713bec2908e578b02623"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.18-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-RT-0.4.18-macos-aarch64.tar.gz",
+          "size": 3338329,
+          "sha256": "d35f972877957233cfc3bf68e5db201187997c36e9d7927b4938ac2263e359b8"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.18-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.18/ExoMind-RT-0.4.18-linux-x64.tar.gz",
+          "size": 3714443,
+          "sha256": "fc1057072fcf325b2466bfaadef94d6d16adc8e83cbfcba3588931bbcb64807f"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "fixed",
+          "text": "replicate agent eventlog writes"
+        },
+        {
+          "kind": "maintenance",
+          "text": "bump version to 0.4.18"
+        }
+      ]
+    },
+    {
+      "version": "0.4.17",
+      "tag": "v0.4.17",
+      "published_at": "2026-06-06T21:45:05Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.17",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.17-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.17/ExoMind-0.4.17-windows-x64-setup.exe",
+          "size": 16550912,
+          "sha256": "fe909cd99e85f47408ed1a55a71183def4439442ee2830f5d4dbbc21d018673a"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.17-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.17/ExoMind-0.4.17-windows-x64-installer.msi",
+          "size": 10960896,
+          "sha256": "cb07cb64ff567bdd5f321e1d3de5421e0d5e9a1bdd3301e461a1546486f98ca9"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.17-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.17/ExoMind-0.4.17-android-arm64.apk",
+          "size": 21243223,
+          "sha256": "7b45268b2e7fae09d0808ce01ac8653f2530c32e64cd24b2487ced95c775f69a"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.17-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.17/ExoMind-0.4.17-android-x86.apk",
+          "size": 23254353,
+          "sha256": "fea202801d76297733fa5bd7a28d01e39df3ce19738453f3668883c82e5fc0b2"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.17-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.17/ExoMind-0.4.17-macos-aarch64.dmg",
+          "size": 10931691,
+          "sha256": "ece0ab29bc8ac9b53b252c662af8f40c6a2046260f8e1dcb011c106517c308c1"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.17-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.17/ExoMind-0.4.17-linux-x64.AppImage",
+          "size": 88218104,
+          "sha256": "c1c060708d8b4933692ea4cb65f0d473a5d7da97ce5b5b63dcad5cc2302cac5c"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.17-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.17/ExoMind-0.4.17-linux-x64.deb",
+          "size": 10916830,
+          "sha256": "969b69d3cdc0a3fdd103fc3cc0684396b3a0b503ed4cc4c543ab71ccf83e73e4"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.17-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.17/ExoMind-RT-0.4.17-windows-x64.exe",
+          "size": 7351808,
+          "sha256": "f82c37c47a9bc9ae271e450cc3f47c00495d5dd8f9deb65763af82ee4ec77040"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.17-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.17/ExoMind-RT-0.4.17-macos-aarch64.tar.gz",
+          "size": 3336866,
+          "sha256": "40b69c96300935951d2129ef0954560cef9e4b9d7c3adaf4fc8237e422483996"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.17-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.17/ExoMind-RT-0.4.17-linux-x64.tar.gz",
+          "size": 3710813,
+          "sha256": "743926808ae59e152c9b11594a76df74f513cad67e1dc56b4df8f8d8b81e6c1d"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "distinguish connecting vs empty states in signal topology UI"
+        },
+        {
+          "kind": "fixed",
+          "text": "resolve embedded runtime port via IPC instead of stale localStorage cache"
+        },
+        {
+          "kind": "fixed",
+          "text": "route timeblock_summary event log reads/writes through correct user profile"
+        },
+        {
+          "kind": "fixed",
+          "text": "initialize IPC port cache in floating workbench window"
+        },
+        {
+          "kind": "fixed",
+          "text": "share localStorage with main window and add profile validation"
+        }
+      ]
+    },
+    {
+      "version": "0.4.16",
+      "tag": "v0.4.16",
+      "published_at": "2026-06-06T00:35:27Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.16",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.16-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.16/ExoMind-0.4.16-windows-x64-setup.exe",
+          "size": 16531968,
+          "sha256": "263dba618a6e8f35870239279ba8d2f6d02220a03877c11b45786ead0744d094"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.16-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.16/ExoMind-0.4.16-windows-x64-installer.msi",
+          "size": 10952704,
+          "sha256": "6c48e44e871f6dce965ede5a71e62dee211e1718a4a853dc27c64774463761dc"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.16-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.16/ExoMind-0.4.16-android-arm64.apk",
+          "size": 21226839,
+          "sha256": "7c0979770ac369dc8147a47e3b901bbf2ae4641577cc05ec2a6a7861beac111b"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.16-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.16/ExoMind-0.4.16-android-x86.apk",
+          "size": 23242065,
+          "sha256": "2d4635f3986f8d2ab6084bee8cea3e14965552991d977d8e086cc0a8760f4bf1"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.16-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.16/ExoMind-0.4.16-macos-aarch64.dmg",
+          "size": 10919071,
+          "sha256": "e59e5d5a265168a5689a0e03cf57e29faabbced0f86de74a12c2e508de945d22"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.16-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.16/ExoMind-0.4.16-linux-x64.AppImage",
+          "size": 88209912,
+          "sha256": "cf89d51194c1c3916812de87e1fa1bd17a9104072ea32b04775974c4c5bd1148"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.16-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.16/ExoMind-0.4.16-linux-x64.deb",
+          "size": 10911444,
+          "sha256": "6f5605f4ab6f6cefb996a242842778cc6a8ca316c57a3d9adf9b4434b79438fd"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.16-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.16/ExoMind-RT-0.4.16-windows-x64.exe",
+          "size": 7347712,
+          "sha256": "fae749370e5cdb40d064c5fb2943d0f7cf719dbcd9c6afd1817a3adf92f8922e"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.16-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.16/ExoMind-RT-0.4.16-macos-aarch64.tar.gz",
+          "size": 3335544,
+          "sha256": "7167fecda0e9c6e1bbe12638d31eaae6735b85140c105cf6a556a72d8c40eccd"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.16-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.16/ExoMind-RT-0.4.16-linux-x64.tar.gz",
+          "size": 3710536,
+          "sha256": "b738feb80e8669f967b5066ed3ea180ab1767c61f05dff13211e0e17c9999612"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add built-in timeblock_summary agent harness"
+        },
+        {
+          "kind": "added",
+          "text": "bridge AI Registry to Runtime flat keys + builtin agent toggle"
+        },
+        {
+          "kind": "added",
+          "text": "add energy system to timeblock_summary agent"
+        },
+        {
+          "kind": "added",
+          "text": "add session recording + list_sessions to timeblock_summary"
+        },
+        {
+          "kind": "added",
+          "text": "add actions/soul API + frontend fallbacks + tick signal"
+        }
+      ]
+    },
+    {
+      "version": "0.4.15",
+      "tag": "v0.4.15",
+      "published_at": "2026-05-19T17:20:46Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.15",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.15-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.15/ExoMind-0.4.15-windows-x64-setup.exe",
+          "size": 16335872,
+          "sha256": "9ca02354eea6e2aaa8ed75a59a5d9228fad555c4fa33e6d85f3bdc3b848d73d9"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.15-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.15/ExoMind-0.4.15-windows-x64-installer.msi",
+          "size": 10883072,
+          "sha256": "25928aed1c9e2af2fbf9dbfe318ad823709ccb0c1577a1d3f2f18682af4f58f8"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.15-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.15/ExoMind-0.4.15-android-arm64.apk",
+          "size": 20985175,
+          "sha256": "179fd1215d93e2d3af800010fc49d20992b0f40ecaec3bbf07fd47d69742d5cd"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.15-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.15/ExoMind-0.4.15-android-x86.apk",
+          "size": 22967633,
+          "sha256": "4d1aa57f53d837ec5b8faea6068f2aa62f1766c78235af9adc830e1d4a47274c"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.15-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.15/ExoMind-0.4.15-macos-aarch64.dmg",
+          "size": 10852555,
+          "sha256": "3aa600bed3e1923eca108e631455b0e88d34e155fcafa577fe26ac0dd1c285db"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.15-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.15/ExoMind-0.4.15-linux-x64.AppImage",
+          "size": 88127992,
+          "sha256": "fb506978b30a889b1f6309b21359f3e76d38efb56a959439a829d74b427b9871"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.15-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.15/ExoMind-0.4.15-linux-x64.deb",
+          "size": 10820070,
+          "sha256": "daa56192858fc4dadac0e466aa7512f9a655679302bfc4bf557529ac86b807df"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.15-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.15/ExoMind-RT-0.4.15-windows-x64.exe",
+          "size": 7194112,
+          "sha256": "e30e51eef9eed3881040b909d4145fa4b3c07e17897508337b6012ae663dd8c9"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.15-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.15/ExoMind-RT-0.4.15-macos-aarch64.tar.gz",
+          "size": 3273169,
+          "sha256": "a1dbd96941a9fbbdfb33fd2d8db19beecf415288793443c744fa2a22e79268b6"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.15-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.15/ExoMind-RT-0.4.15-linux-x64.tar.gz",
+          "size": 3632252,
+          "sha256": "1e7e57a1f6bc673bee8ffd04ee481c1e3a89f1d6972bd1f7d9ae0104c3d32972"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add runtime-local automation and peer pause controls"
+        },
+        {
+          "kind": "added",
+          "text": "move automation controls into device network view"
+        },
+        {
+          "kind": "fixed",
+          "text": "resolve OOM crash + SSE signal stream leaks"
+        },
+        {
+          "kind": "fixed",
+          "text": "keep paused peers paused and show toggle progress"
+        },
+        {
+          "kind": "fixed",
+          "text": "disable pairing entry when automation is off"
+        }
+      ]
+    },
+    {
+      "version": "0.4.14",
+      "tag": "v0.4.14",
+      "published_at": "2026-04-22T10:39:33Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.14",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.14-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.14/ExoMind-0.4.14-windows-x64-setup.exe",
+          "size": 16326144,
+          "sha256": "0c260bb7e61f3852a7e2e44890dc9b4271b98ee03d5831470d2b00c2225a81c3"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.14-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.14/ExoMind-0.4.14-windows-x64-installer.msi",
+          "size": 10870784,
+          "sha256": "0902adab935b89b7528be9c62156ed09d481f2098df180cccc7cd324aeeb643e"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.14-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.14/ExoMind-0.4.14-android-arm64.apk",
+          "size": 20981079,
+          "sha256": "804f83ce998a5a56d1b57adc1f4238836079b83f0e5ec00d9d17de235b4b5ddc"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.14-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.14/ExoMind-0.4.14-android-x86.apk",
+          "size": 22959441,
+          "sha256": "6ad96005b0cfa7a86828e85d0359f497bb3a5071d546c0ad73a27f1a633bb2f6"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.14-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.14/ExoMind-0.4.14-macos-aarch64.dmg",
+          "size": 10849517,
+          "sha256": "1eb22ef1f00aa503496f48af3db3d25603661ecd9660921b191d95809d60ccf6"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.14-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.14/ExoMind-0.4.14-linux-x64.AppImage",
+          "size": 88111608,
+          "sha256": "02f348921091e7615394b328724499590da8898aa2939007681d0e184b63ec8b"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.14-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.14/ExoMind-0.4.14-linux-x64.deb",
+          "size": 10825156,
+          "sha256": "f65e780a85078fa0fc51c9fbcc716f70bcddd3171b89a7fb7924bfd2ff42da77"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.14-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.14/ExoMind-RT-0.4.14-windows-x64.exe",
+          "size": 7188480,
+          "sha256": "2c7cb5a37708e1c34ab24460c7e08c8fb99946806b51348e92b7a06d8ae25308"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.14-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.14/ExoMind-RT-0.4.14-macos-aarch64.tar.gz",
+          "size": 3280919,
+          "sha256": "dfc60df0cd7c7fdba2c09485045fd1f0aedf60556765527f9ead31a24e9f3227"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.14-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.14/ExoMind-RT-0.4.14-linux-x64.tar.gz",
+          "size": 3639077,
+          "sha256": "07768d62824e7b155d33b1a058817e5c0563f81fb68c51b8d02f084583f5d71e"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add eventlog markdown mirror toggle"
+        },
+        {
+          "kind": "fixed",
+          "text": "surface runtime request detail and harden reconciliation"
+        },
+        {
+          "kind": "changed",
+          "text": "add tracing for eventlog and timeblock hot paths"
+        },
+        {
+          "kind": "changed",
+          "text": "tighten runtime hot paths and add trace toggles"
+        },
+        {
+          "kind": "maintenance",
+          "text": "bump version to 0.4.14"
+        }
+      ]
+    },
+    {
+      "version": "0.4.13",
+      "tag": "v0.4.13",
+      "published_at": "2026-04-20T16:47:03Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.13",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.13-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.13/ExoMind-0.4.13-windows-x64-setup.exe",
+          "size": 16299008,
+          "sha256": "1e4b50012843b59f2c52c098fbbb4d7d3eef091c34cbd98efc31dd7ad35570ae"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.13-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.13/ExoMind-0.4.13-windows-x64-installer.msi",
+          "size": 10858496,
+          "sha256": "1883d0423ad5849cb8e2b0dcc4a804379f55521a79596928427754c946cbae5d"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.13-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.13/ExoMind-0.4.13-android-arm64.apk",
+          "size": 20940119,
+          "sha256": "4a80396e862300884e2361188b04119910eb4abe4fc195569eb50d229987b64b"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.13-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.13/ExoMind-0.4.13-android-x86.apk",
+          "size": 22926673,
+          "sha256": "935df4dc987fce77fab3c515e575d4f6a44a550dc4ef7aa379c4024aff50cf28"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.13-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.13/ExoMind-0.4.13-macos-aarch64.dmg",
+          "size": 10820191,
+          "sha256": "5b4743d65878e693f0abb032e9bf0ac39b17a4f4d0c02271e2c566f64864b12b"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.13-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.13/ExoMind-0.4.13-linux-x64.AppImage",
+          "size": 88099320,
+          "sha256": "a33fbf2dd19f6e4974d52e64b03abe77144fa863aeb687ffce7c58cc673273f5"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.13-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.13/ExoMind-0.4.13-linux-x64.deb",
+          "size": 10804014,
+          "sha256": "e8e108d990f765f51223ea1df26550129ad9043eb29386c6b935f15563718f2c"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.13-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.13/ExoMind-RT-0.4.13-windows-x64.exe",
+          "size": 7169536,
+          "sha256": "94be29769a1eb56a8fd59d18f36db902f5966d5d8f78a9f686f72dc2e2aed8aa"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.13-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.13/ExoMind-RT-0.4.13-macos-aarch64.tar.gz",
+          "size": 3261773,
+          "sha256": "2ae9d1a1ec5530b45f2087cc51bfe6ae2af8105ccca64fe60169ac136570d9b0"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.13-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.13/ExoMind-RT-0.4.13-linux-x64.tar.gz",
+          "size": 3627416,
+          "sha256": "c73cd118cc57c4dc0154456631f11bed2271be17a1586b9a2708b335769075ad"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "新增 TaskDagPreferencesConfig 结构与区间折叠持久化"
+        },
+        {
+          "kind": "added",
+          "text": "区间折叠核心逻辑"
+        },
+        {
+          "kind": "added",
+          "text": "控制面板折叠状态汇总 + 详情面板清除节点"
+        },
+        {
+          "kind": "added",
+          "text": "集成折叠偏好与状态汇总至 TaskDagPage"
+        },
+        {
+          "kind": "added",
+          "text": "重构 proposal executor/store/intent mapping"
+        }
+      ]
+    },
+    {
+      "version": "0.4.12",
+      "tag": "v0.4.12",
+      "published_at": "2026-04-19T19:49:00Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.12",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.12-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.12/ExoMind-0.4.12-windows-x64-setup.exe",
+          "size": 16292864,
+          "sha256": "0de5d2ca43af1502f3e6fd74a19679906c2b600246a0628f972dac4a53a74209"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.12-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.12/ExoMind-0.4.12-windows-x64-installer.msi",
+          "size": 10854400,
+          "sha256": "ff5fd197a28e7b6d7c8678390da2ef88f125df1e508727a27ac4cad001c1f6f3"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.12-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.12/ExoMind-0.4.12-android-arm64.apk",
+          "size": 20956503,
+          "sha256": "89e975ff075d0873ce7feb6dcd0035ccc5108d36d125ab5dffc9e8f14cc297ad"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.12-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.12/ExoMind-0.4.12-android-x86.apk",
+          "size": 22922577,
+          "sha256": "45a6a20ddc9a66c750ebf97f940d91020e9ebb5f710ccd6bb4ffc7d335f34914"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.12-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.12/ExoMind-0.4.12-macos-aarch64.dmg",
+          "size": 10821017,
+          "sha256": "57115ac15b81a0d0032754317ac97edb1e863a81a1896de336c08fd8a3ba8bf2"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.12-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.12/ExoMind-0.4.12-linux-x64.AppImage",
+          "size": 88095224,
+          "sha256": "acac74d96d007e96c8a6247e34c3c55016c38bc98180611ea97180fcecf39605"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.12-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.12/ExoMind-0.4.12-linux-x64.deb",
+          "size": 10797824,
+          "sha256": "7aaf3f9af3006ec90fb58ea831c63c9e9b61f077abdd76a3717c10ba68a9b49f"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.12-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.12/ExoMind-RT-0.4.12-windows-x64.exe",
+          "size": 7160320,
+          "sha256": "8aa3f99cb605533b74c437c29aaf75a918d26dc5dcb416f760552f9f65a93ca1"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.12-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.12/ExoMind-RT-0.4.12-macos-aarch64.tar.gz",
+          "size": 3262482,
+          "sha256": "8110f9922072c38af9a63b4ed784efeb5842e66a6dd85f5ccddd6b286291e174"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.12-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.12/ExoMind-RT-0.4.12-linux-x64.tar.gz",
+          "size": 3623427,
+          "sha256": "d8012add7e94e16fb57cb575421831298e906a00c24fec3b6e70918ad7fff1a7"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add lifecycle realtime notifications"
+        },
+        {
+          "kind": "added",
+          "text": "implement tauri text selection and context menu policy"
+        },
+        {
+          "kind": "added",
+          "text": "add external await endpoint"
+        },
+        {
+          "kind": "added",
+          "text": "implement external agent await SSE endpoint"
+        },
+        {
+          "kind": "added",
+          "text": "land task proposal surface pilot"
+        }
+      ]
+    },
+    {
+      "version": "0.4.11",
+      "tag": "v0.4.11",
+      "published_at": "2026-04-16T15:35:23Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.11",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.11-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.11/ExoMind-0.4.11-windows-x64-setup.exe",
+          "size": 15845376,
+          "sha256": "aec88212266023468f414ae0d728e1df7f689f6d14e341ac03ae1fc751fed68b"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.11-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.11/ExoMind-0.4.11-windows-x64-installer.msi",
+          "size": 10690560,
+          "sha256": "d9dea049ed687c4de83640e2f7baa7d10e5e5c605497a9359fc365b27c5e6232"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.11-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.11/ExoMind-0.4.11-android-arm64.apk",
+          "size": 20469079,
+          "sha256": "c87647defcac4ca120118344d2d3a9d8f89d8f0f737ec8a13604bab45674465c"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.11-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.11/ExoMind-0.4.11-android-x86.apk",
+          "size": 22279505,
+          "sha256": "664debee765418426a8499f19fc87acac35c408c58d08ecda0ac464f61224fed"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.11-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.11/ExoMind-0.4.11-macos-aarch64.dmg",
+          "size": 10684051,
+          "sha256": "fdc6fe92062d5a3dce228eeae350f151f3e467551695751a84138b8165ecca68"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.11-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.11/ExoMind-0.4.11-linux-x64.AppImage",
+          "size": 87927288,
+          "sha256": "0030cecebcc76f6c08def38b8d49250e167d4d8cfcc764d055035cd525742991"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.11-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.11/ExoMind-0.4.11-linux-x64.deb",
+          "size": 10616426,
+          "sha256": "97d1066e313a5d21b50f31587e88425bbbece4a666beb87dc018b9767f1df0ae"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.11-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.11/ExoMind-RT-0.4.11-windows-x64.exe",
+          "size": 6728704,
+          "sha256": "d33b162cfc24be69dcc439a11ab85fed8bf7ecd729755c917335309f2d3836b6"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.11-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.11/ExoMind-RT-0.4.11-macos-aarch64.tar.gz",
+          "size": 3115722,
+          "sha256": "7001610de9ba5e4fc12f3b344acd73ecafc51feabb93a568cfd027738818656e"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.11-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.11/ExoMind-RT-0.4.11-linux-x64.tar.gz",
+          "size": 3450392,
+          "sha256": "591b551682941cb12e483ea13303f962fc423cd3a2c8c2e43f8fe317aa749bc6"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "expose plugins module"
+        },
+        {
+          "kind": "added",
+          "text": "keep focus awake and alert on timeblock end"
+        },
+        {
+          "kind": "fixed",
+          "text": "return 401 for invalid peer tokens"
+        },
+        {
+          "kind": "fixed",
+          "text": "harden interval collapse normalization"
+        },
+        {
+          "kind": "fixed",
+          "text": "land android polish batch and playbook"
+        }
+      ]
+    },
+    {
+      "version": "0.4.10",
+      "tag": "v0.4.10",
+      "published_at": "2026-04-15T10:48:28Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.10",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.10-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.10/ExoMind-0.4.10-windows-x64-setup.exe",
+          "size": 15860736,
+          "sha256": "fb471b8b84907472c95c16c1e702e37bef9a081084cf1d4ad8f32f9d112a047d"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.10-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.10/ExoMind-0.4.10-windows-x64-installer.msi",
+          "size": 10686464,
+          "sha256": "1cf1d86909f14d4e62e09ffd868c04b9eda57af1d79e339ce6a93c10ccd3a961"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.10-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.10/ExoMind-0.4.10-android-arm64.apk",
+          "size": 20399447,
+          "sha256": "7879935f6c6672bbe6ab77a3505ee1294192911a80637e49793bf254bc9bdff2"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.10-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.10/ExoMind-0.4.10-android-x86.apk",
+          "size": 22173009,
+          "sha256": "63d427f511be2d5842dead77b0748e3a925552c00b50d275a9c93bf114c7d5d3"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.10-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.10/ExoMind-0.4.10-macos-aarch64.dmg",
+          "size": 10670348,
+          "sha256": "44524476b308561682950b47e97825cfbdcb6b6bc218a13b5497a623f4e797de"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.10-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.10/ExoMind-0.4.10-linux-x64.AppImage",
+          "size": 87943672,
+          "sha256": "d1b27b213a47e4ae8fa4fb812b4fa0678429c9c88fcaa0bc3d04e76d5f1ac4e8"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.10-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.10/ExoMind-0.4.10-linux-x64.deb",
+          "size": 10621330,
+          "sha256": "c810835542d812df49718cd21bb512113295d93df3876a4938786cd25ce7aad5"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.10-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.10/ExoMind-RT-0.4.10-windows-x64.exe",
+          "size": 6739456,
+          "sha256": "123b5dbc237aa6ba9d8731274167492dc8dfbafa562ce8ca709d4453ce12d254"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.10-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.10/ExoMind-RT-0.4.10-macos-aarch64.tar.gz",
+          "size": 3106926,
+          "sha256": "b5b38ec8719ccbabcbc3572062a0801b4b771731dc105d2d5859e62b38ef710a"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.10-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.10/ExoMind-RT-0.4.10-linux-x64.tar.gz",
+          "size": 3451746,
+          "sha256": "2f81404e0e565b939f6460718d5aec23c6cdc3cc2aa14d3c261f962ef5dda96b"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add sqlite json bridge phase1 prototype"
+        },
+        {
+          "kind": "fixed",
+          "text": "normalize transition countdown hydration"
+        },
+        {
+          "kind": "docs",
+          "text": "add frozen architecture plan"
+        },
+        {
+          "kind": "docs",
+          "text": "add Pinned/Unpinned concept viz and academic analysis"
+        },
+        {
+          "kind": "docs",
+          "text": "add EDS freeze plan reference docs and sync research"
+        }
+      ]
+    },
+    {
+      "version": "0.4.9",
+      "tag": "v0.4.9",
+      "published_at": "2026-04-14T09:21:33Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.9",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.9-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.9/ExoMind-0.4.9-windows-x64-setup.exe",
+          "size": 15872000,
+          "sha256": "8ddae8af67fe86f652632d4f59cd35b1b6ded5adbd460addbc9828ff45c42e41"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.9-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.9/ExoMind-0.4.9-windows-x64-installer.msi",
+          "size": 10690560,
+          "sha256": "2b7704376425cfcf5bc0f86edff18c4ab2e47c5bfff792d7c56ddb8c142c88ea"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.9-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.9/ExoMind-0.4.9-android-arm64.apk",
+          "size": 20403543,
+          "sha256": "6f5cc547b685c7f56444011855721f7a24e16f97bf30ab9a55d60447bfa4333f"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.9-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.9/ExoMind-0.4.9-android-x86.apk",
+          "size": 22185297,
+          "sha256": "a2f0206c70913993633f16f240352afc6b4d6f1d7ee61d3d2dd690c78c775bea"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.9-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.9/ExoMind-0.4.9-macos-aarch64.dmg",
+          "size": 10672555,
+          "sha256": "0ba5fde08847e50611e8ec9bbdf95941f906f31ca1e9e2d8c22af6c5f2a2b484"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.9-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.9/ExoMind-0.4.9-linux-x64.AppImage",
+          "size": 87939576,
+          "sha256": "177237160b9e59ba50047131816421fbc1ef463c3aadad9d2766f377c3769224"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.9-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.9/ExoMind-0.4.9-linux-x64.deb",
+          "size": 10617862,
+          "sha256": "f66a5a8811f656cf140720c8b4bf4035f19a3bc9fe01512eaece53f7abda75f9"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.9-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.9/ExoMind-RT-0.4.9-windows-x64.exe",
+          "size": 6752768,
+          "sha256": "0ab6fbe08df73703d4dcbdd5a2e7eedd4156be6112d52294b407cf21522a72c5"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.9-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.9/ExoMind-RT-0.4.9-macos-aarch64.tar.gz",
+          "size": 3104985,
+          "sha256": "c35fe63e6d5fb637b61e2d05b9ff938ba03ede49455235ace80c327adf44241c"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.9-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.9/ExoMind-RT-0.4.9-linux-x64.tar.gz",
+          "size": 3451451,
+          "sha256": "f6c0f034d9a2c1a8891ec206392d27a9030042df724ccab2adb32e37a7362528"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "fixed",
+          "text": "harden paired backfill and tauri validation"
+        },
+        {
+          "kind": "docs",
+          "text": "add settled rebuild decisions"
+        },
+        {
+          "kind": "docs",
+          "text": "add SQLite JSON Bridge technical research and design"
+        },
+        {
+          "kind": "docs",
+          "text": "EDS v3 — 存储适配层定位、Schema 三种声明模式、Phase 2/3 共存策略"
+        },
+        {
+          "kind": "docs",
+          "text": "settle object sync skeleton decisions"
+        }
+      ]
+    },
+    {
+      "version": "0.4.8",
+      "tag": "v0.4.8",
+      "published_at": "2026-04-13T12:33:31Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.8",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.8-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.8/ExoMind-0.4.8-windows-x64-setup.exe",
+          "size": 15694848,
+          "sha256": "dc71d114b66a6e23aa14c85d7f9ff69919d38b478e7734db01786b031575e47f"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.8-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.8/ExoMind-0.4.8-windows-x64-installer.msi",
+          "size": 10625024,
+          "sha256": "1bc187ef4ca026c4054b1d872dfc73729eddbdbeea3f5ac1b32c46d6aa9052af"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.8-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.8/ExoMind-0.4.8-android-arm64.apk",
+          "size": 20202839,
+          "sha256": "c84fd87c7af19732ba487a0ed8e1415e340973741360304165ac55755c601782"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.8-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.8/ExoMind-0.4.8-android-x86.apk",
+          "size": 21943633,
+          "sha256": "f6767ddf4c33a84bf88975b0492e77d85c813915a8cd948e1f223cd3d29aeeb5"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.8-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.8/ExoMind-0.4.8-macos-aarch64.dmg",
+          "size": 10587776,
+          "sha256": "a979ed535c430d5eb7e2496d701b1133feb54e034fff899d071d50408740293f"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.8-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.8/ExoMind-0.4.8-linux-x64.AppImage",
+          "size": 87874040,
+          "sha256": "11295c038ea6ebe43095b8361fbe2122d23955713f9388beef8cd4a70ca65a41"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.8-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.8/ExoMind-0.4.8-linux-x64.deb",
+          "size": 10552966,
+          "sha256": "418f4aba7e6f33120010927bd909005d002929c14b94e8cfc8a0b33763d70521"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.8-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.8/ExoMind-RT-0.4.8-windows-x64.exe",
+          "size": 6574080,
+          "sha256": "b899cf143ca8f8319a6db61e8695509a3b5949d8ec5729caffc53d245da6d17a"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.8-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.8/ExoMind-RT-0.4.8-macos-aarch64.tar.gz",
+          "size": 3045546,
+          "sha256": "63e97a0f986dea291ff772902c3c117cd1cd2f0b99cd2c361f04f2686ee1cbfa"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.8-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.8/ExoMind-RT-0.4.8-linux-x64.tar.gz",
+          "size": 3381140,
+          "sha256": "bfc1ebd169c3ba5b2063e8c05133e1e5cf2791fd9f27192589c18dee758cd423"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add check-issue-newlines.ts utility script"
+        },
+        {
+          "kind": "added",
+          "text": "add refs and record permalinks"
+        },
+        {
+          "kind": "added",
+          "text": "enhance quote references and navigation"
+        },
+        {
+          "kind": "fixed",
+          "text": "make pty model input optional"
+        },
+        {
+          "kind": "fixed",
+          "text": "allow embedded runtime random-port fallback"
+        }
+      ]
+    },
+    {
+      "version": "0.4.7",
+      "tag": "v0.4.7",
+      "published_at": "2026-04-11T03:35:17Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.7",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.7-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.7/ExoMind-0.4.7-windows-x64-setup.exe",
+          "size": 15671296,
+          "sha256": "abaa106b610380b0ec33cc9240dc4a1f9fe88b37cfcbd8a2efa5d7236c3cabb0"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.7-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.7/ExoMind-0.4.7-windows-x64-installer.msi",
+          "size": 10608640,
+          "sha256": "e0560fad71608185eff43b1923d99de0f4abc12adce7ac28942aa53b7ffd0708"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.7-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.7/ExoMind-0.4.7-android-arm64.apk",
+          "size": 20157783,
+          "sha256": "d0d18b5f77f01de02ff920143e5a23760b0fba77425e6fac2fec241caac4400e"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.7-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.7/ExoMind-0.4.7-android-x86.apk",
+          "size": 21898577,
+          "sha256": "807ad987be94933be6fd233972b2f7ad6affc610240c6645a485570f7a8fae30"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.7-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.7/ExoMind-0.4.7-macos-aarch64.dmg",
+          "size": 10566723,
+          "sha256": "80d96190d1d8cc83bf77a102ffec05f0b1b72474a15b1361a6e5afd7acfac1ab"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.7-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.7/ExoMind-0.4.7-linux-x64.AppImage",
+          "size": 87861752,
+          "sha256": "da23134874226090537c79b68573fe84d2a049e89d0e5641b854659d61b9986f"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.7-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.7/ExoMind-0.4.7-linux-x64.deb",
+          "size": 10529428,
+          "sha256": "fb3fd6287ecd30c601558931abd46e83fe58fad7eae01871fceb4e04f4f98485"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.7-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.7/ExoMind-RT-0.4.7-windows-x64.exe",
+          "size": 6555136,
+          "sha256": "9ce0d38b27a4243e766ab985ba3dc7e77af79925b9fe07ecc9fd7b1f966179a7"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.7-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.7/ExoMind-RT-0.4.7-macos-aarch64.tar.gz",
+          "size": 3033933,
+          "sha256": "499a0cf51578633755bcd8ade03f2640e93c666e506773d8fa8dcf0a2c50cce8"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.7-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.7/ExoMind-RT-0.4.7-linux-x64.tar.gz",
+          "size": 3372825,
+          "sha256": "28efefcbaf99e584ec4b109da1354f5c3a1990cdc9bbdcbc51a566a369175db6"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "fixed",
+          "text": "sync Cargo.lock and dedupe preview notes"
+        },
+        {
+          "kind": "fixed",
+          "text": "preserve tiled spawn state and terminal settings"
+        },
+        {
+          "kind": "docs",
+          "text": "record desktop verification playbook updates"
+        },
+        {
+          "kind": "maintenance",
+          "text": "bump version to 0.4.7"
+        }
+      ]
+    },
+    {
+      "version": "0.4.6",
+      "tag": "v0.4.6",
+      "published_at": "2026-04-10T23:17:42Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.6",
+      "assets": {
+        "windows-x64-setup": {
+          "name": "ExoMind-0.4.6-windows-x64-setup.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.6/ExoMind-0.4.6-windows-x64-setup.exe",
+          "size": 15667200,
+          "sha256": "8b617115d229261618e18659b6a1bc5ac2096693f2df10222492e84d34002056"
+        },
+        "windows-x64-installer": {
+          "name": "ExoMind-0.4.6-windows-x64-installer.msi",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.6/ExoMind-0.4.6-windows-x64-installer.msi",
+          "size": 10608640,
+          "sha256": "27f00c8211098dfd0f6fe592602285f9296ebedb6cc923d0a42b95aea1c15dc2"
+        },
+        "android-arm64": {
+          "name": "ExoMind-0.4.6-android-arm64.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.6/ExoMind-0.4.6-android-arm64.apk",
+          "size": 20157783,
+          "sha256": "5af3edbf7d7ecdd0bc809d5f8e027f9c752560cd1e3cc6e1c1f4e4a00375de1f"
+        },
+        "android-x86": {
+          "name": "ExoMind-0.4.6-android-x86.apk",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.6/ExoMind-0.4.6-android-x86.apk",
+          "size": 21898577,
+          "sha256": "2dd2e0c3232f4217f11068a4ab8b52c1a1822ab8f0ce3cb3cf942f036dc69c56"
+        },
+        "macos-aarch64": {
+          "name": "ExoMind-0.4.6-macos-aarch64.dmg",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.6/ExoMind-0.4.6-macos-aarch64.dmg",
+          "size": 10572236,
+          "sha256": "8a7c75198ad4429d67f05bdf571491ad8a375fd83cd695fee013a469cd45312c"
+        },
+        "linux-x64-appimage": {
+          "name": "ExoMind-0.4.6-linux-x64.AppImage",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.6/ExoMind-0.4.6-linux-x64.AppImage",
+          "size": 87857656,
+          "sha256": "1b5ad7d867b9718aa77ad19a89d85b97923b18f2d117457f71666792119120e7"
+        },
+        "linux-x64-deb": {
+          "name": "ExoMind-0.4.6-linux-x64.deb",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.6/ExoMind-0.4.6-linux-x64.deb",
+          "size": 10524908,
+          "sha256": "c3a5e2886a5ea38ab3e71ff3ea3373f1d9b13a25e4f6ddf9b5c6581a46fda79d"
+        },
+        "runtime-windows-x64": {
+          "name": "ExoMind-RT-0.4.6-windows-x64.exe",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.6/ExoMind-RT-0.4.6-windows-x64.exe",
+          "size": 6555136,
+          "sha256": "4e7315616987ccdfc5427bd89c2b3e079a5e996f33e9252113088f5528227437"
+        },
+        "runtime-macos-aarch64": {
+          "name": "ExoMind-RT-0.4.6-macos-aarch64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.6/ExoMind-RT-0.4.6-macos-aarch64.tar.gz",
+          "size": 3033935,
+          "sha256": "69b7911f618ca5d1aed05b1ff1a7907e54dc1b11cb1415afa704c015555e3a12"
+        },
+        "runtime-linux-x64": {
+          "name": "ExoMind-RT-0.4.6-linux-x64.tar.gz",
+          "url": "https://github.com/exomind-team/exomind/releases/download/v0.4.6/ExoMind-RT-0.4.6-linux-x64.tar.gz",
+          "size": 3372826,
+          "sha256": "06878e26a457527ac0baf54abe8fd3614922401027b28b42553fad01de619847"
+        }
+      },
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add API Agent tab test console on network page"
+        },
+        {
+          "kind": "added",
+          "text": "add api agent tab test console"
+        },
+        {
+          "kind": "added",
+          "text": "add voice runtime lab and quota monitor"
+        },
+        {
+          "kind": "added",
+          "text": "add omni provider and docs"
+        },
+        {
+          "kind": "added",
+          "text": "sync lab and omni provider updates"
+        }
+      ]
+    },
     {
       "version": "0.4.5",
       "tag": "v0.4.5",

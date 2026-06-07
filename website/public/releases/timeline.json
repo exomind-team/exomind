@@ -1,32 +1,20 @@
 {
-  "generated_at": "2026-04-09T14:51:38.431Z",
+  "generated_at": "2026-06-07T22:56:16.997Z",
   "latest": {
     "preview": {
       "channel": "preview",
-      "tag": "v0.4.5",
-      "display_tag": "v0.4.5",
-      "published_at": "2026-04-08T17:11:47Z",
-      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.5",
+      "tag": "v0.4.18",
+      "display_tag": "v0.4.18",
+      "published_at": "2026-06-07T12:58:18Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.18",
       "highlights": [
         {
-          "kind": "added",
-          "text": "enforce remote-truth build release flow"
+          "kind": "fixed",
+          "text": "replicate agent eventlog writes"
         },
         {
           "kind": "maintenance",
-          "text": "support GitHub Pages base path in prod smoke"
-        },
-        {
-          "kind": "maintenance",
-          "text": "pin Bun version for website tests"
-        },
-        {
-          "kind": "maintenance",
-          "text": "install root deps without frozen lockfile"
-        },
-        {
-          "kind": "maintenance",
-          "text": "bump version to 0.4.5"
+          "text": "bump version to 0.4.18"
         }
       ]
     },
@@ -53,6 +41,367 @@
     }
   },
   "preview": [
+    {
+      "channel": "preview",
+      "tag": "v0.4.18",
+      "display_tag": "v0.4.18",
+      "published_at": "2026-06-07T12:58:18Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.18",
+      "highlights": [
+        {
+          "kind": "fixed",
+          "text": "replicate agent eventlog writes"
+        },
+        {
+          "kind": "maintenance",
+          "text": "bump version to 0.4.18"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.17",
+      "display_tag": "v0.4.17",
+      "published_at": "2026-06-06T21:45:05Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.17",
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "distinguish connecting vs empty states in signal topology UI"
+        },
+        {
+          "kind": "fixed",
+          "text": "resolve embedded runtime port via IPC instead of stale localStorage cache"
+        },
+        {
+          "kind": "fixed",
+          "text": "route timeblock_summary event log reads/writes through correct user profile"
+        },
+        {
+          "kind": "fixed",
+          "text": "initialize IPC port cache in floating workbench window"
+        },
+        {
+          "kind": "fixed",
+          "text": "share localStorage with main window and add profile validation"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.16",
+      "display_tag": "v0.4.16",
+      "published_at": "2026-06-06T00:35:27Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.16",
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add built-in timeblock_summary agent harness"
+        },
+        {
+          "kind": "added",
+          "text": "bridge AI Registry to Runtime flat keys + builtin agent toggle"
+        },
+        {
+          "kind": "added",
+          "text": "add energy system to timeblock_summary agent"
+        },
+        {
+          "kind": "added",
+          "text": "add session recording + list_sessions to timeblock_summary"
+        },
+        {
+          "kind": "added",
+          "text": "add actions/soul API + frontend fallbacks + tick signal"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.15",
+      "display_tag": "v0.4.15",
+      "published_at": "2026-05-19T17:20:46Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.15",
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add runtime-local automation and peer pause controls"
+        },
+        {
+          "kind": "added",
+          "text": "move automation controls into device network view"
+        },
+        {
+          "kind": "fixed",
+          "text": "resolve OOM crash + SSE signal stream leaks"
+        },
+        {
+          "kind": "fixed",
+          "text": "keep paused peers paused and show toggle progress"
+        },
+        {
+          "kind": "fixed",
+          "text": "disable pairing entry when automation is off"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.14",
+      "display_tag": "v0.4.14",
+      "published_at": "2026-04-22T10:39:33Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.14",
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add eventlog markdown mirror toggle"
+        },
+        {
+          "kind": "fixed",
+          "text": "surface runtime request detail and harden reconciliation"
+        },
+        {
+          "kind": "changed",
+          "text": "add tracing for eventlog and timeblock hot paths"
+        },
+        {
+          "kind": "changed",
+          "text": "tighten runtime hot paths and add trace toggles"
+        },
+        {
+          "kind": "maintenance",
+          "text": "bump version to 0.4.14"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.13",
+      "display_tag": "v0.4.13",
+      "published_at": "2026-04-20T16:47:03Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.13",
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "新增 TaskDagPreferencesConfig 结构与区间折叠持久化"
+        },
+        {
+          "kind": "added",
+          "text": "区间折叠核心逻辑"
+        },
+        {
+          "kind": "added",
+          "text": "控制面板折叠状态汇总 + 详情面板清除节点"
+        },
+        {
+          "kind": "added",
+          "text": "集成折叠偏好与状态汇总至 TaskDagPage"
+        },
+        {
+          "kind": "added",
+          "text": "重构 proposal executor/store/intent mapping"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.12",
+      "display_tag": "v0.4.12",
+      "published_at": "2026-04-19T19:49:00Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.12",
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add lifecycle realtime notifications"
+        },
+        {
+          "kind": "added",
+          "text": "implement tauri text selection and context menu policy"
+        },
+        {
+          "kind": "added",
+          "text": "add external await endpoint"
+        },
+        {
+          "kind": "added",
+          "text": "implement external agent await SSE endpoint"
+        },
+        {
+          "kind": "added",
+          "text": "land task proposal surface pilot"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.11",
+      "display_tag": "v0.4.11",
+      "published_at": "2026-04-16T15:35:23Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.11",
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "expose plugins module"
+        },
+        {
+          "kind": "added",
+          "text": "keep focus awake and alert on timeblock end"
+        },
+        {
+          "kind": "fixed",
+          "text": "return 401 for invalid peer tokens"
+        },
+        {
+          "kind": "fixed",
+          "text": "harden interval collapse normalization"
+        },
+        {
+          "kind": "fixed",
+          "text": "land android polish batch and playbook"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.10",
+      "display_tag": "v0.4.10",
+      "published_at": "2026-04-15T10:48:28Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.10",
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add sqlite json bridge phase1 prototype"
+        },
+        {
+          "kind": "fixed",
+          "text": "normalize transition countdown hydration"
+        },
+        {
+          "kind": "docs",
+          "text": "add frozen architecture plan"
+        },
+        {
+          "kind": "docs",
+          "text": "add Pinned/Unpinned concept viz and academic analysis"
+        },
+        {
+          "kind": "docs",
+          "text": "add EDS freeze plan reference docs and sync research"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.9",
+      "display_tag": "v0.4.9",
+      "published_at": "2026-04-14T09:21:33Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.9",
+      "highlights": [
+        {
+          "kind": "fixed",
+          "text": "harden paired backfill and tauri validation"
+        },
+        {
+          "kind": "docs",
+          "text": "add settled rebuild decisions"
+        },
+        {
+          "kind": "docs",
+          "text": "add SQLite JSON Bridge technical research and design"
+        },
+        {
+          "kind": "docs",
+          "text": "EDS v3 — 存储适配层定位、Schema 三种声明模式、Phase 2/3 共存策略"
+        },
+        {
+          "kind": "docs",
+          "text": "settle object sync skeleton decisions"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.8",
+      "display_tag": "v0.4.8",
+      "published_at": "2026-04-13T12:33:31Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.8",
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add check-issue-newlines.ts utility script"
+        },
+        {
+          "kind": "added",
+          "text": "add refs and record permalinks"
+        },
+        {
+          "kind": "added",
+          "text": "enhance quote references and navigation"
+        },
+        {
+          "kind": "fixed",
+          "text": "make pty model input optional"
+        },
+        {
+          "kind": "fixed",
+          "text": "allow embedded runtime random-port fallback"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.7",
+      "display_tag": "v0.4.7",
+      "published_at": "2026-04-11T03:35:17Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.7",
+      "highlights": [
+        {
+          "kind": "fixed",
+          "text": "sync Cargo.lock and dedupe preview notes"
+        },
+        {
+          "kind": "fixed",
+          "text": "preserve tiled spawn state and terminal settings"
+        },
+        {
+          "kind": "docs",
+          "text": "record desktop verification playbook updates"
+        },
+        {
+          "kind": "maintenance",
+          "text": "bump version to 0.4.7"
+        }
+      ]
+    },
+    {
+      "channel": "preview",
+      "tag": "v0.4.6",
+      "display_tag": "v0.4.6",
+      "published_at": "2026-04-10T23:17:42Z",
+      "release_url": "https://github.com/exomind-team/exomind/releases/tag/v0.4.6",
+      "highlights": [
+        {
+          "kind": "added",
+          "text": "add API Agent tab test console on network page"
+        },
+        {
+          "kind": "added",
+          "text": "add api agent tab test console"
+        },
+        {
+          "kind": "added",
+          "text": "add voice runtime lab and quota monitor"
+        },
+        {
+          "kind": "added",
+          "text": "add omni provider and docs"
+        },
+        {
+          "kind": "added",
+          "text": "sync lab and omni provider updates"
+        }
+      ]
+    },
     {
       "channel": "preview",
       "tag": "v0.4.5",
