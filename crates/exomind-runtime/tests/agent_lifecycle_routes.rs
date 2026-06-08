@@ -33,6 +33,7 @@ fn test_app_state(port: u16, host_id: &str, signal_pool: Arc<SignalPool>) -> App
         allow_lan_without_auth: false,
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
+        ens_transport: Arc::new(exomind_runtime::ens::EnsTransportService::disabled()),
         config_store: Arc::new(exomind_runtime::config::ConfigStore::new()),
         reminder_store: Arc::new(exomind_runtime::reminder::ReminderStore::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),

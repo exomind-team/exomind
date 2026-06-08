@@ -160,6 +160,20 @@ impl PairingManager {
         self.respond(&session_id, pin, responder_host_id)
     }
 
+    /// Cancel a pairing session.
+    ///
+    /// Returns true when an active session was removed. Missing or expired sessions
+    /// are treated as already gone so callers can keep cancel commands idempotent.
+    pub fn cancel(&self, session_id: &str) -> bool {
+        self.cleanup_expired();
+
+        let mut sessions = match self.sessions.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        sessions.remove(session_id).is_some()
+    }
+
     /// Remove all expired sessions.
     fn cleanup_expired(&self) {
         let mut sessions = match self.sessions.write() {
@@ -267,6 +281,20 @@ mod tests {
 
         // Second respond fails (session already consumed).
         let err = manager.respond(&sid, &pin, "host-c").unwrap_err();
+        assert!(matches!(err, PairingError::SessionNotFound));
+    }
+
+    #[test]
+    fn cancel_removes_session() {
+        let manager = PairingManager::new();
+        let session = manager.initiate("host-a".to_string());
+        let pin = session.pin.clone();
+        let sid = session.session_id.clone();
+
+        assert!(manager.cancel(&sid));
+        assert_eq!(manager.active_session_count(), 0);
+
+        let err = manager.respond(&sid, &pin, "host-b").unwrap_err();
         assert!(matches!(err, PairingError::SessionNotFound));
     }
 

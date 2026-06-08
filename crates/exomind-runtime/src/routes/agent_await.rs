@@ -119,6 +119,7 @@ mod tests {
             allow_lan_without_auth: false,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
+            ens_transport: Arc::new(crate::ens::EnsTransportService::disabled()),
             config_store: Arc::new(config::ConfigStore::new()),
             reminder_store: Arc::new(reminder::ReminderStore::new()),
             task_store: Arc::new(task::TaskStore::new()),

@@ -14,6 +14,7 @@ use tokio::time::{Duration, Interval};
 
 use crate::AppState;
 use crate::discovery::DiscoveredPeer;
+use crate::ens::{EnsInterfaceTopology, EnsTransportError};
 use crate::mesh::{PeerInfo, PeerInfoPublic, PeerInterestSnapshot, PeerStatus};
 use serde::Serialize;
 
@@ -308,6 +309,76 @@ async fn list_discovered(State(state): State<AppState>) -> Json<Vec<DiscoveredPe
     Json(peers)
 }
 
+#[derive(Debug, Deserialize)]
+struct SetEnsInterfaceTopologyRequest {
+    topology: EnsInterfaceTopology,
+}
+
+fn ens_error_response(error: EnsTransportError) -> (StatusCode, Json<serde_json::Value>) {
+    let status = match &error {
+        EnsTransportError::NotConfigured | EnsTransportError::ShutDown => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+        EnsTransportError::DiscoveredPeerNotFound(_)
+        | EnsTransportError::PairingOperationNotFound
+        | EnsTransportError::Provider(crate::ens::EnsProviderError::InterfaceNotFound(_)) => {
+            StatusCode::NOT_FOUND
+        }
+        EnsTransportError::IncorrectPin => StatusCode::FORBIDDEN,
+        EnsTransportError::MissingLocalEndpoint
+        | EnsTransportError::MissingRuntimeEndpoint
+        | EnsTransportError::DiscoveredPeerMissingEndpoint(_)
+        | EnsTransportError::PairingOperationCancelled => StatusCode::CONFLICT,
+        EnsTransportError::PairingSessionNotFound => StatusCode::FORBIDDEN,
+        EnsTransportError::Provider(_) => StatusCode::BAD_GATEWAY,
+    };
+
+    (
+        status,
+        Json(serde_json::json!({
+            "error": error.to_string(),
+        })),
+    )
+}
+
+async fn ens_snapshot(State(state): State<AppState>) -> Json<crate::ens::EnsTransportSnapshot> {
+    Json(state.ens_transport.snapshot())
+}
+
+async fn set_ens_interface_topology(
+    Path(name): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<SetEnsInterfaceTopologyRequest>,
+) -> Result<Json<crate::ens::EnsInterfaceSnapshot>, (StatusCode, Json<serde_json::Value>)> {
+    state
+        .ens_transport
+        .set_interface_topology(&name, req.topology)
+        .map(Json)
+        .map_err(ens_error_response)
+}
+
+async fn set_ens_global_topology(
+    State(state): State<AppState>,
+    Json(req): Json<SetEnsInterfaceTopologyRequest>,
+) -> Result<Json<crate::ens::EnsTransportSnapshot>, (StatusCode, Json<serde_json::Value>)> {
+    state
+        .ens_transport
+        .set_global_topology(req.topology)
+        .map(Json)
+        .map_err(ens_error_response)
+}
+
+async fn initiate_ens_pairing_with_discovered_peer(
+    Path(identity_hex): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<crate::ens::EnsPairingOfferTicket>, (StatusCode, Json<serde_json::Value>)> {
+    state
+        .ens_transport
+        .initiate_pairing_with_discovered_peer(&identity_hex)
+        .map(Json)
+        .map_err(ens_error_response)
+}
+
 /// Protected mesh routes (behind auth middleware).
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -317,6 +388,16 @@ pub fn router() -> Router<AppState> {
         .route("/mesh/events", post(ingest_remote_event))
         .route("/mesh/stream", get(stream_handler))
         .route("/mesh/discovered", get(list_discovered))
+        .route("/mesh/ens/snapshot", get(ens_snapshot))
+        .route("/mesh/ens/topology", put(set_ens_global_topology))
+        .route(
+            "/mesh/ens/interfaces/:name/topology",
+            put(set_ens_interface_topology),
+        )
+        .route(
+            "/mesh/ens/pairing/discovered/:identity_hex",
+            post(initiate_ens_pairing_with_discovered_peer),
+        )
         // Initiate is protected: only the local admin can create pairing sessions.
         // This prevents remote attackers from calling initiate + respond to self-pair.
         .route("/mesh/pairing/initiate", post(pairing_initiate))

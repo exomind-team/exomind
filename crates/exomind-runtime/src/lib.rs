@@ -22,6 +22,7 @@ pub mod auth;
 pub mod config;
 pub mod discovery;
 pub mod energy;
+pub mod ens;
 pub mod eventlog;
 pub mod eventlog_appender;
 pub mod eventlog_sqlite;
@@ -1011,6 +1012,7 @@ pub struct AppState {
     pub allow_lan_without_auth: bool,
     pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
     pub pairing: Arc<pairing::PairingManager>,
+    pub ens_transport: Arc<ens::EnsTransportService>,
     pub config_store: Arc<config::ConfigStore>,
     pub reminder_store: Arc<reminder::ReminderStore>,
     pub task_store: Arc<task::TaskStore>,
@@ -1027,6 +1029,52 @@ pub struct AppState {
     pub eventlog_store: Arc<EventLogStore>,
     #[cfg(not(target_os = "android"))]
     pub pty_manager: Arc<pty::PtyManager>,
+}
+
+fn default_ens_transport(
+    host_id: &str,
+    port: u16,
+    mesh: Arc<MeshState>,
+    pairing: Arc<pairing::PairingManager>,
+) -> Arc<ens::EnsTransportService> {
+    let local_endpoint = ens::EnsEndpointAdvertisement {
+        identity_hex: host_id.to_string(),
+        host_id: Some(host_id.to_string()),
+        gateway: ens::EnsGatewayKind::Reticulum,
+        via_interface: Some("local-loopback".to_string()),
+        via_medium: Some(ens::EnsInterfaceMedium::LocalDev),
+        runtime_base_url: Some(format!("http://127.0.0.1:{port}")),
+        reticulum_destination: None,
+        interface_address: Some(format!("tcp://127.0.0.1:{port}")),
+        discovery_source: "local-runtime-debug".to_string(),
+        capabilities: vec!["ens-control".to_string()],
+    };
+    let (service, provider) = ens::EnsTransportService::new_fake_with_endpoint(
+        host_id.to_string(),
+        mesh,
+        pairing,
+        local_endpoint,
+    );
+    provider.set_interfaces(vec![
+        ens::EnsInterfaceSnapshot {
+            name: "local-loopback".to_string(),
+            interface_type: "loopback".to_string(),
+            online: true,
+            outgoing: true,
+            topology: ens::EnsInterfaceTopology::Active,
+            effective_topology: ens::EnsInterfaceTopology::Active,
+        },
+        ens::EnsInterfaceSnapshot {
+            name: "lan-reticulum".to_string(),
+            interface_type: "reticulum-debug".to_string(),
+            online: false,
+            outgoing: true,
+            topology: ens::EnsInterfaceTopology::Passive,
+            effective_topology: ens::EnsInterfaceTopology::Passive,
+        },
+    ]);
+
+    Arc::new(service)
 }
 
 /// Resolve the runtime data directory from `EXOMIND_RT_DATA_DIR` env var,
@@ -1340,6 +1388,10 @@ impl AppState {
         let (eventlog_watch_tx, _rx) = routes::eventlog::eventlog_watch_channel();
         eventlog_store.set_watch_tx(eventlog_watch_tx.clone());
 
+        let pairing = Arc::new(pairing::PairingManager::new());
+        let ens_transport =
+            default_ens_transport(&host_id, port, Arc::clone(&mesh), Arc::clone(&pairing));
+
         Self {
             port,
             host_id,
@@ -1351,7 +1403,8 @@ impl AppState {
             auth_secret,
             allow_lan_without_auth: false,
             mdns: None,
-            pairing: Arc::new(pairing::PairingManager::new()),
+            pairing,
+            ens_transport,
             config_store,
             reminder_store: Arc::new(reminder_store),
             task_store: Arc::new(task_store),
@@ -1511,6 +1564,7 @@ mod tests {
             allow_lan_without_auth: false,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
+            ens_transport: Arc::new(ens::EnsTransportService::disabled()),
             config_store: Arc::new(config::ConfigStore::new()),
             reminder_store: Arc::new(reminder::ReminderStore::new()),
             task_store: Arc::new(task::TaskStore::new()),

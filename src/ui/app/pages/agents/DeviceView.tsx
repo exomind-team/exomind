@@ -1,4 +1,5 @@
-import { ChevronRight, Link2, Monitor, ShieldCheck, Wifi } from 'lucide-react';
+import { ChevronRight, Link2, Monitor, RadioTower, ShieldCheck, Wifi } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Switch } from '@/components/ui/switch';
 import type { AgentDeviceGroup, RuntimeServiceStatus } from '@/lib/types/agent-hub';
 import {
@@ -10,9 +11,17 @@ import type { RuntimeDeviceSnapshot, RuntimeHostSnapshot } from '@/services/runt
 import {
   DEFAULT_EXTERNAL_RUNTIME_PORT,
   DEFAULT_EMBEDDED_RUNTIME_PORT,
+  formatHostForUrl,
   type EmbeddedRuntimeNetworkMode,
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
+import {
+  getRuntimeEnsService,
+  type EnsInterfaceTopology,
+  type EnsInterfaceMedium,
+  type EnsPeerSnapshot,
+  type EnsTransportSnapshot,
+} from '@/lib/services/runtime-ens.service';
 import {
   formatHostMemory,
   formatHostUptime,
@@ -56,6 +65,403 @@ export interface DeviceViewProps {
 type DeviceViewSnapshot = RuntimeDeviceSnapshot & {
   primaryHostSnapshot?: RuntimeHostSnapshot;
 };
+
+const ENS_TOPOLOGY_OPTIONS: EnsInterfaceTopology[] = ['off', 'passive', 'active'];
+
+function formatEnsTopologyLabel(topology: EnsInterfaceTopology): string {
+  if (topology === 'active') {
+    return 'Active';
+  }
+  if (topology === 'passive') {
+    return 'Passive';
+  }
+  return 'Off';
+}
+
+function formatEnsHealthLabel(status: EnsTransportSnapshot['health']['status']): string {
+  if (status === 'healthy') {
+    return '健康';
+  }
+  if (status === 'degraded') {
+    return '降级';
+  }
+  if (status === 'error') {
+    return '错误';
+  }
+  return '未启用';
+}
+
+function formatEnsPeerName(peer: EnsPeerSnapshot): string {
+  return peer.identity.display_name
+    ?? peer.identity.host_id
+    ?? peer.endpoint?.host_id
+    ?? peer.identity.identity_hex;
+}
+
+function formatEnsInterfaceMediumLabel(medium: EnsInterfaceMedium | undefined): string {
+  if (medium === 'local_dev') {
+    return 'local-dev';
+  }
+  return medium ? medium.toUpperCase() : '';
+}
+
+function formatEnsEndpointRoute(peer: EnsPeerSnapshot): string {
+  const endpoint = peer.endpoint;
+  if (!endpoint) {
+    return 'no endpoint';
+  }
+
+  const gateway = endpoint.gateway === 'reticulum' ? 'Reticulum' : endpoint.gateway;
+  const medium = endpoint.via_medium ? formatEnsInterfaceMediumLabel(endpoint.via_medium) : null;
+  const via = [
+    endpoint.via_interface,
+    medium,
+  ].filter(Boolean).join(' / ');
+  const route = via ? `${gateway} via ${via}` : gateway;
+  const address = endpoint.interface_address ?? endpoint.reticulum_destination ?? endpoint.runtime_base_url;
+
+  return address ? `${route} · ${address}` : route;
+}
+
+function resolveRuntimeBaseUrl(status: RuntimeServiceStatus | null): string | null {
+  if (!status?.running || !status.port) {
+    return null;
+  }
+  const host = status.host === '0.0.0.0' ? '127.0.0.1' : status.host;
+  return `http://${formatHostForUrl(host)}:${status.port}`;
+}
+
+function ReticulumDebugPanel({
+  runtimeServiceStatus,
+}: {
+  runtimeServiceStatus: RuntimeServiceStatus | null;
+}) {
+  const runtimeBaseUrl = useMemo(
+    () => resolveRuntimeBaseUrl(runtimeServiceStatus),
+    [runtimeServiceStatus],
+  );
+  const [snapshot, setSnapshot] = useState<EnsTransportSnapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const ensService = useMemo(() => getRuntimeEnsService(), []);
+
+  const refresh = useCallback(async () => {
+    if (!runtimeBaseUrl) {
+      setSnapshot(null);
+      setError(null);
+      return;
+    }
+
+    try {
+      const nextSnapshot = await ensService.getSnapshot(runtimeBaseUrl);
+      setSnapshot(nextSnapshot);
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Reticulum 状态读取失败');
+    }
+  }, [ensService, runtimeBaseUrl]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const handleSetInterfaceTopology = async (
+    interfaceName: string,
+    topology: EnsInterfaceTopology,
+  ) => {
+    if (!runtimeBaseUrl) {
+      return;
+    }
+    setPendingKey(`interface:${interfaceName}`);
+    try {
+      await ensService.setInterfaceTopology(runtimeBaseUrl, interfaceName, topology);
+      await refresh();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Reticulum 接口状态更新失败');
+    } finally {
+      setPendingKey(null);
+    }
+  };
+
+  const handleSetGlobalTopology = async (topology: EnsInterfaceTopology) => {
+    if (!runtimeBaseUrl) {
+      return;
+    }
+    setPendingKey('global-topology');
+    try {
+      await ensService.setGlobalTopology(runtimeBaseUrl, topology);
+      await refresh();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Reticulum 全局接口状态更新失败');
+    } finally {
+      setPendingKey(null);
+    }
+  };
+
+  const handleInitiatePairing = async (identityHex: string) => {
+    if (!runtimeBaseUrl) {
+      return;
+    }
+    setPendingKey(`pair:${identityHex}`);
+    try {
+      await ensService.initiatePairingWithDiscoveredPeer(runtimeBaseUrl, identityHex);
+      await refresh();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Reticulum 配对发起失败');
+    } finally {
+      setPendingKey(null);
+    }
+  };
+
+  const interfaces = Array.isArray(snapshot?.interfaces) ? snapshot.interfaces : [];
+  const peers = Array.isArray(snapshot?.peers) ? snapshot.peers : [];
+  const healthStatus = snapshot?.health?.status ?? 'disabled';
+  const globalTopology = snapshot?.global_topology ?? 'off';
+  const discoveredPeers = peers.filter((peer) => !peer.authorized);
+  const authorizedPeers = peers.filter((peer) => peer.authorized);
+
+  return (
+    <article
+      data-testid="reticulum-debug-panel"
+      className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2">
+          <RadioTower size={14} className="mt-0.5 text-[#0D9488]" />
+          <div>
+            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Reticulum 调试</h3>
+            <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
+              ENS provider、接口 topology 与发现节点状态。
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          data-testid="reticulum-refresh-button"
+          onClick={() => {
+            void refresh();
+          }}
+          disabled={!runtimeBaseUrl}
+          className="rounded-lg bg-[#F5F0ED] px-2.5 py-1 text-[11px] font-semibold text-[#57534E] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#292524] dark:text-[#D6D3D1]"
+        >
+          刷新
+        </button>
+      </div>
+
+      {!runtimeBaseUrl ? (
+        <div className="rounded-xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-3 py-3 text-[11px] text-[#78716C] dark:border-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]">
+          启动本地 embedded RT 后，这里会显示 Reticulum/ENS 调试状态。
+        </div>
+      ) : (
+        <>
+          <div className="grid gap-2 md:grid-cols-3">
+            <div className="rounded-xl bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]">
+              <p className="text-[10px] text-[#A8A29E]">Provider</p>
+              <p data-testid="reticulum-provider-id" className="truncate text-[12px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+                {snapshot?.provider_id ?? '--'}
+              </p>
+            </div>
+            <div className="rounded-xl bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]">
+              <p className="text-[10px] text-[#A8A29E]">健康状态</p>
+              <p data-testid="reticulum-health-status" className="text-[12px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+                {formatEnsHealthLabel(healthStatus)}
+              </p>
+            </div>
+            <div className="rounded-xl bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]">
+              <p className="text-[10px] text-[#A8A29E]">节点</p>
+              <p className="text-[12px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+                {authorizedPeers.length} 已授权 / {discoveredPeers.length} 待配对
+              </p>
+            </div>
+          </div>
+
+          {snapshot?.health?.message && (
+            <p className="rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+              {snapshot.health.message}
+            </p>
+          )}
+
+          <div className="space-y-2 rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-3 dark:border-[#292524] dark:bg-[#292524]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">接口 topology</p>
+                <p className="text-[10px] text-[#A8A29E]">
+                  全局上限与单接口配置取较小值后生效。
+                </p>
+              </div>
+              <div className="inline-flex overflow-hidden rounded-lg border border-[#D6D3D1] bg-white dark:border-[#57534E] dark:bg-[#1C1917]">
+                {ENS_TOPOLOGY_OPTIONS.map((topology) => (
+                  <button
+                    key={topology}
+                    type="button"
+                    data-testid={`reticulum-global-topology-${topology}`}
+                    aria-pressed={globalTopology === topology}
+                    onClick={() => {
+                      void handleSetGlobalTopology(topology);
+                    }}
+                    disabled={!snapshot || pendingKey === 'global-topology'}
+                    className={`px-2 py-1 text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
+                      globalTopology === topology
+                        ? topology === 'active'
+                          ? 'bg-[#0D9488] text-white'
+                          : topology === 'passive'
+                            ? 'bg-[#2563EB] text-white'
+                            : 'bg-[#57534E] text-white'
+                        : 'text-[#78716C] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]'
+                    }`}
+                  >
+                    全局 {formatEnsTopologyLabel(topology)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-lg bg-white px-2 py-1.5 text-[10px] text-[#78716C] dark:bg-[#1C1917] dark:text-[#A8A29E]">
+              全局状态：
+              <span
+                data-testid="reticulum-global-topology-status"
+                className="ml-1 font-semibold text-[#1C1917] dark:text-[#FAFAF9]"
+              >
+                {formatEnsTopologyLabel(globalTopology)}
+              </span>
+            </div>
+
+            {interfaces.length > 0 ? (
+              <div className="space-y-1.5">
+                {interfaces.map((item) => {
+                  const effectiveTopology = item.effective_topology ?? item.topology;
+                  return (
+                    <div
+                      key={item.name}
+                      data-testid={`reticulum-interface-${item.name}`}
+                      className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]"
+                    >
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          effectiveTopology === 'active'
+                            ? 'bg-[#16A34A]'
+                            : effectiveTopology === 'passive'
+                              ? 'bg-[#2563EB]'
+                              : 'bg-[#A8A29E]'
+                        }`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.name}</p>
+                        <p className="text-[10px] text-[#A8A29E]">
+                          {item.type} · {item.online ? 'online' : 'offline'} · {item.outgoing ? 'outgoing' : 'incoming'}
+                        </p>
+                        <p className="text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+                          配置
+                          <span data-testid={`reticulum-interface-${item.name}-configured`} className="mx-1 font-semibold">
+                            {formatEnsTopologyLabel(item.topology)}
+                          </span>
+                          / 生效
+                          <span data-testid={`reticulum-interface-${item.name}-effective`} className="ml-1 font-semibold">
+                            {formatEnsTopologyLabel(effectiveTopology)}
+                          </span>
+                        </p>
+                      </div>
+                      <div className="inline-flex overflow-hidden rounded-md border border-[#D6D3D1] bg-[#FAF7F5] dark:border-[#57534E] dark:bg-[#292524]">
+                        {ENS_TOPOLOGY_OPTIONS.map((topology) => (
+                          <button
+                            key={topology}
+                            type="button"
+                            data-testid={`reticulum-interface-${item.name}-${topology}`}
+                            aria-pressed={item.topology === topology}
+                            disabled={pendingKey === `interface:${item.name}`}
+                            onClick={() => {
+                              void handleSetInterfaceTopology(item.name, topology);
+                            }}
+                            className={`px-2 py-0.5 text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
+                              item.topology === topology
+                                ? topology === 'active'
+                                  ? 'bg-[#0D9488] text-white'
+                                  : topology === 'passive'
+                                    ? 'bg-[#2563EB] text-white'
+                                    : 'bg-[#57534E] text-white'
+                                : 'text-[#78716C] hover:bg-[#E7E5E4] dark:text-[#A8A29E] dark:hover:bg-[#44403C]'
+                            }`}
+                          >
+                            {formatEnsTopologyLabel(topology)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-[#D6D3D1] bg-white px-3 py-3 text-[11px] text-[#78716C] dark:border-[#57534E] dark:bg-[#1C1917] dark:text-[#A8A29E]">
+                暂无 ENS interface snapshot。
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2 rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-3 dark:border-[#292524] dark:bg-[#292524]">
+            <p className="text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">ENS 发现节点</p>
+            {peers.length > 0 ? (
+              <div className="space-y-1.5">
+                {peers.map((peer) => {
+                  const identityHex = peer.identity.identity_hex;
+                  return (
+                    <div
+                      key={identityHex}
+                      data-testid={`reticulum-peer-${identityHex}`}
+                      className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                          {formatEnsPeerName(peer)}
+                        </p>
+                        <p
+                          data-testid={`reticulum-peer-${identityHex}-endpoint`}
+                          className="truncate text-[10px] text-[#A8A29E]"
+                        >
+                          {identityHex} · {formatEnsEndpointRoute(peer)}
+                        </p>
+                      </div>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                        peer.authorized
+                          ? 'bg-[#22C55E20] text-[#16A34A]'
+                          : peer.pairing_pending
+                            ? 'bg-[#F59E0B20] text-[#B45309]'
+                            : 'bg-[#E7E5E4] text-[#57534E] dark:bg-[#44403C] dark:text-[#D6D3D1]'
+                      }`}>
+                        {peer.authorized ? '已授权' : peer.pairing_pending ? '配对中' : '待配对'}
+                      </span>
+                      {!peer.authorized && !peer.pairing_pending && (
+                        <button
+                          type="button"
+                          data-testid={`reticulum-peer-pair-${identityHex}`}
+                          onClick={() => {
+                            void handleInitiatePairing(identityHex);
+                          }}
+                          disabled={pendingKey === `pair:${identityHex}`}
+                          className="rounded-lg bg-[#0D9488] px-2 py-1 text-[10px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          发起配对
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-[#D6D3D1] bg-white px-3 py-3 text-[11px] text-[#78716C] dark:border-[#57534E] dark:bg-[#1C1917] dark:text-[#A8A29E]">
+                暂无 ENS discovered peers。
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <p data-testid="reticulum-debug-error" className="rounded-md bg-[#EF444410] px-2 py-1 text-[10px] text-[#DC2626]">
+              {error}
+            </p>
+          )}
+        </>
+      )}
+    </article>
+  );
+}
 
 function renderSectionSummary(count: number, label: string): string {
   if (count <= 0) {
@@ -673,6 +1079,8 @@ export function DeviceView({
           )}
         </div>
       </article>
+
+      <ReticulumDebugPanel runtimeServiceStatus={runtimeServiceStatus} />
 
       <article
         data-testid="runtime-peer-section-discovered"
