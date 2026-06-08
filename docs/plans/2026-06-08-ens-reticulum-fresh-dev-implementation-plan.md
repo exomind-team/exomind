@@ -4,7 +4,7 @@
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 当前分支：`codex/ens-reticulum-adapter`
 > 基线：当前 `origin/dev`，不是旧 `feat/ret-mesh-prototype`
-> 状态：in-progress，Task 1-3 的 service-level fake 控制面已推进到双节点握手闭环
+> 状态：in-progress，fake control/data-plane、signed queue EventLog、dynamic UDP EventLog 与 Reticulum debug snapshot 纵切已完成
 
 ## 目的
 
@@ -240,6 +240,48 @@ git diff --check
 - mDNS `ret_port` bootstrap 尚未实现；下一步只能作为 Reticulum interface bootstrap，不得成为 Mesh peer truth。
 - 真实 provider 尚未接入 `AppState` 默认启动路径；route/UI 继续使用已稳定的 service snapshot/debug contract。
 
+### 2026-06-09：UDP dynamic port endpoint projection checkpoint
+
+本阶段已把真实 provider 从 queue-backed signed EventLog 纵切推进到 dynamic UDP 日用接口纵切：
+
+- `ReticulumEnsProvider::add_udp_interface("127.0.0.1:0", ...)` 支持 OS 动态分配端口。
+- provider 为每个 dynamic UDP interface 创建唯一内部 manager identity，避免多个 `127.0.0.1:0` interface 在 Reticulum interface manager 中串线。
+- provider snapshot 与 local endpoint 会把动态端口投影为实际 `host:port` public name 和 `udp://host:port` endpoint address。
+- `127.0.0.1:0` / `udp://127.0.0.1:0` 只允许作为 bind input；endpoint、snapshot、route payload、UI payload 不得泄漏 `:0`。
+- `EnsTransportSnapshot` 增加 `local_endpoint`，用于 debug/SSE/UI 观察 provider 当前投影出的本机 endpoint。
+- `EnsTransportService` 优先读取 provider 动态 local endpoint，避免启动时静态 endpoint 与实际 interface 状态脱节。
+- `set_interface_topology(public_name, topology)` 会解析回 dynamic UDP 内部 manager identity，并返回 public snapshot name。
+- DeviceView Reticulum debug panel 已展示 backend snapshot 中的本机 endpoint，并对 `host:port` interface test id 做安全 segment 化。
+- UI 测试覆盖 dynamic UDP 多接口场景：更新第二个接口的 topology 不会影响第一个接口。
+
+验证：
+
+```powershell
+git diff --check
+cargo fmt --package exomind-runtime -- --check
+npx vitest run tests/unit/ui/agent-hub/device-view.reticulum-debug.test.tsx
+cargo test -j 1 -p exomind-runtime --test ens_reticulum_provider -- --nocapture --test-threads=1
+cargo test -j 1 -p exomind-runtime --test ens_routes_debug -- --nocapture --test-threads=1
+cargo check --lib -j 1 -p exomind-runtime
+node ./node_modules/typescript/bin/tsc --noEmit
+```
+
+结果：
+
+- `device-view.reticulum-debug.test.tsx`：6/6 通过。
+- `ens_reticulum_provider`：10/10 通过。
+- `ens_routes_debug`：5/5 通过。
+- `cargo fmt --check`、`cargo check --lib -p exomind-runtime`、`tsc --noEmit` 通过。
+- Rust 仍有既有 warning，集中在 agent/timeblock/task bridge 等无关区域；本阶段未处理。
+
+当前边界：
+
+- dynamic UDP 已证明 EventLog `SignalEvent` 可通过 Reticulum provider 与 UDP interface 在双 provider 间同步，不经 HTTP/SSE。
+- dynamic UDP endpoint projection 是内部状态契约和 debug 面板契约，不是新增或冻结产品对外 API。
+- signed envelope 当前仍只提供 verified signer identity；若 ExoNet-Reticulum 后续暴露 observed link sender，需要继续补 verified signer 与 observed sender 一致性校验。
+- Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收仍待迁移。
+- mDNS `ret_port` bootstrap 与 TCP seed/server-client 仍待实现；它们只能作为 Reticulum physical/interface layer。
+
 ## 目标重心修正
 
 2026-06-08 复核后确认，本分支的长期目标不是“把 Reticulum 状态显示出来”，而是让 Reticulum 成为当前 runtime mesh 的真实传输承载之一。后续优先级因此调整为：
@@ -271,10 +313,10 @@ git diff --check
 下一阶段顺序改为：
 
 1. 从已通过的 fake `EnsDataFrame::SignalEvent` contract 出发，新建真实 `ReticulumEnsProvider`。
-2. queue-backed 真实 provider 已证明 RT-to-RT 不经 HTTP/SSE 也能把 EventLog `SignalEvent` raw payload 投递到 provider 收包队列；当前可信 ingest 因缺少 sender proof 有意 fail closed。
-3. 当前真实 provider 因缺 sender proof fail closed；下一步先补 sender binding，恢复可信 EventLog happy path。
-4. sender binding 通过后，再补 UDP dynamic port、mDNS `ret_port` bootstrap、TCP seed / server-client 这些日用物理联通层；这些能力只作为 Reticulum physical/interface layer 投影到 ENS snapshot。
-5. EventLog 真实纵切安全通过后，再把 fake gateway 已覆盖的 Task、TimeBlock active/completed 与 Proposal 场景搬到真实 provider。
+2. queue-backed 真实 provider 已证明 RT-to-RT 不经 HTTP/SSE 也能把 EventLog `SignalEvent` signed frame 可信 ingest 到远端 store。
+3. dynamic UDP 真实 provider 已证明动态端口可以投影为稳定 endpoint/interface snapshot，并完成双 provider EventLog `SignalEvent` 同步。
+4. 下一步补 mDNS `ret_port` bootstrap、TCP seed / server-client 这些日用物理联通层；这些能力只作为 Reticulum physical/interface layer 投影到 ENS snapshot。
+5. 将 fake gateway 已覆盖的 Task、TimeBlock active/completed 与 Proposal 场景搬到真实 provider。
 6. JSONL/file local-dev interface 与 AppState/route/UI 启动集成后置；UI 只消费 typed snapshot，不承担 transport state machine。
 
 ## 输入材料
@@ -455,7 +497,7 @@ flowchart TD
 
 ### 第一阶段非目标
 
-1. 不承诺真实 Reticulum provider 上的完整四域同步；当前只完成真实 provider queue 收包和 fail-closed 安全闸门，EventLog happy path 需先补 sender binding，Task / TimeBlock / Proposal 仍需迁移真实 provider 回归。
+1. 不承诺真实 Reticulum provider 上的完整四域同步；当前已完成 EventLog 在 queue 与 dynamic UDP 上的真实 provider happy path，Task / TimeBlock / Proposal 仍需迁移真实 provider 回归。
 2. 不在第一阶段删除现有 HTTP/SSE mesh relay；但新设计不得继续把 HTTP/SSE 当作长期跨 RT 通信主路径。
 3. 不承诺完整多 hop Reticulum 数据转发。
 4. 不重做 DeviceView 信息架构。
@@ -726,7 +768,7 @@ cargo test -p exomind-runtime --test mesh_routes_integration ens -- --nocapture
 - [x] 将 Reticulum announce / packet received data 转换为 typed provider event。
 - [x] 文件 IO 与 local registry 不进入 service select loop。
 - [ ] mDNS bridge 不进入 service select loop；尚未实现 `ret_port` bootstrap。
-- [x] 记录第一轮 API drift，不把 API 修复和功能扩张混在一起。
+- [x] 记录第一轮内部集成差异，不把 Reticulum facade 适配和功能扩张混在一起。
 
 **验证：**
 
@@ -909,29 +951,28 @@ rg -n "tokio::time::sleep|Duration::from_secs\\(5\\)|PairingOffer|PairingCancel|
 2. `ExoNet-Reticulum` crate root dependency 或 facade，禁止依赖 `ExoNet-Reticulum/src`。（已完成）
 3. local JSON registry 的 provider/interface projection。（已完成）
 4. provider received data -> `EnsReceivedDataFrame` decode -> `EnsTransportService::handle_received_data_frame`。（已完成）
-5. 至少一条真实 interface 上的 EventLog `SignalEvent` 收包测试或手动验证脚本。（queue 收包 + fail closed 已完成；可信 ingest 待 sender binding）
-6. UDP dynamic port + mDNS `ret_port` bootstrap 的 provider/interface projection。（待做）
-7. API drift list：记录当前 ExoNet-Reticulum 公开 API 与旧分支 `RetMeshNode` 期望之间的差异。（已记录在本计划 checkpoint）
+5. 至少一条真实 interface 上的 EventLog `SignalEvent` 收包测试或手动验证脚本。（queue 与 dynamic UDP 可信 ingest 已完成）
+6. UDP dynamic port provider/interface projection。（已完成）
+7. mDNS `ret_port` bootstrap 的 provider/interface projection。（待做）
+8. 内部集成差异记录：记录当前 ExoNet-Reticulum 可用入口与旧分支 `RetMeshNode` 期望之间的差异。（已记录在本计划 checkpoint）
 
 第二批后续 PR / patch 不包含：
 
 1. `port +/- 5000` endpoint 推导。
 2. 把 mDNS/local JSON registry 提升为 ExoMind mesh 的 peer truth。
-3. 真实 provider 上的全量四域同步，除非 sender binding 已补齐且 EventLog 真实可信 ingest 纵切已通过。
+3. 真实 provider 上的全量四域同步，除非 EventLog 真实可信 ingest 纵切已通过并保持 queue / UDP 回归。
 4. UI protocol state machine 或大型 DeviceView 改造。
 5. `crates/exomind-runtime/src/lib.rs` 中的新巨型 background loop。
 
 ## 下一步执行口径
 
-下一步从当前已完成的 fake control-plane、fake data-plane 与 queue-backed 真实 provider 基础继续：
+下一步从当前已完成的 fake control-plane、fake data-plane、queue-backed 真实 provider 与 dynamic UDP 真实 provider 基础继续：
 
-1. 补 sender binding：用 Reticulum link proof、signed ENS frame 或扩展 `ReceivedData` sender proof 将 immediate sender 与 Reticulum identity 绑定，避免只相信 frame 内自声明的 `from_peer`。
-2. 恢复 queue-backed EventLog 可信 ingest happy path，确认 `MissingDataFrameTransportPeer` 只在缺 sender proof 时出现。
-3. 补 UDP dynamic port 纵切：动态绑定端口、发布实际 bound port、验证双节点 EventLog `SignalEvent` 不经 HTTP/SSE。
-4. 补 mDNS `ret_port` bootstrap：mDNS 只发现 Reticulum interface bootstrap 信息，最终仍落到 `EnsEndpointAdvertisement`。
-5. 补 TCP seed / tcp server-client interface：端口来自显式 config 或 advertisement，不恢复旧分支端口算术。
-6. 把已通过的 fake Task/TimeBlock/Proposal 场景搬到真实 provider，确认四域用户数据都能通过 Reticulum gateway。
-7. 后续再接 JSONL/file local-dev interface 与 AppState/route/UI 启动集成；route/UI 仍只消费 typed snapshot。
+1. 补 mDNS `ret_port` bootstrap：mDNS 只发现 Reticulum interface bootstrap 信息，最终仍落到 `EnsEndpointAdvertisement`。
+2. 补 TCP seed / tcp server-client interface：端口来自显式 config 或 advertisement，不恢复旧分支端口算术。
+3. 把已通过的 fake Task/TimeBlock/Proposal 场景搬到真实 provider，确认四域用户数据都能通过 Reticulum gateway。
+4. 后续再接 JSONL/file local-dev interface 与 AppState/route/UI 启动集成；route/UI 仍只消费 typed snapshot。
+5. 若 ExoNet-Reticulum 暴露 observed link sender/source metadata，补 verified signer 与 observed sender 的一致性校验。
 
 ## 阶段验收
 
