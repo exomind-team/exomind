@@ -1,9 +1,11 @@
+pub mod data_protocol;
 pub mod dto;
 pub mod fake_provider;
 pub mod pairing_protocol;
 pub mod provider;
 pub mod service;
 
+pub use data_protocol::{EnsDataFrame, EnsSignalEventFrame};
 pub use dto::{
     EnsCommandAck, EnsEndpointAdvertisement, EnsGatewayKind, EnsInterfaceMedium,
     EnsInterfaceSnapshot, EnsInterfaceTopology, EnsOperationKind, EnsOperationSnapshot,

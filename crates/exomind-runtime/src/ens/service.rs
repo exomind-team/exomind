@@ -6,7 +6,9 @@ use uuid::Uuid;
 
 use crate::mesh::{MeshState, PeerInfo, PeerStatus};
 use crate::pairing::{PairingError, PairingManager};
+use crate::signal::SignalEvent;
 
+use super::data_protocol::{EnsDataFrame, EnsSignalEventFrame};
 use super::dto::{
     EnsCommandAck, EnsEndpointAdvertisement, EnsInterfaceSnapshot, EnsInterfaceTopology,
     EnsOperationKind, EnsOperationSnapshot, EnsOperationStatus, EnsPairingOfferTicket,
@@ -40,6 +42,8 @@ pub enum EnsTransportError {
     DiscoveredPeerNotFound(String),
     #[error("ENS discovered peer is missing endpoint: {0}")]
     DiscoveredPeerMissingEndpoint(String),
+    #[error("ENS data frame peer is not authorized: {0}")]
+    UnauthorizedDataFramePeer(String),
     #[error("{0}")]
     Provider(#[from] EnsProviderError),
 }
@@ -325,6 +329,57 @@ impl EnsTransportService {
         })?;
 
         self.initiate_pairing_offer(endpoint)
+    }
+
+    pub fn send_signal_event_to_peer(
+        &self,
+        peer_identity_hex: &str,
+        event: SignalEvent,
+    ) -> Result<bool, EnsTransportError> {
+        self.ensure_ready()?;
+        let mesh = self.mesh.as_ref().ok_or(EnsTransportError::NotConfigured)?;
+        let peer = self.authorized_mesh_peer(peer_identity_hex)?;
+        if !mesh.should_stream_event_to_peer(&peer.id, &event) {
+            return Ok(false);
+        }
+
+        let from_peer = self
+            .local_endpoint
+            .as_ref()
+            .ok_or(EnsTransportError::MissingLocalEndpoint)?
+            .identity();
+        let target = mesh_peer_identity(&peer);
+        let frame = EnsDataFrame::SignalEvent(EnsSignalEventFrame {
+            frame_id: Uuid::new_v4().to_string(),
+            from_peer,
+            scope_hint: signal_scope_hint(&event),
+            event,
+        });
+        self.provider.send_data_frame(&target, frame)?;
+        Ok(true)
+    }
+
+    pub async fn handle_data_frame(&self, frame: EnsDataFrame) -> Result<bool, EnsTransportError> {
+        self.ensure_ready()?;
+        match frame {
+            EnsDataFrame::SignalEvent(frame) => self.handle_signal_event_frame(frame).await,
+        }
+    }
+
+    async fn handle_signal_event_frame(
+        &self,
+        frame: EnsSignalEventFrame,
+    ) -> Result<bool, EnsTransportError> {
+        let mesh = self.mesh.as_ref().ok_or(EnsTransportError::NotConfigured)?;
+        self.authorized_mesh_peer(&frame.from_peer.identity_hex)?;
+
+        match mesh
+            .ingest_remote_event(&frame.from_peer.identity_hex, frame.event)
+            .await
+        {
+            Ok(accepted) => Ok(accepted),
+            Err(never) => match never {},
+        }
     }
 
     pub fn handle_pairing_response(
@@ -727,6 +782,15 @@ impl EnsTransportService {
         state.pending_responder_inbound_secrets.remove(operation_id)
     }
 
+    fn authorized_mesh_peer(&self, peer_identity_hex: &str) -> Result<PeerInfo, EnsTransportError> {
+        let mesh = self.mesh.as_ref().ok_or(EnsTransportError::NotConfigured)?;
+        mesh.get_peer(peer_identity_hex)
+            .filter(|peer| peer.enabled)
+            .ok_or_else(|| {
+                EnsTransportError::UnauthorizedDataFramePeer(peer_identity_hex.to_string())
+            })
+    }
+
     fn mark_operation_failed(&self, operation_id: &str, error: String, peer_id: Option<&str>) {
         let now = now_rfc3339();
         let mut state = self.write_state();
@@ -753,4 +817,24 @@ impl EnsTransportService {
 
 fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
+}
+
+fn mesh_peer_identity(peer: &PeerInfo) -> EnsPeerIdentity {
+    let mut identity = EnsPeerIdentity::new(peer.id.clone());
+    if let Some(host_id) = peer
+        .capabilities
+        .iter()
+        .find_map(|capability| capability.strip_prefix("host_id:"))
+    {
+        identity = identity.with_host_id(host_id.to_string());
+    }
+    identity
+}
+
+fn signal_scope_hint(event: &SignalEvent) -> Option<String> {
+    event
+        .payload
+        .get("scopeKey")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
 }

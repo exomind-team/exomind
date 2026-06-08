@@ -324,7 +324,9 @@ fn ens_error_response(error: EnsTransportError) -> (StatusCode, Json<serde_json:
         | EnsTransportError::Provider(crate::ens::EnsProviderError::InterfaceNotFound(_)) => {
             StatusCode::NOT_FOUND
         }
-        EnsTransportError::IncorrectPin => StatusCode::FORBIDDEN,
+        EnsTransportError::IncorrectPin | EnsTransportError::UnauthorizedDataFramePeer(_) => {
+            StatusCode::FORBIDDEN
+        }
         EnsTransportError::MissingLocalEndpoint
         | EnsTransportError::MissingRuntimeEndpoint
         | EnsTransportError::DiscoveredPeerMissingEndpoint(_)

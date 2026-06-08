@@ -158,6 +158,38 @@ git diff --check
 - 当前分支仍落后 `origin/dev` 若干提交；合并上游前不应改写已完成的 ENS contract。
 - 真实 `ExoNet-Reticulum` dependency 仍未接入，后续必须先完成 fake data-plane contract 后再接。
 
+### 2026-06-08：ENS fake SignalEvent data-plane checkpoint
+
+本阶段已把 Reticulum 工作从 control-plane 推进到 fake data-plane 用户功能闭环：
+
+- 新增 `crates/exomind-runtime/src/ens/data_protocol.rs`，定义独立 `EnsDataFrame::SignalEvent` / `EnsSignalEventFrame`，不复用 `EnsPairingFrame`。
+- `EnsProvider` contract 新增 `send_data_frame`，fake provider 可记录 data frame 目标 peer 和 frame 内容。
+- `EnsTransportService::send_signal_event_to_peer` 发送前检查目标 peer 已在 `MeshState` 中 enabled/authorized，并复用 `MeshState::should_stream_event_to_peer` 的 topic interest / hop / origin 约束。
+- `EnsTransportService::handle_data_frame` 接收后检查 immediate sender 已授权，再调用 `MeshState::ingest_remote_event`；provider 和 ENS service 都不直接写 EventLog/Task/TimeBlock/Proposal store。
+- 新增 `crates/exomind-runtime/tests/ens_data_plane.rs`，覆盖：
+  - A EventLog append -> fake ENS data frame -> B `EventLogStore`。
+  - Task `task.replication.upserted` -> B `TaskStore`。
+  - TimeBlock `timeblock.replication.active_upserted` / `timeblock.replication.completed` -> B `TimeBlockStore`。
+  - Proposal `proposal.replication.upserted` -> B `ProposalStore`。
+  - unauthorized peer、duplicate event id、origin bounce、发送侧未知目标。
+
+验证：
+
+```powershell
+cargo test -j 1 -p exomind-runtime --test ens_data_plane -- --nocapture
+cargo test -j 1 -p exomind-runtime --test ens_control_plane_prototype -- --nocapture
+cargo test -j 1 -p exomind-runtime --test ens_routes_debug -- --nocapture
+cargo check --lib -j 1 -p exomind-runtime
+```
+
+结果：
+
+- `ens_data_plane`：8/8 通过。
+- `ens_control_plane_prototype`：16/16 通过。
+- `ens_routes_debug`：5/5 通过。
+- `cargo check --lib -p exomind-runtime` 通过。
+- 仍有既有 warning，集中在 timeblock summary / agent await / task bridge 等区域；本阶段未处理无关 warning。
+
 ## 目标重心修正
 
 2026-06-08 复核后确认，本分支的长期目标不是“把 Reticulum 状态显示出来”，而是让 Reticulum 成为当前 runtime mesh 的真实传输承载之一。后续优先级因此调整为：
@@ -188,11 +220,11 @@ git diff --check
 
 下一阶段顺序改为：
 
-1. 先在 fake ENS provider 中加入 `SignalEvent` data frame，证明 A 的 EventLog replication signal 能到 B，并由 B 的现有 `replication_actor` 写入 store。
-2. 再定义真实 Reticulum gateway contract：Reticulum identity 负责网络身份，announce/link/data packet 负责发现、配对与 `SignalEvent` frame，interface manager 负责底层 UDP/TCP/mDNS/File/Queue 等互通方式。
-3. fake gateway 继续覆盖 Task、TimeBlock active/completed 与 Proposal，确保用户功能目标不是单一 EventLog demo。
-4. 用 ExoNet-Reticulum 的 queue/file 或 TCP/UDP/mDNS interface 做最小真实 gateway 测试，证明 RT-to-RT 不经 HTTP/SSE 也能传递 `SignalEvent` replication signal。
-5. 最后再接 route / AppState / UI，让 UI 只消费 typed snapshot，不承担 transport state machine。
+1. 从已通过的 fake `EnsDataFrame::SignalEvent` contract 出发，新建真实 `ReticulumEnsProvider`。
+2. 先用 UDP dynamic port、mDNS `ret_port` bootstrap、local JSON registry 打通本机/局域网日用发现与互通；这些能力只作为 Reticulum physical/interface layer 投影到 ENS snapshot。
+3. 用 ExoNet-Reticulum 的 queue/file 或 UDP 做最小真实 gateway 测试，证明 RT-to-RT 不经 HTTP/SSE 也能传递 EventLog `SignalEvent`。
+4. EventLog 真实纵切通过后，再把 fake gateway 已覆盖的 Task、TimeBlock active/completed 与 Proposal 场景搬到真实 provider。
+5. 第二批再接 TCP seed 与 JSONL/file local-dev interface；最后再接 route / AppState / UI，让 UI 只消费 typed snapshot，不承担 transport state machine。
 
 ## 输入材料
 
@@ -678,7 +710,7 @@ bun x vitest run tests/unit/services/runtime-mesh-sync.service*.test.ts tests/un
 bun x vitest run tests/unit/ui/peer-pairing-dialog*.test.tsx
 ```
 
-### Task 7：Reticulum 数据面同步用户功能纵切
+### Task 7：Reticulum 数据面同步用户功能纵切（fake provider 已完成）
 
 **目标**：把 Reticulum 工作拉回用户功能目标。EventLog 先走 fake ENS data-plane，随后覆盖 Task、TimeBlock active/completed 与 Proposal；真实 Reticulum provider 只是在合同稳定后替换 gateway。
 
@@ -795,40 +827,57 @@ rg -n "tokio::time::sleep|Duration::from_secs\\(5\\)|PairingOffer|PairingCancel|
 | Task 6 前端服务层收敛 | 7 | 7 | 5 | 中高；后端状态稳定后更稳 |
 | Task 7 data-plane sync | 10 | 7 | 5 | 提前；先 fake 用户功能纵切，真实 Reticulum provider 后接 |
 
-结论：先做 Task 1 + Task 2，并把 Task 7 的 fake EventLog data-plane 纵切纳入第一批后续。真实 Reticulum provider 不应抢在 fake provider、service tests 和 `SignalEvent` data-plane contract 之前。
+结论：Task 1/2/control-plane 与 Task 7 fake data-plane 最低功能集已完成。下一步可以进入真实 `ReticulumEnsProvider`，但仍必须先做最小物理层纵切，不应一次性恢复旧分支巨型后台循环。
 
 ## 第一批建议 patch 边界
 
-第一批后续 PR / patch 只包含：
+第一批后续 PR / patch 已完成，包含：
 
 1. 在现有 `ens` module 上补 data-plane DTO / provider trait。
 2. fake provider 的 `SignalEvent` send / receive 能力。
 3. EventLog fake gateway 用户功能纵切测试。
-4. unauthorized、duplicate event id、origin bounce 失败路径测试。
-5. 必要的 service handle 调整。
-6. `cargo check -p exomind-runtime`。
+4. Task、TimeBlock active/completed、Proposal fake gateway 用户功能测试。
+5. unauthorized、duplicate event id、origin bounce、发送侧未知目标失败路径测试。
+6. 必要的 service handle 调整。
+7. `cargo check -p exomind-runtime`。
 
-第一批后续 PR / patch 不包含：
+第一批后续 PR / patch 未包含：
 
 1. 真实 Reticulum dependency。
 2. 前端大改。
-3. 真实 Reticulum provider 上的全量四域同步。
-4. 旧 route / UI 迁移。
+3. 旧 route / UI 迁移。
 
-理由：第一批后续要先证明用户功能可以经 Reticulum gateway 的 `SignalEvent` frame 闭环，同时继续把边界立住。边界稳定后，真实 Reticulum 接入才有落点。
+理由：第一批后续已经证明用户功能可以经 Reticulum gateway 的 `SignalEvent` frame 闭环，同时继续把边界立住。边界稳定后，真实 Reticulum 接入才有落点。
+
+## 第二批建议 patch 边界
+
+第二批后续 PR / patch 只应包含：
+
+1. `ReticulumEnsProvider` 骨架。
+2. `ExoNet-Reticulum` crate root dependency 或 facade，禁止依赖 `ExoNet-Reticulum/src`。
+3. UDP dynamic port + mDNS `ret_port` bootstrap + local JSON registry 的 provider/interface projection。
+4. provider received data -> `EnsDataFrame::SignalEvent` decode -> `EnsTransportService::handle_data_frame`。
+5. 至少一条真实 interface 上的 EventLog `SignalEvent` 纵切测试或手动验证脚本。
+6. API drift list：记录当前 ExoNet-Reticulum 公开 API 与旧分支 `RetMeshNode` 期望之间的差异。
+
+第二批后续 PR / patch 不包含：
+
+1. `port +/- 5000` endpoint 推导。
+2. 把 mDNS/local JSON registry 提升为 ExoMind mesh 的 peer truth。
+3. 真实 provider 上的全量四域同步，除非 EventLog 真实纵切已通过。
+4. UI protocol state machine 或大型 DeviceView 改造。
+5. `crates/exomind-runtime/src/lib.rs` 中的新巨型 background loop。
 
 ## 下一步执行口径
 
-下一步从当前已完成的 fake control-plane 基础继续：
+下一步从当前已完成的 fake control-plane + fake data-plane 基础继续：
 
-1. 新增 `EnsDataFrame::SignalEvent` 或等价 data-plane frame，不塞进 `EnsPairingFrame`。
-2. 在 provider contract 中拆出 data-plane send/receive 能力，避免 pairing control-plane 与 data-plane 混用同一 frame enum。
-3. 扩展 fake provider，使两个 fake node 可交换 data frame。
-4. 写 A EventLog append -> B EventLogStore 的 fake gateway 纵切测试；远端事件必须通过 `MeshState::ingest_remote_event` 和既有 `replication_actor` 应用。
-5. 补 unauthorized peer、duplicate event id、origin bounce 三个失败路径。
-6. 验证 `cargo test -j 1 -p exomind-runtime --test ens_control_plane_prototype -- --nocapture`、新增 data-plane 测试、`cargo check --lib -j 1 -p exomind-runtime`。
-
-通过后再扩展 Task、TimeBlock active/completed 与 Proposal。不要先接真实 `reticulum` dependency。
+1. 新增 `ReticulumEnsProvider`，让真实 Reticulum provider 实现当前 `EnsProvider` contract。
+2. 先只接 UDP dynamic port、mDNS `ret_port` bootstrap 和 local JSON registry；它们只作为 Reticulum physical/interface layer，不成为 ExoMind mesh 平级发现通道。
+3. provider 收到 Reticulum data packet 后，只解码为 `EnsDataFrame` 并交给 `EnsTransportService::handle_data_frame`，不得直接写业务 store。
+4. 第一条真实 provider 纵切仍用 EventLog；验证 A append 后 B store 出现同一 record，且不经 HTTP/SSE。
+5. EventLog 真实纵切通过后，再把已通过的 fake Task/TimeBlock/Proposal 场景搬到真实 provider。
+6. 第二批后续再接 TCP seed 与 JSONL/file local-dev interface；端口和路径来自显式 config 或 advertisement，不恢复旧分支端口算术。
 
 ## 阶段验收
 
