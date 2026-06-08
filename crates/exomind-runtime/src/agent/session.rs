@@ -238,12 +238,7 @@ impl SqliteAgentSessionStore {
             "assistant_turn_json",
             "TEXT NOT NULL DEFAULT '{\"content\":\"\",\"toolCalls\":[]}'",
         )?;
-        ensure_column(
-            &conn,
-            "agent_api_sessions",
-            "content_blocks_json",
-            "TEXT",
-        )?;
+        ensure_column(&conn, "agent_api_sessions", "content_blocks_json", "TEXT")?;
         ensure_column(
             &conn,
             "agent_api_sessions",
@@ -345,12 +340,10 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSessionReco
         })?;
     let content_blocks_json: Option<String> = row.get(8)?;
     let content_blocks = content_blocks_json
-        .and_then(|json| {
-            serde_json::from_str::<Vec<crate::agent::api::ContentBlock>>(&json).ok()
-        });
+        .and_then(|json| serde_json::from_str::<Vec<crate::agent::api::ContentBlock>>(&json).ok());
     let action_log_json: String = row.get(9)?;
-    let action_log = serde_json::from_str::<Vec<ActionLogEntry>>(&action_log_json)
-        .unwrap_or_default();
+    let action_log =
+        serde_json::from_str::<Vec<ActionLogEntry>>(&action_log_json).unwrap_or_default();
     let prompt: String = row.get(4)?;
     let prompt = normalize_optional_text(&prompt);
     Ok(AgentSessionRecord {

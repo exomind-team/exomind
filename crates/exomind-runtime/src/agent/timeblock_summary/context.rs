@@ -119,7 +119,11 @@ pub async fn collect_context(
     user_id: &str,
 ) -> CollectedContext {
     // 1. Events in this timeblock range
-    let uid = if user_id.is_empty() { None } else { Some(user_id) };
+    let uid = if user_id.is_empty() {
+        None
+    } else {
+        Some(user_id)
+    };
     let events = eventlog_store
         .list_events_filtered(
             uid,

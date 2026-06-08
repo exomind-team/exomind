@@ -202,14 +202,18 @@ async fn get_actions(
 ) -> Result<Json<ActionsListResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Try life agent workspace first
     if let Ok(life_agent) = get_life_agent(&state, &agent_id) {
-        let all = life_agent.workspace().action_log().read_all().map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("failed to read actions: {e}"),
-                }),
-            )
-        })?;
+        let all = life_agent
+            .workspace()
+            .action_log()
+            .read_all()
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("failed to read actions: {e}"),
+                    }),
+                )
+            })?;
         let total = all.len() as u64;
         let start = all.len().saturating_sub(query.limit);
         return Ok(Json(ActionsListResponse {
@@ -239,7 +243,9 @@ async fn get_actions(
                 // Fallback: create a single entry from session metadata
                 let description = {
                     let trigger = session.trigger_source.as_deref().unwrap_or("unknown");
-                    let display_content = session.content.as_ref()
+                    let display_content = session
+                        .content
+                        .as_ref()
                         .filter(|c| !c.is_empty())
                         .or(session.prompt.as_ref())
                         .cloned()

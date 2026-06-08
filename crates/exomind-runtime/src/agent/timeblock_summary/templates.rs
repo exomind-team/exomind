@@ -1,5 +1,5 @@
-use super::context::CollectedContext;
 use super::SummaryKind;
+use super::context::CollectedContext;
 
 /// System prompt for the timeblock_summary agent.
 ///
@@ -112,8 +112,7 @@ pub fn build_start_prompt(
             let duration_min = duration_ms / 60_000; // Convert ms to minutes
             format!(
                 "\n\n## 前一段间隔（gap）的成果与进展\n\n间隔块「{}」已结束（持续 {} 分钟）。\n这意味着用户刚从休息/间隔中回来，准备开始新的工作。\n请将间隔前的活跃块成果作为本块的「先前成果与进展」参考。",
-                gap.name,
-                duration_min,
+                gap.name, duration_min,
             )
         }
         None => String::new(),

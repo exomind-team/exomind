@@ -356,7 +356,7 @@ impl CognitiveLifeAgent {
                                 .map(|(record, _)| record.clone())
                                 .collect(),
                             content_blocks: None,
-                        action_log: Vec::new(),
+                            action_log: Vec::new(),
                             status: "completed".to_string(),
                             error_message: None,
                             created_at,
@@ -387,7 +387,7 @@ impl CognitiveLifeAgent {
                                 }))
                                 .collect(),
                             content_blocks: None,
-                        action_log: Vec::new(),
+                            action_log: Vec::new(),
                             status: "needs_tool_calls".to_string(),
                             error_message: None,
                             created_at,
@@ -416,7 +416,7 @@ impl CognitiveLifeAgent {
                                     .map(|(record, _)| record.clone())
                                     .collect(),
                                 content_blocks: None,
-                        action_log: Vec::new(),
+                                action_log: Vec::new(),
                                 status: "failed".to_string(),
                                 error_message: Some(error.to_string()),
                                 created_at,

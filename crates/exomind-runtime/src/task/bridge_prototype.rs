@@ -134,26 +134,26 @@ fn task_table_schema() -> TableSchema {
         .expanded_fields(vec![
             // Positions 0-13: match store's column order (scope_key through completed_at)
             FieldDef::text("scope_key").default_json(json!(DEFAULT_SCOPE_KEY)), // 0
-            FieldDef::text("id"),                                              // 1
-            FieldDef::text("title"),                                           // 2
+            FieldDef::text("id"),                                               // 1
+            FieldDef::text("title"),                                            // 2
             FieldDef::text("description").nullable(),                           // 3
-            FieldDef::text("done_condition").nullable(),                       // 4
-            FieldDef::text("status"),                                          // 5
-            FieldDef::text("priority"),                                        // 6
-            FieldDef::text("source").nullable(),                               // 7 — matches store's position 8 (after priority)
-            FieldDef::text("parent_id").nullable(),                            // 8 — matches store's position 9
+            FieldDef::text("done_condition").nullable(),                        // 4
+            FieldDef::text("status"),                                           // 5
+            FieldDef::text("priority"),                                         // 6
+            FieldDef::text("source").nullable(), // 7 — matches store's position 8 (after priority)
+            FieldDef::text("parent_id").nullable(), // 8 — matches store's position 9
             // NOTE: tags_json, depends_on_json, time_block_ids_json, status_transitions_json
             //       are preserved fields (positions 14-17), NOT expanded fields
-            FieldDef::integer("due_at").nullable(),        // 9 — matches store's position 11
+            FieldDef::integer("due_at").nullable(), // 9 — matches store's position 11
             FieldDef::integer("estimated_minutes").nullable(), // 10 — matches store's position 12
-            FieldDef::integer("created_at"),               // 11 — matches store's position 15
-            FieldDef::integer("updated_at"),               // 12 — matches store's position 16
-            FieldDef::integer("completed_at").nullable(),  // 13 — matches store's position 17
+            FieldDef::integer("created_at"),        // 11 — matches store's position 15
+            FieldDef::integer("updated_at"),        // 12 — matches store's position 16
+            FieldDef::integer("completed_at").nullable(), // 13 — matches store's position 17
         ])
         .preserved_fields(vec![
             // Positions 14-17: match store's column order
-            PreservedFieldDef::json("tags").default_json(json!([])),          // 14 → tags_json
-            PreservedFieldDef::json("depends_on").default_json(json!([])),    // 15 → depends_on_json
+            PreservedFieldDef::json("tags").default_json(json!([])), // 14 → tags_json
+            PreservedFieldDef::json("depends_on").default_json(json!([])), // 15 → depends_on_json
             PreservedFieldDef::json("time_block_ids").default_json(json!([])), // 16 → time_block_ids_json
             PreservedFieldDef::json("status_transitions").default_json(json!([])), // 17 → status_transitions_json
         ])
@@ -328,10 +328,7 @@ mod tests {
         super::super::store::normalize_task_status_history(&mut actual);
         let expected_json = serde_json::to_value(&expected).unwrap();
         let actual_json = serde_json::to_value(&actual).unwrap();
-        assert_eq!(
-            actual_json, expected_json,
-            "[{tag}] task mismatch",
-        );
+        assert_eq!(actual_json, expected_json, "[{tag}] task mismatch",);
     }
 
     #[test]

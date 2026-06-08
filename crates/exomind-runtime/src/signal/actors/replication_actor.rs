@@ -8,12 +8,12 @@ use tracing::warn;
 use crate::eventlog::{EventLogStore, EventRecord};
 use crate::proposal::{Proposal, ProposalStore};
 use crate::signal::{SignalEvent, SignalPool};
-use crate::timeblock::BlockPhase;
 use crate::task::store::{
     compare_task_replication_preference, merge_task_snapshot, merge_task_status_history,
     normalize_task_status_history, validate_partial_task_status_history,
 };
 use crate::task::{Task, TaskStore};
+use crate::timeblock::BlockPhase;
 use crate::timeblock::{ActiveBlockData, TimeBlockData, TimeBlockStore};
 
 const EVENTLOG_REPLICATION_TOPIC: &str = "eventlog.replication.appended";

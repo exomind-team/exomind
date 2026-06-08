@@ -313,10 +313,7 @@ impl ActiveBlockData {
 
         if self.action_ended_at.is_some()
             || self.feedback_started_at.is_some()
-            || matches!(
-                self.phase.as_ref(),
-                Some(BlockPhase::FeedbackInProgress)
-            )
+            || matches!(self.phase.as_ref(), Some(BlockPhase::FeedbackInProgress))
         {
             return Some("feedback_in_progress");
         }
