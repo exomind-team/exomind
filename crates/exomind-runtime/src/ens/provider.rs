@@ -43,4 +43,7 @@ pub trait EnsProvider: Send + Sync {
         name: &str,
         topology: EnsInterfaceTopology,
     ) -> Result<EnsInterfaceSnapshot, EnsProviderError>;
+    fn drain_received_data_frames(&self) -> Vec<EnsDataFrame> {
+        Vec::new()
+    }
 }

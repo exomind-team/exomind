@@ -40,6 +40,7 @@ base64 = "0.22"
 async-stream = "0.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile = "3"
+reticulum = { path = "../../../ExoNet-Reticulum" }
 
 # PTY support: not available on Android (portable-pty → termios → no android impl)
 [target.'cfg(not(target_os = "android"))'.dependencies]

@@ -3,6 +3,7 @@ pub mod dto;
 pub mod fake_provider;
 pub mod pairing_protocol;
 pub mod provider;
+pub mod reticulum_provider;
 pub mod service;
 
 pub use data_protocol::{EnsDataFrame, EnsSignalEventFrame};
@@ -17,4 +18,5 @@ pub use pairing_protocol::{
     EnsPairingCancel, EnsPairingComplete, EnsPairingFrame, EnsPairingOffer, EnsPairingResponse,
 };
 pub use provider::{EnsProvider, EnsProviderError, EnsProviderSnapshot};
+pub use reticulum_provider::{ReticulumEnsProvider, ReticulumLocalRegistryEntry};
 pub use service::{EnsTransportError, EnsTransportService};

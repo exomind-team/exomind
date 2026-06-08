@@ -366,6 +366,16 @@ impl EnsTransportService {
         }
     }
 
+    pub async fn handle_pending_data_frames(&self) -> Result<Vec<bool>, EnsTransportError> {
+        self.ensure_ready()?;
+        let frames = self.provider.drain_received_data_frames();
+        let mut results = Vec::with_capacity(frames.len());
+        for frame in frames {
+            results.push(self.handle_data_frame(frame).await?);
+        }
+        Ok(results)
+    }
+
     async fn handle_signal_event_frame(
         &self,
         frame: EnsSignalEventFrame,
