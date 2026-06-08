@@ -1,6 +1,6 @@
 [package]
 name = "exomind"
-version = "0.4.20"
+version = "0.4.21"
 description = "ExoMind - Your Life Update Assistant"
 authors = ["exo-mind.ai"]
 edition = "2021"
