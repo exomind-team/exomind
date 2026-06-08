@@ -4,9 +4,10 @@ use std::path::Path;
 use std::sync::atomic::AtomicU16;
 use std::sync::{Arc, Mutex, RwLock};
 
+use ed25519_dalek::Signature;
 use reticulum::destination::{DestinationName, SingleInputDestination};
 use reticulum::hash::AddressHash;
-use reticulum::identity::PrivateIdentity;
+use reticulum::identity::{Identity, PrivateIdentity};
 use reticulum::interface::queue::QueueInterface;
 use reticulum::interface::tcp_client::TcpClient;
 use reticulum::interface::tcp_server::TcpServer;
@@ -28,6 +29,9 @@ use super::provider::{EnsProvider, EnsProviderError, EnsProviderSnapshot};
 const RETICULUM_APP_NAME: &str = "exomind";
 const RETICULUM_APP_ASPECT: &str = "ens";
 const LOCAL_REGISTRY_VERSION: u32 = 1;
+const RETICULUM_ENS_DATA_SIGNATURE_CONTEXT: &[u8] = b"exomind.reticulum.ens.data.v1";
+const RETICULUM_IDENTITY_HEX_LEN: usize = 128;
+const RETICULUM_DATA_SIGNATURE_LEN: usize = 64;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReticulumLocalRegistryEntry {
@@ -45,7 +49,14 @@ struct ReticulumLocalRegistryFile {
 #[serde(tag = "kind", content = "payload", rename_all = "snake_case")]
 enum ReticulumEnsWireFrame {
     Pairing(EnsPairingFrame),
-    Data(EnsDataFrame),
+    Data(ReticulumSignedEnsDataFrame),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReticulumSignedEnsDataFrame {
+    frame: EnsDataFrame,
+    to_peer_identity_hex: String,
+    signature: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -56,6 +67,7 @@ struct ReticulumOutboundFrame {
 
 pub struct ReticulumEnsProvider {
     provider_id: String,
+    identity: PrivateIdentity,
     transport: Arc<Transport>,
     local_destination: Arc<tokio::sync::Mutex<SingleInputDestination>>,
     local_endpoint: RwLock<EnsEndpointAdvertisement>,
@@ -82,7 +94,7 @@ impl ReticulumEnsProvider {
         let mut transport = Transport::new(config);
         let local_destination = transport
             .add_destination(
-                identity,
+                identity.clone(),
                 DestinationName::new(RETICULUM_APP_NAME, RETICULUM_APP_ASPECT),
             )
             .await;
@@ -109,6 +121,7 @@ impl ReticulumEnsProvider {
 
         let provider = Arc::new(Self {
             provider_id,
+            identity,
             transport,
             local_destination,
             local_endpoint: RwLock::new(endpoint),
@@ -312,15 +325,8 @@ impl ReticulumEnsProvider {
                     break;
                 };
                 match serde_json::from_slice::<ReticulumEnsWireFrame>(received.data.as_slice()) {
-                    Ok(ReticulumEnsWireFrame::Data(frame)) => {
-                        let mut frames = match provider.received_data_frames.lock() {
-                            Ok(guard) => guard,
-                            Err(poisoned) => poisoned.into_inner(),
-                        };
-                        frames.push_back(EnsReceivedDataFrame {
-                            transport_peer: None,
-                            frame,
-                        });
+                    Ok(ReticulumEnsWireFrame::Data(signed)) => {
+                        provider.ingest_signed_data_frame(signed);
                     }
                     Ok(ReticulumEnsWireFrame::Pairing(frame)) => {
                         let mut frames = match provider.received_pairing_frames.lock() {
@@ -385,6 +391,38 @@ impl ReticulumEnsProvider {
             .write(bytes.as_slice())
             .map_err(|error| EnsProviderError::SendDataFrame(error.to_string()))?;
         Ok(packet)
+    }
+
+    fn sign_data_frame(
+        &self,
+        peer: &super::dto::EnsPeerIdentity,
+        frame: EnsDataFrame,
+    ) -> Result<ReticulumSignedEnsDataFrame, EnsProviderError> {
+        let canonical = canonical_data_frame_bytes(&frame, &peer.identity_hex)?;
+        let signature = self.identity.sign(&canonical).to_bytes().to_vec();
+        Ok(ReticulumSignedEnsDataFrame {
+            frame,
+            to_peer_identity_hex: peer.identity_hex.clone(),
+            signature,
+        })
+    }
+
+    fn ingest_signed_data_frame(&self, signed: ReticulumSignedEnsDataFrame) {
+        let local_identity_hex = self.local_endpoint().identity_hex;
+        let result = verify_signed_data_frame(signed, local_identity_hex.as_str());
+        match result {
+            Ok(received) => {
+                let mut frames = match self.received_data_frames.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                frames.push_back(received);
+            }
+            Err(error) => self.set_health(EnsTransportHealth {
+                status: EnsTransportHealthStatus::Degraded,
+                message: Some(error),
+            }),
+        }
     }
 
     fn set_health(&self, health: EnsTransportHealth) {
@@ -528,11 +566,19 @@ impl EnsProvider for ReticulumEnsProvider {
         peer: &super::dto::EnsPeerIdentity,
         frame: EnsDataFrame,
     ) -> Result<(), EnsProviderError> {
+        let local_identity_hex = self.local_endpoint().identity_hex;
+        let frame_identity_hex = frame.from_peer().identity_hex.as_str();
+        if frame_identity_hex != local_identity_hex {
+            return Err(EnsProviderError::SendDataFrame(format!(
+                "Reticulum ENS provider refused to sign data frame from non-local peer {frame_identity_hex}"
+            )));
+        }
         let destination = self.peer_destination(&peer.identity_hex)?;
+        let signed = self.sign_data_frame(peer, frame)?;
         self.outbound_tx
             .send(ReticulumOutboundFrame {
                 destination,
-                frame: ReticulumEnsWireFrame::Data(frame),
+                frame: ReticulumEnsWireFrame::Data(signed),
             })
             .map_err(|error| EnsProviderError::SendDataFrame(error.to_string()))
     }
@@ -583,6 +629,76 @@ fn from_reticulum_topology(topology: ReticulumInterfaceTopology) -> EnsInterface
         ReticulumInterfaceTopology::Passive => EnsInterfaceTopology::Passive,
         ReticulumInterfaceTopology::Active => EnsInterfaceTopology::Active,
     }
+}
+
+fn canonical_data_frame_bytes(
+    frame: &EnsDataFrame,
+    to_peer_identity_hex: &str,
+) -> Result<Vec<u8>, EnsProviderError> {
+    let mut canonical = Vec::new();
+    canonical.extend_from_slice(RETICULUM_ENS_DATA_SIGNATURE_CONTEXT);
+    canonical.push(0);
+    canonical.extend_from_slice(to_peer_identity_hex.as_bytes());
+    canonical.push(0);
+    canonical.extend(
+        serde_json::to_vec(frame)
+            .map_err(|error| EnsProviderError::SendDataFrame(error.to_string()))?,
+    );
+    Ok(canonical)
+}
+
+fn verify_signed_data_frame(
+    signed: ReticulumSignedEnsDataFrame,
+    local_identity_hex: &str,
+) -> Result<EnsReceivedDataFrame, String> {
+    let claimed_peer = signed.frame.from_peer().clone();
+    let identity_hex = claimed_peer.identity_hex.as_str();
+    if !valid_reticulum_identity_hex(identity_hex) {
+        return Err(format!(
+            "invalid Reticulum ENS data frame identity: {identity_hex}"
+        ));
+    }
+    if signed.to_peer_identity_hex != local_identity_hex {
+        return Err(format!(
+            "Reticulum ENS data frame was addressed to {}, not local peer {local_identity_hex}",
+            signed.to_peer_identity_hex
+        ));
+    }
+    if signed.signature.len() != RETICULUM_DATA_SIGNATURE_LEN {
+        return Err(format!(
+            "invalid Reticulum ENS data frame signature length: {}",
+            signed.signature.len()
+        ));
+    }
+
+    let identity = Identity::new_from_hex_string(identity_hex)
+        .map_err(|error| format!("invalid Reticulum ENS data frame identity: {error}"))?;
+    let signature_bytes: [u8; RETICULUM_DATA_SIGNATURE_LEN] = signed
+        .signature
+        .as_slice()
+        .try_into()
+        .map_err(|_| "invalid Reticulum ENS data frame signature bytes".to_string())?;
+    let signature = Signature::from_bytes(&signature_bytes);
+    let canonical = canonical_data_frame_bytes(&signed.frame, &signed.to_peer_identity_hex)
+        .map_err(|error| error.to_string())?;
+    identity
+        .verify(canonical.as_slice(), &signature)
+        .map_err(|error| {
+            format!("Reticulum ENS data frame signature verification failed: {error}")
+        })?;
+
+    // Reticulum currently exposes the verified frame signer here rather than an
+    // independent link-layer sender. A future Reticulum source-binding API can
+    // add another observed peer check before this frame reaches the service.
+    Ok(EnsReceivedDataFrame {
+        transport_peer: Some(claimed_peer),
+        frame: signed.frame,
+    })
+}
+
+fn valid_reticulum_identity_hex(identity_hex: &str) -> bool {
+    identity_hex.len() == RETICULUM_IDENTITY_HEX_LEN
+        && identity_hex.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn read_local_registry(path: &Path) -> Result<ReticulumLocalRegistryFile, EnsProviderError> {

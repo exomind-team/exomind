@@ -24,3 +24,11 @@ pub struct EnsReceivedDataFrame {
 pub enum EnsDataFrame {
     SignalEvent(EnsSignalEventFrame),
 }
+
+impl EnsDataFrame {
+    pub fn from_peer(&self) -> &EnsPeerIdentity {
+        match self {
+            Self::SignalEvent(frame) => &frame.from_peer,
+        }
+    }
+}
