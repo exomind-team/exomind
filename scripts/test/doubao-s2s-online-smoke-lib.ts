@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 export const DEFAULT_DOUBAO_REALTIME_SMOKE_AUDIO_FIXTURE =
-  'public/dev-assets/voice-runtime/codex-smoke-short.pcm';
+  'tests/fixtures/voice-runtime/codex-smoke-short.pcm';
 
 export interface DoubaoRealtimeSmokeConfig {
   appId: string;

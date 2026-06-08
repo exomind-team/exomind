@@ -1023,7 +1023,7 @@ mod tests {
             "EXOMIND_VOICE_RUNTIME_SMOKE_FIXTURE",
             "OMNI_REALTIME_SMOKE_FIXTURE",
         ])
-        .unwrap_or_else(|| "public/dev-assets/voice-runtime/codex-smoke-short.pcm".to_string());
+        .unwrap_or_else(|| "tests/fixtures/voice-runtime/codex-smoke-short.pcm".to_string());
         let fixture_path = PathBuf::from(&fixture);
         if fixture_path.is_file() {
             return fixture_path;

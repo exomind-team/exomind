@@ -1026,7 +1026,7 @@ mod tests {
             "EXOMIND_VOICE_RUNTIME_SMOKE_FIXTURE",
             "DOUBAO_REALTIME_SMOKE_FIXTURE",
         ])
-        .unwrap_or_else(|| "public/dev-assets/voice-runtime/codex-smoke-short.pcm".to_string());
+        .unwrap_or_else(|| "tests/fixtures/voice-runtime/codex-smoke-short.pcm".to_string());
         let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("project root should exist（项目根目录应存在）")

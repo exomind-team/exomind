@@ -93,9 +93,11 @@ website/.astro/
 
 # === Agent output (local cache) ===
 agent-output/
+skills/*-workspace/
 
 # === Build artifacts (local cache) ===
 artifacts/
+public/dev-assets/
 
 # === Jujutsu metadata ===
 /.jj/
