@@ -6,7 +6,7 @@ pub mod provider;
 pub mod reticulum_provider;
 pub mod service;
 
-pub use data_protocol::{EnsDataFrame, EnsSignalEventFrame};
+pub use data_protocol::{EnsDataFrame, EnsReceivedDataFrame, EnsSignalEventFrame};
 pub use dto::{
     EnsCommandAck, EnsEndpointAdvertisement, EnsGatewayKind, EnsInterfaceMedium,
     EnsInterfaceSnapshot, EnsInterfaceTopology, EnsOperationKind, EnsOperationSnapshot,

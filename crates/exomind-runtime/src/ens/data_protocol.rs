@@ -13,6 +13,12 @@ pub struct EnsSignalEventFrame {
     pub event: SignalEvent,
 }
 
+#[derive(Debug, Clone)]
+pub struct EnsReceivedDataFrame {
+    pub transport_peer: Option<EnsPeerIdentity>,
+    pub frame: EnsDataFrame,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum EnsDataFrame {

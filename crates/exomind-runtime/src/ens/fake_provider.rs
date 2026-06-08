@@ -1,6 +1,6 @@
 use std::sync::{Mutex, RwLock};
 
-use super::data_protocol::EnsDataFrame;
+use super::data_protocol::{EnsDataFrame, EnsReceivedDataFrame};
 use super::dto::{
     EnsInterfaceSnapshot, EnsInterfaceTopology, EnsPeerIdentity, EnsPeerSnapshot,
     EnsTransportHealth, EnsTransportHealthStatus,
@@ -21,6 +21,7 @@ pub struct FakeEnsProvider {
     interfaces: RwLock<Vec<EnsInterfaceSnapshot>>,
     sent_frames: Mutex<Vec<EnsPairingFrame>>,
     sent_data_frames: Mutex<Vec<FakeEnsSentDataFrame>>,
+    received_data_frames: Mutex<Vec<EnsReceivedDataFrame>>,
     fail_next_send: Mutex<Option<String>>,
 }
 
@@ -33,6 +34,7 @@ impl FakeEnsProvider {
             interfaces: RwLock::new(Vec::new()),
             sent_frames: Mutex::new(Vec::new()),
             sent_data_frames: Mutex::new(Vec::new()),
+            received_data_frames: Mutex::new(Vec::new()),
             fail_next_send: Mutex::new(None),
         }
     }
@@ -49,6 +51,21 @@ impl FakeEnsProvider {
             Ok(guard) => guard.clone(),
             Err(poisoned) => poisoned.into_inner().clone(),
         }
+    }
+
+    pub fn push_received_data_frame(
+        &self,
+        transport_peer: Option<EnsPeerIdentity>,
+        frame: EnsDataFrame,
+    ) {
+        let mut frames = match self.received_data_frames.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        frames.push(EnsReceivedDataFrame {
+            transport_peer,
+            frame,
+        });
     }
 
     pub fn set_fail_next_send(&self, message: impl Into<String>) {
@@ -185,5 +202,13 @@ impl EnsProvider for FakeEnsProvider {
         interface.topology = topology;
         interface.effective_topology = topology;
         Ok(interface.clone())
+    }
+
+    fn drain_received_data_frames(&self) -> Vec<EnsReceivedDataFrame> {
+        let mut frames = match self.received_data_frames.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        frames.drain(..).collect()
     }
 }

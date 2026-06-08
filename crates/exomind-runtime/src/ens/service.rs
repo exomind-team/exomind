@@ -8,7 +8,7 @@ use crate::mesh::{MeshState, PeerInfo, PeerStatus};
 use crate::pairing::{PairingError, PairingManager};
 use crate::signal::SignalEvent;
 
-use super::data_protocol::{EnsDataFrame, EnsSignalEventFrame};
+use super::data_protocol::{EnsDataFrame, EnsReceivedDataFrame, EnsSignalEventFrame};
 use super::dto::{
     EnsCommandAck, EnsEndpointAdvertisement, EnsInterfaceSnapshot, EnsInterfaceTopology,
     EnsOperationKind, EnsOperationSnapshot, EnsOperationStatus, EnsPairingOfferTicket,
@@ -44,6 +44,10 @@ pub enum EnsTransportError {
     DiscoveredPeerMissingEndpoint(String),
     #[error("ENS data frame peer is not authorized: {0}")]
     UnauthorizedDataFramePeer(String),
+    #[error("ENS data frame is missing transport peer for claimed peer: {0}")]
+    MissingDataFrameTransportPeer(String),
+    #[error("ENS data frame transport peer mismatch: claimed {claimed}, observed {observed}")]
+    DataFrameTransportPeerMismatch { claimed: String, observed: String },
     #[error("{0}")]
     Provider(#[from] EnsProviderError),
 }
@@ -360,9 +364,23 @@ impl EnsTransportService {
     }
 
     pub async fn handle_data_frame(&self, frame: EnsDataFrame) -> Result<bool, EnsTransportError> {
+        self.handle_received_data_frame(EnsReceivedDataFrame {
+            transport_peer: None,
+            frame,
+        })
+        .await
+    }
+
+    pub async fn handle_received_data_frame(
+        &self,
+        received: EnsReceivedDataFrame,
+    ) -> Result<bool, EnsTransportError> {
         self.ensure_ready()?;
-        match frame {
-            EnsDataFrame::SignalEvent(frame) => self.handle_signal_event_frame(frame).await,
+        match received.frame {
+            EnsDataFrame::SignalEvent(frame) => {
+                self.handle_signal_event_frame(received.transport_peer, frame)
+                    .await
+            }
         }
     }
 
@@ -370,21 +388,37 @@ impl EnsTransportService {
         self.ensure_ready()?;
         let frames = self.provider.drain_received_data_frames();
         let mut results = Vec::with_capacity(frames.len());
+        let mut first_error = None;
         for frame in frames {
-            results.push(self.handle_data_frame(frame).await?);
+            match self.handle_received_data_frame(frame).await {
+                Ok(result) => results.push(result),
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
         }
+
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+
         Ok(results)
     }
 
     async fn handle_signal_event_frame(
         &self,
+        transport_peer: Option<EnsPeerIdentity>,
         frame: EnsSignalEventFrame,
     ) -> Result<bool, EnsTransportError> {
         let mesh = self.mesh.as_ref().ok_or(EnsTransportError::NotConfigured)?;
-        self.authorized_mesh_peer(&frame.from_peer.identity_hex)?;
+        let transport_peer =
+            self.ensure_data_frame_transport_peer(transport_peer, &frame.from_peer)?;
+        self.authorized_mesh_peer(&transport_peer.identity_hex)?;
 
         match mesh
-            .ingest_remote_event(&frame.from_peer.identity_hex, frame.event)
+            .ingest_remote_event(&transport_peer.identity_hex, frame.event)
             .await
         {
             Ok(accepted) => Ok(accepted),
@@ -799,6 +833,25 @@ impl EnsTransportService {
             .ok_or_else(|| {
                 EnsTransportError::UnauthorizedDataFramePeer(peer_identity_hex.to_string())
             })
+    }
+
+    fn ensure_data_frame_transport_peer(
+        &self,
+        transport_peer: Option<EnsPeerIdentity>,
+        claimed_peer: &EnsPeerIdentity,
+    ) -> Result<EnsPeerIdentity, EnsTransportError> {
+        let Some(transport_peer) = transport_peer else {
+            return Err(EnsTransportError::MissingDataFrameTransportPeer(
+                claimed_peer.identity_hex.clone(),
+            ));
+        };
+        if transport_peer.identity_hex != claimed_peer.identity_hex {
+            return Err(EnsTransportError::DataFrameTransportPeerMismatch {
+                claimed: claimed_peer.identity_hex.clone(),
+                observed: transport_peer.identity_hex,
+            });
+        }
+        Ok(transport_peer)
     }
 
     fn mark_operation_failed(&self, operation_id: &str, error: String, peer_id: Option<&str>) {

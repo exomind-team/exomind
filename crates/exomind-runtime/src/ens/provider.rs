@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use super::data_protocol::EnsDataFrame;
+use super::data_protocol::{EnsDataFrame, EnsReceivedDataFrame};
 use super::dto::{
     EnsInterfaceSnapshot, EnsInterfaceTopology, EnsPeerIdentity, EnsPeerSnapshot,
     EnsTransportHealth,
@@ -43,7 +43,7 @@ pub trait EnsProvider: Send + Sync {
         name: &str,
         topology: EnsInterfaceTopology,
     ) -> Result<EnsInterfaceSnapshot, EnsProviderError>;
-    fn drain_received_data_frames(&self) -> Vec<EnsDataFrame> {
+    fn drain_received_data_frames(&self) -> Vec<EnsReceivedDataFrame> {
         Vec::new()
     }
 }

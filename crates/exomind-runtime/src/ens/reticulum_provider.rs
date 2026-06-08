@@ -17,7 +17,7 @@ use reticulum::transport::{Transport, TransportConfig};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-use super::data_protocol::EnsDataFrame;
+use super::data_protocol::{EnsDataFrame, EnsReceivedDataFrame};
 use super::dto::{
     EnsEndpointAdvertisement, EnsGatewayKind, EnsInterfaceMedium, EnsInterfaceSnapshot,
     EnsInterfaceTopology, EnsPeerSnapshot, EnsTransportHealth, EnsTransportHealthStatus,
@@ -62,7 +62,7 @@ pub struct ReticulumEnsProvider {
     health: RwLock<EnsTransportHealth>,
     peers: RwLock<HashMap<String, EnsPeerSnapshot>>,
     interfaces: RwLock<Vec<EnsInterfaceSnapshot>>,
-    received_data_frames: Mutex<VecDeque<EnsDataFrame>>,
+    received_data_frames: Mutex<VecDeque<EnsReceivedDataFrame>>,
     received_pairing_frames: Mutex<VecDeque<EnsPairingFrame>>,
     outbound_tx: mpsc::UnboundedSender<ReticulumOutboundFrame>,
 }
@@ -317,7 +317,10 @@ impl ReticulumEnsProvider {
                             Ok(guard) => guard,
                             Err(poisoned) => poisoned.into_inner(),
                         };
-                        frames.push_back(frame);
+                        frames.push_back(EnsReceivedDataFrame {
+                            transport_peer: None,
+                            frame,
+                        });
                     }
                     Ok(ReticulumEnsWireFrame::Pairing(frame)) => {
                         let mut frames = match provider.received_pairing_frames.lock() {
@@ -557,7 +560,7 @@ impl EnsProvider for ReticulumEnsProvider {
             .ok_or_else(|| EnsProviderError::InterfaceNotFound(name.to_string()))
     }
 
-    fn drain_received_data_frames(&self) -> Vec<EnsDataFrame> {
+    fn drain_received_data_frames(&self) -> Vec<EnsReceivedDataFrame> {
         let mut frames = match self.received_data_frames.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),

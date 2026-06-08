@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use exomind_runtime::ens::{
     EnsDataFrame, EnsEndpointAdvertisement, EnsGatewayKind, EnsInterfaceMedium, EnsPeerIdentity,
-    EnsSignalEventFrame, EnsTransportError, EnsTransportService,
+    EnsReceivedDataFrame, EnsSignalEventFrame, EnsTransportError, EnsTransportService,
 };
 use exomind_runtime::eventlog::{EventLogStore, EventRecord};
 use exomind_runtime::eventlog_appender::{
@@ -227,6 +227,27 @@ fn data_frame_from_peer(identity_hex: &str, host_id: &str, event: SignalEvent) -
     })
 }
 
+fn received_data_frame_from_peer(
+    identity_hex: &str,
+    host_id: &str,
+    event: SignalEvent,
+) -> EnsReceivedDataFrame {
+    received_data_frame_with_transport_peer(
+        EnsPeerIdentity::new(identity_hex).with_host_id(host_id),
+        data_frame_from_peer(identity_hex, host_id, event),
+    )
+}
+
+fn received_data_frame_with_transport_peer(
+    transport_peer: EnsPeerIdentity,
+    frame: EnsDataFrame,
+) -> EnsReceivedDataFrame {
+    EnsReceivedDataFrame {
+        transport_peer: Some(transport_peer),
+        frame,
+    }
+}
+
 async fn yield_for_replication_actor() {
     tokio::task::yield_now().await;
     tokio::task::yield_now().await;
@@ -324,7 +345,10 @@ async fn eventlog_append_replicates_through_ens_signal_event_frame() {
 
     let accepted = node_b
         .service
-        .handle_data_frame(sent_frames[0].frame.clone())
+        .handle_received_data_frame(received_data_frame_with_transport_peer(
+            EnsPeerIdentity::new("identity-a").with_host_id("rt-a"),
+            sent_frames[0].frame.clone(),
+        ))
         .await
         .expect("authorized sender frame should ingest");
     assert!(accepted);
@@ -342,7 +366,7 @@ async fn task_snapshot_replicates_through_same_ens_signal_event_frame() {
 
     let accepted = node_b
         .service
-        .handle_data_frame(data_frame_from_peer(
+        .handle_received_data_frame(received_data_frame_from_peer(
             "identity-a",
             "rt-a",
             signal_event(
@@ -433,7 +457,16 @@ async fn timeblock_active_and_completed_snapshots_replicate_through_same_ens_fra
     );
     let mut signal_rx = node_b.signal_pool.subscribe();
 
-    assert!(node_b.service.handle_data_frame(active).await.unwrap());
+    assert!(
+        node_b
+            .service
+            .handle_received_data_frame(received_data_frame_with_transport_peer(
+                EnsPeerIdentity::new("identity-a").with_host_id("rt-a"),
+                active
+            ))
+            .await
+            .unwrap()
+    );
     recv_signal_topic(&mut signal_rx, "timeblock.replication.active_upserted").await;
     yield_until(|| {
         node_b
@@ -450,7 +483,16 @@ async fn timeblock_active_and_completed_snapshots_replicate_through_same_ens_fra
         .expect("active block should be replicated from ENS data-plane");
     assert_eq!(active.start_id, "tb-start-1");
 
-    assert!(node_b.service.handle_data_frame(completed).await.unwrap());
+    assert!(
+        node_b
+            .service
+            .handle_received_data_frame(received_data_frame_with_transport_peer(
+                EnsPeerIdentity::new("identity-a").with_host_id("rt-a"),
+                completed
+            ))
+            .await
+            .unwrap()
+    );
     recv_signal_topic(&mut signal_rx, "timeblock.replication.completed").await;
     yield_until(|| {
         !node_b
@@ -485,7 +527,7 @@ async fn proposal_snapshot_replicates_through_same_ens_signal_event_frame() {
 
     let accepted = node_b
         .service
-        .handle_data_frame(data_frame_from_peer(
+        .handle_received_data_frame(received_data_frame_from_peer(
             "identity-a",
             "rt-a",
             signal_event(
@@ -541,7 +583,7 @@ async fn proposal_snapshot_replicates_through_same_ens_signal_event_frame() {
 #[tokio::test]
 async fn data_frame_from_unauthorized_peer_is_rejected() {
     let node_b = test_node("rt-b", "identity-b", "192.168.1.20:1949");
-    let frame = data_frame_from_peer(
+    let frame = received_data_frame_from_peer(
         "identity-a",
         "rt-a",
         replication_signal("signal-unauthorized", "rt-a", "event-unauthorized"),
@@ -549,13 +591,133 @@ async fn data_frame_from_unauthorized_peer_is_rejected() {
 
     let error = node_b
         .service
-        .handle_data_frame(frame)
+        .handle_received_data_frame(frame)
         .await
         .expect_err("unauthorized sender must be rejected before SignalPool ingest");
 
     assert_eq!(
         error,
         EnsTransportError::UnauthorizedDataFramePeer("identity-a".to_string())
+    );
+    assert!(
+        node_b
+            .eventlog_store
+            .list_events(Some("profile-sync"))
+            .expect("list eventlog")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn data_frame_without_transport_peer_is_rejected_before_authorization() {
+    let node_b = test_node("rt-b", "identity-b", "192.168.1.20:1949");
+    authorize_peer(&node_b.mesh, "identity-a", "rt-a");
+    let frame = data_frame_from_peer(
+        "identity-a",
+        "rt-a",
+        replication_signal(
+            "signal-missing-transport-peer",
+            "rt-a",
+            "event-missing-source",
+        ),
+    );
+
+    let error = node_b
+        .service
+        .handle_data_frame(frame)
+        .await
+        .expect_err("raw data frame without transport peer must fail closed");
+
+    assert_eq!(
+        error,
+        EnsTransportError::MissingDataFrameTransportPeer("identity-a".to_string())
+    );
+    assert!(
+        node_b
+            .eventlog_store
+            .list_events(Some("profile-sync"))
+            .expect("list eventlog")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn pending_data_frame_errors_do_not_drop_later_valid_frames() {
+    let node_b = test_node("rt-b", "identity-b", "192.168.1.20:1949");
+    authorize_peer(&node_b.mesh, "identity-a", "rt-a");
+    yield_for_replication_actor().await;
+
+    let invalid_frame = data_frame_from_peer(
+        "identity-a",
+        "rt-a",
+        replication_signal(
+            "signal-queue-missing-peer",
+            "rt-a",
+            "event-queue-missing-peer",
+        ),
+    );
+    let valid_frame = data_frame_from_peer(
+        "identity-a",
+        "rt-a",
+        replication_signal("signal-queue-valid", "rt-a", "event-queue-valid"),
+    );
+    node_b
+        .provider
+        .push_received_data_frame(None, invalid_frame);
+    node_b.provider.push_received_data_frame(
+        Some(EnsPeerIdentity::new("identity-a").with_host_id("rt-a")),
+        valid_frame,
+    );
+
+    let error = node_b
+        .service
+        .handle_pending_data_frames()
+        .await
+        .expect_err("batch should report the first invalid frame");
+
+    assert_eq!(
+        error,
+        EnsTransportError::MissingDataFrameTransportPeer("identity-a".to_string())
+    );
+    let replicated = wait_for_event(&node_b.eventlog_store, "event-queue-valid").await;
+    assert_eq!(replicated.id, "event-queue-valid");
+    assert!(
+        node_b
+            .eventlog_store
+            .list_events(Some("profile-sync"))
+            .expect("list eventlog")
+            .into_iter()
+            .all(|event| event.id != "event-queue-missing-peer"),
+        "invalid frame must not be ingested while later valid frame still applies"
+    );
+}
+
+#[tokio::test]
+async fn data_frame_from_mismatched_transport_peer_is_rejected_before_ingest() {
+    let node_b = test_node("rt-b", "identity-b", "192.168.1.20:1949");
+    authorize_peer(&node_b.mesh, "identity-a", "rt-a");
+    authorize_peer(&node_b.mesh, "identity-c", "rt-c");
+    let frame = data_frame_from_peer(
+        "identity-a",
+        "rt-a",
+        replication_signal("signal-spoof", "rt-a", "event-spoof"),
+    );
+
+    let error = node_b
+        .service
+        .handle_received_data_frame(received_data_frame_with_transport_peer(
+            EnsPeerIdentity::new("identity-c").with_host_id("rt-c"),
+            frame,
+        ))
+        .await
+        .expect_err("transport peer C must not be allowed to claim authorized peer A");
+
+    assert_eq!(
+        error,
+        EnsTransportError::DataFrameTransportPeerMismatch {
+            claimed: "identity-a".to_string(),
+            observed: "identity-c".to_string(),
+        }
     );
     assert!(
         node_b
@@ -579,12 +741,18 @@ async fn duplicate_signal_event_id_is_not_applied_twice() {
 
     let first = node_b
         .service
-        .handle_data_frame(frame.clone())
+        .handle_received_data_frame(received_data_frame_with_transport_peer(
+            EnsPeerIdentity::new("identity-a").with_host_id("rt-a"),
+            frame.clone(),
+        ))
         .await
         .expect("first frame should ingest");
     let second = node_b
         .service
-        .handle_data_frame(frame)
+        .handle_received_data_frame(received_data_frame_with_transport_peer(
+            EnsPeerIdentity::new("identity-a").with_host_id("rt-a"),
+            frame,
+        ))
         .await
         .expect("duplicate frame should be skipped without failing transport");
 
@@ -615,7 +783,10 @@ async fn origin_bounce_signal_event_is_skipped_before_replication_actor() {
 
     let accepted = node_b
         .service
-        .handle_data_frame(frame)
+        .handle_received_data_frame(received_data_frame_with_transport_peer(
+            EnsPeerIdentity::new("identity-a").with_host_id("rt-a"),
+            frame,
+        ))
         .await
         .expect("origin bounce should be a skipped mesh delivery, not a provider failure");
 

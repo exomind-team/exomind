@@ -2,7 +2,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use exomind_runtime::ens::{
-    EnsInterfaceMedium, EnsInterfaceTopology, EnsTransportService, ReticulumEnsProvider,
+    EnsInterfaceMedium, EnsInterfaceTopology, EnsTransportError, EnsTransportService,
+    ReticulumEnsProvider,
 };
 use exomind_runtime::eventlog::{EventLogStore, EventRecord};
 use exomind_runtime::eventlog_appender::{EVENTLOG_REPLICATION_APPENDED_TOPIC, EventLogAppender};
@@ -128,14 +129,12 @@ fn sample_event_record(id: &str) -> EventRecord {
     }
 }
 
-async fn wait_for_pending_data_frames(service: &EnsTransportService) -> Vec<bool> {
+async fn wait_for_pending_data_frame_rejection(service: &EnsTransportService) -> EnsTransportError {
     for _ in 0..40 {
-        let accepted = service
-            .handle_pending_data_frames()
-            .await
-            .expect("pending provider frames should be readable");
-        if !accepted.is_empty() {
-            return accepted;
+        match service.handle_pending_data_frames().await {
+            Ok(accepted) if accepted.is_empty() => {}
+            Ok(accepted) => panic!("raw Reticulum packet data should not ingest: {accepted:?}"),
+            Err(error) => return error,
         }
         tokio::task::yield_now().await;
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -144,25 +143,8 @@ async fn wait_for_pending_data_frames(service: &EnsTransportService) -> Vec<bool
     panic!("provider did not receive data frames");
 }
 
-async fn wait_for_event(store: &EventLogStore, event_id: &str) -> EventRecord {
-    for _ in 0..40 {
-        if let Some(event) = store
-            .list_events(Some("profile-sync"))
-            .expect("list replicated eventlog")
-            .into_iter()
-            .find(|event| event.id == event_id)
-        {
-            return event;
-        }
-        tokio::task::yield_now().await;
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    panic!("replicated event {event_id} was not stored");
-}
-
 #[tokio::test]
-async fn queue_reticulum_provider_replicates_eventlog_signal_event_without_http_sse() {
+async fn queue_reticulum_provider_does_not_ingest_raw_packet_data_without_sender_binding() {
     let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-test-a").await;
     let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-test-b").await;
     connect_queue_interfaces(&node_a, &node_b).await;
@@ -209,12 +191,18 @@ async fn queue_reticulum_provider_replicates_eventlog_signal_event_without_http_
         .expect("authorized Reticulum peer should accept send");
     assert!(sent);
 
-    let accepted = wait_for_pending_data_frames(&node_b.service).await;
-    assert_eq!(accepted, vec![true]);
-
-    let replicated = wait_for_event(&node_b.eventlog_store, "event-reticulum-1").await;
-    assert_eq!(replicated.content, "Reticulum queue provider event");
-    assert_eq!(replicated.tags, vec!["note", "reticulum"]);
+    let error = wait_for_pending_data_frame_rejection(&node_b.service).await;
+    assert_eq!(
+        error,
+        EnsTransportError::MissingDataFrameTransportPeer(endpoint_a.identity_hex)
+    );
+    assert!(
+        node_b
+            .eventlog_store
+            .list_events(Some("profile-sync"))
+            .expect("list replicated eventlog")
+            .is_empty()
+    );
 }
 
 #[tokio::test]

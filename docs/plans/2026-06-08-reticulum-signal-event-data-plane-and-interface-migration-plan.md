@@ -312,7 +312,7 @@ UI 一致性约束：
 - `ReticulumEnsProvider` 已用当前 `ExoNet-Reticulum` crate root 和公开 API 接入真实 `Transport` / `InterfaceManager` / `QueueInterface` / UDP / TCP interface entrypoint。
 - provider 以 Reticulum `PrivateIdentity` 派生 `identity_hex`，以 local destination address hash 填充 `reticulum_destination`；二者不混用。
 - provider 后台任务只解码 Reticulum packet-level payload 为 `EnsDataFrame`，再由 `EnsTransportService::handle_pending_data_frames` 进入 `handle_data_frame` / `MeshState::ingest_remote_event`；provider 仍不直接写业务 store。
-- `crates/exomind-runtime/tests/ens_reticulum_provider.rs` 已证明 queue-backed Reticulum provider 能在不经 HTTP/SSE 的情况下把 A 端 EventLog replication `SignalEvent` 投递到 B 端 store。
+- `crates/exomind-runtime/tests/ens_reticulum_provider.rs` 已证明 queue-backed Reticulum provider 能在不经 HTTP/SSE 的情况下把 A 端 EventLog replication `SignalEvent` raw payload 投递到 B 端 provider 收包队列；由于当前 Reticulum received data 尚无可信 sender proof，`EnsTransportService` 会 fail closed，B 端 store 不会 ingest。
 - 同一测试文件已证明 local JSON registry 只把 endpoint 投影为 discovered peer，peer 默认未授权，仍需 Mesh 授权后才能进入 data-plane。
 - 当前真实 provider 纵切尚未把 `from_peer` 与 Reticulum link proof 或 signed frame 做密码学绑定；默认启动集成前必须补 sender binding，不能把 packet-level proof 误当成生产安全闭环。
 
@@ -358,9 +358,9 @@ UI 一致性约束：
 - route/UI/AppState 仍不承载协议状态机。
 - `cargo check -p exomind-runtime` 通过。
 
-### Phase 4：Reticulum provider contract（packet-level 最小纵切已完成）
+### Phase 4：Reticulum provider contract（packet-level 收包与安全闸门已完成）
 
-目标：用当前 ExoNet-Reticulum 公开 API 实现最小真实 provider，并把 fake gateway 证明过的功能搬到真实 Reticulum packet / 后续 link 上。当前已先完成 packet-level queue 纵切；link lifecycle、ack/receipt 和更完整路径发现后置。
+目标：用当前 ExoNet-Reticulum 公开 API 实现最小真实 provider，并把 fake gateway 证明过的功能搬到真实 Reticulum packet / 后续 link 上。当前已先完成 packet-level queue 收包路径，但真实 provider 暂时 fail closed；link lifecycle、sender binding、ack/receipt 和更完整路径发现后置。
 
 验收：
 
@@ -369,8 +369,10 @@ UI 一致性约束：
 - announce 只做发现和身份广告。
 - packet/link data 只承载 `EnsDataFrame::SignalEvent` 等 typed frame。
 - received data 解码失败必须记录 typed error，不得 fail open。
-- queue interface 已证明不经 HTTP/SSE 也能传一条 EventLog replication signal。
-- EventLog 真实 provider 纵切已通过；下一步按 Phase 2 的四域验收扩展到 Task、TimeBlock、Proposal，并补 UDP/TCP/mDNS 日用物理层验证。
+- queue interface 已证明不经 HTTP/SSE 也能把 Reticulum packet-level payload 投递到 provider 收包队列。
+- `ReticulumEnsProvider` 当前无法从 `ReceivedData` 取得可信 sender/origin proof，因此会把 `transport_peer` 置为 `None`。
+- `EnsTransportService` 对 `transport_peer=None` 的 `SignalEvent` 返回 `MissingDataFrameTransportPeer`，不会调用 `MeshState::ingest_remote_event`。
+- EventLog 真实 provider happy path 尚未恢复；下一步必须先补 sender binding，再按 Phase 2 的四域验收扩展到 Task、TimeBlock、Proposal，并补 UDP/TCP/mDNS 日用物理层验证。
 
 ### Phase 5：Interface/local-link provider config
 
@@ -458,4 +460,4 @@ UI 一致性约束：
 7. JSONL/file 只作为 local-dev/file medium 实验接口接入，避免把轮询文件协议上升为正式跨 RT truth。
 8. 最后再考虑 AppState/route/UI 启动集成；route/UI 仍只消费 typed snapshot，仍禁止乐观显示 topology 或 provider 状态。
 
-这个顺序的理由是：fake gateway 已证明用户功能可以经 `SignalEvent` data frame 闭环，queue-backed 真实 provider 已证明 Reticulum packet-level gateway 可以替代跨 RT HTTP/SSE。旧分支的 UDP/TCP/mDNS/local JSON/JSONL 经验要迁移到 Reticulum provider 的 physical layer 下方，不能重新滑回 mDNS/local registry 与 Reticulum 平级、或巨型后台循环直接驱动业务同步的旧形态。
+这个顺序的理由是：fake gateway 已证明用户功能可以经 `SignalEvent` data frame 闭环，queue-backed 真实 provider 已证明 Reticulum packet-level gateway 可以在不经跨 RT HTTP/SSE 的情况下送达 provider 收包队列，但可信 ingest 还必须先补 sender binding。旧分支的 UDP/TCP/mDNS/local JSON/JSONL 经验要迁移到 Reticulum provider 的 physical layer 下方，不能重新滑回 mDNS/local registry 与 Reticulum 平级、或巨型后台循环直接驱动业务同步的旧形态。

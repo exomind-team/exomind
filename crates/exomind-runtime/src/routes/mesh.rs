@@ -1,4 +1,4 @@
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post, put};
@@ -13,6 +13,7 @@ use tokio::sync::broadcast;
 use tokio::time::{Duration, Interval};
 
 use crate::AppState;
+use crate::auth::AuthenticatedPeerIdentity;
 use crate::discovery::DiscoveredPeer;
 use crate::ens::{EnsInterfaceTopology, EnsTransportError};
 use crate::mesh::{PeerInfo, PeerInfoPublic, PeerInterestSnapshot, PeerStatus};
@@ -161,8 +162,15 @@ async fn update_peer_interests(
 
 async fn ingest_remote_event(
     State(state): State<AppState>,
+    identity: Option<Extension<AuthenticatedPeerIdentity>>,
     Json(req): Json<IngestRemoteEventRequest>,
 ) -> StatusCode {
+    if let Some(Extension(identity)) = identity
+        && identity.peer_id != req.from_peer_id
+    {
+        return StatusCode::FORBIDDEN;
+    }
+
     match state
         .mesh
         .ingest_remote_event(&req.from_peer_id, req.event)
@@ -324,9 +332,10 @@ fn ens_error_response(error: EnsTransportError) -> (StatusCode, Json<serde_json:
         | EnsTransportError::Provider(crate::ens::EnsProviderError::InterfaceNotFound(_)) => {
             StatusCode::NOT_FOUND
         }
-        EnsTransportError::IncorrectPin | EnsTransportError::UnauthorizedDataFramePeer(_) => {
-            StatusCode::FORBIDDEN
-        }
+        EnsTransportError::IncorrectPin
+        | EnsTransportError::UnauthorizedDataFramePeer(_)
+        | EnsTransportError::DataFrameTransportPeerMismatch { .. } => StatusCode::FORBIDDEN,
+        EnsTransportError::MissingDataFrameTransportPeer(_) => StatusCode::BAD_REQUEST,
         EnsTransportError::MissingLocalEndpoint
         | EnsTransportError::MissingRuntimeEndpoint
         | EnsTransportError::DiscoveredPeerMissingEndpoint(_)
