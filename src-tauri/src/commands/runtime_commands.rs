@@ -819,7 +819,8 @@ pub async fn ensure_runtime_started(
         }
         log::warn!(
             "ensure_runtime_started: deciding to restart — healthy={}, host_mismatch={}",
-            is_healthy, host_mismatch,
+            is_healthy,
+            host_mismatch,
         );
         should_restart_embedded_runtime = true;
     }
@@ -919,7 +920,10 @@ pub async fn ensure_runtime_started(
     let started_port = handle.port();
     log::info!(
         "ensure_runtime_started: runtime started on {}:{} (requested was {}:{})",
-        started_host, started_port, requested_host, requested_port,
+        started_host,
+        started_port,
+        requested_host,
+        requested_port,
     );
 
     if requested_port == 0 {
