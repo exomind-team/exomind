@@ -2,8 +2,8 @@ use thiserror::Error;
 
 use super::data_protocol::{EnsDataFrame, EnsReceivedDataFrame};
 use super::dto::{
-    EnsInterfaceSnapshot, EnsInterfaceTopology, EnsPeerIdentity, EnsPeerSnapshot,
-    EnsTransportHealth,
+    EnsEndpointAdvertisement, EnsInterfaceSnapshot, EnsInterfaceTopology, EnsPeerIdentity,
+    EnsPeerSnapshot, EnsTransportHealth,
 };
 use super::pairing_protocol::EnsPairingFrame;
 
@@ -32,6 +32,9 @@ pub enum EnsProviderError {
 pub trait EnsProvider: Send + Sync {
     fn provider_id(&self) -> &str;
     fn snapshot(&self) -> EnsProviderSnapshot;
+    fn local_endpoint(&self) -> Option<EnsEndpointAdvertisement> {
+        None
+    }
     fn send_pairing_frame(&self, frame: EnsPairingFrame) -> Result<(), EnsProviderError>;
     fn send_data_frame(
         &self,

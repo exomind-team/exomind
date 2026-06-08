@@ -75,6 +75,10 @@ async fn ens_snapshot_route_exposes_provider_interfaces() {
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(payload["provider_id"], "fake-ens");
+    assert_eq!(
+        payload["local_endpoint"]["interface_address"],
+        "udp://192.168.1.20:4242"
+    );
     assert_eq!(payload["global_topology"], "active");
     assert_eq!(payload["interfaces"][0]["name"], "lan-udp");
     assert_eq!(payload["interfaces"][0]["topology"], "active");

@@ -1,22 +1,28 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs;
+use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::atomic::AtomicU16;
+use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use ed25519_dalek::Signature;
 use reticulum::destination::{DestinationName, SingleInputDestination};
+use reticulum::error::RnsError;
 use reticulum::hash::AddressHash;
 use reticulum::identity::{Identity, PrivateIdentity};
 use reticulum::interface::queue::QueueInterface;
 use reticulum::interface::tcp_client::TcpClient;
 use reticulum::interface::tcp_server::TcpServer;
 use reticulum::interface::udp::UdpInterface;
-use reticulum::interface::{Interface, InterfaceTopology as ReticulumInterfaceTopology};
+use reticulum::interface::{
+    Interface, InterfaceCommon, InterfaceRxSender, InterfaceStatus,
+    InterfaceTopology as ReticulumInterfaceTopology, InterfaceTxReceiver, TxMessage,
+};
 use reticulum::packet::{DestinationType, Packet, PacketType};
 use reticulum::transport::{Transport, TransportConfig};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use super::data_protocol::{EnsDataFrame, EnsReceivedDataFrame};
 use super::dto::{
@@ -65,6 +71,79 @@ struct ReticulumOutboundFrame {
     frame: ReticulumEnsWireFrame,
 }
 
+struct NamedInterface {
+    common: InterfaceCommon,
+    inner: Box<dyn Interface>,
+}
+
+impl NamedInterface {
+    fn new(name: String, inner: Box<dyn Interface>) -> Self {
+        let interface_type = inner.common().interface_type.clone();
+        Self {
+            common: InterfaceCommon::new(&name, &interface_type),
+            inner,
+        }
+    }
+}
+
+impl Interface for NamedInterface {
+    fn common(&self) -> &InterfaceCommon {
+        &self.common
+    }
+
+    fn status(&self) -> &InterfaceStatus {
+        self.inner.status()
+    }
+
+    fn mtu(&self) -> usize {
+        self.inner.mtu()
+    }
+
+    fn process_outgoing(&self, msg: TxMessage) -> Result<(), RnsError> {
+        self.inner.process_outgoing(msg)
+    }
+
+    fn set_rx_sender(&mut self, sender: InterfaceRxSender) {
+        self.inner.set_rx_sender(sender);
+    }
+
+    fn start(
+        &mut self,
+        tx_recv: InterfaceTxReceiver,
+        stop: CancellationToken,
+        address: AddressHash,
+    ) -> Result<(), RnsError> {
+        self.inner.start(tx_recv, stop, address)
+    }
+
+    fn stop(&mut self) {
+        self.inner.stop();
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ReticulumUdpDynamicBinding {
+    manager_name: String,
+    pending_public_name: String,
+    host: String,
+    bound_port: Arc<AtomicU16>,
+}
+
+impl ReticulumUdpDynamicBinding {
+    fn bound_port(&self) -> Option<u16> {
+        let port = self.bound_port.load(Ordering::Relaxed);
+        if port == 0 { None } else { Some(port) }
+    }
+
+    fn public_interface_name(&self) -> Option<String> {
+        udp_interface_name_from_host_port(&self.host, self.bound_port()?)
+    }
+
+    fn public_endpoint_address(&self) -> Option<String> {
+        udp_endpoint_address_from_host_port(&self.host, self.bound_port()?)
+    }
+}
+
 pub struct ReticulumEnsProvider {
     provider_id: String,
     identity: PrivateIdentity,
@@ -76,6 +155,8 @@ pub struct ReticulumEnsProvider {
     interfaces: RwLock<Vec<EnsInterfaceSnapshot>>,
     received_data_frames: Mutex<VecDeque<EnsReceivedDataFrame>>,
     received_pairing_frames: Mutex<VecDeque<EnsPairingFrame>>,
+    udp_dynamic_bindings: Mutex<Vec<ReticulumUdpDynamicBinding>>,
+    udp_dynamic_counter: AtomicUsize,
     outbound_tx: mpsc::UnboundedSender<ReticulumOutboundFrame>,
 }
 
@@ -130,6 +211,8 @@ impl ReticulumEnsProvider {
             interfaces: RwLock::new(Vec::new()),
             received_data_frames: Mutex::new(VecDeque::new()),
             received_pairing_frames: Mutex::new(VecDeque::new()),
+            udp_dynamic_bindings: Mutex::new(Vec::new()),
+            udp_dynamic_counter: AtomicUsize::new(0),
             outbound_tx,
         });
         provider.refresh_interfaces();
@@ -141,6 +224,7 @@ impl ReticulumEnsProvider {
     }
 
     pub fn local_endpoint(&self) -> EnsEndpointAdvertisement {
+        self.refresh_dynamic_udp_endpoint();
         match self.local_endpoint.read() {
             Ok(guard) => guard.clone(),
             Err(poisoned) => poisoned.into_inner().clone(),
@@ -180,12 +264,23 @@ impl ReticulumEnsProvider {
         let bind_addr = bind_addr.into();
         let interface = UdpInterface::new(bind_addr.clone(), forward_addr);
         let bound_port = Arc::clone(&interface.bound_port);
-        self.add_interface(Box::new(interface), topology).await;
-        self.set_local_interface_source(
-            &bind_addr,
-            EnsInterfaceMedium::Udp,
-            Some(format!("udp://{bind_addr}")),
-        );
+        if let Some(binding) = self.create_dynamic_udp_binding(&bind_addr, &bound_port) {
+            let manager_name = binding.manager_name.clone();
+            let pending_public_name = binding.pending_public_name.clone();
+            self.track_dynamic_udp_binding(binding);
+            self.add_interface(
+                Box::new(NamedInterface::new(manager_name, Box::new(interface))),
+                topology,
+            )
+            .await;
+            self.set_local_interface_source(&pending_public_name, EnsInterfaceMedium::Udp, None);
+            self.refresh_dynamic_udp_endpoint();
+        } else {
+            self.add_interface(Box::new(interface), topology).await;
+            let endpoint_address =
+                udp_endpoint_address(&bind_addr, bound_port.load(Ordering::Relaxed));
+            self.set_local_interface_source(&bind_addr, EnsInterfaceMedium::Udp, endpoint_address);
+        }
         Ok(bound_port)
     }
 
@@ -451,21 +546,130 @@ impl ReticulumEnsProvider {
         }
     }
 
+    fn create_dynamic_udp_binding(
+        &self,
+        bind_addr: &str,
+        bound_port: &Arc<AtomicU16>,
+    ) -> Option<ReticulumUdpDynamicBinding> {
+        let socket_addr = bind_addr.parse::<SocketAddr>().ok()?;
+        if socket_addr.port() != 0 {
+            return None;
+        }
+        let sequence = self.udp_dynamic_counter.fetch_add(1, Ordering::Relaxed) + 1;
+        let host = socket_addr.ip().to_string();
+        Some(ReticulumUdpDynamicBinding {
+            manager_name: format!("udp-dynamic://{host}/{sequence}"),
+            pending_public_name: format!("{host}:pending-{sequence}"),
+            host,
+            bound_port: Arc::clone(bound_port),
+        })
+    }
+
+    fn track_dynamic_udp_binding(&self, binding: ReticulumUdpDynamicBinding) {
+        let mut guard = match self.udp_dynamic_bindings.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.push(binding);
+    }
+
+    fn refresh_dynamic_udp_endpoint(&self) {
+        let bindings = self.dynamic_udp_bindings();
+        if bindings.is_empty() {
+            return;
+        }
+
+        let mut endpoint = match self.local_endpoint.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        for binding in bindings {
+            let Some(public_name) = binding.public_interface_name() else {
+                continue;
+            };
+            let Some(endpoint_address) = binding.public_endpoint_address() else {
+                continue;
+            };
+            let via_interface = endpoint.via_interface.as_deref();
+            if !matches!(
+                via_interface,
+                Some(name) if name == binding.pending_public_name || name == public_name
+            ) || endpoint.via_medium != Some(EnsInterfaceMedium::Udp)
+            {
+                continue;
+            }
+            endpoint.via_interface = Some(public_name);
+            endpoint.interface_address = Some(endpoint_address);
+            endpoint.discovery_source = "reticulum-provider-interface".to_string();
+        }
+    }
+
+    fn dynamic_udp_bindings(&self) -> Vec<ReticulumUdpDynamicBinding> {
+        match self.udp_dynamic_bindings.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    fn project_dynamic_udp_interface_name(
+        &self,
+        name: &str,
+        bindings: &[ReticulumUdpDynamicBinding],
+    ) -> Option<String> {
+        bindings.iter().find_map(|binding| {
+            if binding.manager_name == name {
+                binding
+                    .public_interface_name()
+                    .or_else(|| Some(binding.pending_public_name.clone()))
+            } else {
+                None
+            }
+        })
+    }
+
+    fn resolve_interface_manager_name(&self, name: &str) -> String {
+        self.dynamic_udp_bindings()
+            .into_iter()
+            .find_map(|binding| {
+                if binding.manager_name == name || binding.pending_public_name == name {
+                    return Some(binding.manager_name);
+                }
+                if binding.public_interface_name().as_deref() == Some(name) {
+                    Some(binding.manager_name)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| name.to_string())
+    }
+
+    fn public_interface_snapshot_name(&self, manager_name: &str) -> String {
+        let bindings = self.dynamic_udp_bindings();
+        self.project_dynamic_udp_interface_name(manager_name, &bindings)
+            .unwrap_or_else(|| manager_name.to_string())
+    }
+
     fn refresh_interfaces(&self) {
         let manager = self.transport.interface_manager();
         let Ok(guard) = manager.try_lock() else {
             return;
         };
+        let bindings = self.dynamic_udp_bindings();
         let interfaces = guard
             .list_interfaces()
             .into_iter()
-            .map(|info| EnsInterfaceSnapshot {
-                name: info.name,
-                interface_type: info.interface_type,
-                online: info.online,
-                outgoing: info.outgoing,
-                topology: from_reticulum_topology(info.topology),
-                effective_topology: from_reticulum_topology(info.topology),
+            .map(|info| {
+                let name = self
+                    .project_dynamic_udp_interface_name(&info.name, &bindings)
+                    .unwrap_or(info.name);
+                EnsInterfaceSnapshot {
+                    name,
+                    interface_type: info.interface_type,
+                    online: info.online,
+                    outgoing: info.outgoing,
+                    topology: from_reticulum_topology(info.topology),
+                    effective_topology: from_reticulum_topology(info.topology),
+                }
             })
             .collect::<Vec<_>>();
         drop(guard);
@@ -520,7 +724,12 @@ impl EnsProvider for ReticulumEnsProvider {
         &self.provider_id
     }
 
+    fn local_endpoint(&self) -> Option<EnsEndpointAdvertisement> {
+        Some(ReticulumEnsProvider::local_endpoint(self))
+    }
+
     fn snapshot(&self) -> EnsProviderSnapshot {
+        self.refresh_dynamic_udp_endpoint();
         self.refresh_interfaces();
         let health = match self.health.read() {
             Ok(guard) => guard.clone(),
@@ -594,15 +803,17 @@ impl EnsProvider for ReticulumEnsProvider {
                 "Reticulum interface manager is busy: {error}"
             ))
         })?;
-        if !guard.set_topology(name, to_reticulum_topology(topology)) {
+        let manager_name = self.resolve_interface_manager_name(name);
+        if !guard.set_topology(&manager_name, to_reticulum_topology(topology)) {
             return Err(EnsProviderError::InterfaceNotFound(name.to_string()));
         }
         drop(guard);
         self.refresh_interfaces();
+        let public_name = self.public_interface_snapshot_name(&manager_name);
         self.snapshot()
             .interfaces
             .into_iter()
-            .find(|interface| interface.name == name)
+            .find(|interface| interface.name == public_name)
             .ok_or_else(|| EnsProviderError::InterfaceNotFound(name.to_string()))
     }
 
@@ -629,6 +840,33 @@ fn from_reticulum_topology(topology: ReticulumInterfaceTopology) -> EnsInterface
         ReticulumInterfaceTopology::Passive => EnsInterfaceTopology::Passive,
         ReticulumInterfaceTopology::Active => EnsInterfaceTopology::Active,
     }
+}
+
+fn udp_endpoint_address(bind_addr: &str, bound_port: u16) -> Option<String> {
+    let socket_addr = bind_addr.parse::<SocketAddr>().ok()?;
+    let port = if bound_port == 0 {
+        socket_addr.port()
+    } else {
+        bound_port
+    };
+    if port == 0 {
+        return None;
+    }
+    Some(format!("udp://{}:{port}", socket_addr.ip()))
+}
+
+fn udp_interface_name_from_host_port(host: &str, port: u16) -> Option<String> {
+    if port == 0 {
+        return None;
+    }
+    Some(format!("{host}:{port}"))
+}
+
+fn udp_endpoint_address_from_host_port(host: &str, port: u16) -> Option<String> {
+    if port == 0 {
+        return None;
+    }
+    Some(format!("udp://{host}:{port}"))
 }
 
 fn canonical_data_frame_bytes(

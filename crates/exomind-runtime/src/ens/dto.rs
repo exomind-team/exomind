@@ -195,6 +195,8 @@ pub struct EnsPairingOfferTicket {
 pub struct EnsTransportSnapshot {
     pub enabled: bool,
     pub provider_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_endpoint: Option<EnsEndpointAdvertisement>,
     pub global_topology: EnsInterfaceTopology,
     pub health: EnsTransportHealth,
     pub peers: Vec<EnsPeerSnapshot>,

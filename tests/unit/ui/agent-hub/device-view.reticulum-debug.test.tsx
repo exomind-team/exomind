@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DeviceView } from '@/ui/app/pages/agents/DeviceView';
-import type { EnsTransportSnapshot } from '@/lib/services/runtime-ens.service';
+import type { EnsInterfaceTopology, EnsTransportSnapshot } from '@/lib/services/runtime-ens.service';
 
 const runtimeEnsMocks = vi.hoisted(() => ({
   getSnapshot: vi.fn(),
@@ -66,17 +66,29 @@ function renderDeviceView(runtimeRunning = true) {
 }
 
 function snapshotWithTopology(
-  topology: 'off' | 'passive' | 'active',
-  globalTopology: 'off' | 'passive' | 'active' = 'active',
-  effectiveTopology: 'off' | 'passive' | 'active' = topology,
+  topology: EnsInterfaceTopology,
+  globalTopology: EnsInterfaceTopology = 'active',
+  effectiveTopology: EnsInterfaceTopology = topology,
 ): EnsTransportSnapshot {
   return {
     enabled: true,
     provider_id: 'fake-ens',
+    local_endpoint: {
+      identity_hex: 'identity-a',
+      host_id: 'rt-a',
+      gateway: 'reticulum',
+      via_interface: '127.0.0.1:4242',
+      via_medium: 'udp',
+      runtime_base_url: 'http://127.0.0.1:9124',
+      reticulum_destination: 'ret-destination-a',
+      interface_address: 'udp://127.0.0.1:4242',
+      discovery_source: 'reticulum-provider-interface',
+      capabilities: ['ens-control'],
+    },
     global_topology: globalTopology,
     health: { status: 'healthy' },
     interfaces: [{
-      name: 'lan-udp',
+      name: '127.0.0.1:4242',
       type: 'udp',
       online: true,
       outgoing: true,
@@ -92,7 +104,7 @@ function snapshotWithTopology(
         identity_hex: 'identity-b',
         host_id: 'rt-b',
         gateway: 'reticulum',
-        via_interface: 'lan-udp',
+        via_interface: '127.0.0.1:4242',
         via_medium: 'udp',
         runtime_base_url: 'http://192.168.1.20:9124',
         reticulum_destination: 'ret-destination-b',
@@ -105,6 +117,21 @@ function snapshotWithTopology(
     }],
     operations: [],
     updated_at: '2026-06-08T00:00:00Z',
+  };
+}
+
+function snapshotWithInterfaces(
+  interfaces: EnsTransportSnapshot['interfaces'],
+  localInterfaceName = interfaces[0]?.name ?? '127.0.0.1:4242',
+): EnsTransportSnapshot {
+  return {
+    ...snapshotWithTopology('active'),
+    local_endpoint: {
+      ...snapshotWithTopology('active').local_endpoint,
+      via_interface: localInterfaceName,
+      interface_address: `udp://${localInterfaceName}`,
+    },
+    interfaces,
   };
 }
 
@@ -124,27 +151,30 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
     const panel = await screen.findByTestId('reticulum-debug-panel');
     expect(within(panel).getByTestId('reticulum-provider-id')).toHaveTextContent('fake-ens');
     expect(within(panel).getByTestId('reticulum-health-status')).toHaveTextContent('健康');
+    expect(within(panel).getByTestId('reticulum-local-endpoint-address')).toHaveTextContent('udp://127.0.0.1:4242');
+    expect(within(panel).queryByText('udp://127.0.0.1:0')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('127.0.0.1:0')).not.toBeInTheDocument();
     expect(within(panel).getByTestId('reticulum-global-topology-status')).toHaveTextContent('Active');
     expect(within(panel).getByTestId('reticulum-global-topology-active')).toHaveAttribute('aria-pressed', 'true');
-    expect(within(panel).getByTestId('reticulum-interface-lan-udp-active')).toHaveAttribute('aria-pressed', 'true');
-    expect(within(panel).getByTestId('reticulum-interface-lan-udp-configured')).toHaveTextContent('Active');
-    expect(within(panel).getByTestId('reticulum-interface-lan-udp-effective')).toHaveTextContent('Active');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-active')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-configured')).toHaveTextContent('Active');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-effective')).toHaveTextContent('Active');
     expect(within(panel).getByTestId('reticulum-peer-identity-b')).toBeInTheDocument();
     expect(within(panel).getByTestId('reticulum-peer-identity-b-endpoint')).toHaveTextContent(
-      'Reticulum via lan-udp / UDP',
+      'Reticulum via 127.0.0.1:4242 / UDP',
     );
 
-    fireEvent.click(within(panel).getByTestId('reticulum-interface-lan-udp-passive'));
+    fireEvent.click(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-passive'));
 
     await waitFor(() => {
       expect(runtimeEnsMocks.setInterfaceTopology).toHaveBeenCalledWith(
         'http://127.0.0.1:9124',
-        'lan-udp',
+        '127.0.0.1:4242',
         'passive',
       );
-      expect(within(panel).getByTestId('reticulum-interface-lan-udp-passive')).toHaveAttribute('aria-pressed', 'true');
-      expect(within(panel).getByTestId('reticulum-interface-lan-udp-configured')).toHaveTextContent('Passive');
-      expect(within(panel).getByTestId('reticulum-interface-lan-udp-effective')).toHaveTextContent('Passive');
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-passive')).toHaveAttribute('aria-pressed', 'true');
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-configured')).toHaveTextContent('Passive');
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-effective')).toHaveTextContent('Passive');
     });
   });
 
@@ -175,16 +205,71 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
     );
     expect(within(panel).getByTestId('reticulum-global-topology-active')).toHaveAttribute('aria-pressed', 'true');
     expect(within(panel).getByTestId('reticulum-global-topology-passive')).toHaveAttribute('aria-pressed', 'false');
-    expect(within(panel).getByTestId('reticulum-interface-lan-udp-configured')).toHaveTextContent('Active');
-    expect(within(panel).getByTestId('reticulum-interface-lan-udp-effective')).toHaveTextContent('Active');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-configured')).toHaveTextContent('Active');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-effective')).toHaveTextContent('Active');
 
     resolveSetGlobal?.();
 
     await waitFor(() => {
       expect(within(panel).getByTestId('reticulum-global-topology-status')).toHaveTextContent('Passive');
       expect(within(panel).getByTestId('reticulum-global-topology-passive')).toHaveAttribute('aria-pressed', 'true');
-      expect(within(panel).getByTestId('reticulum-interface-lan-udp-configured')).toHaveTextContent('Active');
-      expect(within(panel).getByTestId('reticulum-interface-lan-udp-effective')).toHaveTextContent('Passive');
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-configured')).toHaveTextContent('Active');
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-effective')).toHaveTextContent('Passive');
+    });
+  });
+
+  it('keeps dynamic UDP interface topology updates scoped to the selected public name（动态 UDP 多接口只更新选中的 public name）', async () => {
+    const activeInterface = {
+      name: '127.0.0.1:4242',
+      type: 'udp' as const,
+      online: true,
+      outgoing: true,
+      topology: 'active' as const,
+      effective_topology: 'active' as const,
+    };
+    const secondInterfaceActive = {
+      name: '127.0.0.1:4343',
+      type: 'udp' as const,
+      online: true,
+      outgoing: true,
+      topology: 'active' as const,
+      effective_topology: 'active' as const,
+    };
+    const secondInterfacePassive = {
+      ...secondInterfaceActive,
+      topology: 'passive' as const,
+      effective_topology: 'passive' as const,
+    };
+    let currentSnapshot = snapshotWithInterfaces([activeInterface, secondInterfaceActive]);
+    runtimeEnsMocks.getSnapshot.mockImplementation(async () => currentSnapshot);
+    runtimeEnsMocks.setInterfaceTopology.mockImplementation(async () => {
+      currentSnapshot = snapshotWithInterfaces([activeInterface, secondInterfacePassive]);
+      return secondInterfacePassive;
+    });
+    runtimeEnsMocks.setGlobalTopology.mockReset();
+    runtimeEnsMocks.initiatePairingWithDiscoveredPeer.mockReset();
+
+    renderDeviceView();
+
+    const panel = await screen.findByTestId('reticulum-debug-panel');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242')).toBeInTheDocument();
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4343')).toBeInTheDocument();
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-active')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4343-active')).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(within(panel).getByTestId('reticulum-interface-127-0-0-1-4343-passive'));
+
+    await waitFor(() => {
+      expect(runtimeEnsMocks.setInterfaceTopology).toHaveBeenCalledWith(
+        'http://127.0.0.1:9124',
+        '127.0.0.1:4343',
+        'passive',
+      );
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-active')).toHaveAttribute('aria-pressed', 'true');
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-configured')).toHaveTextContent('Active');
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4343-passive')).toHaveAttribute('aria-pressed', 'true');
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4343-configured')).toHaveTextContent('Passive');
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4343-effective')).toHaveTextContent('Passive');
     });
   });
 

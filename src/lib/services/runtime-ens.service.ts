@@ -74,6 +74,7 @@ export interface EnsPairingOfferTicket {
 export interface EnsTransportSnapshot {
   enabled: boolean;
   provider_id: string;
+  local_endpoint?: EnsEndpointAdvertisement;
   global_topology: EnsInterfaceTopology;
   health: EnsTransportHealth;
   peers: EnsPeerSnapshot[];

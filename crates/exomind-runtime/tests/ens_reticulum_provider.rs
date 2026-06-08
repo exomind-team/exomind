@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use exomind_runtime::ens::{
@@ -218,6 +219,39 @@ async fn wait_for_health_status(
     panic!("provider health did not become {status:?}");
 }
 
+async fn wait_for_bound_udp_endpoint(
+    provider: &ReticulumEnsProvider,
+    bound_port: &std::sync::atomic::AtomicU16,
+) -> String {
+    for _ in 0..80 {
+        let port = bound_port.load(Ordering::Relaxed);
+        let endpoint = provider.local_endpoint();
+        if port != 0 {
+            let expected = format!("udp://127.0.0.1:{port}");
+            if endpoint.interface_address.as_deref() == Some(expected.as_str()) {
+                return expected;
+            }
+        }
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    panic!("UDP dynamic port was not projected into the local endpoint");
+}
+
+async fn wait_for_bound_udp_port(bound_port: &std::sync::atomic::AtomicU16) -> u16 {
+    for _ in 0..80 {
+        let port = bound_port.load(Ordering::Relaxed);
+        if port != 0 {
+            return port;
+        }
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    panic!("UDP interface did not bind a concrete port");
+}
+
 fn reticulum_packet_bytes(
     destination_hex: &str,
     wire_frame: serde_json::Value,
@@ -332,6 +366,122 @@ async fn queue_reticulum_provider_accepts_signed_eventlog_replication_frame() {
         .await
         .expect("second drain should not duplicate accepted frame");
     assert!(drained.is_empty());
+}
+
+#[tokio::test]
+async fn udp_dynamic_port_supports_reticulum_eventlog_replication_frame() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-udp-data-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-udp-data-b").await;
+
+    let node_b_bound_port = node_b
+        .provider
+        .add_udp_interface("127.0.0.1:0", None, EnsInterfaceTopology::Active)
+        .await
+        .expect("node B dynamic UDP interface should bind");
+    let node_b_endpoint_address =
+        wait_for_bound_udp_endpoint(&node_b.provider, &node_b_bound_port).await;
+    let node_b_port = wait_for_bound_udp_port(&node_b_bound_port).await;
+    assert_eq!(
+        node_b_endpoint_address,
+        format!("udp://127.0.0.1:{node_b_port}")
+    );
+
+    let node_a_bound_port = node_a
+        .provider
+        .add_udp_interface(
+            "127.0.0.1:0",
+            Some(format!("127.0.0.1:{node_b_port}")),
+            EnsInterfaceTopology::Active,
+        )
+        .await
+        .expect("node A dynamic UDP interface should bind with node B as forward target");
+    let node_a_endpoint_address =
+        wait_for_bound_udp_endpoint(&node_a.provider, &node_a_bound_port).await;
+    let node_a_port = wait_for_bound_udp_port(&node_a_bound_port).await;
+    let node_a_public_name = format!("127.0.0.1:{node_a_port}");
+    let node_b_public_name = format!("127.0.0.1:{node_b_port}");
+
+    let endpoint_a = node_a.provider.local_endpoint();
+    let endpoint_b = node_b.provider.local_endpoint();
+    assert_eq!(
+        endpoint_a.via_interface.as_deref(),
+        Some(node_a_public_name.as_str())
+    );
+    assert_eq!(
+        endpoint_a.interface_address.as_deref(),
+        Some(node_a_endpoint_address.as_str())
+    );
+    assert_eq!(
+        endpoint_b.via_interface.as_deref(),
+        Some(node_b_public_name.as_str())
+    );
+    assert_eq!(
+        endpoint_b.interface_address.as_deref(),
+        Some(node_b_endpoint_address.as_str())
+    );
+    for payload in [
+        serde_json::to_string(&endpoint_a).expect("endpoint A should serialize"),
+        serde_json::to_string(&endpoint_b).expect("endpoint B should serialize"),
+    ] {
+        assert!(!payload.contains("127.0.0.1:0"));
+        assert!(!payload.contains("udp://127.0.0.1:0"));
+    }
+
+    node_a
+        .provider
+        .upsert_discovered_endpoint(endpoint_b.clone());
+    node_b
+        .provider
+        .upsert_discovered_endpoint(endpoint_a.clone());
+    authorize_peer(&node_a.mesh, &endpoint_b.identity_hex, "rt-b");
+    authorize_peer(&node_b.mesh, &endpoint_a.identity_hex, "rt-a");
+    node_a.mesh.set_peer_interests(
+        &endpoint_b.identity_hex,
+        vec![EVENTLOG_REPLICATION_APPENDED_TOPIC.to_string()],
+    );
+    yield_for_replication_actor().await;
+
+    let appender = EventLogAppender::new(
+        Arc::clone(&node_a.eventlog_store),
+        "rt-a".to_string(),
+        Arc::clone(&node_a.signal_pool),
+        None,
+    );
+    appender
+        .append_event(
+            Some("profile-sync"),
+            sample_event_record("event-reticulum-udp-dynamic"),
+        )
+        .await
+        .expect("local append should succeed");
+    let signal = node_a
+        .signal_pool
+        .window()
+        .recent(10)
+        .into_iter()
+        .find(|event| event.topic == EVENTLOG_REPLICATION_APPENDED_TOPIC)
+        .expect("append should publish eventlog replication signal");
+
+    let sent = node_a
+        .service
+        .send_signal_event_to_peer(&endpoint_b.identity_hex, signal)
+        .expect("authorized Reticulum peer should accept UDP send");
+    assert!(sent);
+
+    let accepted = wait_for_pending_data_frame_acceptance(&node_b.service).await;
+    assert_eq!(accepted, vec![true]);
+    let replicated = wait_for_event(
+        &node_b.eventlog_store,
+        Some("profile-sync"),
+        "event-reticulum-udp-dynamic",
+    )
+    .await;
+    let expected = sample_event_record("event-reticulum-udp-dynamic");
+    assert_eq!(replicated.timestamp, expected.timestamp);
+    assert_eq!(replicated.content, expected.content);
+    assert_eq!(replicated.tags, expected.tags);
+    assert_eq!(replicated.refs, expected.refs);
+    assert_eq!(replicated.metadata, expected.metadata);
 }
 
 #[tokio::test]
@@ -591,4 +741,138 @@ async fn queue_interface_and_local_registry_project_reticulum_endpoint_state() {
     assert_eq!(endpoint.via_medium, Some(EnsInterfaceMedium::Queue));
     assert_eq!(endpoint.discovery_source, "reticulum-provider-interface");
     assert!(endpoint.reticulum_destination.is_some());
+}
+
+#[tokio::test]
+async fn udp_dynamic_port_projects_actual_bound_endpoint_state() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-udp-port-a").await;
+    let bound_port = node_a
+        .provider
+        .add_udp_interface("127.0.0.1:0", None, EnsInterfaceTopology::Active)
+        .await
+        .expect("dynamic UDP interface should bind");
+
+    let projected = wait_for_bound_udp_endpoint(&node_a.provider, &bound_port).await;
+    let port = wait_for_bound_udp_port(&bound_port).await;
+    let public_name = format!("127.0.0.1:{port}");
+    assert_ne!(projected, "udp://127.0.0.1:0");
+
+    let endpoint = node_a.provider.local_endpoint();
+    assert_eq!(
+        endpoint.via_interface.as_deref(),
+        Some(public_name.as_str())
+    );
+    assert_eq!(endpoint.via_medium, Some(EnsInterfaceMedium::Udp));
+    assert_eq!(
+        endpoint.interface_address.as_deref(),
+        Some(projected.as_str())
+    );
+    assert_eq!(endpoint.discovery_source, "reticulum-provider-interface");
+    let endpoint_payload =
+        serde_json::to_string(&endpoint).expect("endpoint should serialize for route payloads");
+    assert!(!endpoint_payload.contains("127.0.0.1:0"));
+    assert!(!endpoint_payload.contains("udp://127.0.0.1:0"));
+
+    let snapshot = node_a.service.snapshot();
+    assert_eq!(
+        snapshot
+            .local_endpoint
+            .as_ref()
+            .and_then(|endpoint| endpoint.interface_address.as_deref()),
+        Some(projected.as_str())
+    );
+    let udp = snapshot
+        .interfaces
+        .iter()
+        .find(|interface| interface.name == public_name)
+        .expect("dynamic UDP interface should be visible in provider snapshot");
+    assert_eq!(udp.interface_type, "udp_interface");
+    assert_eq!(udp.topology, EnsInterfaceTopology::Active);
+    assert_eq!(udp.effective_topology, EnsInterfaceTopology::Active);
+    let snapshot_payload =
+        serde_json::to_string(&snapshot).expect("snapshot should serialize for route payloads");
+    assert!(!snapshot_payload.contains("127.0.0.1:0"));
+    assert!(!snapshot_payload.contains("udp://127.0.0.1:0"));
+    let updated = node_a
+        .service
+        .set_interface_topology(&public_name, EnsInterfaceTopology::Off)
+        .expect("dynamic UDP public name should update manager topology");
+    assert_eq!(updated.name, public_name);
+    assert_eq!(updated.topology, EnsInterfaceTopology::Off);
+    assert_eq!(updated.effective_topology, EnsInterfaceTopology::Off);
+    assert_eq!(
+        node_a
+            .provider
+            .local_endpoint()
+            .interface_address
+            .as_deref(),
+        Some(projected.as_str())
+    );
+}
+
+#[tokio::test]
+async fn udp_dynamic_ports_keep_distinct_snapshot_names_and_topology_state() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-udp-two-ports-a").await;
+    let first_bound_port = node_a
+        .provider
+        .add_udp_interface("127.0.0.1:0", None, EnsInterfaceTopology::Active)
+        .await
+        .expect("first dynamic UDP interface should bind");
+    let pending_snapshot_payload = serde_json::to_string(&node_a.service.snapshot())
+        .expect("pending snapshot should serialize for route payloads");
+    assert!(!pending_snapshot_payload.contains("127.0.0.1:0"));
+    assert!(!pending_snapshot_payload.contains("udp://127.0.0.1:0"));
+
+    let second_bound_port = node_a
+        .provider
+        .add_udp_interface("127.0.0.1:0", None, EnsInterfaceTopology::Active)
+        .await
+        .expect("second dynamic UDP interface should bind");
+    let first_port = wait_for_bound_udp_port(&first_bound_port).await;
+    let second_port = wait_for_bound_udp_port(&second_bound_port).await;
+    assert_ne!(
+        first_port, second_port,
+        "OS-assigned UDP dynamic ports should be distinct in one provider"
+    );
+
+    let first_public_name = format!("127.0.0.1:{first_port}");
+    let second_public_name = format!("127.0.0.1:{second_port}");
+    let snapshot = node_a.service.snapshot();
+    let first = snapshot
+        .interfaces
+        .iter()
+        .find(|interface| interface.name == first_public_name)
+        .expect("first dynamic UDP interface should keep its own public name");
+    let second = snapshot
+        .interfaces
+        .iter()
+        .find(|interface| interface.name == second_public_name)
+        .expect("second dynamic UDP interface should keep its own public name");
+    assert_eq!(first.topology, EnsInterfaceTopology::Active);
+    assert_eq!(second.topology, EnsInterfaceTopology::Active);
+    let snapshot_payload =
+        serde_json::to_string(&snapshot).expect("snapshot should serialize for route payloads");
+    assert!(!snapshot_payload.contains("127.0.0.1:0"));
+    assert!(!snapshot_payload.contains("udp://127.0.0.1:0"));
+
+    let updated_second = node_a
+        .service
+        .set_interface_topology(&second_public_name, EnsInterfaceTopology::Off)
+        .expect("second dynamic UDP public name should update its own manager topology");
+    assert_eq!(updated_second.name, second_public_name);
+    assert_eq!(updated_second.topology, EnsInterfaceTopology::Off);
+
+    let snapshot = node_a.service.snapshot();
+    let first = snapshot
+        .interfaces
+        .iter()
+        .find(|interface| interface.name == first_public_name)
+        .expect("first dynamic UDP interface should remain visible");
+    let second = snapshot
+        .interfaces
+        .iter()
+        .find(|interface| interface.name == second_public_name)
+        .expect("second dynamic UDP interface should remain visible");
+    assert_eq!(first.topology, EnsInterfaceTopology::Active);
+    assert_eq!(second.topology, EnsInterfaceTopology::Off);
 }

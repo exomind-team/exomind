@@ -91,6 +91,10 @@ function formatEnsHealthLabel(status: EnsTransportSnapshot['health']['status']):
   return '未启用';
 }
 
+function ensDebugTestIdSegment(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 function formatEnsPeerName(peer: EnsPeerSnapshot): string {
   return peer.identity.display_name
     ?? peer.identity.host_id
@@ -217,6 +221,7 @@ function ReticulumDebugPanel({
   const peers = Array.isArray(snapshot?.peers) ? snapshot.peers : [];
   const healthStatus = snapshot?.health?.status ?? 'disabled';
   const globalTopology = snapshot?.global_topology ?? 'off';
+  const localEndpointAddress = snapshot?.local_endpoint?.interface_address ?? '--';
   const discoveredPeers = peers.filter((peer) => !peer.authorized);
   const authorizedPeers = peers.filter((peer) => peer.authorized);
 
@@ -254,7 +259,7 @@ function ReticulumDebugPanel({
         </div>
       ) : (
         <>
-          <div className="grid gap-2 md:grid-cols-3">
+          <div className="grid gap-2 md:grid-cols-4">
             <div className="rounded-xl bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]">
               <p className="text-[10px] text-[#A8A29E]">Provider</p>
               <p data-testid="reticulum-provider-id" className="truncate text-[12px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
@@ -265,6 +270,12 @@ function ReticulumDebugPanel({
               <p className="text-[10px] text-[#A8A29E]">健康状态</p>
               <p data-testid="reticulum-health-status" className="text-[12px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
                 {formatEnsHealthLabel(healthStatus)}
+              </p>
+            </div>
+            <div data-testid="reticulum-local-endpoint" className="rounded-xl bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]">
+              <p className="text-[10px] text-[#A8A29E]">本机 endpoint</p>
+              <p data-testid="reticulum-local-endpoint-address" className="truncate text-[12px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+                {localEndpointAddress}
               </p>
             </div>
             <div className="rounded-xl bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]">
@@ -329,10 +340,11 @@ function ReticulumDebugPanel({
               <div className="space-y-1.5">
                 {interfaces.map((item) => {
                   const effectiveTopology = item.effective_topology ?? item.topology;
+                  const interfaceTestId = ensDebugTestIdSegment(item.name);
                   return (
                     <div
                       key={item.name}
-                      data-testid={`reticulum-interface-${item.name}`}
+                      data-testid={`reticulum-interface-${interfaceTestId}`}
                       className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]"
                     >
                       <span
@@ -351,11 +363,11 @@ function ReticulumDebugPanel({
                         </p>
                         <p className="text-[10px] text-[#78716C] dark:text-[#A8A29E]">
                           配置
-                          <span data-testid={`reticulum-interface-${item.name}-configured`} className="mx-1 font-semibold">
+                          <span data-testid={`reticulum-interface-${interfaceTestId}-configured`} className="mx-1 font-semibold">
                             {formatEnsTopologyLabel(item.topology)}
                           </span>
                           / 生效
-                          <span data-testid={`reticulum-interface-${item.name}-effective`} className="ml-1 font-semibold">
+                          <span data-testid={`reticulum-interface-${interfaceTestId}-effective`} className="ml-1 font-semibold">
                             {formatEnsTopologyLabel(effectiveTopology)}
                           </span>
                         </p>
@@ -365,7 +377,7 @@ function ReticulumDebugPanel({
                           <button
                             key={topology}
                             type="button"
-                            data-testid={`reticulum-interface-${item.name}-${topology}`}
+                            data-testid={`reticulum-interface-${interfaceTestId}-${topology}`}
                             aria-pressed={item.topology === topology}
                             disabled={pendingKey === `interface:${item.name}`}
                             onClick={() => {

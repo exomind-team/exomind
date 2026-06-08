@@ -201,10 +201,12 @@ impl EnsTransportService {
                 interface
             })
             .collect();
+        let local_endpoint = self.current_local_endpoint();
 
         EnsTransportSnapshot {
             enabled: state.enabled && !state.shutdown,
             provider_id: provider_snapshot.provider_id,
+            local_endpoint,
             global_topology,
             health: if state.enabled {
                 provider_snapshot.health
@@ -224,11 +226,13 @@ impl EnsTransportService {
         topology: EnsInterfaceTopology,
     ) -> Result<EnsInterfaceSnapshot, EnsTransportError> {
         self.ensure_ready()?;
-        self.provider.set_interface_topology(name, topology)?;
+        let updated = self.provider.set_interface_topology(name, topology)?;
+        let public_name = updated.name.clone();
         self.snapshot()
             .interfaces
             .into_iter()
-            .find(|interface| interface.name == name)
+            .find(|interface| interface.name == public_name)
+            .or(Some(updated))
             .ok_or_else(|| {
                 EnsTransportError::Provider(EnsProviderError::InterfaceNotFound(name.to_string()))
             })
@@ -297,7 +301,7 @@ impl EnsTransportService {
             operation_id: operation_id.clone(),
             session_id: session.session_id.clone(),
             initiator: self.local_identity(),
-            initiator_endpoint: self.local_endpoint.clone(),
+            initiator_endpoint: self.current_local_endpoint(),
         });
 
         if let Err(error) = self.provider.send_pairing_frame(frame) {
@@ -348,8 +352,7 @@ impl EnsTransportService {
         }
 
         let from_peer = self
-            .local_endpoint
-            .as_ref()
+            .current_local_endpoint()
             .ok_or(EnsTransportError::MissingLocalEndpoint)?
             .identity();
         let target = mesh_peer_identity(&peer);
@@ -491,7 +494,7 @@ impl EnsTransportService {
             operation_id: response.operation_id.clone(),
             session_id: response.session_id.clone(),
             initiator: self.local_identity(),
-            initiator_endpoint: self.local_endpoint.clone(),
+            initiator_endpoint: self.current_local_endpoint(),
             initiator_inbound_secret: initiator_inbound_secret.clone(),
         });
         if let Err(error) = self.provider.send_pairing_frame(frame) {
@@ -600,8 +603,7 @@ impl EnsTransportService {
     ) -> Result<EnsCommandAck, EnsTransportError> {
         self.ensure_ready()?;
         let local_endpoint = self
-            .local_endpoint
-            .clone()
+            .current_local_endpoint()
             .ok_or(EnsTransportError::MissingLocalEndpoint)?;
         let offer = self
             .pending_offer(operation_id)
@@ -806,8 +808,14 @@ impl EnsTransportService {
             .unwrap_or(false)
     }
 
+    fn current_local_endpoint(&self) -> Option<EnsEndpointAdvertisement> {
+        self.provider
+            .local_endpoint()
+            .or_else(|| self.local_endpoint.clone())
+    }
+
     fn local_identity(&self) -> EnsPeerIdentity {
-        match self.local_endpoint.as_ref() {
+        match self.current_local_endpoint().as_ref() {
             Some(endpoint) => endpoint.identity(),
             None => EnsPeerIdentity::new(self.host_id.clone()).with_host_id(self.host_id.clone()),
         }
