@@ -26,14 +26,18 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 - ENS data-plane 已有独立 `EnsDataFrame::SignalEvent`，与 `EnsPairingFrame` 分离。
 - fake provider 已证明同一个 `SignalEvent` data frame 能覆盖 EventLog、Task、TimeBlock active/completed、Proposal 四类复制 topic。
 - `ReticulumEnsProvider` 已接入当前同级 `ExoNet-Reticulum` crate root，并支持 queue / UDP / TCP server / TCP client interface entrypoint。
-- queue-backed 真实 Reticulum provider 已证明 raw packet payload 可以在不经 HTTP/SSE 的情况下抵达 provider 收包队列。
+- queue-backed 真实 Reticulum provider 已证明 signed `EnsDataFrame::SignalEvent` 可以在不经 HTTP/SSE 的情况下完成 A -> B EventLog 复制。
+- Reticulum data-plane wire frame 已从裸 `EnsDataFrame` 收敛为 signed envelope：`frame`、`to_peer_identity_hex`、`signature`。
+- 出站 provider 只为本机 `identity_hex` 声称的 frame 签名；若 frame 的 `from_peer` 不是本机 Reticulum identity，直接拒绝发送。
+- 入站 provider 会校验目标 peer、sender identity hex、签名长度和 Ed25519 签名；legacy raw frame、坏签名、错误接收者都会 fail closed，并把 provider health 置为 `Degraded`。
+- `EnsTransportService` 仍负责 Mesh 授权；签名有效但未授权的 signer 会被拒绝，不会写入 store。
 
 当前故意没有完成的能力：
 
-- 真实 Reticulum provider 还不能把 raw packet 当作可信同步事件 ingest 到 store。
-- 原因是当前 `ReceivedData` 路径没有提供可验证 sender proof；provider 会把 `transport_peer` 置为 `None`。
-- `EnsTransportService` 对缺 sender proof 的 `SignalEvent` 返回 `MissingDataFrameTransportPeer`，这是有意的 fail-closed 行为。
-- 因此文档里不能写“真实 provider EventLog happy path 已通过”或“已投递到 B 端 store”。准确说法是“raw payload 已抵达 provider queue，可信 ingest 待 sender binding”。
+- signed envelope 当前提供的是“可验签 signer identity”，不是 Reticulum link-layer 暴露的独立 observed sender。
+- `EnsReceivedDataFrame.transport_peer` 在 Reticulum provider 中暂时表示 verified signer；若 ExoNet-Reticulum 后续暴露 source-binding/link metadata，需要再增加 verified signer 与 observed link sender 的一致性校验。
+- UDP/TCP/mDNS/local JSON/JSONL/file/queue/Bluetooth 等日用物理联通层还没有全部迁到 Reticulum interface 下方；下一阶段应做这些物理层纵切，而不是继续扩展 HTTP/SSE。
+- 真实 provider 目前只完成 EventLog signed happy path；Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收仍待从 fake gateway 搬过来。
 
 ## 本轮代码变更
 
@@ -41,12 +45,17 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 
 - `crates/exomind-runtime/src/ens/data_protocol.rs`
   - 新增 `EnsReceivedDataFrame { transport_peer, frame }` envelope。
+  - 新增 `EnsDataFrame::from_peer()`，供 provider 在签名前后统一读取 frame 声称的 sender。
 - `crates/exomind-runtime/src/ens/provider.rs`
   - `drain_received_data_frames` 改为返回 `Vec<EnsReceivedDataFrame>`。
 - `crates/exomind-runtime/src/ens/fake_provider.rs`
   - fake provider 支持注入带 observed transport peer 的 received data frame。
 - `crates/exomind-runtime/src/ens/reticulum_provider.rs`
-  - raw Reticulum packet decode 后进入 `EnsReceivedDataFrame { transport_peer: None, frame }` 队列。
+  - `ReticulumEnsWireFrame::Data` 改为 signed envelope，裸 `EnsDataFrame` 不再作为 Reticulum data-plane wire frame。
+  - provider 保存 `PrivateIdentity`，出站对 canonical bytes 签名，并绑定目标 `to_peer_identity_hex`。
+  - canonical bytes 固定为 `b"exomind.reticulum.ens.data.v1" + 0 + to_peer_identity_hex + 0 + serde_json(frame)`，避免跨接收者重放。
+  - 入站验签成功后推入 `EnsReceivedDataFrame { transport_peer: Some(verified_signer), frame }`。
+  - 解码失败、legacy raw frame、坏签名、错误接收者、非法 identity hex 都 fail closed。
 - `crates/exomind-runtime/src/ens/service.rs`
   - 新增 `handle_received_data_frame`。
   - 新增 sender binding 校验：缺 observed transport peer 返回 `MissingDataFrameTransportPeer`；observed peer 与 frame 内 `from_peer` 不一致返回 `DataFrameTransportPeerMismatch`。
@@ -58,7 +67,9 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - fake data-plane 四域测试已迁到 sender-bound envelope。
   - 新增缺 transport peer、transport peer mismatch、mixed invalid+valid pending frames 回归测试。
 - `crates/exomind-runtime/tests/ens_reticulum_provider.rs`
-  - queue-backed provider 测试现在确认 raw packet 被收到后因缺 sender proof fail closed，B 端 store 保持为空。
+  - queue-backed provider 测试确认 signed EventLog frame 可以通过真实 Reticulum provider 写入 B 端 store。
+  - 覆盖 legacy unsigned frame fail closed、bad signature fail closed、wrong recipient fail closed、non-local signing refused。
+  - 覆盖签名有效但 Mesh 未授权 signer 时由 service 返回 `UnauthorizedDataFramePeer`，B 端 store 保持为空。
 - `crates/exomind-runtime/tests/mesh_routes_integration.rs`
   - 新增 peer A token 冒充 peer B 的 `403` 回归测试，以及匹配身份的 happy path。
 
@@ -67,8 +78,9 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 必须遵守：
 
 - 不信任 payload 内自声明的 `from_peer`。
-- 真实 data-plane 必须有 Reticulum link proof、signed ENS frame 或扩展后的 `ReceivedData` sender proof。
-- 缺 sender proof 必须 fail closed，不能为了跑通 demo 改成信任 body。
+- 真实 data-plane 必须有 signed ENS frame、Reticulum link proof 或扩展后的 `ReceivedData` sender proof。
+- Reticulum signed envelope 是当前第一版 sender binding；缺 proof、坏签名、错误目标必须 fail closed。
+- 当前 `transport_peer` 表示 verified signer；未来若 Reticulum 暴露 observed link sender，必须再校验两者一致。
 - Reticulum identity 是跨 RT trust、pairing、delivery、discovery 的主键；`host_id` 只是 runtime metadata。
 - provider 不直接写 `EventLogStore`、`TaskStore`、`TimeBlockStore` 或 `ProposalStore`。
 - 远端事件必须进入 `MeshState::ingest_remote_event`，再由 `SignalPool` 和现有 replication actor/projector 应用。
@@ -77,25 +89,20 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 
 ## 下一步顺序
 
-1. 补 sender binding。
-   - 优先方案可以是 signed ENS frame、Reticulum link proof，或扩展 `ReceivedData` 以携带可验证 sender identity。
-   - 验收是缺 proof 继续 `MissingDataFrameTransportPeer`，有 proof 且 identity 匹配才能进入 `MeshState::ingest_remote_event`。
-2. 恢复 queue-backed EventLog 可信 ingest happy path。
-   - 证明 A append EventLog 后，B store 出现同一 record。
-   - 仍不得经过跨 RT HTTP/SSE。
-3. 补 UDP dynamic port 纵切。
+1. 补 UDP dynamic port 纵切。
    - 动态绑定端口。
    - 把实际 bound port 投影到 endpoint/interface snapshot。
    - 双 provider 验证 EventLog `SignalEvent`。
-4. 补 mDNS `ret_port` bootstrap。
+2. 补 mDNS `ret_port` bootstrap。
    - mDNS 只发布/发现 Reticulum interface bootstrap 信息。
    - 最终仍投影为 `EnsEndpointAdvertisement`，不能成为 Mesh peer truth。
-5. 补 TCP seed / TCP server-client interface。
+3. 补 TCP seed / TCP server-client interface。
    - 端口必须来自显式 config 或 endpoint advertisement。
    - 禁止恢复旧分支的 `port +/- 5000` 推导。
-6. 把 fake 已覆盖的 Task、TimeBlock active/completed、Proposal 场景搬到真实 provider。
-7. JSONL/file 只作为 local-dev/file medium 实验接口接入。
-8. 最后再考虑 AppState/route/UI 默认启动集成。
+4. 把 fake 已覆盖的 Task、TimeBlock active/completed、Proposal 场景搬到真实 provider。
+5. JSONL/file/queue 作为 local-dev/file medium 实验接口继续收敛到 Reticulum physical layer。
+6. 如果 ExoNet-Reticulum 暴露 link/source metadata，补 verified signer 与 observed link sender 的一致性测试。
+7. 最后再考虑 AppState/route/UI 默认启动集成。
 
 ## 推荐验证命令
 
