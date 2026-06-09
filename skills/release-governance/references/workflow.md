@@ -51,8 +51,10 @@ and `website/src/lib/release-highlights.ts`. Editing an existing GitHub Release 
 2. Before publishing a public preview, review the user-facing release meaning:
    - list the shipped PRs / direct commits that affect product behavior
    - map each meaningful change to a user scenario, user-visible change, try/verify path, and public copy
+   - write the public copy from the contributor-as-user voice: explain what we changed because it affects how we actually use ExoMind
+   - for the current Chinese public website, put readable Simplified Chinese first and keep English-only engineering terms out of the primary public blocks
    - exclude or demote version bumps, dependency pins, CI fixes, Pages sync, manifests, lockfiles, and internal release pipeline work from primary website highlights
-   - write or review one concise product summary for the website changelog/download surface
+   - write or review one concise `给使用者看的摘要` for the website changelog/download surface
    - place the curated website bullets in the first `## What Changed / 本次变化` block, because Pages parses that block and keeps at most 5 highlights
    - if no meaningful user-visible change exists, treat the build as an engineering validation build and avoid presenting it as a product iteration on public surfaces
 3. Preferred local entry:
@@ -124,7 +126,7 @@ bun run build:tag
 ## Formal Release
 
 1. Start from an existing stable preview tag.
-2. Review / edit release body and public website copy from the product side: summarize why the release matters to users, preserve the structured compare/highlight semantics if you want curated Pages highlights to survive, and keep raw engineering evidence outside the primary public changelog.
+2. Review / edit release body and public website copy from the product side: summarize why the release matters to users in the contributor-as-user voice, put readable Simplified Chinese first for the current Chinese public site, preserve the structured compare/highlight semantics if you want curated Pages highlights to survive, and keep raw engineering evidence outside the primary public changelog.
    - If the formal release is the stable publication of a long preview line, summarize the accumulated user-visible change since the last stable/public baseline, not just the final preview-to-preview diff.
 3. Promote the release via `workflow_dispatch` with `promote_tag`; do not create a second `release/...` tag.
 4. If GitHub UI was used as an emergency/manual fallback, manually trigger `Sync Release Pages` and verify the missing scripted side effects separately.
@@ -147,7 +149,7 @@ pipeline housekeeping.
 
 1. Edit only existing GitHub Releases; do not invent releases for tags that have no GitHub Release.
 2. Preserve the original generated notes under `## Developer Notes / 工程证据` so reviewers can still audit PRs, commits, assets, and compare ranges.
-3. Add `## 产品侧摘要`, then put the public bullets in the first `## What Changed / 本次变化` block.
+3. Add `## 给使用者看的摘要`, then put the public bullets in the first `## What Changed / 本次变化` block.
 4. Limit public bullets to the highest-signal 3-5 user-visible outcomes because Pages timeline metadata keeps at most 5 highlights.
 5. Rerun `Sync Release Pages` and verify both GitHub Pages and the public domain JSON, for example:
 
