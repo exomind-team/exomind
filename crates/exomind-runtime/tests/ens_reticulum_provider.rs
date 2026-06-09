@@ -261,7 +261,7 @@ async fn yield_for_replication_actor() {
 }
 
 async fn wait_for_pending_data_frame_acceptance(service: &EnsTransportService) -> Vec<bool> {
-    for _ in 0..80 {
+    for _ in 0..160 {
         let accepted = service
             .handle_pending_data_frames()
             .await
@@ -274,6 +274,15 @@ async fn wait_for_pending_data_frame_acceptance(service: &EnsTransportService) -
     }
 
     panic!("provider did not receive an accepted signed data frame");
+}
+
+async fn assert_no_pending_data_frame_after_file_poll(service: &EnsTransportService) {
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let drained = service
+        .handle_pending_data_frames()
+        .await
+        .expect("second drain should not duplicate accepted frame");
+    assert!(drained.is_empty());
 }
 
 async fn wait_for_pending_data_frame_error(service: &EnsTransportService) -> EnsTransportError {
@@ -291,7 +300,7 @@ async fn wait_for_pending_data_frame_error(service: &EnsTransportService) -> Ens
 }
 
 async fn wait_for_event(store: &EventLogStore, scope: Option<&str>, event_id: &str) -> EventRecord {
-    for _ in 0..80 {
+    for _ in 0..160 {
         if let Some(event) = store
             .list_events(scope)
             .expect("list replicated eventlog")
@@ -431,6 +440,89 @@ fn signal_data_frame(from: EnsPeerIdentity, event_id: &str) -> EnsDataFrame {
     })
 }
 
+fn assert_local_interface_projection(
+    node: &ReticulumTestNode,
+    interface_name: &str,
+    medium: EnsInterfaceMedium,
+    expected_address: &str,
+    expected_interface_type: &str,
+) {
+    let endpoint = node.provider.local_endpoint();
+    assert_eq!(endpoint.via_interface.as_deref(), Some(interface_name));
+    assert_eq!(endpoint.via_medium, Some(medium));
+    assert_eq!(
+        endpoint.interface_address.as_deref(),
+        Some(expected_address)
+    );
+
+    let snapshot = node.service.snapshot();
+    let interface = snapshot
+        .interfaces
+        .iter()
+        .find(|interface| interface.name == interface_name)
+        .expect("interface should be visible in provider snapshot");
+    assert_eq!(interface.interface_type, expected_interface_type);
+    assert_eq!(interface.topology, EnsInterfaceTopology::Active);
+    assert_eq!(interface.effective_topology, EnsInterfaceTopology::Active);
+}
+
+async fn replicate_eventlog_append_from_a_to_b(
+    node_a: &ReticulumTestNode,
+    node_b: &ReticulumTestNode,
+    event_id: &str,
+) -> EventRecord {
+    let endpoint_a = node_a.provider.local_endpoint();
+    let endpoint_b = node_b.provider.local_endpoint();
+    node_a
+        .provider
+        .upsert_discovered_endpoint(endpoint_b.clone());
+    node_b
+        .provider
+        .upsert_discovered_endpoint(endpoint_a.clone());
+    authorize_peer(&node_a.mesh, &endpoint_b.identity_hex, "rt-b");
+    authorize_peer(&node_b.mesh, &endpoint_a.identity_hex, "rt-a");
+    node_a.mesh.set_peer_interests(
+        &endpoint_b.identity_hex,
+        vec![EVENTLOG_REPLICATION_APPENDED_TOPIC.to_string()],
+    );
+    yield_for_replication_actor().await;
+
+    let appender = EventLogAppender::new(
+        Arc::clone(&node_a.eventlog_store),
+        "rt-a".to_string(),
+        Arc::clone(&node_a.signal_pool),
+        None,
+    );
+    appender
+        .append_event(Some("profile-sync"), sample_event_record(event_id))
+        .await
+        .expect("local append should succeed");
+    let signal = node_a
+        .signal_pool
+        .window()
+        .recent(10)
+        .into_iter()
+        .find(|event| event.topic == EVENTLOG_REPLICATION_APPENDED_TOPIC)
+        .expect("append should publish eventlog replication signal");
+
+    let sent = node_a
+        .service
+        .send_signal_event_to_peer(&endpoint_b.identity_hex, signal)
+        .expect("authorized Reticulum peer should accept send");
+    assert!(sent);
+
+    let accepted = wait_for_pending_data_frame_acceptance(&node_b.service).await;
+    assert_eq!(accepted, vec![true]);
+    let replicated = wait_for_event(&node_b.eventlog_store, Some("profile-sync"), event_id).await;
+    let expected = sample_event_record(event_id);
+    assert_eq!(replicated.timestamp, expected.timestamp);
+    assert_eq!(replicated.content, expected.content);
+    assert_eq!(replicated.tags, expected.tags);
+    assert_eq!(replicated.refs, expected.refs);
+    assert_eq!(replicated.metadata, expected.metadata);
+    replicated
+}
+
 #[tokio::test]
 async fn queue_reticulum_provider_accepts_signed_eventlog_replication_frame() {
     let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-test-a").await;
@@ -506,6 +598,97 @@ async fn queue_reticulum_provider_accepts_signed_eventlog_replication_frame() {
         .await
         .expect("second drain should not duplicate accepted frame");
     assert!(drained.is_empty());
+}
+
+#[tokio::test]
+async fn jsonl_reticulum_provider_supports_eventlog_replication_frame() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-jsonl-data-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-jsonl-data-b").await;
+    let stream_dir = tempfile::tempdir().expect("jsonl stream dir");
+
+    node_a
+        .provider
+        .add_jsonl_interface(
+            "jsonl-node-a",
+            stream_dir.path().to_path_buf(),
+            EnsInterfaceTopology::Active,
+        )
+        .await
+        .expect("node A JSONL interface should start");
+    node_b
+        .provider
+        .add_jsonl_interface(
+            "jsonl-node-b",
+            stream_dir.path().to_path_buf(),
+            EnsInterfaceTopology::Active,
+        )
+        .await
+        .expect("node B JSONL interface should start");
+
+    let expected_address = format!("jsonl://{}", stream_dir.path().display());
+    assert_local_interface_projection(
+        &node_a,
+        "jsonl-node-a",
+        EnsInterfaceMedium::Jsonl,
+        &expected_address,
+        "jsonl_interface",
+    );
+    assert_local_interface_projection(
+        &node_b,
+        "jsonl-node-b",
+        EnsInterfaceMedium::Jsonl,
+        &expected_address,
+        "jsonl_interface",
+    );
+
+    replicate_eventlog_append_from_a_to_b(&node_a, &node_b, "event-reticulum-jsonl").await;
+    assert_no_pending_data_frame_after_file_poll(&node_b.service).await;
+}
+
+#[tokio::test]
+async fn file_reticulum_provider_supports_eventlog_replication_frame() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-file-data-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-file-data-b").await;
+    let dir = tempfile::tempdir().expect("file interface dir");
+    let file_path = dir.path().join("reticulum-shared.jsonl");
+
+    node_a
+        .provider
+        .add_file_interface(
+            "file-node-a",
+            file_path.clone(),
+            EnsInterfaceTopology::Active,
+        )
+        .await
+        .expect("node A file interface should start");
+    node_b
+        .provider
+        .add_file_interface(
+            "file-node-b",
+            file_path.clone(),
+            EnsInterfaceTopology::Active,
+        )
+        .await
+        .expect("node B file interface should start");
+
+    let expected_address = format!("file://{}", file_path.display());
+    assert_local_interface_projection(
+        &node_a,
+        "file-node-a",
+        EnsInterfaceMedium::File,
+        &expected_address,
+        "FileInterface",
+    );
+    assert_local_interface_projection(
+        &node_b,
+        "file-node-b",
+        EnsInterfaceMedium::File,
+        &expected_address,
+        "FileInterface",
+    );
+
+    replicate_eventlog_append_from_a_to_b(&node_a, &node_b, "event-reticulum-file").await;
+    assert_no_pending_data_frame_after_file_poll(&node_b.service).await;
 }
 
 #[tokio::test]

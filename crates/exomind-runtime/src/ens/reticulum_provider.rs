@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -10,6 +10,8 @@ use reticulum::destination::{DestinationName, SingleInputDestination};
 use reticulum::error::RnsError;
 use reticulum::hash::AddressHash;
 use reticulum::identity::{Identity, PrivateIdentity};
+use reticulum::interface::file::FileInterface;
+use reticulum::interface::jsonl::JsonlInterface;
 use reticulum::interface::queue::QueueInterface;
 use reticulum::interface::tcp_client::TcpClient;
 use reticulum::interface::tcp_server::TcpServer;
@@ -365,6 +367,53 @@ impl ReticulumEnsProvider {
             &remote_addr,
             EnsInterfaceMedium::Tcp,
             Some(format!("tcp://{remote_addr}")),
+        );
+        Ok(())
+    }
+
+    pub async fn add_jsonl_interface(
+        &self,
+        node_name: impl Into<String>,
+        stream_dir: impl Into<PathBuf>,
+        topology: EnsInterfaceTopology,
+    ) -> Result<(), EnsProviderError> {
+        let node_name = node_name.into();
+        let stream_dir = stream_dir.into();
+        let identity_hex = self.local_endpoint().identity_hex;
+        self.add_interface(
+            Box::new(JsonlInterface::new(
+                identity_hex,
+                node_name.clone(),
+                stream_dir.clone(),
+            )),
+            topology,
+        )
+        .await;
+        self.set_local_interface_source(
+            &node_name,
+            EnsInterfaceMedium::Jsonl,
+            Some(format!("jsonl://{}", stream_dir.display())),
+        );
+        Ok(())
+    }
+
+    pub async fn add_file_interface(
+        &self,
+        name: impl AsRef<str>,
+        file_path: impl Into<PathBuf>,
+        topology: EnsInterfaceTopology,
+    ) -> Result<(), EnsProviderError> {
+        let name = name.as_ref().to_string();
+        let file_path = file_path.into();
+        self.add_interface(
+            Box::new(FileInterface::new(&name, file_path.clone())),
+            topology,
+        )
+        .await;
+        self.set_local_interface_source(
+            &name,
+            EnsInterfaceMedium::File,
+            Some(format!("file://{}", file_path.display())),
         );
         Ok(())
     }
