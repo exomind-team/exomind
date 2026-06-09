@@ -13,7 +13,14 @@ use exomind_runtime::eventlog_appender::{
 };
 use exomind_runtime::mesh::{MeshState, PeerInfo, PeerStatus};
 use exomind_runtime::pairing::PairingManager;
+use exomind_runtime::proposal::{ActionType, ProposalStatus, ProposalStore};
+use exomind_runtime::signal::SignalEvent;
 use exomind_runtime::signal::actors::replication_actor::spawn_replication_actor;
+use exomind_runtime::task::{TaskPriority, TaskStatus, TaskStore};
+use exomind_runtime::timeblock::{
+    ActiveBlockData, BlockPhase, BlockTransition, BlockTransitionType, TimeBlockData,
+    TimeBlockStore,
+};
 use reticulum::buffer::OutputBuffer;
 use reticulum::hash::AddressHash;
 use reticulum::identity::PrivateIdentity;
@@ -22,12 +29,20 @@ use reticulum::serde::Serialize as ReticulumSerialize;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 
+const TASK_REPLICATION_TOPIC: &str = "task.replication.upserted";
+const TIMEBLOCK_ACTIVE_REPLICATION_TOPIC: &str = "timeblock.replication.active_upserted";
+const TIMEBLOCK_COMPLETED_REPLICATION_TOPIC: &str = "timeblock.replication.completed";
+const PROPOSAL_REPLICATION_TOPIC: &str = "proposal.replication.upserted";
+
 struct ReticulumTestNode {
     service: EnsTransportService,
     provider: Arc<ReticulumEnsProvider>,
     mesh: Arc<MeshState>,
     signal_pool: Arc<exomind_runtime::signal::SignalPool>,
     eventlog_store: Arc<EventLogStore>,
+    task_store: Arc<TaskStore>,
+    timeblock_store: Arc<TimeBlockStore>,
+    proposal_store: Arc<ProposalStore>,
     _data_dir: TempDir,
     _replication_handle: tokio::task::JoinHandle<()>,
 }
@@ -65,13 +80,16 @@ async fn reticulum_node(
     );
     let data_dir = tempfile::tempdir().expect("eventlog tempdir");
     let eventlog_store = Arc::new(EventLogStore::new(data_dir.path().to_path_buf()));
+    let task_store = Arc::new(TaskStore::new());
+    let timeblock_store = Arc::new(TimeBlockStore::new());
+    let proposal_store = Arc::new(ProposalStore::new());
     let replication_handle = spawn_replication_actor(
         Arc::clone(&signal_pool),
         host_id.to_string(),
         Arc::clone(&eventlog_store),
-        Arc::new(exomind_runtime::task::TaskStore::new()),
-        Arc::new(exomind_runtime::timeblock::TimeBlockStore::new()),
-        Arc::new(exomind_runtime::proposal::ProposalStore::new()),
+        Arc::clone(&task_store),
+        Arc::clone(&timeblock_store),
+        Arc::clone(&proposal_store),
     );
 
     ReticulumTestNode {
@@ -80,6 +98,9 @@ async fn reticulum_node(
         mesh,
         signal_pool,
         eventlog_store,
+        task_store,
+        timeblock_store,
+        proposal_store,
         _data_dir: data_dir,
         _replication_handle: replication_handle,
     }
@@ -150,6 +171,89 @@ fn sample_event_record(id: &str) -> EventRecord {
     }
 }
 
+fn sample_active_block() -> ActiveBlockData {
+    ActiveBlockData {
+        start_id: "tb-start-1".to_string(),
+        name: "deep work".to_string(),
+        mode: "countup".to_string(),
+        target_minutes: None,
+        block_type: Some("active".to_string()),
+        elapsed: 1000,
+        updated_at: Some(1_710_000_002_000),
+        phase: Some(BlockPhase::Running),
+        version: Some(2),
+        actor_id: None,
+        last_transition_at: Some(1_710_000_002_000),
+        last_resumed_at: Some(1_710_000_001_000),
+        accumulated_run_ms: Some(1000),
+        start_time: 1_710_000_001_000,
+        action_ended_at: None,
+        feedback_started_at: None,
+        feedback_submitted_at: None,
+        pause_accumulated_ms: Some(0),
+        paused: false,
+        paused_at: None,
+        task_ids: vec![],
+        task_association_log: vec![],
+        source_planned_block_id: None,
+        transitions: vec![BlockTransition {
+            transition_type: BlockTransitionType::Start,
+            at: 1_710_000_001_000,
+            actor_id: Some("rt-a".to_string()),
+        }],
+        task_id: None,
+    }
+}
+
+fn sample_completed_block() -> TimeBlockData {
+    TimeBlockData {
+        id: "tb-start-1".to_string(),
+        name: "deep work".to_string(),
+        start_id: "tb-start-1".to_string(),
+        end_id: "tb-end-1".to_string(),
+        note: Some("done".to_string()),
+        tags: vec!["focus".to_string()],
+        start_time: 1_710_000_001_000,
+        end_time: 1_710_003_601_000,
+        block_type: Some("active".to_string()),
+        task_ids: vec![],
+        task_status_outcomes: None,
+        task_association_log: vec![],
+        source_planned_block_id: None,
+        transitions: vec![
+            BlockTransition {
+                transition_type: BlockTransitionType::Start,
+                at: 1_710_000_001_000,
+                actor_id: Some("rt-a".to_string()),
+            },
+            BlockTransition {
+                transition_type: BlockTransitionType::End,
+                at: 1_710_003_601_000,
+                actor_id: Some("rt-a".to_string()),
+            },
+        ],
+    }
+}
+
+fn signal_event(
+    signal_id: &str,
+    topic: &str,
+    origin_host_id: &str,
+    payload: serde_json::Value,
+) -> SignalEvent {
+    SignalEvent {
+        schema_version: 1,
+        id: signal_id.to_string(),
+        topic: topic.to_string(),
+        ts: chrono::Utc::now().timestamp_millis() as u64,
+        source: "test:ens-reticulum-provider".to_string(),
+        origin_host_id: origin_host_id.to_string(),
+        hop: 0,
+        trace_id: Some(format!("ens-reticulum-test:{signal_id}")),
+        payload,
+    }
+}
+
 async fn yield_for_replication_actor() {
     tokio::task::yield_now().await;
     tokio::task::yield_now().await;
@@ -201,6 +305,18 @@ async fn wait_for_event(store: &EventLogStore, scope: Option<&str>, event_id: &s
     }
 
     panic!("replicated event {event_id} was not stored");
+}
+
+async fn yield_until(assertion: impl Fn() -> bool) {
+    for _ in 0..80 {
+        if assertion() {
+            return;
+        }
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    panic!("condition did not become true after actor yields");
 }
 
 async fn wait_for_health_status(
@@ -609,6 +725,246 @@ async fn tcp_server_client_supports_reticulum_eventlog_replication_frame() {
     assert_eq!(replicated.tags, expected.tags);
     assert_eq!(replicated.refs, expected.refs);
     assert_eq!(replicated.metadata, expected.metadata);
+}
+
+#[tokio::test]
+async fn tcp_server_client_supports_reticulum_domain_replication_frames() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-tcp-domains-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-tcp-domains-b").await;
+
+    node_b
+        .provider
+        .add_tcp_server_interface("127.0.0.1:0", EnsInterfaceTopology::Active)
+        .await
+        .expect("node B dynamic TCP server should bind");
+    let node_b_endpoint_address = wait_for_bound_tcp_endpoint(&node_b.provider).await;
+    let node_b_port =
+        tcp_endpoint_port(&node_b_endpoint_address).expect("TCP endpoint should expose a port");
+
+    node_a
+        .provider
+        .add_tcp_client_interface(
+            format!("127.0.0.1:{node_b_port}"),
+            EnsInterfaceTopology::Active,
+        )
+        .await
+        .expect("node A TCP client should connect to node B server");
+
+    let endpoint_a = node_a.provider.local_endpoint();
+    let endpoint_b = node_b.provider.local_endpoint();
+    node_a
+        .provider
+        .upsert_discovered_endpoint(endpoint_b.clone());
+    node_b
+        .provider
+        .upsert_discovered_endpoint(endpoint_a.clone());
+    authorize_peer(&node_a.mesh, &endpoint_b.identity_hex, "rt-b");
+    authorize_peer(&node_b.mesh, &endpoint_a.identity_hex, "rt-a");
+    node_a.mesh.set_peer_interests(
+        &endpoint_b.identity_hex,
+        vec![
+            TASK_REPLICATION_TOPIC.to_string(),
+            TIMEBLOCK_ACTIVE_REPLICATION_TOPIC.to_string(),
+            TIMEBLOCK_COMPLETED_REPLICATION_TOPIC.to_string(),
+            PROPOSAL_REPLICATION_TOPIC.to_string(),
+        ],
+    );
+    yield_for_replication_actor().await;
+
+    assert!(
+        node_a
+            .service
+            .send_signal_event_to_peer(
+                &endpoint_b.identity_hex,
+                signal_event(
+                    "signal-task-tcp",
+                    TASK_REPLICATION_TOPIC,
+                    "rt-a",
+                    serde_json::json!({
+                        "scopeKey": "profile-sync",
+                        "task": {
+                            "id": "task-1",
+                            "title": "replicated task",
+                            "description": "from real Reticulum TCP",
+                            "done_condition": null,
+                            "status": "pending",
+                            "priority": "medium",
+                            "tags": ["reticulum"],
+                            "source": "remote",
+                            "parent_id": null,
+                            "depends_on": [],
+                            "due_at": null,
+                            "estimated_minutes": 25,
+                            "time_block_ids": [],
+                            "status_transitions": [{
+                                "id": "task-1:task.create:1710000000000",
+                                "at": 1710000000000u64,
+                                "to_status": "pending",
+                                "reason": "task.create"
+                            }],
+                            "created_at": 1710000000000u64,
+                            "updated_at": 1710000001000u64,
+                            "completed_at": null
+                        }
+                    }),
+                )
+            )
+            .expect("authorized Reticulum peer should accept task send")
+    );
+    assert_eq!(
+        wait_for_pending_data_frame_acceptance(&node_b.service).await,
+        vec![true]
+    );
+    yield_until(|| {
+        node_b
+            .task_store
+            .get_scoped(Some("profile-sync"), "task-1")
+            .is_some()
+    })
+    .await;
+    let task = node_b
+        .task_store
+        .get_scoped(Some("profile-sync"), "task-1")
+        .expect("replicated task");
+    assert_eq!(task.title, "replicated task");
+    assert_eq!(task.priority, TaskPriority::Medium);
+    assert_eq!(task.status, TaskStatus::Pending);
+
+    assert!(
+        node_a
+            .service
+            .send_signal_event_to_peer(
+                &endpoint_b.identity_hex,
+                signal_event(
+                    "signal-active-timeblock-tcp",
+                    TIMEBLOCK_ACTIVE_REPLICATION_TOPIC,
+                    "rt-a",
+                    serde_json::json!({
+                        "scopeKey": "profile-sync",
+                        "active": sample_active_block()
+                    }),
+                )
+            )
+            .expect("authorized Reticulum peer should accept active timeblock send")
+    );
+    assert_eq!(
+        wait_for_pending_data_frame_acceptance(&node_b.service).await,
+        vec![true]
+    );
+    yield_until(|| {
+        node_b
+            .timeblock_store
+            .get_active_scoped(Some("profile-sync"))
+            .expect("active query")
+            .is_some()
+    })
+    .await;
+    let active = node_b
+        .timeblock_store
+        .get_active_scoped(Some("profile-sync"))
+        .expect("active query")
+        .expect("active block should replicate through real Reticulum TCP");
+    assert_eq!(active.start_id, "tb-start-1");
+    assert_eq!(active.phase, Some(BlockPhase::Running));
+
+    assert!(
+        node_a
+            .service
+            .send_signal_event_to_peer(
+                &endpoint_b.identity_hex,
+                signal_event(
+                    "signal-completed-timeblock-tcp",
+                    TIMEBLOCK_COMPLETED_REPLICATION_TOPIC,
+                    "rt-a",
+                    serde_json::json!({
+                        "scopeKey": "profile-sync",
+                        "block": sample_completed_block()
+                    }),
+                )
+            )
+            .expect("authorized Reticulum peer should accept completed timeblock send")
+    );
+    assert_eq!(
+        wait_for_pending_data_frame_acceptance(&node_b.service).await,
+        vec![true]
+    );
+    yield_until(|| {
+        !node_b
+            .timeblock_store
+            .list_completed_scoped(Some("profile-sync"))
+            .expect("completed query")
+            .is_empty()
+    })
+    .await;
+    let completed = node_b
+        .timeblock_store
+        .list_completed_scoped(Some("profile-sync"))
+        .expect("completed query");
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed[0].start_id, "tb-start-1");
+    assert!(
+        node_b
+            .timeblock_store
+            .get_active_scoped(Some("profile-sync"))
+            .expect("active query")
+            .is_none(),
+        "completed block with the same start_id should clear the active block"
+    );
+
+    assert!(
+        node_a
+            .service
+            .send_signal_event_to_peer(
+                &endpoint_b.identity_hex,
+                signal_event(
+                    "signal-proposal-tcp",
+                    PROPOSAL_REPLICATION_TOPIC,
+                    "rt-a",
+                    serde_json::json!({
+                        "scopeKey": "profile-sync",
+                        "proposal": {
+                            "id": "proposal-42",
+                            "title": "replicated proposal",
+                            "body": "from real Reticulum TCP",
+                            "action_type": "append_event",
+                            "action_params": { "content": "hello", "tags": ["proposal"] },
+                            "references": [],
+                            "status": "pending",
+                            "publisher": {
+                                "publisher_type": "human",
+                                "id": "remote-user",
+                                "name": "Remote User"
+                            },
+                            "comments": [],
+                            "snooze_until": null,
+                            "created_at": "2026-04-06T00:00:00Z",
+                            "updated_at": "2026-04-06T00:00:10Z"
+                        }
+                    }),
+                )
+            )
+            .expect("authorized Reticulum peer should accept proposal send")
+    );
+    assert_eq!(
+        wait_for_pending_data_frame_acceptance(&node_b.service).await,
+        vec![true]
+    );
+    yield_until(|| {
+        node_b
+            .proposal_store
+            .get_scoped(Some("profile-sync"), "proposal-42")
+            .expect("proposal query")
+            .is_some()
+    })
+    .await;
+    let proposal = node_b
+        .proposal_store
+        .get_scoped(Some("profile-sync"), "proposal-42")
+        .expect("proposal query")
+        .expect("replicated proposal");
+    assert_eq!(proposal.title, "replicated proposal");
+    assert_eq!(proposal.status, ProposalStatus::Pending);
+    assert_eq!(proposal.action_type, ActionType::AppendEvent);
 }
 
 #[tokio::test]

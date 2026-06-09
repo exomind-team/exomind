@@ -4,7 +4,7 @@
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 当前分支：`codex/ens-reticulum-adapter`
 > 基线：当前 `origin/dev`，不是旧 `feat/ret-mesh-prototype`
-> 状态：in-progress，fake control/data-plane、signed queue EventLog、dynamic UDP EventLog、dynamic TCP server/client EventLog、mDNS `ret_port` bootstrap 与 Reticulum debug snapshot 纵切已完成
+> 状态：in-progress，fake control/data-plane、signed queue EventLog、dynamic UDP EventLog、dynamic TCP server/client 四域同步、mDNS `ret_port` bootstrap 与 Reticulum debug snapshot 纵切已完成
 
 ## 目的
 
@@ -279,7 +279,7 @@ node ./node_modules/typescript/bin/tsc --noEmit
 - dynamic UDP 已证明 EventLog `SignalEvent` 可通过 Reticulum provider 与 UDP interface 在双 provider 间同步，不经 HTTP/SSE。
 - dynamic UDP endpoint projection 是内部状态契约和 debug 面板契约，不是新增或冻结产品对外 API。
 - signed envelope 当前仍只提供 verified signer identity；若 ExoNet-Reticulum 后续暴露 observed link sender，需要继续补 verified signer 与 observed sender 一致性校验。
-- Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收仍待迁移。
+- Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收在此 UDP checkpoint 时仍待迁移；后续已在 dynamic TCP server/client checkpoint 中完成。
 - mDNS `ret_port` bootstrap 已完成 provider/service/route 级投影闭环，但尚未做真实局域网双进程人工验收；TCP server/client 后续已通过 dynamic TCP provider checkpoint 验证。二者都只能作为 Reticulum physical/interface layer。
 
 ### 2026-06-09：mDNS Reticulum bootstrap checkpoint
@@ -319,7 +319,7 @@ node ./node_modules/typescript/bin/tsc --noEmit
 - mDNS 是 Reticulum physical/bootstrap layer，不是与 Reticulum 平级的 discovery channel。
 - mDNS 只负责发布和发现 Reticulum bootstrap；pairing、授权、data-plane delivery 仍必须走 ENS/Reticulum service contract。
 - 当前 mDNS bootstrap 还没有做真实局域网双进程端到端人工验收；已完成的是 provider/service/route 级行为闭环。
-- TCP seed/server-client、JSONL/file/local-dev 与真实 provider 四域同步仍待迁移。
+- JSONL/file/local-dev 与 mDNS 真实局域网双进程人工验收仍待迁移；TCP server/client 真实 provider 四域同步见后续 dynamic TCP checkpoint。
 
 ### 2026-06-09：dynamic TCP server/client endpoint projection checkpoint
 
@@ -331,6 +331,7 @@ node ./node_modules/typescript/bin/tsc --noEmit
 - `127.0.0.1:0` 只允许作为 bind input；endpoint、snapshot 和 route payload 不得泄漏 `tcp-listen://127.0.0.1:0`。
 - `set_interface_topology(public_name, topology)` 会解析回 dynamic TCP server 内部 manager identity，并返回 public snapshot name。
 - TCP server/client 双 provider 测试已确认：B 端 dynamic TCP server 暴露实际 bound port，A 端 TCP client 使用该端口连接，EventLog `SignalEvent` 可通过真实 Reticulum TCP interface 同步到 B 端 store。
+- TCP server/client 四域测试已确认：Task、TimeBlock active、TimeBlock completed 与 Proposal 的 replication `SignalEvent` 都经同一真实 TCP provider data-plane 进入 B 端 `MeshState` / `SignalPool` / `replication_actor`，并写入对应业务 store。
 
 验证：
 
@@ -359,7 +360,7 @@ git diff --check
 - TCP server/client 已证明 EventLog `SignalEvent` 可通过 Reticulum provider 与真实 TCP interface 在双 provider 间同步，不经 HTTP/SSE。
 - TCP endpoint projection 是内部状态契约和 debug 面板契约，不是新增或冻结产品对外 API。
 - signed envelope 当前仍只提供 verified signer identity；若 ExoNet-Reticulum 后续暴露 observed link sender，需要继续补 verified signer 与 observed sender 一致性校验。
-- Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收仍待迁移；这是 TCP checkpoint 后的主线。
+- TCP server/client 已完成 EventLog 与 Task/TimeBlock active/completed/Proposal 的真实 provider 四域验收。
 - JSONL/file/local-dev interface 与真实局域网 mDNS 双进程人工验收仍后置。
 
 ## 目标重心修正
@@ -577,7 +578,7 @@ flowchart TD
 
 ### 第一阶段非目标
 
-1. 不承诺真实 Reticulum provider 上的完整四域同步；当前已完成 EventLog 在 queue 与 dynamic UDP 上的真实 provider happy path，Task / TimeBlock / Proposal 仍需迁移真实 provider 回归。
+1. 不承诺所有 physical medium 都已有完整四域同步；当前已完成 EventLog 在 queue 与 dynamic UDP 上的真实 provider happy path，并已完成 dynamic TCP server/client 上的 Task / TimeBlock / Proposal 真实 provider 回归。
 2. 不在第一阶段删除现有 HTTP/SSE mesh relay；但新设计不得继续把 HTTP/SSE 当作长期跨 RT 通信主路径。
 3. 不承诺完整多 hop Reticulum 数据转发。
 4. 不重做 DeviceView 信息架构。
@@ -1001,7 +1002,7 @@ rg -n "tokio::time::sleep|Duration::from_secs\\(5\\)|PairingOffer|PairingCancel|
 | Task 6 前端服务层收敛 | 7 | 7 | 5 | 中高；后端状态稳定后更稳 |
 | Task 7 data-plane sync | 10 | 7 | 5 | 提前；先 fake 用户功能纵切，真实 Reticulum provider 后接 |
 
-结论：Task 1/2/control-plane、Task 7 fake data-plane 最低功能集、Task 5 queue-backed/dynamic UDP/dynamic TCP 真实 provider 收包路径、fail-closed 安全闸门，以及 mDNS `ret_port` bootstrap projection 已完成。下一步进入真实 provider 四域回归，不应一次性恢复旧分支巨型后台循环。
+结论：Task 1/2/control-plane、Task 7 fake data-plane 最低功能集、Task 5 queue-backed/dynamic UDP/dynamic TCP 真实 provider 收包路径、dynamic TCP 四域同步回归、fail-closed 安全闸门，以及 mDNS `ret_port` bootstrap projection 已完成。下一步进入 JSONL/file/local-dev physical medium 与 mDNS 真实局域网双进程验收，不应一次性恢复旧分支巨型后台循环。
 
 ## 第一批建议 patch 边界
 
@@ -1046,10 +1047,10 @@ rg -n "tokio::time::sleep|Duration::from_secs\\(5\\)|PairingOffer|PairingCancel|
 
 ## 下一步执行口径
 
-下一步从当前已完成的 fake control-plane、fake data-plane、queue-backed 真实 provider、dynamic UDP 真实 provider、dynamic TCP 真实 provider 与 mDNS bootstrap 基础继续：
+下一步从当前已完成的 fake control-plane、fake data-plane、queue-backed 真实 provider、dynamic UDP 真实 provider、dynamic TCP 四域真实 provider 与 mDNS bootstrap 基础继续：
 
-1. 把已通过的 fake Task/TimeBlock/Proposal 场景搬到真实 provider，确认四域用户数据都能通过 Reticulum gateway。
-2. 后续再接 JSONL/file local-dev interface 与 AppState/route/UI 启动集成；route/UI 仍只消费 typed snapshot。
+1. 以 dynamic TCP server/client 四域同步测试作为真实 provider data-plane 主回归，后续新增 physical medium 不得绕过 Reticulum gateway / `EnsDataFrame::SignalEvent`。
+2. 后续再接 JSONL/file/local JSON local-dev interface 与 AppState/route/UI 启动集成；route/UI 仍只消费 typed snapshot。
 3. 若 ExoNet-Reticulum 暴露 observed link sender/source metadata，补 verified signer 与 observed sender 的一致性校验。
 
 ## 阶段验收
