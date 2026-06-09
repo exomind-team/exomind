@@ -4,7 +4,7 @@
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 分支：`codex/ens-reticulum-adapter`
 > 目标读者：没有本轮会话上下文、但需要继续推进 Reticulum 同步的 Agent
-> 最新 checkpoint：2026-06-09，signed queue、dynamic UDP EventLog、dynamic TCP server/client 四域同步纵切与 mDNS `ret_port` bootstrap projection 已完成
+> 最新 checkpoint：2026-06-09，signed queue、dynamic UDP、JSONL/file EventLog、dynamic TCP server/client 四域同步纵切与 mDNS `ret_port` bootstrap projection 已完成
 
 ## 当前目标
 
@@ -26,7 +26,7 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 - route/UI debug contract 已能查看和调整 Reticulum interface 状态，并以 backend snapshot 为事实来源。
 - ENS data-plane 已有独立 `EnsDataFrame::SignalEvent`，与 `EnsPairingFrame` 分离。
 - fake provider 已证明同一个 `SignalEvent` data frame 能覆盖 EventLog、Task、TimeBlock active/completed、Proposal 四类复制 topic。
-- `ReticulumEnsProvider` 已接入当前同级 `ExoNet-Reticulum` crate root，并支持 queue / UDP / TCP server / TCP client interface entrypoint。
+- `ReticulumEnsProvider` 已接入当前同级 `ExoNet-Reticulum` crate root，并支持 queue / UDP / TCP server / TCP client / JSONL / file interface entrypoint。
 - queue-backed 真实 Reticulum provider 已证明 signed `EnsDataFrame::SignalEvent` 可以在不经 HTTP/SSE 的情况下完成 A -> B EventLog 复制。
 - Reticulum data-plane wire frame 已从裸 `EnsDataFrame` 收敛为 signed envelope：`frame`、`to_peer_identity_hex`、`signature`。
 - 出站 provider 只为本机 `identity_hex` 声称的 frame 签名；若 frame 的 `from_peer` 不是本机 Reticulum identity，直接拒绝发送。
@@ -39,14 +39,15 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 - UI debug panel 已显示 backend snapshot 给出的本机 endpoint，并覆盖 dynamic UDP 多接口防串线测试。
 - mDNS `ret_port` bootstrap 已完成 provider/service/route 级投影闭环：mDNS TXT 保留 legacy `host_id`，新增 `ret_identity_hex`、`ret_port`、`ret_destination`、`ret_interface`、`ret_capabilities`，并把发现结果投影为 `gateway=reticulum`、`via_medium=mdns`、`runtime_base_url=None` 的未授权 `EnsEndpointAdvertisement`。
 - mDNS bootstrap 不写 `MeshState`，不授权 data frame，不能完成 legacy HTTP mesh pairing；invalid / zero `ret_port` fail closed。
+- JSONL 与 file provider 入口已完成 EventLog 级 physical medium 纵切：两端通过共享 JSONL 目录或 shared file 传递 signed EventLog `SignalEvent`，B 端经 `EnsTransportService` 写入 `EventLogStore`。
 
 当前故意没有完成的能力：
 
 - signed envelope 当前提供的是“可验签 signer identity”，不是 Reticulum link-layer 暴露的独立 observed sender。
 - `EnsReceivedDataFrame.transport_peer` 在 Reticulum provider 中暂时表示 verified signer；若 ExoNet-Reticulum 后续暴露 source-binding/link metadata，需要再增加 verified signer 与 observed link sender 的一致性校验。
-- local JSON/JSONL/file/queue/Bluetooth 等日用物理联通层还没有全部迁到 Reticulum interface 下方；下一阶段应继续做这些物理层纵切，而不是继续扩展 HTTP/SSE。
+- local JSON/Bluetooth 等日用物理联通层还没有全部迁到 Reticulum interface 下方；JSONL/file 已有 EventLog 级纵切，但不是四域完整验收。
 - mDNS bootstrap 目前完成的是 provider/service/route 级行为闭环，尚未做真实局域网双进程人工验收。
-- 真实 provider 目前已完成 EventLog signed happy path，并已覆盖 queue、dynamic UDP 与 dynamic TCP server/client；Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收已在 TCP server/client 路径完成，queue/UDP 上仍保持 EventLog 级回归。
+- 真实 provider 目前已完成 EventLog signed happy path，并已覆盖 queue、dynamic UDP、JSONL、file 与 dynamic TCP server/client；Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收已在 TCP server/client 路径完成，其它 medium 仍保持 EventLog 级回归。
 
 ## 本轮代码变更
 
@@ -71,6 +72,7 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - dynamic TCP server 使用唯一内部 manager name 绑定 `127.0.0.1:0`，状态投影为实际 bound port。
   - `set_interface_topology(public_name, topology)` 会解析回内部 manager name，并返回 public snapshot name。
   - 新增 `ReticulumMdnsBootstrap` 与 `endpoint_from_mdns_bootstrap`，把 mDNS bootstrap 投影为 `gateway=reticulum`、`via_medium=mdns`、`runtime_base_url=None` 的 endpoint。
+  - 新增 `add_jsonl_interface` 与 `add_file_interface`，将 JSONL stream directory 和 shared file path 作为 Reticulum local-dev/file physical medium 接入，并投影 `jsonl://...` / `file://...` endpoint address。
 - `crates/exomind-runtime/src/ens/service.rs`
   - 新增 `handle_received_data_frame`。
   - 新增 sender binding 校验：缺 observed transport peer 返回 `MissingDataFrameTransportPeer`；observed peer 与 frame 内 `from_peer` 不一致返回 `DataFrameTransportPeerMismatch`。
@@ -103,6 +105,7 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - dynamic TCP server 测试确认 OS 分配端口会投影为 `tcp-listen://127.0.0.1:<port>`，并可按 public name 调整 topology。
   - TCP server/client 双 provider 测试确认 A -> B EventLog `SignalEvent` 可通过真实 TCP interface 同步。
   - TCP server/client 双 provider 四域测试确认 Task、TimeBlock active、TimeBlock completed 与 Proposal replication `SignalEvent` 都经同一 Reticulum data-plane 进入 `EnsTransportService` / `MeshState` / `SignalPool` / `replication_actor`，并写入对应远端业务 store。
+  - JSONL 与 file 双 provider 测试确认共享 JSONL 目录或 shared file 可以作为 Reticulum physical medium 传递 signed EventLog `SignalEvent`，并验证 endpoint/snapshot 中的 `via_medium` 与 `interface_address` 投影。
   - 覆盖 legacy unsigned frame fail closed、bad signature fail closed、wrong recipient fail closed、non-local signing refused。
   - 覆盖签名有效但 Mesh 未授权 signer 时由 service 返回 `UnauthorizedDataFramePeer`，B 端 store 保持为空。
 - `crates/exomind-runtime/tests/mesh_routes_integration.rs`
@@ -130,7 +133,7 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 ## 下一步顺序
 
 1. 以 TCP server/client 四域真实 provider 测试作为当前 data-plane 主回归，后续扩展 transport 时不得绕过 `EnsDataFrame::SignalEvent`。
-2. JSONL/file/queue/local JSON 作为 local-dev/file medium 实验接口继续收敛到 Reticulum physical layer。
+2. 继续迁移 local JSON registry/default startup config 等剩余日用入口，仍作为 Reticulum physical layer，不作为 peer truth。
 3. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 bootstrap/discovered endpoint，不把 mDNS 升级成授权来源。
 4. 如果 ExoNet-Reticulum 暴露 link/source metadata，补 verified signer 与 observed sender 的一致性测试。
 5. 最后再考虑 AppState/route/UI 默认启动集成。
