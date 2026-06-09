@@ -4,7 +4,7 @@
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 当前分支：`codex/ens-reticulum-adapter`
 > 基线：当前 `origin/dev`，不是旧 `feat/ret-mesh-prototype`
-> 状态：in-progress，fake control/data-plane、signed queue EventLog、dynamic UDP EventLog、mDNS `ret_port` bootstrap 与 Reticulum debug snapshot 纵切已完成
+> 状态：in-progress，fake control/data-plane、signed queue EventLog、dynamic UDP EventLog、dynamic TCP server/client EventLog、mDNS `ret_port` bootstrap 与 Reticulum debug snapshot 纵切已完成
 
 ## 目的
 
@@ -236,7 +236,7 @@ git diff --check
 - 当前 `ExoNet-Reticulum::ReceivedData` 没有提供可直接使用的 sender/origin proof；真实 provider 会把 `transport_peer` 置为 `None`。
 - 当前 packet-level queue proof 已证明 raw payload 可以抵达 provider，但不会被当作安全同步闭环；`MissingDataFrameTransportPeer` 是有意的 fail-closed 行为。
 - 默认启动集成前必须补 sender binding，例如 signed ENS frame、Reticulum link proof，或扩展 `ReceivedData` 以携带可验证 sender identity。
-- UDP/TCP entrypoint 已在 provider 暴露，其中 dynamic UDP 已完成双 provider EventLog 同步；TCP seed/server-client 仍待补齐显式端口闭环。
+- UDP/TCP entrypoint 已在 provider 暴露，其中 dynamic UDP 已完成双 provider EventLog 同步；TCP server/client 的显式端口闭环后续在 2026-06-09 dynamic TCP checkpoint 中完成。
 - mDNS `ret_port` bootstrap 已完成 provider/service/route 级投影闭环；它只能作为 Reticulum interface bootstrap，不得成为 Mesh peer truth。
 - 真实 provider 尚未接入 `AppState` 默认启动路径；route/UI 继续使用已稳定的 service snapshot/debug contract。
 
@@ -280,7 +280,7 @@ node ./node_modules/typescript/bin/tsc --noEmit
 - dynamic UDP endpoint projection 是内部状态契约和 debug 面板契约，不是新增或冻结产品对外 API。
 - signed envelope 当前仍只提供 verified signer identity；若 ExoNet-Reticulum 后续暴露 observed link sender，需要继续补 verified signer 与 observed sender 一致性校验。
 - Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收仍待迁移。
-- mDNS `ret_port` bootstrap 已完成 provider/service/route 级投影闭环，但尚未做真实局域网双进程人工验收；TCP seed/server-client 仍待实现。二者都只能作为 Reticulum physical/interface layer。
+- mDNS `ret_port` bootstrap 已完成 provider/service/route 级投影闭环，但尚未做真实局域网双进程人工验收；TCP server/client 后续已通过 dynamic TCP provider checkpoint 验证。二者都只能作为 Reticulum physical/interface layer。
 
 ### 2026-06-09：mDNS Reticulum bootstrap checkpoint
 
@@ -321,6 +321,47 @@ node ./node_modules/typescript/bin/tsc --noEmit
 - 当前 mDNS bootstrap 还没有做真实局域网双进程端到端人工验收；已完成的是 provider/service/route 级行为闭环。
 - TCP seed/server-client、JSONL/file/local-dev 与真实 provider 四域同步仍待迁移。
 
+### 2026-06-09：dynamic TCP server/client endpoint projection checkpoint
+
+本阶段已把真实 provider 的 TCP 入口从“entrypoint 已暴露”推进到可测试的 server/client EventLog 纵切：
+
+- `ReticulumEnsProvider::add_tcp_server_interface("127.0.0.1:0", ...)` 支持 OS 动态分配端口。
+- provider 为 dynamic TCP server 创建唯一内部 manager identity，避免 `127.0.0.1:0` 作为 public interface name 泄漏到 snapshot。
+- provider local endpoint 与 interface snapshot 会把动态端口投影为实际 `host:port` public name 和 `tcp-listen://host:port` endpoint address。
+- `127.0.0.1:0` 只允许作为 bind input；endpoint、snapshot 和 route payload 不得泄漏 `tcp-listen://127.0.0.1:0`。
+- `set_interface_topology(public_name, topology)` 会解析回 dynamic TCP server 内部 manager identity，并返回 public snapshot name。
+- TCP server/client 双 provider 测试已确认：B 端 dynamic TCP server 暴露实际 bound port，A 端 TCP client 使用该端口连接，EventLog `SignalEvent` 可通过真实 Reticulum TCP interface 同步到 B 端 store。
+
+验证：
+
+```powershell
+cargo fmt --package exomind-runtime
+cargo test -j 1 -p exomind-runtime --test ens_reticulum_provider tcp_server_dynamic_port_projects_actual_bound_endpoint_state -- --nocapture --test-threads=1
+cargo test -j 1 -p exomind-runtime --test ens_reticulum_provider tcp_server_client_supports_reticulum_eventlog_replication_frame -- --nocapture --test-threads=1
+cargo test -j 1 -p exomind-runtime --test ens_reticulum_provider -- --nocapture --test-threads=1
+cargo test -j 1 -p exomind-runtime --test ens_control_plane_prototype -- --nocapture --test-threads=1
+cargo test -j 1 -p exomind-runtime --test ens_routes_debug -- --nocapture --test-threads=1
+cargo check --lib -j 1 -p exomind-runtime
+node ./node_modules/typescript/bin/tsc --noEmit
+git diff --check
+```
+
+结果：
+
+- `ens_reticulum_provider`：17/17 通过。
+- `ens_control_plane_prototype`：22/22 通过。
+- `ens_routes_debug`：5/5 通过。
+- `cargo fmt`、`cargo check --lib -p exomind-runtime`、`tsc --noEmit`、`git diff --check` 均通过。
+- Rust 仍有既有 warning，集中在 agent/timeblock/task bridge 等无关区域；本阶段未处理。
+
+当前边界：
+
+- TCP server/client 已证明 EventLog `SignalEvent` 可通过 Reticulum provider 与真实 TCP interface 在双 provider 间同步，不经 HTTP/SSE。
+- TCP endpoint projection 是内部状态契约和 debug 面板契约，不是新增或冻结产品对外 API。
+- signed envelope 当前仍只提供 verified signer identity；若 ExoNet-Reticulum 后续暴露 observed link sender，需要继续补 verified signer 与 observed sender 一致性校验。
+- Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收仍待迁移；这是 TCP checkpoint 后的主线。
+- JSONL/file/local-dev interface 与真实局域网 mDNS 双进程人工验收仍后置。
+
 ## 目标重心修正
 
 2026-06-08 复核后确认，本分支的长期目标不是“把 Reticulum 状态显示出来”，而是让 Reticulum 成为当前 runtime mesh 的真实传输承载之一。后续优先级因此调整为：
@@ -354,7 +395,7 @@ node ./node_modules/typescript/bin/tsc --noEmit
 1. 从已通过的 fake `EnsDataFrame::SignalEvent` contract 出发，新建真实 `ReticulumEnsProvider`。
 2. queue-backed 真实 provider 已证明 RT-to-RT 不经 HTTP/SSE 也能把 EventLog `SignalEvent` signed frame 可信 ingest 到远端 store。
 3. dynamic UDP 真实 provider 已证明动态端口可以投影为稳定 endpoint/interface snapshot，并完成双 provider EventLog `SignalEvent` 同步。
-4. mDNS `ret_port` bootstrap 已完成为未授权 discovered endpoint 投影；下一步补 TCP seed / server-client 这些日用物理联通层，端口必须来自显式 config 或 advertisement。
+4. mDNS `ret_port` bootstrap 已完成为未授权 discovered endpoint 投影；TCP server/client 也已完成动态端口投影与 EventLog 真实 provider 纵切，端口来自真实 bind 或显式 endpoint。
 5. 将 fake gateway 已覆盖的 Task、TimeBlock active/completed 与 Proposal 场景搬到真实 provider。
 6. JSONL/file local-dev interface 与 AppState/route/UI 启动集成后置；UI 只消费 typed snapshot，不承担 transport state machine。
 
@@ -960,7 +1001,7 @@ rg -n "tokio::time::sleep|Duration::from_secs\\(5\\)|PairingOffer|PairingCancel|
 | Task 6 前端服务层收敛 | 7 | 7 | 5 | 中高；后端状态稳定后更稳 |
 | Task 7 data-plane sync | 10 | 7 | 5 | 提前；先 fake 用户功能纵切，真实 Reticulum provider 后接 |
 
-结论：Task 1/2/control-plane、Task 7 fake data-plane 最低功能集、Task 5 queue-backed/dynamic UDP 真实 provider 收包路径、fail-closed 安全闸门，以及 mDNS `ret_port` bootstrap projection 已完成。下一步继续扩展 TCP seed/server-client 这些日用物理联通层和真实 provider 四域回归，不应一次性恢复旧分支巨型后台循环。
+结论：Task 1/2/control-plane、Task 7 fake data-plane 最低功能集、Task 5 queue-backed/dynamic UDP/dynamic TCP 真实 provider 收包路径、fail-closed 安全闸门，以及 mDNS `ret_port` bootstrap projection 已完成。下一步进入真实 provider 四域回归，不应一次性恢复旧分支巨型后台循环。
 
 ## 第一批建议 patch 边界
 
@@ -1005,12 +1046,11 @@ rg -n "tokio::time::sleep|Duration::from_secs\\(5\\)|PairingOffer|PairingCancel|
 
 ## 下一步执行口径
 
-下一步从当前已完成的 fake control-plane、fake data-plane、queue-backed 真实 provider、dynamic UDP 真实 provider 与 mDNS bootstrap 基础继续：
+下一步从当前已完成的 fake control-plane、fake data-plane、queue-backed 真实 provider、dynamic UDP 真实 provider、dynamic TCP 真实 provider 与 mDNS bootstrap 基础继续：
 
-1. 补 TCP seed / tcp server-client interface：端口来自显式 config 或 advertisement，不恢复旧分支端口算术。
-2. 把已通过的 fake Task/TimeBlock/Proposal 场景搬到真实 provider，确认四域用户数据都能通过 Reticulum gateway。
-3. 后续再接 JSONL/file local-dev interface 与 AppState/route/UI 启动集成；route/UI 仍只消费 typed snapshot。
-4. 若 ExoNet-Reticulum 暴露 observed link sender/source metadata，补 verified signer 与 observed sender 的一致性校验。
+1. 把已通过的 fake Task/TimeBlock/Proposal 场景搬到真实 provider，确认四域用户数据都能通过 Reticulum gateway。
+2. 后续再接 JSONL/file local-dev interface 与 AppState/route/UI 启动集成；route/UI 仍只消费 typed snapshot。
+3. 若 ExoNet-Reticulum 暴露 observed link sender/source metadata，补 verified signer 与 observed sender 的一致性校验。
 
 ## 阶段验收
 

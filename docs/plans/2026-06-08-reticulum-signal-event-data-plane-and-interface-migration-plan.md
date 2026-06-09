@@ -299,7 +299,7 @@ UI 一致性约束：
 
 ### 当前完成状态
 
-截至 2026-06-08，本计划的 control-plane 前置条件、fake data-plane 最低功能集和第一条真实 Reticulum provider signed data-plane 纵切已经推进到可提交状态：
+截至 2026-06-09，本计划的 control-plane 前置条件、fake data-plane 最低功能集和第一条真实 Reticulum provider signed data-plane 纵切已经推进到可提交状态；queue、dynamic UDP 与 dynamic TCP server/client 都已完成 EventLog 真实 provider 纵切：
 
 - ENS/Reticulum fake control-plane 能完成双节点 PIN pairing happy path。
 - 后端支持 `global_topology`、`interface.topology` 与 `interface.effective_topology = min(global_topology, interface.topology)`。
@@ -323,10 +323,12 @@ UI 一致性约束：
 - UDP `127.0.0.1:0` / `udp://127.0.0.1:0` 现在只允许作为 provider bind input；provider snapshot、local endpoint、route payload 与 UI debug payload 都必须投影为 OS 实际 bound port，不能泄漏 `:0`。
 - 多个 dynamic UDP interface 会使用唯一内部 manager identity，并在 snapshot/debug 中投影为各自的实际 `host:port` public name；设置单接口 topology 时必须按 public name 回到对应 manager identity，不能串线。
 - UI debug panel 已展示 backend snapshot 中的本机 endpoint，并通过测试覆盖多个 dynamic UDP interface 的单接口 topology 更新。
+- dynamic TCP server 支持 `127.0.0.1:0` 作为 bind input；provider local endpoint 与 interface snapshot 会投影为 OS 实际 bound port，且 `set_interface_topology(public_name, topology)` 会解析回内部 manager identity。
+- TCP server/client 双 provider 已证明 A 端 TCP client 可使用 B 端 dynamic TCP server 广告出的实际端口，把 EventLog `SignalEvent` 经 Reticulum provider 写入 B 端 `EventLogStore`，不经 HTTP/SSE。
 - mDNS `ret_port` bootstrap 已完成 provider/service/route 级投影闭环：mDNS TXT 保留 legacy `host_id`，新增 `ret_identity_hex`、`ret_port`、`ret_destination`、`ret_interface`、`ret_capabilities`，并把发现结果投影为 `gateway=reticulum`、`via_medium=mdns`、`runtime_base_url=None` 的未授权 `EnsEndpointAdvertisement`。
 - mDNS bootstrap 只发布和发现 Reticulum interface bootstrap，不写 `MeshState`，不授权 data frame，也不能完成 legacy HTTP mesh pairing；invalid / zero `ret_port` fail closed。
 
-因此下一阶段不再继续扩展 debug UI，也不再停留在 fake data-plane；下一步应从已通过的 queue、dynamic UDP 与 mDNS bootstrap proof 扩展到 TCP seed/server-client 这些日用物理联通层，并把 fake 已覆盖的四域同步搬到真实 provider。
+因此下一阶段不再继续扩展 debug UI，也不再停留在 fake data-plane 或重复 TCP endpoint 纵切；下一步应把 fake 已覆盖的四域同步搬到真实 provider，并继续把 JSONL/file/queue/local JSON 等日用物理层收敛到 Reticulum interface 下方。
 
 ### Phase 1：fake EventLog 用户功能纵切（已完成）
 
@@ -368,9 +370,9 @@ UI 一致性约束：
 - route/UI/AppState 仍不承载协议状态机。
 - `cargo check -p exomind-runtime` 通过。
 
-### Phase 4：Reticulum provider contract（signed queue、dynamic UDP data-plane 与 mDNS bootstrap 已完成）
+### Phase 4：Reticulum provider contract（signed queue、dynamic UDP/dynamic TCP data-plane 与 mDNS bootstrap 已完成）
 
-目标：用当前 ExoNet-Reticulum 公开 API 实现最小真实 provider，并把 fake gateway 证明过的功能搬到真实 Reticulum packet / 后续 link 上。当前已完成 queue-backed signed EventLog happy path、dynamic UDP 双 provider EventLog 纵切和 mDNS `ret_port` bootstrap projection；link lifecycle、observed sender metadata、ack/receipt、TCP seed/server-client 和更完整路径发现后置。
+目标：用当前 ExoNet-Reticulum 公开 API 实现最小真实 provider，并把 fake gateway 证明过的功能搬到真实 Reticulum packet / 后续 link 上。当前已完成 queue-backed signed EventLog happy path、dynamic UDP 双 provider EventLog 纵切、dynamic TCP server/client EventLog 纵切和 mDNS `ret_port` bootstrap projection；link lifecycle、observed sender metadata、ack/receipt 和更完整路径发现后置。
 
 验收：
 
@@ -385,7 +387,7 @@ UI 一致性约束：
 - `EnsTransportService` 对 verified signer 继续执行 Mesh 授权；未授权 signer 不会进入 `MeshState::ingest_remote_event`。
 - dynamic UDP bind input 可以使用 `127.0.0.1:0`，但 provider local endpoint、interface snapshot、route payload、UI payload 必须暴露实际 bound port。
 - 多个 dynamic UDP interface 必须有唯一 manager identity；public snapshot name 只能是 pending public name 或实际 `host:port`，不能复用 `127.0.0.1:0`。
-- EventLog 真实 provider happy path 已在 queue 与 dynamic UDP 上恢复；mDNS bootstrap 已能把 Reticulum interface endpoint 投影为未授权 discovered peer。下一步按 Phase 2 的四域验收扩展到 Task、TimeBlock、Proposal，并补 TCP/local JSON/JSONL/file/queue 等日用物理层验证。
+- EventLog 真实 provider happy path 已在 queue、dynamic UDP 与 dynamic TCP server/client 上恢复；mDNS bootstrap 已能把 Reticulum interface endpoint 投影为未授权 discovered peer。下一步按 Phase 2 的四域验收扩展到 Task、TimeBlock、Proposal，并补 local JSON/JSONL/file/queue 等日用物理层验证。
 
 ### Phase 5：Interface/local-link provider config
 
@@ -468,10 +470,10 @@ UI 一致性约束：
 ## 下一步执行顺序
 
 1. 保持 `ReticulumEnsProvider` 为唯一真实 gateway provider，不新增 Reticulum-only route island。
-2. 基于已通过的 signed queue、dynamic UDP EventLog 纵切与 mDNS bootstrap projection，补 TCP seed / tcp server-client interface：端口必须来自显式 config 或 endpoint advertisement，禁止恢复旧分支的 `port +/- 5000` 推导。
-3. 将 fake 已覆盖的 Task、TimeBlock active/completed、Proposal 场景搬到真实 provider，确认四类用户数据都能通过同一 `EnsDataFrame::SignalEvent` data-plane。
-4. JSONL/file/queue 只作为 local-dev/file medium 实验接口接入，避免把轮询文件协议上升为正式跨 RT truth。
+2. 将 fake 已覆盖的 Task、TimeBlock active/completed、Proposal 场景搬到真实 provider，确认四类用户数据都能通过同一 `EnsDataFrame::SignalEvent` data-plane。
+3. JSONL/file/queue/local JSON 只作为 local-dev/file medium 实验接口接入，避免把轮询文件协议或本地注册表上升为正式跨 RT truth。
+4. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 Reticulum bootstrap/discovered endpoint，不授权 data frame。
 5. 若 ExoNet-Reticulum 后续暴露 observed link sender，补 observed sender 与 verified signer 一致性校验。
 6. 最后再考虑 AppState/route/UI 启动集成；route/UI 仍只消费 typed snapshot，仍禁止乐观显示 topology 或 provider 状态。
 
-这个顺序的理由是：fake gateway 已证明用户功能可以经 `SignalEvent` data frame 闭环，queue-backed 与 dynamic UDP 真实 provider 已证明 Reticulum signed gateway 可以在不经跨 RT HTTP/SSE 的情况下完成 EventLog 可信 ingest，dynamic bind endpoint 能被投影成可调试、可配对的稳定状态，mDNS 已作为 Reticulum bootstrap 而非 peer truth 接入。旧分支的 TCP/local JSON/JSONL 经验要迁移到 Reticulum provider 的 physical layer 下方，不能重新滑回 mDNS/local registry 与 Reticulum 平级、或巨型后台循环直接驱动业务同步的旧形态。
+这个顺序的理由是：fake gateway 已证明用户功能可以经 `SignalEvent` data frame 闭环，queue-backed、dynamic UDP 与 dynamic TCP 真实 provider 已证明 Reticulum signed gateway 可以在不经跨 RT HTTP/SSE 的情况下完成 EventLog 可信 ingest，dynamic bind endpoint 能被投影成可调试、可配对的稳定状态，mDNS 已作为 Reticulum bootstrap 而非 peer truth 接入。旧分支的 local JSON/JSONL/file/queue 经验要迁移到 Reticulum provider 的 physical layer 下方，不能重新滑回 mDNS/local registry 与 Reticulum 平级、或巨型后台循环直接驱动业务同步的旧形态。

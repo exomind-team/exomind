@@ -252,6 +252,30 @@ async fn wait_for_bound_udp_port(bound_port: &std::sync::atomic::AtomicU16) -> u
     panic!("UDP interface did not bind a concrete port");
 }
 
+async fn wait_for_bound_tcp_endpoint(provider: &ReticulumEnsProvider) -> String {
+    for _ in 0..80 {
+        let endpoint = provider.local_endpoint();
+        if let Some(address) = endpoint.interface_address.as_deref() {
+            if let Some(port) = tcp_endpoint_port(address) {
+                if port != 0 {
+                    return address.to_string();
+                }
+            }
+        }
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    panic!("TCP dynamic port was not projected into the local endpoint");
+}
+
+fn tcp_endpoint_port(address: &str) -> Option<u16> {
+    address
+        .strip_prefix("tcp-listen://127.0.0.1:")?
+        .parse()
+        .ok()
+}
+
 fn reticulum_packet_bytes(
     destination_hex: &str,
     wire_frame: serde_json::Value,
@@ -477,6 +501,109 @@ async fn udp_dynamic_port_supports_reticulum_eventlog_replication_frame() {
     )
     .await;
     let expected = sample_event_record("event-reticulum-udp-dynamic");
+    assert_eq!(replicated.timestamp, expected.timestamp);
+    assert_eq!(replicated.content, expected.content);
+    assert_eq!(replicated.tags, expected.tags);
+    assert_eq!(replicated.refs, expected.refs);
+    assert_eq!(replicated.metadata, expected.metadata);
+}
+
+#[tokio::test]
+async fn tcp_server_client_supports_reticulum_eventlog_replication_frame() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-tcp-data-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-tcp-data-b").await;
+
+    node_b
+        .provider
+        .add_tcp_server_interface("127.0.0.1:0", EnsInterfaceTopology::Active)
+        .await
+        .expect("node B dynamic TCP server should bind");
+    let node_b_endpoint_address = wait_for_bound_tcp_endpoint(&node_b.provider).await;
+    let node_b_port =
+        tcp_endpoint_port(&node_b_endpoint_address).expect("TCP endpoint should expose a port");
+    assert_eq!(
+        node_b_endpoint_address,
+        format!("tcp-listen://127.0.0.1:{node_b_port}")
+    );
+    let node_b_public_name = format!("127.0.0.1:{node_b_port}");
+
+    node_a
+        .provider
+        .add_tcp_client_interface(
+            format!("127.0.0.1:{node_b_port}"),
+            EnsInterfaceTopology::Active,
+        )
+        .await
+        .expect("node A TCP client should connect to node B server");
+
+    let endpoint_a = node_a.provider.local_endpoint();
+    let endpoint_b = node_b.provider.local_endpoint();
+    assert_eq!(
+        endpoint_b.via_interface.as_deref(),
+        Some(node_b_public_name.as_str())
+    );
+    assert_eq!(
+        endpoint_b.interface_address.as_deref(),
+        Some(node_b_endpoint_address.as_str())
+    );
+    for payload in [
+        serde_json::to_string(&endpoint_a).expect("endpoint A should serialize"),
+        serde_json::to_string(&endpoint_b).expect("endpoint B should serialize"),
+    ] {
+        assert!(!payload.contains("127.0.0.1:0"));
+        assert!(!payload.contains("tcp-listen://127.0.0.1:0"));
+    }
+
+    node_a
+        .provider
+        .upsert_discovered_endpoint(endpoint_b.clone());
+    node_b
+        .provider
+        .upsert_discovered_endpoint(endpoint_a.clone());
+    authorize_peer(&node_a.mesh, &endpoint_b.identity_hex, "rt-b");
+    authorize_peer(&node_b.mesh, &endpoint_a.identity_hex, "rt-a");
+    node_a.mesh.set_peer_interests(
+        &endpoint_b.identity_hex,
+        vec![EVENTLOG_REPLICATION_APPENDED_TOPIC.to_string()],
+    );
+    yield_for_replication_actor().await;
+
+    let appender = EventLogAppender::new(
+        Arc::clone(&node_a.eventlog_store),
+        "rt-a".to_string(),
+        Arc::clone(&node_a.signal_pool),
+        None,
+    );
+    appender
+        .append_event(
+            Some("profile-sync"),
+            sample_event_record("event-reticulum-tcp-dynamic"),
+        )
+        .await
+        .expect("local append should succeed");
+    let signal = node_a
+        .signal_pool
+        .window()
+        .recent(10)
+        .into_iter()
+        .find(|event| event.topic == EVENTLOG_REPLICATION_APPENDED_TOPIC)
+        .expect("append should publish eventlog replication signal");
+
+    let sent = node_a
+        .service
+        .send_signal_event_to_peer(&endpoint_b.identity_hex, signal)
+        .expect("authorized Reticulum peer should accept TCP send");
+    assert!(sent);
+
+    let accepted = wait_for_pending_data_frame_acceptance(&node_b.service).await;
+    assert_eq!(accepted, vec![true]);
+    let replicated = wait_for_event(
+        &node_b.eventlog_store,
+        Some("profile-sync"),
+        "event-reticulum-tcp-dynamic",
+    )
+    .await;
+    let expected = sample_event_record("event-reticulum-tcp-dynamic");
     assert_eq!(replicated.timestamp, expected.timestamp);
     assert_eq!(replicated.content, expected.content);
     assert_eq!(replicated.tags, expected.tags);
@@ -1007,6 +1134,73 @@ async fn udp_dynamic_port_projects_actual_bound_endpoint_state() {
         .service
         .set_interface_topology(&public_name, EnsInterfaceTopology::Off)
         .expect("dynamic UDP public name should update manager topology");
+    assert_eq!(updated.name, public_name);
+    assert_eq!(updated.topology, EnsInterfaceTopology::Off);
+    assert_eq!(updated.effective_topology, EnsInterfaceTopology::Off);
+    assert_eq!(
+        node_a
+            .provider
+            .local_endpoint()
+            .interface_address
+            .as_deref(),
+        Some(projected.as_str())
+    );
+}
+
+#[tokio::test]
+async fn tcp_server_dynamic_port_projects_actual_bound_endpoint_state() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-tcp-port-a").await;
+    node_a
+        .provider
+        .add_tcp_server_interface("127.0.0.1:0", EnsInterfaceTopology::Active)
+        .await
+        .expect("dynamic TCP server interface should bind");
+
+    let projected = wait_for_bound_tcp_endpoint(&node_a.provider).await;
+    let port = tcp_endpoint_port(&projected).expect("TCP endpoint should expose a bound port");
+    let public_name = format!("127.0.0.1:{port}");
+    assert_ne!(projected, "tcp-listen://127.0.0.1:0");
+
+    let endpoint = node_a.provider.local_endpoint();
+    assert_eq!(
+        endpoint.via_interface.as_deref(),
+        Some(public_name.as_str())
+    );
+    assert_eq!(endpoint.via_medium, Some(EnsInterfaceMedium::Tcp));
+    assert_eq!(
+        endpoint.interface_address.as_deref(),
+        Some(projected.as_str())
+    );
+    assert_eq!(endpoint.discovery_source, "reticulum-provider-interface");
+    let endpoint_payload =
+        serde_json::to_string(&endpoint).expect("endpoint should serialize for route payloads");
+    assert!(!endpoint_payload.contains("127.0.0.1:0"));
+    assert!(!endpoint_payload.contains("tcp-listen://127.0.0.1:0"));
+
+    let snapshot = node_a.service.snapshot();
+    assert_eq!(
+        snapshot
+            .local_endpoint
+            .as_ref()
+            .and_then(|endpoint| endpoint.interface_address.as_deref()),
+        Some(projected.as_str())
+    );
+    let tcp = snapshot
+        .interfaces
+        .iter()
+        .find(|interface| interface.name == public_name)
+        .expect("dynamic TCP server interface should be visible in provider snapshot");
+    assert_eq!(tcp.interface_type, "tcp_server");
+    assert_eq!(tcp.topology, EnsInterfaceTopology::Active);
+    assert_eq!(tcp.effective_topology, EnsInterfaceTopology::Active);
+    let snapshot_payload =
+        serde_json::to_string(&snapshot).expect("snapshot should serialize for route payloads");
+    assert!(!snapshot_payload.contains("127.0.0.1:0"));
+    assert!(!snapshot_payload.contains("tcp-listen://127.0.0.1:0"));
+    let updated = node_a
+        .service
+        .set_interface_topology(&public_name, EnsInterfaceTopology::Off)
+        .expect("dynamic TCP public name should update manager topology");
     assert_eq!(updated.name, public_name);
     assert_eq!(updated.topology, EnsInterfaceTopology::Off);
     assert_eq!(updated.effective_topology, EnsInterfaceTopology::Off);

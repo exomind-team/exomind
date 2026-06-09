@@ -4,7 +4,7 @@
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 分支：`codex/ens-reticulum-adapter`
 > 目标读者：没有本轮会话上下文、但需要继续推进 Reticulum 同步的 Agent
-> 最新 checkpoint：2026-06-09，signed queue、dynamic UDP EventLog 纵切与 mDNS `ret_port` bootstrap projection 已完成
+> 最新 checkpoint：2026-06-09，signed queue、dynamic UDP EventLog、dynamic TCP server/client EventLog 纵切与 mDNS `ret_port` bootstrap projection 已完成
 
 ## 当前目标
 
@@ -34,6 +34,8 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 - `EnsTransportService` 仍负责 Mesh 授权；签名有效但未授权的 signer 会被拒绝，不会写入 store。
 - dynamic UDP provider 纵切已完成：`127.0.0.1:0` / `udp://127.0.0.1:0` 只允许作为 bind input；provider local endpoint、interface snapshot、route payload 与 UI payload 都投影为 OS 实际 bound port。
 - 多个 dynamic UDP interface 已有唯一内部 manager identity；snapshot 调试展示名使用实际 `host:port` public name，按第二个 public name 改 topology 不会影响第一个接口。
+- dynamic TCP server provider 纵切已完成：`127.0.0.1:0` 只允许作为 bind input；provider local endpoint 与 interface snapshot 会投影为 OS 实际 bound port，`tcp-listen://127.0.0.1:0` 不得出现在 endpoint/snapshot payload。
+- TCP server/client 真实 provider 闭环已完成：B 端 dynamic TCP server 暴露实际 bound port，A 端 TCP client 使用该端口连接，EventLog `SignalEvent` 可通过 Reticulum provider 写入 B 端 store。
 - UI debug panel 已显示 backend snapshot 给出的本机 endpoint，并覆盖 dynamic UDP 多接口防串线测试。
 - mDNS `ret_port` bootstrap 已完成 provider/service/route 级投影闭环：mDNS TXT 保留 legacy `host_id`，新增 `ret_identity_hex`、`ret_port`、`ret_destination`、`ret_interface`、`ret_capabilities`，并把发现结果投影为 `gateway=reticulum`、`via_medium=mdns`、`runtime_base_url=None` 的未授权 `EnsEndpointAdvertisement`。
 - mDNS bootstrap 不写 `MeshState`，不授权 data frame，不能完成 legacy HTTP mesh pairing；invalid / zero `ret_port` fail closed。
@@ -42,9 +44,9 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 
 - signed envelope 当前提供的是“可验签 signer identity”，不是 Reticulum link-layer 暴露的独立 observed sender。
 - `EnsReceivedDataFrame.transport_peer` 在 Reticulum provider 中暂时表示 verified signer；若 ExoNet-Reticulum 后续暴露 source-binding/link metadata，需要再增加 verified signer 与 observed link sender 的一致性校验。
-- TCP/local JSON/JSONL/file/queue/Bluetooth 等日用物理联通层还没有全部迁到 Reticulum interface 下方；下一阶段应做这些物理层纵切，而不是继续扩展 HTTP/SSE。
+- local JSON/JSONL/file/queue/Bluetooth 等日用物理联通层还没有全部迁到 Reticulum interface 下方；下一阶段应继续做这些物理层纵切，而不是继续扩展 HTTP/SSE。
 - mDNS bootstrap 目前完成的是 provider/service/route 级行为闭环，尚未做真实局域网双进程人工验收。
-- 真实 provider 目前只完成 EventLog signed happy path，并已覆盖 queue 与 dynamic UDP；Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收仍待从 fake gateway 搬过来。
+- 真实 provider 目前只完成 EventLog signed happy path，并已覆盖 queue、dynamic UDP 与 dynamic TCP server/client；Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收仍待从 fake gateway 搬过来。
 
 ## 本轮代码变更
 
@@ -66,6 +68,7 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - 入站验签成功后推入 `EnsReceivedDataFrame { transport_peer: Some(verified_signer), frame }`。
   - 解码失败、legacy raw frame、坏签名、错误接收者、非法 identity hex 都 fail closed。
   - dynamic UDP 使用唯一内部 manager name 绑定 `127.0.0.1:0`，状态投影为实际 bound port。
+  - dynamic TCP server 使用唯一内部 manager name 绑定 `127.0.0.1:0`，状态投影为实际 bound port。
   - `set_interface_topology(public_name, topology)` 会解析回内部 manager name，并返回 public snapshot name。
   - 新增 `ReticulumMdnsBootstrap` 与 `endpoint_from_mdns_bootstrap`，把 mDNS bootstrap 投影为 `gateway=reticulum`、`via_medium=mdns`、`runtime_base_url=None` 的 endpoint。
 - `crates/exomind-runtime/src/ens/service.rs`
@@ -97,6 +100,8 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - dynamic UDP 双 provider 测试确认 A -> B EventLog `SignalEvent` 可通过 OS 分配的实际 UDP 端口同步。
   - 覆盖 `127.0.0.1:0` / `udp://127.0.0.1:0` 不出现在 endpoint/snapshot payload。
   - 覆盖多个 dynamic UDP interface 保持独立 public name 与 topology 状态。
+  - dynamic TCP server 测试确认 OS 分配端口会投影为 `tcp-listen://127.0.0.1:<port>`，并可按 public name 调整 topology。
+  - TCP server/client 双 provider 测试确认 A -> B EventLog `SignalEvent` 可通过真实 TCP interface 同步。
   - 覆盖 legacy unsigned frame fail closed、bad signature fail closed、wrong recipient fail closed、non-local signing refused。
   - 覆盖签名有效但 Mesh 未授权 signer 时由 service 返回 `UnauthorizedDataFramePeer`，B 端 store 保持为空。
 - `crates/exomind-runtime/tests/mesh_routes_integration.rs`
@@ -119,17 +124,15 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 - topology 语义固定为 `Off < Passive < Active`，`effective_topology = min(global_topology, interface.topology)`。
 - `127.0.0.1:0` / `udp://127.0.0.1:0` 只能是 UDP bind input；任何 endpoint、snapshot、route payload 或 UI payload 中出现 `:0` 都是 bug。
 - dynamic UDP 的内部 manager identity 与 public snapshot name 是两层状态：内部用于 Reticulum interface manager 唯一定位，snapshot/debug 只展示 pending public name 或实际 `host:port`。
+- dynamic TCP server 的内部 manager identity 与 public snapshot name 也是两层状态：内部用于 Reticulum interface manager 唯一定位，snapshot/debug 只展示 pending public name 或实际 `host:port`。
 
 ## 下一步顺序
 
-1. 补 TCP seed / TCP server-client interface。
-   - 端口必须来自显式 config 或 endpoint advertisement。
-   - 禁止恢复旧分支的 `port +/- 5000` 推导。
-2. 把 fake 已覆盖的 Task、TimeBlock active/completed、Proposal 场景搬到真实 provider。
-3. JSONL/file/queue 作为 local-dev/file medium 实验接口继续收敛到 Reticulum physical layer。
-4. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 bootstrap/discovered endpoint，不把 mDNS 升级成授权来源。
-5. 如果 ExoNet-Reticulum 暴露 link/source metadata，补 verified signer 与 observed sender 的一致性测试。
-6. 最后再考虑 AppState/route/UI 默认启动集成。
+1. 把 fake 已覆盖的 Task、TimeBlock active/completed、Proposal 场景搬到真实 provider。
+2. JSONL/file/queue 作为 local-dev/file medium 实验接口继续收敛到 Reticulum physical layer。
+3. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 bootstrap/discovered endpoint，不把 mDNS 升级成授权来源。
+4. 如果 ExoNet-Reticulum 暴露 link/source metadata，补 verified signer 与 observed sender 的一致性测试。
+5. 最后再考虑 AppState/route/UI 默认启动集成。
 
 ## 推荐验证命令
 

@@ -156,6 +156,29 @@ impl ReticulumUdpDynamicBinding {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ReticulumTcpServerDynamicBinding {
+    manager_name: String,
+    pending_public_name: String,
+    host: String,
+    bound_port: Arc<AtomicU16>,
+}
+
+impl ReticulumTcpServerDynamicBinding {
+    fn bound_port(&self) -> Option<u16> {
+        let port = self.bound_port.load(Ordering::Relaxed);
+        if port == 0 { None } else { Some(port) }
+    }
+
+    fn public_interface_name(&self) -> Option<String> {
+        tcp_server_interface_name_from_host_port(&self.host, self.bound_port()?)
+    }
+
+    fn public_endpoint_address(&self) -> Option<String> {
+        tcp_server_endpoint_address_from_host_port(&self.host, self.bound_port()?)
+    }
+}
+
 pub struct ReticulumEnsProvider {
     provider_id: String,
     identity: PrivateIdentity,
@@ -169,6 +192,8 @@ pub struct ReticulumEnsProvider {
     received_pairing_frames: Mutex<VecDeque<EnsPairingFrame>>,
     udp_dynamic_bindings: Mutex<Vec<ReticulumUdpDynamicBinding>>,
     udp_dynamic_counter: AtomicUsize,
+    tcp_server_dynamic_bindings: Mutex<Vec<ReticulumTcpServerDynamicBinding>>,
+    tcp_server_dynamic_counter: AtomicUsize,
     outbound_tx: mpsc::UnboundedSender<ReticulumOutboundFrame>,
 }
 
@@ -225,6 +250,8 @@ impl ReticulumEnsProvider {
             received_pairing_frames: Mutex::new(VecDeque::new()),
             udp_dynamic_bindings: Mutex::new(Vec::new()),
             udp_dynamic_counter: AtomicUsize::new(0),
+            tcp_server_dynamic_bindings: Mutex::new(Vec::new()),
+            tcp_server_dynamic_counter: AtomicUsize::new(0),
             outbound_tx,
         });
         provider.refresh_interfaces();
@@ -236,7 +263,7 @@ impl ReticulumEnsProvider {
     }
 
     pub fn local_endpoint(&self) -> EnsEndpointAdvertisement {
-        self.refresh_dynamic_udp_endpoint();
+        self.refresh_dynamic_endpoints();
         match self.local_endpoint.read() {
             Ok(guard) => guard.clone(),
             Err(poisoned) => poisoned.into_inner().clone(),
@@ -286,7 +313,7 @@ impl ReticulumEnsProvider {
             )
             .await;
             self.set_local_interface_source(&pending_public_name, EnsInterfaceMedium::Udp, None);
-            self.refresh_dynamic_udp_endpoint();
+            self.refresh_dynamic_endpoints();
         } else {
             self.add_interface(Box::new(interface), topology).await;
             let endpoint_address =
@@ -303,12 +330,26 @@ impl ReticulumEnsProvider {
     ) -> Result<(), EnsProviderError> {
         let bind_addr = bind_addr.into();
         let interface = TcpServer::new(bind_addr.clone(), self.transport.interface_manager());
-        self.add_interface(Box::new(interface), topology).await;
-        self.set_local_interface_source(
-            &bind_addr,
-            EnsInterfaceMedium::Tcp,
-            Some(format!("tcp-listen://{bind_addr}")),
-        );
+        let bound_port = Arc::clone(&interface.bound_port);
+        if let Some(binding) = self.create_dynamic_tcp_server_binding(&bind_addr, &bound_port) {
+            let manager_name = binding.manager_name.clone();
+            let pending_public_name = binding.pending_public_name.clone();
+            self.track_dynamic_tcp_server_binding(binding);
+            self.add_interface(
+                Box::new(NamedInterface::new(manager_name, Box::new(interface))),
+                topology,
+            )
+            .await;
+            self.set_local_interface_source(&pending_public_name, EnsInterfaceMedium::Tcp, None);
+            self.refresh_dynamic_endpoints();
+        } else {
+            self.add_interface(Box::new(interface), topology).await;
+            self.set_local_interface_source(
+                &bind_addr,
+                EnsInterfaceMedium::Tcp,
+                Some(format!("tcp-listen://{bind_addr}")),
+            );
+        }
         Ok(())
     }
 
@@ -618,9 +659,40 @@ impl ReticulumEnsProvider {
         guard.push(binding);
     }
 
-    fn refresh_dynamic_udp_endpoint(&self) {
-        let bindings = self.dynamic_udp_bindings();
-        if bindings.is_empty() {
+    fn create_dynamic_tcp_server_binding(
+        &self,
+        bind_addr: &str,
+        bound_port: &Arc<AtomicU16>,
+    ) -> Option<ReticulumTcpServerDynamicBinding> {
+        let socket_addr = bind_addr.parse::<SocketAddr>().ok()?;
+        if socket_addr.port() != 0 {
+            return None;
+        }
+        let sequence = self
+            .tcp_server_dynamic_counter
+            .fetch_add(1, Ordering::Relaxed)
+            + 1;
+        let host = socket_addr.ip().to_string();
+        Some(ReticulumTcpServerDynamicBinding {
+            manager_name: format!("tcp-server-dynamic://{host}/{sequence}"),
+            pending_public_name: format!("{host}:pending-tcp-{sequence}"),
+            host,
+            bound_port: Arc::clone(bound_port),
+        })
+    }
+
+    fn track_dynamic_tcp_server_binding(&self, binding: ReticulumTcpServerDynamicBinding) {
+        let mut guard = match self.tcp_server_dynamic_bindings.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.push(binding);
+    }
+
+    fn refresh_dynamic_endpoints(&self) {
+        let udp_bindings = self.dynamic_udp_bindings();
+        let tcp_server_bindings = self.dynamic_tcp_server_bindings();
+        if udp_bindings.is_empty() && tcp_server_bindings.is_empty() {
             return;
         }
 
@@ -628,7 +700,7 @@ impl ReticulumEnsProvider {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        for binding in bindings {
+        for binding in udp_bindings {
             let Some(public_name) = binding.public_interface_name() else {
                 continue;
             };
@@ -647,10 +719,36 @@ impl ReticulumEnsProvider {
             endpoint.interface_address = Some(endpoint_address);
             endpoint.discovery_source = "reticulum-provider-interface".to_string();
         }
+        for binding in tcp_server_bindings {
+            let Some(public_name) = binding.public_interface_name() else {
+                continue;
+            };
+            let Some(endpoint_address) = binding.public_endpoint_address() else {
+                continue;
+            };
+            let via_interface = endpoint.via_interface.as_deref();
+            if !matches!(
+                via_interface,
+                Some(name) if name == binding.pending_public_name || name == public_name
+            ) || endpoint.via_medium != Some(EnsInterfaceMedium::Tcp)
+            {
+                continue;
+            }
+            endpoint.via_interface = Some(public_name);
+            endpoint.interface_address = Some(endpoint_address);
+            endpoint.discovery_source = "reticulum-provider-interface".to_string();
+        }
     }
 
     fn dynamic_udp_bindings(&self) -> Vec<ReticulumUdpDynamicBinding> {
         match self.udp_dynamic_bindings.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    fn dynamic_tcp_server_bindings(&self) -> Vec<ReticulumTcpServerDynamicBinding> {
+        match self.tcp_server_dynamic_bindings.lock() {
             Ok(guard) => guard.clone(),
             Err(poisoned) => poisoned.into_inner().clone(),
         }
@@ -672,8 +770,38 @@ impl ReticulumEnsProvider {
         })
     }
 
+    fn project_dynamic_tcp_server_interface_name(
+        &self,
+        name: &str,
+        bindings: &[ReticulumTcpServerDynamicBinding],
+    ) -> Option<String> {
+        bindings.iter().find_map(|binding| {
+            if binding.manager_name == name {
+                binding
+                    .public_interface_name()
+                    .or_else(|| Some(binding.pending_public_name.clone()))
+            } else {
+                None
+            }
+        })
+    }
+
     fn resolve_interface_manager_name(&self, name: &str) -> String {
-        self.dynamic_udp_bindings()
+        let udp = self.dynamic_udp_bindings().into_iter().find_map(|binding| {
+            if binding.manager_name == name || binding.pending_public_name == name {
+                return Some(binding.manager_name);
+            }
+            if binding.public_interface_name().as_deref() == Some(name) {
+                Some(binding.manager_name)
+            } else {
+                None
+            }
+        });
+        if let Some(manager_name) = udp {
+            return manager_name;
+        }
+
+        self.dynamic_tcp_server_bindings()
             .into_iter()
             .find_map(|binding| {
                 if binding.manager_name == name || binding.pending_public_name == name {
@@ -689,8 +817,12 @@ impl ReticulumEnsProvider {
     }
 
     fn public_interface_snapshot_name(&self, manager_name: &str) -> String {
-        let bindings = self.dynamic_udp_bindings();
-        self.project_dynamic_udp_interface_name(manager_name, &bindings)
+        let udp_bindings = self.dynamic_udp_bindings();
+        self.project_dynamic_udp_interface_name(manager_name, &udp_bindings)
+            .or_else(|| {
+                let tcp_server_bindings = self.dynamic_tcp_server_bindings();
+                self.project_dynamic_tcp_server_interface_name(manager_name, &tcp_server_bindings)
+            })
             .unwrap_or_else(|| manager_name.to_string())
     }
 
@@ -699,13 +831,20 @@ impl ReticulumEnsProvider {
         let Ok(guard) = manager.try_lock() else {
             return;
         };
-        let bindings = self.dynamic_udp_bindings();
+        let udp_bindings = self.dynamic_udp_bindings();
+        let tcp_server_bindings = self.dynamic_tcp_server_bindings();
         let interfaces = guard
             .list_interfaces()
             .into_iter()
             .map(|info| {
                 let name = self
-                    .project_dynamic_udp_interface_name(&info.name, &bindings)
+                    .project_dynamic_udp_interface_name(&info.name, &udp_bindings)
+                    .or_else(|| {
+                        self.project_dynamic_tcp_server_interface_name(
+                            &info.name,
+                            &tcp_server_bindings,
+                        )
+                    })
                     .unwrap_or(info.name);
                 EnsInterfaceSnapshot {
                     name,
@@ -774,7 +913,7 @@ impl EnsProvider for ReticulumEnsProvider {
     }
 
     fn snapshot(&self) -> EnsProviderSnapshot {
-        self.refresh_dynamic_udp_endpoint();
+        self.refresh_dynamic_endpoints();
         self.refresh_interfaces();
         let health = match self.health.read() {
             Ok(guard) => guard.clone(),
@@ -919,6 +1058,20 @@ fn udp_endpoint_address_from_host_port(host: &str, port: u16) -> Option<String> 
         return None;
     }
     Some(format!("udp://{host}:{port}"))
+}
+
+fn tcp_server_interface_name_from_host_port(host: &str, port: u16) -> Option<String> {
+    if port == 0 {
+        return None;
+    }
+    Some(format!("{host}:{port}"))
+}
+
+fn tcp_server_endpoint_address_from_host_port(host: &str, port: u16) -> Option<String> {
+    if port == 0 {
+        return None;
+    }
+    Some(format!("tcp-listen://{host}:{port}"))
 }
 
 pub(crate) fn endpoint_from_mdns_bootstrap(
