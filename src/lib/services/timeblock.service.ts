@@ -90,11 +90,19 @@ interface TimeBlockRtPort {
   }): Promise<{ completed: TimeBlockData | null; active: TimeBlockData }>;
   rtPauseBlock(): Promise<{ status: string }>;
   rtResumeBlock(): Promise<{ status: string }>;
+  rtDescribeBlock(params: {
+    name?: string;
+    note?: string;
+  }): Promise<{ updated: string; blockId: string }>;
   rtPatchActiveBlockTasks(params: {
     taskIds: string[];
     taskAssociationLog: BlockTaskAssociationEvent[];
   }): Promise<TimeBlockData | null>;
 }
+
+type ActiveBlockPatch = Partial<
+  Pick<ActiveBlockData, "name" | "taskIds" | "taskAssociationLog">
+>;
 
 export interface TimeBlockServiceOptions {
   backendMode?: DomainBackendMode;
@@ -123,10 +131,8 @@ export interface TimeBlockService {
     traceContext?: TimeBlockMutationTraceContext,
   ): Promise<TimeBlockData>;
 
-  /** 更新当前进行中时间块的任务关联 */
-  updateActiveBlock(
-    patch: Partial<Pick<TimeBlockData, "taskIds" | "taskAssociationLog">>,
-  ): Promise<TimeBlockData | null>;
+  /** 更新当前进行中时间块的名称与任务关联 */
+  updateActiveBlock(patch: ActiveBlockPatch): Promise<TimeBlockData | null>;
 
   /** 标记“行动结束/开始填写反馈”（点击结束时刻） */
   markEnding(): Promise<void>;
@@ -256,9 +262,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return gaps.length;
   }
 
-  async updateActiveBlock(
-    patch: Partial<Pick<ActiveBlockData, "taskIds" | "taskAssociationLog">>,
-  ): Promise<ActiveBlockData | null> {
+  async updateActiveBlock(patch: ActiveBlockPatch): Promise<ActiveBlockData | null> {
     const existing = await this.readActiveBlock();
     if (!existing) return null;
 
@@ -270,16 +274,36 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     }
 
     if (this.backendMode === "rt-sqlite" && this.rtAdapter) {
-      const updated = await this.rtAdapter.rtPatchActiveBlockTasks({
-        taskIds: patch.taskIds ?? normalizedExisting.taskIds ?? [],
-        taskAssociationLog:
-          patch.taskAssociationLog ??
-          normalizedExisting.taskAssociationLog ??
-          [],
-      });
+      const hasTaskPatch =
+        Object.prototype.hasOwnProperty.call(patch, "taskIds") ||
+        Object.prototype.hasOwnProperty.call(patch, "taskAssociationLog");
+      const nextName =
+        typeof patch.name === "string" ? patch.name.trim() : undefined;
+      const hasNamePatch =
+        typeof nextName === "string" && nextName !== normalizedExisting.name;
+
+      let updated: ActiveBlockData | null = normalizedExisting;
+      if (hasTaskPatch) {
+        updated = await this.rtAdapter.rtPatchActiveBlockTasks({
+          taskIds: patch.taskIds ?? normalizedExisting.taskIds ?? [],
+          taskAssociationLog:
+            patch.taskAssociationLog ??
+            normalizedExisting.taskAssociationLog ??
+            [],
+        });
+      }
       if (!updated) {
         return null;
       }
+
+      if (hasNamePatch) {
+        await this.rtAdapter.rtDescribeBlock({ name: nextName });
+        updated = await this.rtAdapter.getActiveBlock();
+        if (!updated) {
+          return null;
+        }
+      }
+
       const normalizedUpdated = this.normalizeActiveBlock(updated, now);
       this.rememberAcceptedBlock(normalizedUpdated);
       this.notifyChange(normalizedUpdated);
