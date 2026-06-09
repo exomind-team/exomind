@@ -7,6 +7,9 @@ use super::dto::{
 };
 use super::pairing_protocol::EnsPairingFrame;
 use super::provider::{EnsProvider, EnsProviderError, EnsProviderSnapshot};
+use super::reticulum_provider::{
+    ReticulumMdnsBootstrap, can_refresh_mdns_bootstrap_peer, endpoint_from_mdns_bootstrap,
+};
 
 #[derive(Debug, Clone)]
 pub struct FakeEnsSentDataFrame {
@@ -210,5 +213,35 @@ impl EnsProvider for FakeEnsProvider {
             Err(poisoned) => poisoned.into_inner(),
         };
         frames.drain(..).collect()
+    }
+
+    fn upsert_mdns_bootstrap(
+        &self,
+        bootstrap: ReticulumMdnsBootstrap,
+    ) -> Result<(), EnsProviderError> {
+        let endpoint = endpoint_from_mdns_bootstrap(bootstrap)?;
+        let identity = endpoint.identity();
+        let mut peers = match self.peers.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let peer = EnsPeerSnapshot {
+            identity,
+            endpoint: Some(endpoint),
+            authorized: false,
+            pairing_pending: false,
+            last_error: None,
+        };
+        if let Some(existing) = peers
+            .iter_mut()
+            .find(|existing| existing.identity.identity_hex == peer.identity.identity_hex)
+        {
+            if can_refresh_mdns_bootstrap_peer(existing) {
+                *existing = peer;
+            }
+        } else {
+            peers.push(peer);
+        }
+        Ok(())
     }
 }

@@ -19,6 +19,7 @@ use super::pairing_protocol::{
     EnsPairingCancel, EnsPairingComplete, EnsPairingFrame, EnsPairingOffer, EnsPairingResponse,
 };
 use super::provider::{EnsProvider, EnsProviderError};
+use super::reticulum_provider::ReticulumMdnsBootstrap;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum EnsTransportError {
@@ -337,6 +338,21 @@ impl EnsTransportService {
         })?;
 
         self.initiate_pairing_offer(endpoint)
+    }
+
+    pub fn upsert_mdns_bootstrap(
+        &self,
+        bootstrap: ReticulumMdnsBootstrap,
+    ) -> Result<(), EnsTransportError> {
+        self.ensure_ready()?;
+        if self
+            .current_local_endpoint()
+            .is_some_and(|endpoint| endpoint.identity_hex == bootstrap.identity_hex)
+        {
+            return Ok(());
+        }
+        self.provider.upsert_mdns_bootstrap(bootstrap)?;
+        Ok(())
     }
 
     pub fn send_signal_event_to_peer(

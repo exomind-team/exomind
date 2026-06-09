@@ -6,6 +6,7 @@ use super::dto::{
     EnsPeerSnapshot, EnsTransportHealth,
 };
 use super::pairing_protocol::EnsPairingFrame;
+use super::reticulum_provider::ReticulumMdnsBootstrap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnsProviderSnapshot {
@@ -48,5 +49,12 @@ pub trait EnsProvider: Send + Sync {
     ) -> Result<EnsInterfaceSnapshot, EnsProviderError>;
     fn drain_received_data_frames(&self) -> Vec<EnsReceivedDataFrame> {
         Vec::new()
+    }
+    fn upsert_mdns_bootstrap(
+        &self,
+        bootstrap: ReticulumMdnsBootstrap,
+    ) -> Result<(), EnsProviderError> {
+        let _ = bootstrap;
+        Ok(())
     }
 }

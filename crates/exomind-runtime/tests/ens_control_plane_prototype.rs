@@ -3,11 +3,11 @@ use std::sync::Arc;
 use exomind_runtime::ens::{
     EnsEndpointAdvertisement, EnsGatewayKind, EnsInterfaceMedium, EnsInterfaceTopology,
     EnsOperationStatus, EnsPairingCancel, EnsPairingFrame, EnsPairingResponse, EnsPeerIdentity,
-    EnsProviderError, EnsTransportError, EnsTransportService,
+    EnsProviderError, EnsTransportError, EnsTransportService, ReticulumMdnsBootstrap,
 };
 use exomind_runtime::mesh::MeshState;
 use exomind_runtime::pairing::PairingManager;
-use exomind_runtime::signal::SignalPool;
+use exomind_runtime::signal::{SignalEvent, SignalPool};
 
 fn test_service() -> (
     EnsTransportService,
@@ -99,6 +99,32 @@ fn responder_endpoint() -> EnsEndpointAdvertisement {
         "reticulum-destination-b",
         "udp://192.168.1.20:4242",
     )
+}
+
+fn reticulum_mdns_bootstrap(identity_hex: &str, host_id: &str) -> ReticulumMdnsBootstrap {
+    ReticulumMdnsBootstrap {
+        identity_hex: identity_hex.to_string(),
+        host_id: Some(host_id.to_string()),
+        host: "192.168.1.20".to_string(),
+        ret_port: 4242,
+        reticulum_destination: Some("reticulum-destination-b".to_string()),
+        via_interface: Some("lan-mdns".to_string()),
+        capabilities: vec!["ens-control".to_string()],
+    }
+}
+
+fn sample_signal_event() -> SignalEvent {
+    SignalEvent {
+        schema_version: 1,
+        id: "signal-mdns-bootstrap".to_string(),
+        topic: "eventlog.replication.appended".to_string(),
+        ts: 1_710_000_000_000,
+        source: "test".to_string(),
+        origin_host_id: "rt-a".to_string(),
+        hop: 0,
+        trace_id: None,
+        payload: serde_json::json!({ "event_id": "event-mdns-bootstrap" }),
+    }
 }
 
 fn interface_snapshot(
@@ -318,6 +344,179 @@ fn discovered_peer_pairing_rejects_unknown_identity() {
         error,
         EnsTransportError::DiscoveredPeerNotFound("missing".to_string())
     );
+}
+
+#[test]
+fn mdns_bootstrap_projects_discovered_peer_without_authorizing_data_frames() {
+    let (service, _provider, mesh) = test_service_for("rt-a", initiator_endpoint());
+
+    service
+        .upsert_mdns_bootstrap(reticulum_mdns_bootstrap("identity-b", "rt-b"))
+        .expect("mDNS Reticulum bootstrap should project a discovered endpoint");
+
+    let snapshot = service.snapshot();
+    let peer = snapshot
+        .peers
+        .iter()
+        .find(|peer| peer.identity.identity_hex == "identity-b")
+        .expect("mDNS bootstrap peer should appear in ENS debug snapshot");
+    assert_eq!(peer.identity.host_id.as_deref(), Some("rt-b"));
+    assert!(!peer.authorized);
+    assert!(!peer.pairing_pending);
+    let endpoint = peer.endpoint.as_ref().expect("mDNS peer endpoint");
+    assert_eq!(endpoint.gateway, EnsGatewayKind::Reticulum);
+    assert_eq!(endpoint.via_medium, Some(EnsInterfaceMedium::Mdns));
+    assert_eq!(endpoint.runtime_base_url, None);
+    assert_eq!(
+        endpoint.interface_address.as_deref(),
+        Some("udp://192.168.1.20:4242")
+    );
+    assert_eq!(endpoint.discovery_source, "reticulum-mdns-bootstrap");
+    assert!(mesh.get_peer("identity-b").is_none());
+
+    let error = service
+        .send_signal_event_to_peer("identity-b", sample_signal_event())
+        .expect_err("mDNS discovery alone must not authorize Reticulum data frames");
+    assert_eq!(
+        error,
+        EnsTransportError::UnauthorizedDataFramePeer("identity-b".to_string())
+    );
+    assert!(mesh.get_peer("identity-b").is_none());
+}
+
+#[test]
+fn mdns_bootstrap_endpoint_cannot_complete_legacy_http_pairing_without_runtime_url() {
+    let (service, _provider, mesh) = test_service_for("rt-a", initiator_endpoint());
+
+    service
+        .upsert_mdns_bootstrap(reticulum_mdns_bootstrap("identity-b", "rt-b"))
+        .expect("mDNS Reticulum bootstrap should project a discovered endpoint");
+    let ticket = service
+        .initiate_pairing_with_discovered_peer("identity-b")
+        .expect("mDNS Reticulum endpoint can still start the user-visible pairing handshake");
+    let endpoint = service
+        .snapshot()
+        .peers
+        .into_iter()
+        .find(|peer| peer.identity.identity_hex == "identity-b")
+        .and_then(|peer| peer.endpoint)
+        .expect("mDNS peer endpoint should remain visible after pairing starts");
+
+    let error = service
+        .handle_pairing_response(EnsPairingResponse {
+            operation_id: ticket.operation_id,
+            session_id: ticket.session_id,
+            responder: EnsPeerIdentity::new("identity-b").with_host_id("rt-b"),
+            responder_endpoint: endpoint,
+            pin: ticket.pin,
+            responder_inbound_secret: Some("secret-for-rt-a-to-call-b".to_string()),
+        })
+        .expect_err("legacy HTTP mesh authorization requires runtime_base_url");
+
+    assert_eq!(error, EnsTransportError::MissingRuntimeEndpoint);
+    assert!(mesh.get_peer("identity-b").is_none());
+}
+
+#[test]
+fn mdns_bootstrap_ignores_local_identity_at_service_boundary() {
+    let (service, _provider, _mesh) = test_service_for("rt-a", initiator_endpoint());
+
+    service
+        .upsert_mdns_bootstrap(reticulum_mdns_bootstrap("identity-a", "rt-a"))
+        .expect("self mDNS bootstrap should be ignored");
+
+    assert!(
+        service.snapshot().peers.is_empty(),
+        "self mDNS bootstrap must not create a discovered peer"
+    );
+}
+
+#[test]
+fn mdns_bootstrap_refuses_empty_identity_at_provider_boundary() {
+    let (service, _provider, _mesh) = test_service_for("rt-a", initiator_endpoint());
+    let mut bootstrap = reticulum_mdns_bootstrap("  ", "rt-b");
+    bootstrap.host = "192.168.1.20".to_string();
+
+    let error = service
+        .upsert_mdns_bootstrap(bootstrap)
+        .expect_err("anonymous mDNS bootstrap must not create a discovered peer");
+
+    assert!(matches!(
+        error,
+        EnsTransportError::Provider(EnsProviderError::Unavailable(message))
+            if message.contains("identity must be non-empty")
+    ));
+    assert!(
+        service.snapshot().peers.is_empty(),
+        "anonymous mDNS bootstrap must not create a discovered peer"
+    );
+}
+
+#[test]
+fn mdns_bootstrap_cannot_replace_non_mdns_discovered_endpoint() {
+    let (service, provider, _mesh) = test_service_for("rt-a", initiator_endpoint());
+    let original = responder_endpoint();
+    provider.set_peers(vec![discovered_peer(original.clone())]);
+
+    let mut spoofed = reticulum_mdns_bootstrap("identity-b", "rt-b");
+    spoofed.host = "10.0.0.99".to_string();
+    spoofed.ret_port = 6553;
+    spoofed.reticulum_destination = Some("spoofed-reticulum-destination".to_string());
+
+    service
+        .upsert_mdns_bootstrap(spoofed)
+        .expect("spoofed mDNS bootstrap should be ignored rather than fail");
+
+    let snapshot = service.snapshot();
+    let peer = snapshot
+        .peers
+        .iter()
+        .find(|peer| peer.identity.identity_hex == "identity-b")
+        .expect("original discovered peer should remain visible");
+    let endpoint = peer.endpoint.as_ref().expect("original endpoint");
+    assert_eq!(
+        endpoint.reticulum_destination.as_deref(),
+        original.reticulum_destination.as_deref()
+    );
+    assert_eq!(
+        endpoint.interface_address.as_deref(),
+        original.interface_address.as_deref()
+    );
+    assert_eq!(endpoint.discovery_source, "fake-provider");
+}
+
+#[test]
+fn mdns_bootstrap_can_refresh_previous_mdns_bootstrap_endpoint() {
+    let (service, _provider, _mesh) = test_service_for("rt-a", initiator_endpoint());
+
+    service
+        .upsert_mdns_bootstrap(reticulum_mdns_bootstrap("identity-b", "rt-b"))
+        .expect("first mDNS bootstrap should insert peer");
+    let mut refreshed = reticulum_mdns_bootstrap("identity-b", "rt-b");
+    refreshed.host = "192.168.1.21".to_string();
+    refreshed.ret_port = 5252;
+    refreshed.reticulum_destination = Some("refreshed-reticulum-destination".to_string());
+
+    service
+        .upsert_mdns_bootstrap(refreshed)
+        .expect("second mDNS bootstrap should refresh the low-trust endpoint");
+
+    let snapshot = service.snapshot();
+    let endpoint = snapshot
+        .peers
+        .iter()
+        .find(|peer| peer.identity.identity_hex == "identity-b")
+        .and_then(|peer| peer.endpoint.as_ref())
+        .expect("refreshed mDNS endpoint");
+    assert_eq!(
+        endpoint.interface_address.as_deref(),
+        Some("udp://192.168.1.21:5252")
+    );
+    assert_eq!(
+        endpoint.reticulum_destination.as_deref(),
+        Some("refreshed-reticulum-destination")
+    );
+    assert_eq!(endpoint.discovery_source, "reticulum-mdns-bootstrap");
 }
 
 #[test]

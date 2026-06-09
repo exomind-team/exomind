@@ -613,8 +613,24 @@ pub async fn start_with_options(
 
     // mDNS discovery setup.
     let mdns = if options.enable_mdns {
+        let reticulum_advertisement = reticulum_mdns_advertisement_from_endpoint(
+            state.ens_transport.snapshot().local_endpoint.as_ref(),
+        );
+        let ens_transport = Arc::clone(&state.ens_transport);
+        let reticulum_bootstrap_sink: discovery::MdnsReticulumBootstrapSink =
+            Arc::new(move |bootstrap| {
+                if let Err(error) = ens_transport.upsert_mdns_bootstrap(bootstrap) {
+                    tracing::warn!(
+                        error = %error,
+                        "failed to project mDNS Reticulum bootstrap into ENS transport"
+                    );
+                }
+            });
         match discovery::MdnsDiscovery::new(options.host_id.clone(), local_addr.port()) {
             Ok(mdns) => {
+                let mdns = mdns
+                    .with_reticulum_advertisement(reticulum_advertisement)
+                    .with_reticulum_bootstrap_sink(Some(reticulum_bootstrap_sink));
                 if let Err(e) = mdns.register() {
                     tracing::warn!("mDNS register failed: {e}");
                 }
@@ -1075,6 +1091,36 @@ fn default_ens_transport(
     ]);
 
     Arc::new(service)
+}
+
+fn reticulum_mdns_advertisement_from_endpoint(
+    endpoint: Option<&ens::EnsEndpointAdvertisement>,
+) -> Option<discovery::ReticulumMdnsAdvertisement> {
+    let endpoint = endpoint?;
+    if endpoint.reticulum_destination.is_none() {
+        return None;
+    }
+    let (_, ret_port) = parse_udp_endpoint_address(endpoint.interface_address.as_deref()?)?;
+    Some(discovery::ReticulumMdnsAdvertisement {
+        identity_hex: endpoint.identity_hex.clone(),
+        ret_port,
+        reticulum_destination: endpoint.reticulum_destination.clone(),
+        via_interface: endpoint.via_interface.clone(),
+        capabilities: endpoint.capabilities.clone(),
+    })
+}
+
+fn parse_udp_endpoint_address(address: &str) -> Option<(&str, u16)> {
+    let rest = address.strip_prefix("udp://")?;
+    let (host, port) = rest.rsplit_once(':')?;
+    if host.trim().is_empty() {
+        return None;
+    }
+    let port = port.parse::<u16>().ok()?;
+    if port == 0 {
+        return None;
+    }
+    Some((host, port))
 }
 
 /// Resolve the runtime data directory from `EXOMIND_RT_DATA_DIR` env var,

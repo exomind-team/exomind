@@ -38,11 +38,23 @@ const LOCAL_REGISTRY_VERSION: u32 = 1;
 const RETICULUM_ENS_DATA_SIGNATURE_CONTEXT: &[u8] = b"exomind.reticulum.ens.data.v1";
 const RETICULUM_IDENTITY_HEX_LEN: usize = 128;
 const RETICULUM_DATA_SIGNATURE_LEN: usize = 64;
+pub(super) const RETICULUM_MDNS_BOOTSTRAP_DISCOVERY_SOURCE: &str = "reticulum-mdns-bootstrap";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReticulumLocalRegistryEntry {
     pub endpoint: EnsEndpointAdvertisement,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReticulumMdnsBootstrap {
+    pub identity_hex: String,
+    pub host_id: Option<String>,
+    pub host: String,
+    pub ret_port: u16,
+    pub reticulum_destination: Option<String>,
+    pub via_interface: Option<String>,
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -341,6 +353,39 @@ impl ReticulumEnsProvider {
             Err(poisoned) => poisoned.into_inner(),
         };
         peers.insert(peer.identity.identity_hex.clone(), peer);
+    }
+
+    pub fn upsert_mdns_bootstrap(
+        &self,
+        bootstrap: ReticulumMdnsBootstrap,
+    ) -> Result<(), EnsProviderError> {
+        let endpoint = endpoint_from_mdns_bootstrap(bootstrap)?;
+        if endpoint.identity_hex == self.local_endpoint().identity_hex {
+            return Ok(());
+        }
+
+        let identity = endpoint.identity();
+        let peer = EnsPeerSnapshot {
+            identity,
+            endpoint: Some(endpoint),
+            authorized: false,
+            pairing_pending: false,
+            last_error: None,
+        };
+        let mut peers = match self.peers.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        match peers.get_mut(&peer.identity.identity_hex) {
+            Some(existing) if can_refresh_mdns_bootstrap_peer(existing) => {
+                *existing = peer;
+            }
+            Some(_) => {}
+            None => {
+                peers.insert(peer.identity.identity_hex.clone(), peer);
+            }
+        }
+        Ok(())
     }
 
     pub fn publish_local_registry(&self, path: &Path) -> Result<(), EnsProviderError> {
@@ -824,6 +869,13 @@ impl EnsProvider for ReticulumEnsProvider {
         };
         frames.drain(..).collect()
     }
+
+    fn upsert_mdns_bootstrap(
+        &self,
+        bootstrap: ReticulumMdnsBootstrap,
+    ) -> Result<(), EnsProviderError> {
+        ReticulumEnsProvider::upsert_mdns_bootstrap(self, bootstrap)
+    }
 }
 
 fn to_reticulum_topology(topology: EnsInterfaceTopology) -> ReticulumInterfaceTopology {
@@ -867,6 +919,68 @@ fn udp_endpoint_address_from_host_port(host: &str, port: u16) -> Option<String> 
         return None;
     }
     Some(format!("udp://{host}:{port}"))
+}
+
+pub(crate) fn endpoint_from_mdns_bootstrap(
+    bootstrap: ReticulumMdnsBootstrap,
+) -> Result<EnsEndpointAdvertisement, EnsProviderError> {
+    let ReticulumMdnsBootstrap {
+        identity_hex,
+        host_id,
+        host,
+        ret_port,
+        reticulum_destination,
+        via_interface,
+        mut capabilities,
+    } = bootstrap;
+    let identity_hex = identity_hex.trim().to_string();
+    if identity_hex.is_empty() {
+        return Err(EnsProviderError::Unavailable(
+            "mDNS Reticulum bootstrap identity must be non-empty".to_string(),
+        ));
+    }
+    let host = host.trim().to_string();
+    let interface_address = mdns_reticulum_endpoint_address(&host, ret_port)?;
+    if !capabilities
+        .iter()
+        .any(|item| item == "reticulum-bootstrap")
+    {
+        capabilities.push("reticulum-bootstrap".to_string());
+    }
+
+    Ok(EnsEndpointAdvertisement {
+        identity_hex,
+        host_id,
+        gateway: EnsGatewayKind::Reticulum,
+        via_interface: Some(via_interface.unwrap_or_else(|| "lan-mdns".to_string())),
+        via_medium: Some(EnsInterfaceMedium::Mdns),
+        runtime_base_url: None,
+        reticulum_destination,
+        interface_address: Some(interface_address),
+        discovery_source: RETICULUM_MDNS_BOOTSTRAP_DISCOVERY_SOURCE.to_string(),
+        capabilities,
+    })
+}
+
+fn mdns_reticulum_endpoint_address(host: &str, ret_port: u16) -> Result<String, EnsProviderError> {
+    if host.trim().is_empty() {
+        return Err(EnsProviderError::Unavailable(
+            "mDNS Reticulum bootstrap host must be non-empty".to_string(),
+        ));
+    }
+    udp_endpoint_address_from_host_port(host, ret_port).ok_or_else(|| {
+        EnsProviderError::Unavailable(
+            "mDNS Reticulum bootstrap ret_port must be non-zero".to_string(),
+        )
+    })
+}
+
+pub(super) fn can_refresh_mdns_bootstrap_peer(existing: &EnsPeerSnapshot) -> bool {
+    !existing.authorized
+        && !existing.pairing_pending
+        && existing.endpoint.as_ref().is_some_and(|endpoint| {
+            endpoint.discovery_source == RETICULUM_MDNS_BOOTSTRAP_DISCOVERY_SOURCE
+        })
 }
 
 fn canonical_data_frame_bytes(

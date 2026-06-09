@@ -18,5 +18,7 @@ pub use pairing_protocol::{
     EnsPairingCancel, EnsPairingComplete, EnsPairingFrame, EnsPairingOffer, EnsPairingResponse,
 };
 pub use provider::{EnsProvider, EnsProviderError, EnsProviderSnapshot};
-pub use reticulum_provider::{ReticulumEnsProvider, ReticulumLocalRegistryEntry};
+pub use reticulum_provider::{
+    ReticulumEnsProvider, ReticulumLocalRegistryEntry, ReticulumMdnsBootstrap,
+};
 pub use service::{EnsTransportError, EnsTransportService};

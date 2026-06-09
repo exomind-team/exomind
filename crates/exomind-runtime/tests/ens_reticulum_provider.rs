@@ -5,7 +5,7 @@ use std::time::Duration;
 use exomind_runtime::ens::{
     EnsDataFrame, EnsInterfaceMedium, EnsInterfaceTopology, EnsPeerIdentity, EnsProvider,
     EnsProviderError, EnsSignalEventFrame, EnsTransportError, EnsTransportHealthStatus,
-    EnsTransportService, ReticulumEnsProvider,
+    EnsTransportService, ReticulumEnsProvider, ReticulumMdnsBootstrap,
 };
 use exomind_runtime::eventlog::{EventLogStore, EventRecord};
 use exomind_runtime::eventlog_appender::{
@@ -741,6 +741,216 @@ async fn queue_interface_and_local_registry_project_reticulum_endpoint_state() {
     assert_eq!(endpoint.via_medium, Some(EnsInterfaceMedium::Queue));
     assert_eq!(endpoint.discovery_source, "reticulum-provider-interface");
     assert!(endpoint.reticulum_destination.is_some());
+}
+
+#[tokio::test]
+async fn mdns_bootstrap_projects_reticulum_endpoint_without_authorizing_mesh_peer() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-mdns-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-mdns-b").await;
+    let endpoint_b = node_b.provider.local_endpoint();
+    let destination_b = endpoint_b
+        .reticulum_destination
+        .clone()
+        .expect("local Reticulum destination");
+
+    node_a
+        .provider
+        .upsert_mdns_bootstrap(ReticulumMdnsBootstrap {
+            identity_hex: endpoint_b.identity_hex.clone(),
+            host_id: Some("rt-b".to_string()),
+            host: "192.168.1.20".to_string(),
+            ret_port: 4242,
+            reticulum_destination: Some(destination_b.clone()),
+            via_interface: None,
+            capabilities: vec!["ens-control".to_string()],
+        })
+        .expect("mDNS bootstrap should project Reticulum endpoint");
+
+    let snapshot = node_a.service.snapshot();
+    let peer = snapshot
+        .peers
+        .iter()
+        .find(|peer| peer.identity.identity_hex == endpoint_b.identity_hex)
+        .expect("mDNS bootstrap peer should be projected as discovered endpoint");
+    assert_eq!(peer.identity.host_id.as_deref(), Some("rt-b"));
+    assert!(!peer.authorized);
+    assert!(!peer.pairing_pending);
+    let endpoint = peer.endpoint.as_ref().expect("mDNS peer endpoint");
+    assert_eq!(
+        endpoint.gateway,
+        exomind_runtime::ens::EnsGatewayKind::Reticulum
+    );
+    assert_eq!(endpoint.via_interface.as_deref(), Some("lan-mdns"));
+    assert_eq!(endpoint.via_medium, Some(EnsInterfaceMedium::Mdns));
+    assert_eq!(
+        endpoint.interface_address.as_deref(),
+        Some("udp://192.168.1.20:4242")
+    );
+    assert_eq!(endpoint.runtime_base_url, None);
+    assert_eq!(
+        endpoint.reticulum_destination.as_deref(),
+        Some(destination_b.as_str())
+    );
+    assert_eq!(endpoint.discovery_source, "reticulum-mdns-bootstrap");
+    assert!(
+        endpoint
+            .capabilities
+            .iter()
+            .any(|capability| capability == "reticulum-bootstrap")
+    );
+    assert!(
+        endpoint
+            .capabilities
+            .iter()
+            .any(|capability| capability == "ens-control")
+    );
+    assert!(node_a.mesh.get_peer(&endpoint_b.identity_hex).is_none());
+}
+
+#[tokio::test]
+async fn mdns_bootstrap_refuses_zero_reticulum_port() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-mdns-zero-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-mdns-zero-b").await;
+    let endpoint_b = node_b.provider.local_endpoint();
+
+    let error = node_a
+        .provider
+        .upsert_mdns_bootstrap(ReticulumMdnsBootstrap {
+            identity_hex: endpoint_b.identity_hex.clone(),
+            host_id: Some("rt-b".to_string()),
+            host: "192.168.1.20".to_string(),
+            ret_port: 0,
+            reticulum_destination: endpoint_b.reticulum_destination.clone(),
+            via_interface: Some("lan-mdns".to_string()),
+            capabilities: vec![],
+        })
+        .expect_err("mDNS bootstrap must not publish a non-dialable endpoint");
+
+    assert!(matches!(
+        error,
+        EnsProviderError::Unavailable(message)
+            if message.contains("ret_port must be non-zero")
+    ));
+    assert!(
+        node_a
+            .service
+            .snapshot()
+            .peers
+            .iter()
+            .all(|peer| peer.identity.identity_hex != endpoint_b.identity_hex)
+    );
+}
+
+#[tokio::test]
+async fn mdns_bootstrap_refuses_empty_reticulum_host() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-mdns-empty-host-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-mdns-empty-host-b").await;
+    let endpoint_b = node_b.provider.local_endpoint();
+
+    let error = node_a
+        .provider
+        .upsert_mdns_bootstrap(ReticulumMdnsBootstrap {
+            identity_hex: endpoint_b.identity_hex.clone(),
+            host_id: Some("rt-b".to_string()),
+            host: "  ".to_string(),
+            ret_port: 4242,
+            reticulum_destination: endpoint_b.reticulum_destination.clone(),
+            via_interface: Some("lan-mdns".to_string()),
+            capabilities: vec![],
+        })
+        .expect_err("mDNS bootstrap must not publish an empty host endpoint");
+
+    assert!(matches!(
+        error,
+        EnsProviderError::Unavailable(message)
+            if message.contains("host must be non-empty")
+    ));
+    assert!(
+        node_a
+            .service
+            .snapshot()
+            .peers
+            .iter()
+            .all(|peer| peer.identity.identity_hex != endpoint_b.identity_hex)
+    );
+}
+
+#[tokio::test]
+async fn mdns_bootstrap_refuses_empty_reticulum_identity() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-mdns-empty-identity-a").await;
+
+    let error = node_a
+        .provider
+        .upsert_mdns_bootstrap(ReticulumMdnsBootstrap {
+            identity_hex: "  ".to_string(),
+            host_id: Some("rt-b".to_string()),
+            host: "192.168.1.20".to_string(),
+            ret_port: 4242,
+            reticulum_destination: Some("reticulum-destination-b".to_string()),
+            via_interface: Some("lan-mdns".to_string()),
+            capabilities: vec![],
+        })
+        .expect_err("mDNS bootstrap must not publish an anonymous Reticulum peer");
+
+    assert!(matches!(
+        error,
+        EnsProviderError::Unavailable(message)
+            if message.contains("identity must be non-empty")
+    ));
+    assert!(
+        node_a.service.snapshot().peers.is_empty(),
+        "anonymous mDNS bootstrap must not create a discovered peer"
+    );
+}
+
+#[tokio::test]
+async fn mdns_bootstrap_cannot_replace_existing_non_mdns_reticulum_endpoint() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-mdns-spoof-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-mdns-spoof-b").await;
+    let endpoint_b = node_b.provider.local_endpoint();
+    node_a
+        .provider
+        .upsert_discovered_endpoint(endpoint_b.clone());
+
+    node_a
+        .provider
+        .upsert_mdns_bootstrap(ReticulumMdnsBootstrap {
+            identity_hex: endpoint_b.identity_hex.clone(),
+            host_id: Some("rt-b".to_string()),
+            host: "10.0.0.99".to_string(),
+            ret_port: 6553,
+            reticulum_destination: Some("spoofed-reticulum-destination".to_string()),
+            via_interface: Some("spoofed-mdns-interface".to_string()),
+            capabilities: vec!["spoofed-capability".to_string()],
+        })
+        .expect("spoofed mDNS bootstrap should be ignored rather than fail");
+
+    let snapshot = node_a.service.snapshot();
+    let endpoint = snapshot
+        .peers
+        .iter()
+        .find(|peer| peer.identity.identity_hex == endpoint_b.identity_hex)
+        .and_then(|peer| peer.endpoint.as_ref())
+        .expect("original Reticulum endpoint should remain visible");
+    assert_eq!(
+        endpoint.reticulum_destination.as_deref(),
+        endpoint_b.reticulum_destination.as_deref()
+    );
+    assert_eq!(
+        endpoint.interface_address.as_deref(),
+        endpoint_b.interface_address.as_deref()
+    );
+    assert_eq!(
+        endpoint.via_interface.as_deref(),
+        endpoint_b.via_interface.as_deref()
+    );
+    assert_eq!(endpoint.discovery_source, endpoint_b.discovery_source);
+    assert!(
+        !endpoint
+            .capabilities
+            .iter()
+            .any(|capability| capability == "spoofed-capability")
+    );
 }
 
 #[tokio::test]

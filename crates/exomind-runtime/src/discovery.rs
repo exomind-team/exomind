@@ -12,8 +12,125 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
+use crate::ens::ReticulumMdnsBootstrap;
+
 /// Service type for mDNS advertisement and browsing.
 const SERVICE_TYPE: &str = "_exomind._tcp.local.";
+const TXT_HOST_ID: &str = "host_id";
+const TXT_RET_IDENTITY_HEX: &str = "ret_identity_hex";
+const TXT_RET_PORT: &str = "ret_port";
+const TXT_RET_DESTINATION: &str = "ret_destination";
+const TXT_RET_INTERFACE: &str = "ret_interface";
+const TXT_RET_CAPABILITIES: &str = "ret_capabilities";
+const TXT_LEGACY_IDENTITY_HEX: &str = "identity_hex";
+const TXT_LEGACY_RETICULUM_DESTINATION: &str = "reticulum_destination";
+
+pub type MdnsReticulumBootstrapSink = Arc<dyn Fn(ReticulumMdnsBootstrap) + Send + Sync>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReticulumMdnsAdvertisement {
+    pub identity_hex: String,
+    pub ret_port: u16,
+    pub reticulum_destination: Option<String>,
+    pub via_interface: Option<String>,
+    pub capabilities: Vec<String>,
+}
+
+fn mdns_txt_properties(
+    host_id: &str,
+    advertisement: Option<&ReticulumMdnsAdvertisement>,
+) -> HashMap<String, String> {
+    let mut properties = HashMap::from([(TXT_HOST_ID.to_string(), host_id.to_string())]);
+
+    if let Some(advertisement) = advertisement {
+        properties.insert(
+            TXT_RET_IDENTITY_HEX.to_string(),
+            advertisement.identity_hex.clone(),
+        );
+        properties.insert(TXT_RET_PORT.to_string(), advertisement.ret_port.to_string());
+        if let Some(destination) = advertisement.reticulum_destination.as_deref() {
+            properties.insert(TXT_RET_DESTINATION.to_string(), destination.to_string());
+        }
+        if let Some(via_interface) = advertisement.via_interface.as_deref() {
+            properties.insert(TXT_RET_INTERFACE.to_string(), via_interface.to_string());
+        }
+        if !advertisement.capabilities.is_empty() {
+            properties.insert(
+                TXT_RET_CAPABILITIES.to_string(),
+                advertisement.capabilities.join(","),
+            );
+        }
+    }
+
+    properties
+}
+
+fn parse_reticulum_capabilities(raw: Option<&str>) -> Vec<String> {
+    raw.unwrap_or_default()
+        .split([',', ';', ' ', '\t', '\n', '\r'])
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn reticulum_bootstrap_from_service_info(
+    info: &ServiceInfo,
+    host: &str,
+    host_id: Option<String>,
+) -> Result<Option<ReticulumMdnsBootstrap>, String> {
+    let identity_hex = info
+        .get_property_val_str(TXT_RET_IDENTITY_HEX)
+        .or_else(|| info.get_property_val_str(TXT_LEGACY_IDENTITY_HEX))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if identity_hex.is_empty() {
+        return Ok(None);
+    }
+    let host = host.trim();
+    if host.is_empty() {
+        return Err(format!(
+            "invalid mDNS Reticulum host for identity {identity_hex}"
+        ));
+    }
+
+    let ret_port = info
+        .get_property_val_str(TXT_RET_PORT)
+        .unwrap_or_default()
+        .trim()
+        .parse::<u16>()
+        .map_err(|_| format!("invalid mDNS Reticulum ret_port for identity {identity_hex}"))?;
+    if ret_port == 0 {
+        return Err(format!(
+            "invalid mDNS Reticulum ret_port=0 for identity {identity_hex}"
+        ));
+    }
+
+    let reticulum_destination = info
+        .get_property_val_str(TXT_RET_DESTINATION)
+        .or_else(|| info.get_property_val_str(TXT_LEGACY_RETICULUM_DESTINATION))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let via_interface = info
+        .get_property_val_str(TXT_RET_INTERFACE)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let capabilities =
+        parse_reticulum_capabilities(info.get_property_val_str(TXT_RET_CAPABILITIES));
+
+    Ok(Some(ReticulumMdnsBootstrap {
+        identity_hex,
+        host_id,
+        host: host.to_string(),
+        ret_port,
+        reticulum_destination,
+        via_interface,
+        capabilities,
+    }))
+}
 
 /// Pick the best address from a set of discovered addresses.
 ///
@@ -280,6 +397,8 @@ pub struct MdnsDiscovery {
     daemon: ServiceDaemon,
     peers: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
     browse_handle: RwLock<Option<thread::JoinHandle<()>>>,
+    reticulum_advertisement: Option<ReticulumMdnsAdvertisement>,
+    reticulum_bootstrap_sink: Option<MdnsReticulumBootstrapSink>,
 }
 
 // SAFETY: ServiceDaemon internally uses channels that are Send+Sync.
@@ -302,7 +421,25 @@ impl MdnsDiscovery {
             daemon,
             peers: Arc::new(RwLock::new(HashMap::new())),
             browse_handle: RwLock::new(None),
+            reticulum_advertisement: None,
+            reticulum_bootstrap_sink: None,
         })
+    }
+
+    pub fn with_reticulum_advertisement(
+        mut self,
+        advertisement: Option<ReticulumMdnsAdvertisement>,
+    ) -> Self {
+        self.reticulum_advertisement = advertisement;
+        self
+    }
+
+    pub fn with_reticulum_bootstrap_sink(
+        mut self,
+        sink: Option<MdnsReticulumBootstrapSink>,
+    ) -> Self {
+        self.reticulum_bootstrap_sink = sink;
+        self
     }
 
     /// Register this runtime as an `_exomind._tcp.local.` service.
@@ -313,7 +450,7 @@ impl MdnsDiscovery {
         let instance_name = format!("exomind-{}", self.host_id);
         let host_name = format!("{instance_name}.local.");
 
-        let properties = [("host_id", self.host_id.as_str())];
+        let properties = mdns_txt_properties(&self.host_id, self.reticulum_advertisement.as_ref());
 
         let service_info = ServiceInfo::new(
             SERVICE_TYPE,
@@ -321,7 +458,7 @@ impl MdnsDiscovery {
             &host_name,
             "", // empty IP — will be auto-filled
             self.port,
-            &properties[..],
+            properties,
         )
         .map_err(|e| format!("failed to build ServiceInfo: {e}"))?
         .enable_addr_auto();
@@ -353,6 +490,7 @@ impl MdnsDiscovery {
         let peers = Arc::clone(&self.peers);
         let own_host_id = self.host_id.clone();
         let preferred_network = detect_preferred_local_network();
+        let reticulum_bootstrap_sink = self.reticulum_bootstrap_sink.clone();
 
         let handle = thread::Builder::new()
             .name("mdns-browser".to_string())
@@ -378,6 +516,22 @@ impl MdnsDiscovery {
                             let host = pick_best_address(info.get_addresses())
                                 .map(|addr| addr.to_string())
                                 .unwrap_or_default();
+
+                            match reticulum_bootstrap_from_service_info(
+                                &info,
+                                &host,
+                                (!remote_host_id.is_empty()).then(|| remote_host_id.clone()),
+                            ) {
+                                Ok(Some(bootstrap)) => {
+                                    if let Some(sink) = &reticulum_bootstrap_sink {
+                                        sink(bootstrap);
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    tracing::warn!(error = %error, "ignored invalid mDNS Reticulum bootstrap");
+                                }
+                            }
 
                             let peer = DiscoveredPeer {
                                 host_id: remote_host_id.clone(),
@@ -459,11 +613,178 @@ impl Drop for MdnsDiscovery {
 #[cfg(test)]
 mod tests {
     use super::{
-        DiscoveredPeer, PreferredLocalNetwork, better_discovered_peer, local_interface_rank,
-        pick_best_address_for_network,
+        DiscoveredPeer, PreferredLocalNetwork, ReticulumMdnsAdvertisement, SERVICE_TYPE,
+        TXT_HOST_ID, TXT_RET_CAPABILITIES, TXT_RET_DESTINATION, TXT_RET_IDENTITY_HEX,
+        TXT_RET_INTERFACE, TXT_RET_PORT, better_discovered_peer, local_interface_rank,
+        mdns_txt_properties, parse_reticulum_capabilities, pick_best_address_for_network,
+        reticulum_bootstrap_from_service_info,
     };
+    use mdns_sd::ServiceInfo;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    fn service_info_with_properties(
+        port: u16,
+        properties: std::collections::HashMap<String, String>,
+    ) -> ServiceInfo {
+        ServiceInfo::new(
+            SERVICE_TYPE,
+            "exomind-rt-peer",
+            "exomind-rt-peer.local.",
+            "192.168.1.20",
+            port,
+            properties,
+        )
+        .expect("test ServiceInfo should build")
+    }
+
+    #[test]
+    fn mdns_txt_properties_keep_legacy_host_id_and_add_reticulum_bootstrap() {
+        let properties = mdns_txt_properties(
+            "rt-local",
+            Some(&ReticulumMdnsAdvertisement {
+                identity_hex: "identity-a".to_string(),
+                ret_port: 4242,
+                reticulum_destination: Some("destination-a".to_string()),
+                via_interface: Some("192.168.1.20:4242".to_string()),
+                capabilities: vec!["ens-control".to_string(), "ens-data".to_string()],
+            }),
+        );
+
+        assert_eq!(
+            properties.get(TXT_HOST_ID).map(String::as_str),
+            Some("rt-local")
+        );
+        assert_eq!(
+            properties.get(TXT_RET_IDENTITY_HEX).map(String::as_str),
+            Some("identity-a")
+        );
+        assert_eq!(
+            properties.get(TXT_RET_PORT).map(String::as_str),
+            Some("4242")
+        );
+        assert_eq!(
+            properties.get(TXT_RET_DESTINATION).map(String::as_str),
+            Some("destination-a")
+        );
+        assert_eq!(
+            properties.get(TXT_RET_INTERFACE).map(String::as_str),
+            Some("192.168.1.20:4242")
+        );
+        assert_eq!(
+            properties.get(TXT_RET_CAPABILITIES).map(String::as_str),
+            Some("ens-control,ens-data")
+        );
+    }
+
+    #[test]
+    fn mdns_txt_properties_without_reticulum_advertisement_only_publish_host_id() {
+        let properties = mdns_txt_properties("rt-local", None);
+
+        assert_eq!(properties.len(), 1);
+        assert_eq!(
+            properties.get(TXT_HOST_ID).map(String::as_str),
+            Some("rt-local")
+        );
+    }
+
+    #[test]
+    fn reticulum_bootstrap_from_mdns_uses_ret_port_separate_from_http_port() {
+        let properties = mdns_txt_properties(
+            "rt-b",
+            Some(&ReticulumMdnsAdvertisement {
+                identity_hex: "identity-b".to_string(),
+                ret_port: 4242,
+                reticulum_destination: Some("destination-b".to_string()),
+                via_interface: Some("lan0".to_string()),
+                capabilities: vec!["ens-control".to_string(), "eventlog-sync".to_string()],
+            }),
+        );
+        let info = service_info_with_properties(1949, properties);
+
+        let bootstrap =
+            reticulum_bootstrap_from_service_info(&info, "192.168.1.20", Some("rt-b".to_string()))
+                .expect("valid bootstrap should parse")
+                .expect("identity and ret_port should produce bootstrap");
+
+        assert_eq!(info.get_port(), 1949);
+        assert_eq!(bootstrap.ret_port, 4242);
+        assert_eq!(bootstrap.host, "192.168.1.20");
+        assert_eq!(bootstrap.host_id.as_deref(), Some("rt-b"));
+        assert_eq!(bootstrap.identity_hex, "identity-b");
+        assert_eq!(
+            bootstrap.reticulum_destination.as_deref(),
+            Some("destination-b")
+        );
+        assert_eq!(bootstrap.via_interface.as_deref(), Some("lan0"));
+        assert_eq!(
+            bootstrap.capabilities,
+            vec!["ens-control".to_string(), "eventlog-sync".to_string()]
+        );
+    }
+
+    #[test]
+    fn reticulum_bootstrap_ignores_mdns_services_without_reticulum_identity() {
+        let info = service_info_with_properties(
+            1949,
+            std::collections::HashMap::from([(TXT_HOST_ID.to_string(), "rt-b".to_string())]),
+        );
+
+        let bootstrap =
+            reticulum_bootstrap_from_service_info(&info, "192.168.1.20", Some("rt-b".to_string()))
+                .expect("missing identity is not an invalid legacy mDNS service");
+
+        assert!(bootstrap.is_none());
+    }
+
+    #[test]
+    fn reticulum_bootstrap_rejects_zero_ret_port() {
+        let properties = std::collections::HashMap::from([
+            (TXT_HOST_ID.to_string(), "rt-b".to_string()),
+            (TXT_RET_IDENTITY_HEX.to_string(), "identity-b".to_string()),
+            (TXT_RET_PORT.to_string(), "0".to_string()),
+        ]);
+        let info = service_info_with_properties(1949, properties);
+
+        let error =
+            reticulum_bootstrap_from_service_info(&info, "192.168.1.20", Some("rt-b".to_string()))
+                .expect_err("ret_port=0 must not produce a dialable bootstrap");
+
+        assert!(error.contains("ret_port=0"));
+    }
+
+    #[test]
+    fn reticulum_bootstrap_rejects_empty_host() {
+        let properties = std::collections::HashMap::from([
+            (TXT_HOST_ID.to_string(), "rt-b".to_string()),
+            (TXT_RET_IDENTITY_HEX.to_string(), "identity-b".to_string()),
+            (TXT_RET_PORT.to_string(), "4242".to_string()),
+        ]);
+        let info = service_info_with_properties(1949, properties);
+
+        let error = reticulum_bootstrap_from_service_info(&info, "  ", Some("rt-b".to_string()))
+            .expect_err("empty mDNS host must not produce a dialable bootstrap");
+
+        assert!(error.contains("host"));
+    }
+
+    #[test]
+    fn parse_reticulum_capabilities_supports_common_mdns_separators() {
+        let capabilities = parse_reticulum_capabilities(Some(
+            "ens-control,eventlog-sync;timeblock-sync task-sync\nproposal-sync",
+        ));
+
+        assert_eq!(
+            capabilities,
+            vec![
+                "ens-control".to_string(),
+                "eventlog-sync".to_string(),
+                "timeblock-sync".to_string(),
+                "task-sync".to_string(),
+                "proposal-sync".to_string(),
+            ]
+        );
+    }
 
     #[test]
     fn pick_best_address_prefers_same_subnet_ipv4_on_multi_homed_hosts() {
