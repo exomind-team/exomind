@@ -4,7 +4,7 @@
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 分支：`codex/ens-reticulum-adapter`
 > 目标读者：没有本轮会话上下文、但需要继续推进 Reticulum 同步的 Agent
-> 最新 checkpoint：2026-06-09，signed queue 与 dynamic UDP EventLog 纵切已完成
+> 最新 checkpoint：2026-06-09，signed queue、dynamic UDP EventLog 纵切与 mDNS `ret_port` bootstrap projection 已完成
 
 ## 当前目标
 
@@ -35,12 +35,15 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 - dynamic UDP provider 纵切已完成：`127.0.0.1:0` / `udp://127.0.0.1:0` 只允许作为 bind input；provider local endpoint、interface snapshot、route payload 与 UI payload 都投影为 OS 实际 bound port。
 - 多个 dynamic UDP interface 已有唯一内部 manager identity；snapshot 调试展示名使用实际 `host:port` public name，按第二个 public name 改 topology 不会影响第一个接口。
 - UI debug panel 已显示 backend snapshot 给出的本机 endpoint，并覆盖 dynamic UDP 多接口防串线测试。
+- mDNS `ret_port` bootstrap 已完成 provider/service/route 级投影闭环：mDNS TXT 保留 legacy `host_id`，新增 `ret_identity_hex`、`ret_port`、`ret_destination`、`ret_interface`、`ret_capabilities`，并把发现结果投影为 `gateway=reticulum`、`via_medium=mdns`、`runtime_base_url=None` 的未授权 `EnsEndpointAdvertisement`。
+- mDNS bootstrap 不写 `MeshState`，不授权 data frame，不能完成 legacy HTTP mesh pairing；invalid / zero `ret_port` fail closed。
 
 当前故意没有完成的能力：
 
 - signed envelope 当前提供的是“可验签 signer identity”，不是 Reticulum link-layer 暴露的独立 observed sender。
 - `EnsReceivedDataFrame.transport_peer` 在 Reticulum provider 中暂时表示 verified signer；若 ExoNet-Reticulum 后续暴露 source-binding/link metadata，需要再增加 verified signer 与 observed link sender 的一致性校验。
-- TCP/mDNS/local JSON/JSONL/file/queue/Bluetooth 等日用物理联通层还没有全部迁到 Reticulum interface 下方；下一阶段应做这些物理层纵切，而不是继续扩展 HTTP/SSE。
+- TCP/local JSON/JSONL/file/queue/Bluetooth 等日用物理联通层还没有全部迁到 Reticulum interface 下方；下一阶段应做这些物理层纵切，而不是继续扩展 HTTP/SSE。
+- mDNS bootstrap 目前完成的是 provider/service/route 级行为闭环，尚未做真实局域网双进程人工验收。
 - 真实 provider 目前只完成 EventLog signed happy path，并已覆盖 queue 与 dynamic UDP；Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收仍待从 fake gateway 搬过来。
 
 ## 本轮代码变更
@@ -52,8 +55,10 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - 新增 `EnsDataFrame::from_peer()`，供 provider 在签名前后统一读取 frame 声称的 sender。
 - `crates/exomind-runtime/src/ens/provider.rs`
   - `drain_received_data_frames` 改为返回 `Vec<EnsReceivedDataFrame>`。
+  - provider trait 增加 `upsert_mdns_bootstrap` 默认空实现，供 mDNS bootstrap 投影入口使用。
 - `crates/exomind-runtime/src/ens/fake_provider.rs`
   - fake provider 支持注入带 observed transport peer 的 received data frame。
+  - fake provider 支持把 mDNS bootstrap 投影为未授权 discovered Reticulum endpoint。
 - `crates/exomind-runtime/src/ens/reticulum_provider.rs`
   - `ReticulumEnsWireFrame::Data` 改为 signed envelope，裸 `EnsDataFrame` 不再作为 Reticulum data-plane wire frame。
   - provider 保存 `PrivateIdentity`，出站对 canonical bytes 签名，并绑定目标 `to_peer_identity_hex`。
@@ -62,11 +67,18 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - 解码失败、legacy raw frame、坏签名、错误接收者、非法 identity hex 都 fail closed。
   - dynamic UDP 使用唯一内部 manager name 绑定 `127.0.0.1:0`，状态投影为实际 bound port。
   - `set_interface_topology(public_name, topology)` 会解析回内部 manager name，并返回 public snapshot name。
+  - 新增 `ReticulumMdnsBootstrap` 与 `endpoint_from_mdns_bootstrap`，把 mDNS bootstrap 投影为 `gateway=reticulum`、`via_medium=mdns`、`runtime_base_url=None` 的 endpoint。
 - `crates/exomind-runtime/src/ens/service.rs`
   - 新增 `handle_received_data_frame`。
   - 新增 sender binding 校验：缺 observed transport peer 返回 `MissingDataFrameTransportPeer`；observed peer 与 frame 内 `from_peer` 不一致返回 `DataFrameTransportPeerMismatch`。
   - `handle_pending_data_frames` 会继续处理后续帧，保留第一个错误并最终返回，避免坏帧吞掉后续好帧。
   - snapshot 会优先读取 provider 动态 local endpoint，避免 service 中的启动静态 endpoint 与实际接口状态脱节。
+  - 新增 `upsert_mdns_bootstrap`，只把 bootstrap 交给 provider projection，不授权 Mesh peer。
+- `crates/exomind-runtime/src/discovery.rs`
+  - mDNS TXT 继续发布 legacy `host_id`，并在可用时附加 Reticulum bootstrap 字段：`ret_identity_hex`、`ret_port`、`ret_destination`、`ret_interface`、`ret_capabilities`。
+  - `MdnsDiscovery` 浏览到 Reticulum bootstrap 后通过 `MdnsReticulumBootstrapSink` 投给 ENS transport；缺 identity 的 legacy mDNS service 保持兼容，zero/invalid `ret_port` fail closed。
+- `crates/exomind-runtime/src/lib.rs`
+  - 默认 mDNS 启动路径会从 backend snapshot 的 local Reticulum endpoint 生成 mDNS advertisement，并把 discovered bootstrap 投影回 ENS transport。
 - `crates/exomind-runtime/src/ens/dto.rs`
   - `EnsTransportSnapshot` 增加内部调试状态 `local_endpoint`，用于 UI/debug/SSE 观察 provider 当前投影出的 endpoint。
 - `src/lib/services/runtime-ens.service.ts`
@@ -110,15 +122,13 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 
 ## 下一步顺序
 
-1. 补 mDNS `ret_port` bootstrap。
-   - mDNS 只发布/发现 Reticulum interface bootstrap 信息。
-   - 最终仍投影为 `EnsEndpointAdvertisement`，不能成为 Mesh peer truth。
-2. 补 TCP seed / TCP server-client interface。
+1. 补 TCP seed / TCP server-client interface。
    - 端口必须来自显式 config 或 endpoint advertisement。
    - 禁止恢复旧分支的 `port +/- 5000` 推导。
-3. 把 fake 已覆盖的 Task、TimeBlock active/completed、Proposal 场景搬到真实 provider。
-4. JSONL/file/queue 作为 local-dev/file medium 实验接口继续收敛到 Reticulum physical layer。
-5. 如果 ExoNet-Reticulum 暴露 link/source metadata，补 verified signer 与 observed link sender 的一致性测试。
+2. 把 fake 已覆盖的 Task、TimeBlock active/completed、Proposal 场景搬到真实 provider。
+3. JSONL/file/queue 作为 local-dev/file medium 实验接口继续收敛到 Reticulum physical layer。
+4. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 bootstrap/discovered endpoint，不把 mDNS 升级成授权来源。
+5. 如果 ExoNet-Reticulum 暴露 link/source metadata，补 verified signer 与 observed sender 的一致性测试。
 6. 最后再考虑 AppState/route/UI 默认启动集成。
 
 ## 推荐验证命令
