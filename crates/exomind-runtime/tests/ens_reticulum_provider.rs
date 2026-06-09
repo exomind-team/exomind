@@ -5,7 +5,8 @@ use std::time::Duration;
 use exomind_runtime::ens::{
     EnsDataFrame, EnsInterfaceMedium, EnsInterfaceTopology, EnsPeerIdentity, EnsProvider,
     EnsProviderError, EnsSignalEventFrame, EnsTransportError, EnsTransportHealthStatus,
-    EnsTransportService, ReticulumEnsProvider, ReticulumMdnsBootstrap,
+    EnsTransportService, ReticulumEnsInterfaceConfig, ReticulumEnsProvider,
+    ReticulumEnsProviderConfig, ReticulumMdnsBootstrap,
 };
 use exomind_runtime::eventlog::{EventLogStore, EventRecord};
 use exomind_runtime::eventlog_appender::{
@@ -362,6 +363,23 @@ async fn wait_for_bound_udp_endpoint(
     }
 
     panic!("UDP dynamic port was not projected into the local endpoint");
+}
+
+async fn wait_for_local_udp_endpoint(provider: &ReticulumEnsProvider) -> String {
+    for _ in 0..80 {
+        let endpoint = provider.local_endpoint();
+        if let Some(address) = endpoint.interface_address.as_deref() {
+            if let Some(port) = address.strip_prefix("udp://127.0.0.1:") {
+                if port != "0" {
+                    return address.to_string();
+                }
+            }
+        }
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    panic!("UDP endpoint was not projected into the local endpoint");
 }
 
 async fn wait_for_bound_udp_port(bound_port: &std::sync::atomic::AtomicU16) -> u16 {
@@ -1407,6 +1425,93 @@ async fn queue_interface_and_local_registry_project_reticulum_endpoint_state() {
     assert_eq!(endpoint.via_medium, Some(EnsInterfaceMedium::Queue));
     assert_eq!(endpoint.discovery_source, "reticulum-provider-interface");
     assert!(endpoint.reticulum_destination.is_some());
+}
+
+#[tokio::test]
+async fn apply_config_adds_interfaces_and_projects_registry_without_authorizing_peer() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-config-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-config-b").await;
+    let tempdir = tempfile::tempdir().expect("registry tempdir");
+    let registry_path = tempdir.path().join("reticulum-local-registry.json");
+    node_b
+        .provider
+        .publish_local_registry(&registry_path)
+        .expect("publish peer endpoint registry");
+
+    node_a
+        .provider
+        .apply_config(&ReticulumEnsProviderConfig {
+            local_registry_path: Some(registry_path.clone()),
+            interfaces: vec![ReticulumEnsInterfaceConfig::Udp {
+                bind_addr: "127.0.0.1:0".to_string(),
+                forward_addr: None,
+                topology: EnsInterfaceTopology::Active,
+            }],
+            load_local_registry: true,
+            publish_local_registry: true,
+        })
+        .await
+        .expect("provider config should apply");
+
+    let endpoint_address = wait_for_local_udp_endpoint(&node_a.provider).await;
+    let endpoint = node_a.provider.local_endpoint();
+    assert_eq!(endpoint.via_medium, Some(EnsInterfaceMedium::Udp));
+    assert_eq!(
+        endpoint.interface_address.as_deref(),
+        Some(endpoint_address.as_str())
+    );
+    assert_eq!(endpoint.runtime_base_url, None);
+    assert!(endpoint.reticulum_destination.is_some());
+
+    let snapshot = node_a.service.snapshot();
+    let udp_interface = snapshot
+        .interfaces
+        .iter()
+        .find(|interface| interface.name.starts_with("127.0.0.1:"))
+        .expect("configured UDP interface should be visible");
+    assert_eq!(udp_interface.interface_type, "udp_interface");
+    assert_eq!(udp_interface.topology, EnsInterfaceTopology::Active);
+    assert_eq!(
+        udp_interface.effective_topology,
+        EnsInterfaceTopology::Active
+    );
+
+    let peer_identity = node_b.provider.local_endpoint().identity_hex;
+    let peer = snapshot
+        .peers
+        .iter()
+        .find(|peer| peer.identity.identity_hex == peer_identity)
+        .expect("registry peer should be projected as discovered endpoint");
+    assert!(!peer.authorized);
+    assert!(node_a.mesh.get_peer(&peer_identity).is_none());
+
+    let registry_json =
+        std::fs::read_to_string(&registry_path).expect("registry should be written");
+    let registry: serde_json::Value =
+        serde_json::from_str(&registry_json).expect("registry JSON should decode");
+    let entries = registry["entries"]
+        .as_array()
+        .expect("registry entries should be an array");
+    assert!(
+        entries.len() >= 2,
+        "apply_config should preserve loaded peer entry and publish local endpoint"
+    );
+    let local_registry_entry = entries
+        .iter()
+        .find(|entry| {
+            entry["endpoint"]["identity_hex"]
+                .as_str()
+                .is_some_and(|identity| identity == endpoint.identity_hex)
+        })
+        .expect("registry should contain the published local endpoint");
+    assert_eq!(
+        local_registry_entry["endpoint"]["interface_address"].as_str(),
+        Some(endpoint_address.as_str())
+    );
+    assert!(
+        !endpoint_address.ends_with(":0"),
+        "local registry must publish the actual dynamic UDP port"
+    );
 }
 
 #[tokio::test]

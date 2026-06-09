@@ -1,5 +1,6 @@
 use axum::http::Method;
 use axum::{Json, Router, routing::get};
+use reticulum::identity::PrivateIdentity;
 use serde::Serialize;
 use std::env;
 use std::net::SocketAddr;
@@ -237,6 +238,98 @@ fn configured_mesh_state_path_from_env(data_dir: Option<&Path>) -> Option<PathBu
         })
 }
 
+fn env_flag_enabled(key: &str) -> bool {
+    env::var(key)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn env_list_values(key: &str) -> Vec<String> {
+    env::var(key)
+        .ok()
+        .into_iter()
+        .flat_map(|raw| {
+            raw.split([',', ';'])
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn env_optional_value(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn configured_reticulum_ens_from_env() -> Option<ens::ReticulumEnsProviderConfig> {
+    if !env_flag_enabled("EXOMIND_RT_ENS_RETICULUM") {
+        return None;
+    }
+
+    let local_registry_path =
+        env_optional_value("EXOMIND_RT_RETICULUM_LOCAL_REGISTRY_PATH").map(PathBuf::from);
+    let registry_enabled = local_registry_path.is_some();
+    let udp_forward_addr = env_optional_value("EXOMIND_RT_RETICULUM_UDP_FORWARD");
+    let mut interfaces = Vec::new();
+
+    for bind_addr in env_list_values("EXOMIND_RT_RETICULUM_UDP_BIND") {
+        interfaces.push(ens::ReticulumEnsInterfaceConfig::Udp {
+            bind_addr,
+            forward_addr: udp_forward_addr.clone(),
+            topology: ens::EnsInterfaceTopology::Active,
+        });
+    }
+
+    for bind_addr in env_list_values("EXOMIND_RT_RETICULUM_TCP_LISTEN") {
+        interfaces.push(ens::ReticulumEnsInterfaceConfig::TcpServer {
+            bind_addr,
+            topology: ens::EnsInterfaceTopology::Active,
+        });
+    }
+
+    for remote_addr in env_list_values("EXOMIND_RT_RETICULUM_TCP_CONNECT") {
+        interfaces.push(ens::ReticulumEnsInterfaceConfig::TcpClient {
+            remote_addr,
+            topology: ens::EnsInterfaceTopology::Active,
+        });
+    }
+
+    for stream_dir in env_list_values("EXOMIND_RT_RETICULUM_JSONL_DIR") {
+        interfaces.push(ens::ReticulumEnsInterfaceConfig::Jsonl {
+            node_name: env_optional_value("EXOMIND_RT_RETICULUM_JSONL_NODE")
+                .unwrap_or_else(|| "runtime-jsonl".to_string()),
+            stream_dir: PathBuf::from(stream_dir),
+            topology: ens::EnsInterfaceTopology::Active,
+        });
+    }
+
+    for file_path in env_list_values("EXOMIND_RT_RETICULUM_FILE_PATH") {
+        interfaces.push(ens::ReticulumEnsInterfaceConfig::File {
+            name: env_optional_value("EXOMIND_RT_RETICULUM_FILE_NAME")
+                .unwrap_or_else(|| "runtime-file".to_string()),
+            file_path: PathBuf::from(file_path),
+            topology: ens::EnsInterfaceTopology::Active,
+        });
+    }
+
+    Some(ens::ReticulumEnsProviderConfig {
+        local_registry_path,
+        interfaces,
+        load_local_registry: registry_enabled,
+        publish_local_registry: registry_enabled,
+    })
+}
+
 /// Runtime startup options（运行时启动选项）.
 #[derive(Debug, Clone)]
 pub struct RuntimeStartOptions {
@@ -266,6 +359,8 @@ pub struct RuntimeStartOptions {
     pub allow_lan_without_auth: bool,
     /// enable mDNS service discovery for LAN peer auto-detection（启用 mDNS 局域网自动发现）.
     pub enable_mdns: bool,
+    /// optional Reticulum ENS provider startup config（可选 Reticulum ENS provider 启动配置）.
+    pub reticulum_ens: Option<ens::ReticulumEnsProviderConfig>,
     /// optional data directory for agent workspaces（可选 Agent workspace 数据目录）.
     pub data_dir: Option<PathBuf>,
 }
@@ -302,6 +397,7 @@ impl Default for RuntimeStartOptions {
             auth_secret: env::var("EXOMIND_RT_SECRET").ok(),
             allow_lan_without_auth: false,
             enable_mdns,
+            reticulum_ens: configured_reticulum_ens_from_env(),
             data_dir,
         }
     }
@@ -343,6 +439,8 @@ pub enum RuntimeStartError {
     },
     #[error("failed to read listener local address: {0}")]
     ReadLocalAddr(#[source] std::io::Error),
+    #[error("failed to start Reticulum ENS provider: {0}")]
+    ReticulumEnsProvider(#[from] ens::EnsProviderError),
 }
 
 #[derive(Debug, Error)]
@@ -610,6 +708,25 @@ pub async fn start_with_options(
     );
     state.device_id = options.device_id.clone();
     state.allow_lan_without_auth = options.allow_lan_without_auth;
+
+    if let Some(config) = options.reticulum_ens.as_ref() {
+        let provider = ens::ReticulumEnsProvider::new_with_identity(
+            "runtime-reticulum-ens",
+            Some(options.host_id.clone()),
+            PrivateIdentity::new_from_name(&options.host_id),
+        )
+        .await?;
+        provider.apply_config(config).await?;
+        let local_endpoint = provider.local_endpoint();
+        let provider: Arc<dyn ens::EnsProvider> = provider;
+        state.ens_transport = Arc::new(ens::EnsTransportService::new_with_endpoint(
+            options.host_id.clone(),
+            Arc::clone(&state.mesh),
+            Arc::clone(&state.pairing),
+            provider,
+            Some(local_endpoint),
+        ));
+    }
 
     // mDNS discovery setup.
     let mdns = if options.enable_mdns {

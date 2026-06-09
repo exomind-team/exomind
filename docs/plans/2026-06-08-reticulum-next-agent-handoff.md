@@ -4,7 +4,7 @@
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 分支：`codex/ens-reticulum-adapter`
 > 目标读者：没有本轮会话上下文、但需要继续推进 Reticulum 同步的 Agent
-> 最新 checkpoint：2026-06-09，signed queue、dynamic UDP、JSONL/file EventLog、dynamic TCP server/client 四域同步纵切与 mDNS `ret_port` bootstrap projection 已完成
+> 最新 checkpoint：2026-06-09，signed queue、dynamic UDP、JSONL/file EventLog、dynamic TCP server/client 四域同步纵切、mDNS `ret_port` bootstrap projection 与 runtime startup config 已完成
 
 ## 当前目标
 
@@ -40,12 +40,15 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 - mDNS `ret_port` bootstrap 已完成 provider/service/route 级投影闭环：mDNS TXT 保留 legacy `host_id`，新增 `ret_identity_hex`、`ret_port`、`ret_destination`、`ret_interface`、`ret_capabilities`，并把发现结果投影为 `gateway=reticulum`、`via_medium=mdns`、`runtime_base_url=None` 的未授权 `EnsEndpointAdvertisement`。
 - mDNS bootstrap 不写 `MeshState`，不授权 data frame，不能完成 legacy HTTP mesh pairing；invalid / zero `ret_port` fail closed。
 - JSONL 与 file provider 入口已完成 EventLog 级 physical medium 纵切：两端通过共享 JSONL 目录或 shared file 传递 signed EventLog `SignalEvent`，B 端经 `EnsTransportService` 写入 `EventLogStore`。
+- runtime startup 已支持 `RuntimeStartOptions.reticulum_ens`，并可通过环境变量启用真实 `ReticulumEnsProvider`。
+- `/mesh/ens/snapshot` 在 runtime 启动后可观测真实 Reticulum provider、本机 endpoint、实际动态 UDP 端口与 Reticulum destination。
+- local registry load/publish 已接入 `apply_config`：load 只投影未授权 discovered endpoint；publish 会等待动态 UDP/TCP server endpoint 具备真实 `interface_address`，不会写入 `:0` 或缺失动态端口的本机 endpoint。
 
 当前故意没有完成的能力：
 
 - signed envelope 当前提供的是“可验签 signer identity”，不是 Reticulum link-layer 暴露的独立 observed sender。
 - `EnsReceivedDataFrame.transport_peer` 在 Reticulum provider 中暂时表示 verified signer；若 ExoNet-Reticulum 后续暴露 source-binding/link metadata，需要再增加 verified signer 与 observed link sender 的一致性校验。
-- local JSON/Bluetooth 等日用物理联通层还没有全部迁到 Reticulum interface 下方；JSONL/file 已有 EventLog 级纵切，但不是四域完整验收。
+- Bluetooth 等日用物理联通层还没有全部迁到 Reticulum interface 下方；JSONL/file 已有 EventLog 级纵切，但不是四域完整验收。
 - mDNS bootstrap 目前完成的是 provider/service/route 级行为闭环，尚未做真实局域网双进程人工验收。
 - 真实 provider 目前已完成 EventLog signed happy path，并已覆盖 queue、dynamic UDP、JSONL、file 与 dynamic TCP server/client；Task、TimeBlock active/completed、Proposal 的真实 provider 四域验收已在 TCP server/client 路径完成，其它 medium 仍保持 EventLog 级回归。
 
@@ -73,6 +76,8 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - `set_interface_topology(public_name, topology)` 会解析回内部 manager name，并返回 public snapshot name。
   - 新增 `ReticulumMdnsBootstrap` 与 `endpoint_from_mdns_bootstrap`，把 mDNS bootstrap 投影为 `gateway=reticulum`、`via_medium=mdns`、`runtime_base_url=None` 的 endpoint。
   - 新增 `add_jsonl_interface` 与 `add_file_interface`，将 JSONL stream directory 和 shared file path 作为 Reticulum local-dev/file physical medium 接入，并投影 `jsonl://...` / `file://...` endpoint address。
+  - 新增 `ReticulumEnsProviderConfig` / `ReticulumEnsInterfaceConfig` 和 `apply_config`，统一配置 UDP、TCP server、TCP client、JSONL、File 与 local registry load/publish。
+  - local registry publish 前等待动态 UDP/TCP server endpoint 投影为真实 `interface_address`，防止 registry 写入 `:0`。
 - `crates/exomind-runtime/src/ens/service.rs`
   - 新增 `handle_received_data_frame`。
   - 新增 sender binding 校验：缺 observed transport peer 返回 `MissingDataFrameTransportPeer`；observed peer 与 frame 内 `from_peer` 不一致返回 `DataFrameTransportPeerMismatch`。
@@ -84,6 +89,10 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - `MdnsDiscovery` 浏览到 Reticulum bootstrap 后通过 `MdnsReticulumBootstrapSink` 投给 ENS transport；缺 identity 的 legacy mDNS service 保持兼容，zero/invalid `ret_port` fail closed。
 - `crates/exomind-runtime/src/lib.rs`
   - 默认 mDNS 启动路径会从 backend snapshot 的 local Reticulum endpoint 生成 mDNS advertisement，并把 discovered bootstrap 投影回 ENS transport。
+  - `RuntimeStartOptions` 增加 `reticulum_ens`，`start_with_options` 会创建真实 `ReticulumEnsProvider` 并替换默认 ENS transport provider。
+  - `RuntimeStartOptions::default()` 可从 `EXOMIND_RT_ENS_RETICULUM`、local registry、UDP/TCP/JSONL/File 相关环境变量生成 Reticulum ENS 启动配置。
+- `crates/exomind-runtime/src/ens/mod.rs`
+  - 重新导出 `ReticulumEnsProviderConfig` 与 `ReticulumEnsInterfaceConfig`，供 runtime startup 和测试使用。
 - `crates/exomind-runtime/src/ens/dto.rs`
   - `EnsTransportSnapshot` 增加内部调试状态 `local_endpoint`，用于 UI/debug/SSE 观察 provider 当前投影出的 endpoint。
 - `src/lib/services/runtime-ens.service.ts`
@@ -106,12 +115,16 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - TCP server/client 双 provider 测试确认 A -> B EventLog `SignalEvent` 可通过真实 TCP interface 同步。
   - TCP server/client 双 provider 四域测试确认 Task、TimeBlock active、TimeBlock completed 与 Proposal replication `SignalEvent` 都经同一 Reticulum data-plane 进入 `EnsTransportService` / `MeshState` / `SignalPool` / `replication_actor`，并写入对应远端业务 store。
   - JSONL 与 file 双 provider 测试确认共享 JSONL 目录或 shared file 可以作为 Reticulum physical medium 传递 signed EventLog `SignalEvent`，并验证 endpoint/snapshot 中的 `via_medium` 与 `interface_address` 投影。
+  - 覆盖 `apply_config` 同时添加 interface、加载 peer registry、发布本机 registry entry；peer 只作为未授权 discovered endpoint，发布出的本机 endpoint 使用实际动态 UDP 端口。
   - 覆盖 legacy unsigned frame fail closed、bad signature fail closed、wrong recipient fail closed、non-local signing refused。
   - 覆盖签名有效但 Mesh 未授权 signer 时由 service 返回 `UnauthorizedDataFramePeer`，B 端 store 保持为空。
 - `crates/exomind-runtime/tests/mesh_routes_integration.rs`
   - 新增 peer A token 冒充 peer B 的 `403` 回归测试，以及匹配身份的 happy path。
 - `tests/unit/ui/agent-hub/device-view.reticulum-debug.test.tsx`
   - 覆盖本机 endpoint 展示、不泄漏 `:0`，以及 dynamic UDP 多接口 topology 更新不串线。
+- `crates/exomind-runtime/tests/runtime_startup.rs`
+  - 覆盖环境变量到 `ReticulumEnsProviderConfig` 的映射。
+  - 覆盖 `start_with_options` 启动真实 Reticulum ENS provider 后，`/mesh/ens/snapshot` 可见 provider id、本机 endpoint、Reticulum destination 与实际动态 UDP 端口。
 
 ## 安全与产品原则
 
@@ -133,10 +146,10 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 ## 下一步顺序
 
 1. 以 TCP server/client 四域真实 provider 测试作为当前 data-plane 主回归，后续扩展 transport 时不得绕过 `EnsDataFrame::SignalEvent`。
-2. 继续迁移 local JSON registry/default startup config 等剩余日用入口，仍作为 Reticulum physical layer，不作为 peer truth。
-3. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 bootstrap/discovered endpoint，不把 mDNS 升级成授权来源。
-4. 如果 ExoNet-Reticulum 暴露 link/source metadata，补 verified signer 与 observed sender 的一致性测试。
-5. 最后再考虑 AppState/route/UI 默认启动集成。
+2. 用 runtime startup config 启动两个真实 runtime，做多端 Reticulum 同步验收：至少先确认 EventLog，再扩展 Task、TimeBlock、Proposal。
+3. 组合验收 local registry、mDNS bootstrap、UDP/TCP、JSONL/File physical medium；这些渠道只能产生 Reticulum endpoint/bootstrap，不得自动授权 Mesh peer。
+4. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 bootstrap/discovered endpoint，不把 mDNS 升级成授权来源。
+5. 如果 ExoNet-Reticulum 暴露 link/source metadata，补 verified signer 与 observed sender 的一致性测试。
 
 ## 推荐验证命令
 
@@ -147,6 +160,7 @@ npx vitest run tests/unit/ui/agent-hub/device-view.reticulum-debug.test.tsx
 cargo test -j 1 -p exomind-runtime --test ens_data_plane -- --nocapture
 cargo test -j 1 -p exomind-runtime --test mesh_routes_integration -- --nocapture
 cargo test -j 1 -p exomind-runtime --test ens_reticulum_provider -- --nocapture --test-threads=1
+cargo test -j 1 -p exomind-runtime --test runtime_startup -- --nocapture --test-threads=1
 cargo test -j 1 -p exomind-runtime --test ens_routes_debug -- --nocapture
 cargo test -j 1 -p exomind-runtime --test ens_control_plane_prototype -- --nocapture
 cargo check --lib -j 1 -p exomind-runtime
@@ -157,18 +171,21 @@ node ./node_modules/typescript/bin/tsc --noEmit
 
 ## 当前可提交边界
 
-截至 2026-06-09，本轮工作区脏文件集中在 Reticulum/ENS 相关代码、UI debug 类型/测试和计划文档。提交前仍必须以 `git status --short` 为准；如果出现下列范围之外的文件，不要顺手 stage、revert 或格式化。
+截至 2026-06-09，本轮工作区脏文件集中在 Reticulum/ENS startup config、local registry 发布保护、runtime startup 测试和计划文档。提交前仍必须以 `git status --short` 为准；如果出现下列范围之外的文件，不要顺手 stage、revert 或格式化。
 
 可以 stage 的 Reticulum/ENS 相关文件包括：
 
 - `Cargo.lock`
 - `crates/exomind-runtime/Cargo.toml`
 - `crates/exomind-runtime/src/ens/dto.rs`
+- `crates/exomind-runtime/src/ens/mod.rs`
 - `crates/exomind-runtime/src/ens/provider.rs`
 - `crates/exomind-runtime/src/ens/reticulum_provider.rs`
 - `crates/exomind-runtime/src/ens/service.rs`
+- `crates/exomind-runtime/src/lib.rs`
 - `crates/exomind-runtime/tests/ens_routes_debug.rs`
 - `crates/exomind-runtime/tests/ens_reticulum_provider.rs`
+- `crates/exomind-runtime/tests/runtime_startup.rs`
 - `src/lib/services/runtime-ens.service.ts`
 - `src/ui/app/pages/agents/DeviceView.tsx`
 - `tests/unit/ui/agent-hub/device-view.reticulum-debug.test.tsx`

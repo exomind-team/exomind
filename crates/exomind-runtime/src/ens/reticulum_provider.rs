@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 
 use ed25519_dalek::Signature;
 use reticulum::destination::{DestinationName, SingleInputDestination};
@@ -40,6 +41,8 @@ const LOCAL_REGISTRY_VERSION: u32 = 1;
 const RETICULUM_ENS_DATA_SIGNATURE_CONTEXT: &[u8] = b"exomind.reticulum.ens.data.v1";
 const RETICULUM_IDENTITY_HEX_LEN: usize = 128;
 const RETICULUM_DATA_SIGNATURE_LEN: usize = 64;
+const LOCAL_ENDPOINT_READY_ATTEMPTS: usize = 100;
+const LOCAL_ENDPOINT_READY_POLL_INTERVAL: Duration = Duration::from_millis(10);
 pub(super) const RETICULUM_MDNS_BOOTSTRAP_DISCOVERY_SOURCE: &str = "reticulum-mdns-bootstrap";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +60,47 @@ pub struct ReticulumMdnsBootstrap {
     pub reticulum_destination: Option<String>,
     pub via_interface: Option<String>,
     pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReticulumEnsProviderConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_registry_path: Option<PathBuf>,
+    #[serde(default)]
+    pub interfaces: Vec<ReticulumEnsInterfaceConfig>,
+    #[serde(default)]
+    pub load_local_registry: bool,
+    #[serde(default)]
+    pub publish_local_registry: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ReticulumEnsInterfaceConfig {
+    Udp {
+        bind_addr: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        forward_addr: Option<String>,
+        topology: EnsInterfaceTopology,
+    },
+    TcpServer {
+        bind_addr: String,
+        topology: EnsInterfaceTopology,
+    },
+    TcpClient {
+        remote_addr: String,
+        topology: EnsInterfaceTopology,
+    },
+    Jsonl {
+        node_name: String,
+        stream_dir: PathBuf,
+        topology: EnsInterfaceTopology,
+    },
+    File {
+        name: String,
+        file_path: PathBuf,
+        topology: EnsInterfaceTopology,
+    },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -415,6 +459,66 @@ impl ReticulumEnsProvider {
             EnsInterfaceMedium::File,
             Some(format!("file://{}", file_path.display())),
         );
+        Ok(())
+    }
+
+    pub async fn apply_config(
+        &self,
+        config: &ReticulumEnsProviderConfig,
+    ) -> Result<(), EnsProviderError> {
+        for interface in &config.interfaces {
+            match interface {
+                ReticulumEnsInterfaceConfig::Udp {
+                    bind_addr,
+                    forward_addr,
+                    topology,
+                } => {
+                    self.add_udp_interface(bind_addr.clone(), forward_addr.clone(), *topology)
+                        .await?;
+                }
+                ReticulumEnsInterfaceConfig::TcpServer {
+                    bind_addr,
+                    topology,
+                } => {
+                    self.add_tcp_server_interface(bind_addr.clone(), *topology)
+                        .await?;
+                }
+                ReticulumEnsInterfaceConfig::TcpClient {
+                    remote_addr,
+                    topology,
+                } => {
+                    self.add_tcp_client_interface(remote_addr.clone(), *topology)
+                        .await?;
+                }
+                ReticulumEnsInterfaceConfig::Jsonl {
+                    node_name,
+                    stream_dir,
+                    topology,
+                } => {
+                    self.add_jsonl_interface(node_name.clone(), stream_dir.clone(), *topology)
+                        .await?;
+                }
+                ReticulumEnsInterfaceConfig::File {
+                    name,
+                    file_path,
+                    topology,
+                } => {
+                    self.add_file_interface(name, file_path.clone(), *topology)
+                        .await?;
+                }
+            }
+        }
+
+        if let Some(path) = config.local_registry_path.as_deref() {
+            if config.load_local_registry {
+                self.load_local_registry(path)?;
+            }
+            if config.publish_local_registry {
+                self.wait_for_publishable_local_endpoint().await?;
+                self.publish_local_registry(path)?;
+            }
+        }
+
         Ok(())
     }
 
@@ -787,6 +891,42 @@ impl ReticulumEnsProvider {
             endpoint.interface_address = Some(endpoint_address);
             endpoint.discovery_source = "reticulum-provider-interface".to_string();
         }
+    }
+
+    async fn wait_for_publishable_local_endpoint(&self) -> Result<(), EnsProviderError> {
+        for _ in 0..LOCAL_ENDPOINT_READY_ATTEMPTS {
+            let endpoint = self.local_endpoint();
+            if !self.endpoint_tracks_pending_dynamic_interface(&endpoint) {
+                return Ok(());
+            }
+            tokio::time::sleep(LOCAL_ENDPOINT_READY_POLL_INTERVAL).await;
+        }
+
+        let endpoint = self.local_endpoint();
+        Err(EnsProviderError::Unavailable(format!(
+            "Reticulum ENS local endpoint was not ready for local registry publication: {:?}",
+            endpoint.via_interface
+        )))
+    }
+
+    fn endpoint_tracks_pending_dynamic_interface(
+        &self,
+        endpoint: &EnsEndpointAdvertisement,
+    ) -> bool {
+        let Some(interface_name) = endpoint.via_interface.as_deref() else {
+            return false;
+        };
+        if endpoint.interface_address.is_some() {
+            return false;
+        }
+
+        self.dynamic_udp_bindings()
+            .iter()
+            .any(|binding| binding.pending_public_name == interface_name)
+            || self
+                .dynamic_tcp_server_bindings()
+                .iter()
+                .any(|binding| binding.pending_public_name == interface_name)
     }
 
     fn dynamic_udp_bindings(&self) -> Vec<ReticulumUdpDynamicBinding> {
