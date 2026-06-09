@@ -9,7 +9,7 @@ import {
   parseRepoFromRemoteUrl,
   readBodyInput,
   resolveMode,
-} from '../../../Scripts/dev/github-comment-lib.ts';
+} from '../../../scripts/dev/github-comment-lib.ts';
 
 describe('github-comment-lib', () => {
   describe('parseCommentId', () => {

@@ -1,4 +1,36 @@
 import type React from 'react';
+import { createContext, useContext } from 'react';
+import type { CSSProperties } from 'react';
+
+const SettingsToneContext = createContext<string | null>(null);
+
+export function SettingsToneProvider({
+  toneColor,
+  children,
+}: {
+  toneColor: string | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <SettingsToneContext.Provider value={toneColor}>
+      {children}
+    </SettingsToneContext.Provider>
+  );
+}
+
+export function useSettingsToneColor(): string | null {
+  return useContext(SettingsToneContext);
+}
+
+export function buildSettingsToneStyle(toneColor: string | null): CSSProperties | undefined {
+  if (!toneColor) {
+    return undefined;
+  }
+
+  return {
+    '--settings-tone-color': toneColor,
+  } as CSSProperties;
+}
 
 export function SettingRow({
   icon,
@@ -6,22 +38,31 @@ export function SettingRow({
   right,
   onClick,
   className = '',
+  testId,
+  disabled = false,
+  title,
 }: {
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   label: string;
   right?: React.ReactNode;
   onClick?: () => void;
   className?: string;
+  testId?: string;
+  disabled?: boolean;
+  title?: string;
 }) {
   const Wrapper = onClick ? 'button' : 'div';
   return (
     <Wrapper
+      data-testid={testId}
       type={onClick ? 'button' : undefined}
       onClick={onClick}
-      className={`flex w-full items-center justify-between px-4 py-[14px] ${onClick ? 'active:bg-stone-50 dark:active:bg-stone-800' : ''} ${className}`}
+      disabled={onClick ? disabled : undefined}
+      title={title}
+      className={`flex w-full items-center justify-between px-4 py-[14px] ${onClick ? 'active:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60 dark:active:bg-stone-800' : ''} ${className}`}
     >
       <div className="flex items-center gap-3">
-        {icon}
+        {icon ?? null}
         <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">{label}</span>
       </div>
       {right}
@@ -29,10 +70,25 @@ export function SettingRow({
   );
 }
 
-export function Divider() {
+export function Divider({
+  toneColor = null,
+}: {
+  toneColor?: string | null;
+}) {
+  const toneStyle = buildSettingsToneStyle(toneColor);
+  const style = toneStyle
+    ? {
+        ...toneStyle,
+        backgroundColor: 'color-mix(in srgb, var(--settings-tone-color) 18%, transparent)',
+      } as CSSProperties
+    : undefined;
+
   return (
     <div className="px-4">
-      <div className="h-px bg-[#F0ECE8] dark:bg-[#292524]" />
+      <div
+        style={style}
+        className={`h-px ${toneColor ? 'bg-transparent' : 'bg-[#F0ECE8] dark:bg-[#292524]'}`}
+      />
     </div>
   );
 }

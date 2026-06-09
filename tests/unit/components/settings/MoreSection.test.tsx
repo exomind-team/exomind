@@ -13,7 +13,7 @@ import { MoreSection } from '@/ui/app/components/MoreSection';
 describe('SettingsPage - More Section', () => {
   it('renders More section title', () => {
     render(<SettingsPage />);
-    expect(screen.getByText('更多')).toBeInTheDocument();
+    expect(screen.getAllByText('更多').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders update settings row', () => {

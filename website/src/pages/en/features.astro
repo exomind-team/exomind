@@ -1,4 +1,5 @@
 ---
+import SmartDownloadLink from '../../components/SmartDownloadLink.astro';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { useTranslations } from '../../i18n';
 
@@ -123,9 +124,9 @@ const features = [
         <h2 class="heading-display text-3xl text-white sm:text-4xl">{t('features.cta.title')}</h2>
         <p class="mt-4 text-stone-400">{t('features.cta.desc')}</p>
         <div class="mt-8">
-          <a href="/en/download" class="btn-primary px-8 py-3.5 text-base">
+          <SmartDownloadLink lang="en" class="btn-primary px-8 py-3.5 text-base" label={t('features.cta.download')}>
             {t('features.cta.download')}
-          </a>
+          </SmartDownloadLink>
         </div>
       </div>
     </div>

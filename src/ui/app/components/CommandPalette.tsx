@@ -89,11 +89,11 @@ export function CommandPalette({ context }: CommandPaletteProps) {
   return (
     <div
       data-testid="command-palette-overlay"
-      className="absolute inset-0 z-50 flex items-start justify-center bg-black/35 px-4 pt-16"
+      className="absolute inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 px-3 pb-3 pt-3 sm:px-4 sm:pt-16"
       onClick={() => paletteService.close()}
     >
       <section
-        className="w-full max-w-[360px] overflow-hidden rounded-2xl border border-[#E7E5E4] bg-[#FAF7F5] shadow-[0_20px_50px_-24px_rgba(0,0,0,0.45)] dark:border-[#292524] dark:bg-[#0C0A09]"
+        className="flex w-[min(94vw,560px)] max-h-[min(86dvh,620px)] flex-col overflow-hidden rounded-2xl border border-[#E7E5E4] bg-[#FAF7F5] shadow-[0_20px_50px_-24px_rgba(0,0,0,0.45)] min-[400px]:min-h-[300px] sm:min-w-[360px] dark:border-[#292524] dark:bg-[#0C0A09]"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex items-center justify-between border-b border-[#E7E5E4] px-3 py-2 dark:border-[#292524]">
@@ -154,7 +154,7 @@ export function CommandPalette({ context }: CommandPaletteProps) {
 
         <div
           ref={listRef}
-          className="max-h-[320px] overflow-y-auto p-2"
+          className="min-h-0 flex-1 overflow-y-auto p-2"
           data-testid="command-palette-list"
         >
           {commands.length === 0 ? (

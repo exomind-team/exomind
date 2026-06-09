@@ -62,7 +62,14 @@ impl SignalBus {
                 finished_at: chrono::Utc::now().to_rfc3339(),
             };
 
-            journal.append(record.clone());
+            if let Err(error) = journal.append(record.clone()) {
+                tracing::warn!(
+                    event_id = %record.event_id,
+                    route_id = %record.route_id,
+                    error = %error,
+                    "signal journal append failed during publish (日志追加失败)"
+                );
+            }
             records.push(record);
         }
 
@@ -100,24 +107,28 @@ mod tests {
     fn make_route_table_with_routes() -> RouteTable {
         let table = RouteTable::new(None, None);
         let now = chrono::Utc::now().to_rfc3339();
-        table.add(crate::signal::types::SignalRoute {
-            id: "route-classifier".to_string(),
-            enabled: true,
-            topic: "user.input.text".to_string(),
-            target_type: TargetType::Agent,
-            target_ref: "classifier".to_string(),
-            created_at: now.clone(),
-            updated_at: now.clone(),
-        });
-        table.add(crate::signal::types::SignalRoute {
-            id: "route-ui".to_string(),
-            enabled: true,
-            topic: "*".to_string(),
-            target_type: TargetType::Frontend,
-            target_ref: "ui".to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-        });
+        table
+            .add(crate::signal::types::SignalRoute {
+                id: "route-classifier".to_string(),
+                enabled: true,
+                topic: "user.input.text".to_string(),
+                target_type: TargetType::Agent,
+                target_ref: "classifier".to_string(),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+        table
+            .add(crate::signal::types::SignalRoute {
+                id: "route-ui".to_string(),
+                enabled: true,
+                topic: "*".to_string(),
+                target_type: TargetType::Frontend,
+                target_ref: "ui".to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .unwrap();
         table
     }
 

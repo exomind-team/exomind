@@ -8,9 +8,12 @@ describe('issue-142 mobile safe area', () => {
   const routesPath = path.resolve('src/routes.tsx');
   const voiceInputPath = path.resolve('src/components/VoiceMessageInput.tsx');
 
-  it('includes viewport-fit=cover in index.html', () => {
+  it('includes fullscreen-safe and anti-zoom viewport settings in index.html', () => {
     const html = fs.readFileSync(htmlPath, 'utf-8');
     expect(html).toContain('viewport-fit=cover');
+    expect(html).toContain('minimum-scale=1.0');
+    expect(html).toContain('maximum-scale=1.0');
+    expect(html).toContain('user-scalable=no');
   });
 
   it('defines safe-area utility classes in src/index.css', () => {
@@ -24,6 +27,11 @@ describe('issue-142 mobile safe area', () => {
     const routesSource = fs.readFileSync(routesPath, 'utf-8');
     expect(routesSource).toContain('env(safe-area-inset-bottom,0px)');
     expect(routesSource).toContain('env(safe-area-inset-top,0px)');
+  });
+
+  it('hides the vertical scrollbar only for mobile fullscreen routes', () => {
+    const routesSource = fs.readFileSync(routesPath, 'utf-8');
+    expect(routesSource).toContain("fullscreenRoute && 'scrollbar-none'");
   });
 
   it('keeps base vertical spacing when applying bottom safe-area in voice input', () => {

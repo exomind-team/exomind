@@ -1,0 +1,631 @@
+import { act, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Event } from '@/lib/types/event';
+import { ChatPage, type ChatPageKeepAliveState } from '@/components/Chat/ChatPage';
+import { useSyncStore } from '@/ui/stores/sync-store';
+import { getEventLogService } from '@/lib/services/eventlog.service';
+import { log } from '@/lib/logger';
+import { setPerfLoggingEnabled } from '@/config/perf-logging-enabled';
+
+const navigateMock = vi.fn();
+
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-router')>();
+  return {
+    ...actual,
+    useLocation: () => ({
+      pathname: '/eventlog/record',
+      searchStr: '',
+    }),
+    useNavigate: () => navigateMock,
+  };
+});
+
+vi.mock('@/ui/stores/sync-store', () => ({
+  useSyncStore: vi.fn(),
+}));
+
+vi.mock('@/lib/services/eventlog.service', () => ({
+  getEventLogService: vi.fn(),
+}));
+
+vi.mock('@/lib/logger', () => ({
+  log: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
+vi.mock('@/components/Chat/EventMarkdown', () => ({
+  EventMarkdown: ({ content }: { content: string }) => <div>{content}</div>,
+}));
+
+vi.mock('@/components/Chat/MessageActions', () => ({
+  MessageActions: () => null,
+}));
+
+vi.mock('@/ui/app/components/NowInputRow', async () => {
+  const React = await import('react');
+  return {
+    NowInputRow: React.forwardRef<HTMLDivElement>((_, ref) => (
+      <div ref={ref} data-testid="now-input-row" />
+    )),
+  };
+});
+
+vi.mock('@/ui/app/components/PageMoreMenu', () => ({
+  PageMoreMenu: () => <div data-testid="page-more-menu" />,
+}));
+
+vi.mock('@/ui/app/components/FocusTimerWidget', async () => {
+  const React = await import('react');
+  return {
+    FocusTimerWidget: React.forwardRef<HTMLDivElement>((_, ref) => (
+      <div ref={ref} data-testid="focus-timer-widget" />
+    )),
+  };
+});
+
+vi.mock('@/components/TimeBlockWidget', () => ({
+  TimeBlockWidget: () => <div data-testid="time-block-widget" />,
+}));
+
+vi.mock('@/components/VoiceMessageInput', () => ({
+  VoiceMessageInput: () => <div data-testid="voice-message-input" />,
+}));
+
+const mockUseSyncStore = vi.mocked(useSyncStore);
+const mockGetEventLogService = vi.mocked(getEventLogService);
+const mockedLog = vi.mocked(log, true);
+const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+
+const initialEvent: Event = {
+  id: 'evt-initial',
+  timestamp: new Date('2026-03-30T10:00:00.000Z').getTime(),
+  content: '初始事件',
+  tags: new Set<string>(),
+  refs: [],
+  metadata: {
+    source: {
+      deviceId: 'device-1',
+      deviceName: 'Desktop',
+      platform: 'windows',
+      app: 'ExoMind',
+    },
+  },
+};
+
+type MockLoadEventsDetailedResult = {
+  events: Event[];
+  semantics: 'full_snapshot' | 'incremental_batch';
+  snapshotRevision?: string | null;
+};
+
+const sameTimestampBase = new Date('2026-03-30T10:05:00.000Z').getTime();
+
+const sameTimestampLowerIdEvent: Event = {
+  id: 'evt-same-a',
+  timestamp: sameTimestampBase,
+  content: '同时间戳 A',
+  tags: new Set<string>(),
+  refs: [],
+};
+
+const sameTimestampHigherIdEvent: Event = {
+  id: 'evt-same-b',
+  timestamp: sameTimestampBase,
+  content: '同时间戳 B',
+  tags: new Set<string>(),
+  refs: [],
+};
+
+const refreshOnlySignalEvent: Event = {
+  id: 'evt-refresh-signal',
+  timestamp: new Date('2026-03-30T10:10:01.000Z').getTime(),
+  content: '',
+  tags: new Set<string>(['note']),
+  refs: [],
+  metadata: {
+    refreshOnly: true,
+    source: {
+      deviceId: 'device-refresh',
+      deviceName: 'Refresh Only',
+      platform: 'windows',
+      app: 'ExoMind',
+    },
+  },
+};
+
+describe('ChatPage incremental refresh issue 769', () => {
+  const unsubscribe = vi.fn();
+  const loadEventsDetailed = vi.fn<() => Promise<MockLoadEventsDetailedResult>>();
+  let onEventCallback: ((event: Event) => void) | null = null;
+  let keepAliveState: ChatPageKeepAliveState | null = null;
+
+  const lateHistoricalEvent: Event = {
+    id: 'evt-late-history',
+    timestamp: new Date('2026-03-29T08:00:00.000Z').getTime(),
+    content: '补导入的历史事件',
+    tags: new Set<string>(),
+    refs: [],
+    metadata: {
+      source: {
+        deviceId: 'device-2',
+        deviceName: 'Imported',
+        platform: 'windows',
+        app: 'ExoMind',
+      },
+    },
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-30T10:10:00.000Z'));
+    vi.clearAllMocks();
+    setPerfLoggingEnabled(true);
+    navigateMock.mockReset();
+    onEventCallback = null;
+    keepAliveState = null;
+
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+
+    mockUseSyncStore.mockReturnValue({
+      currentUser: 'Alice',
+      isLoggedIn: true,
+      activeProfileId: 'profile-alice',
+    } as never);
+
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-1',
+      })
+      .mockResolvedValueOnce({
+        events: [],
+        semantics: 'incremental_batch',
+        snapshotRevision: 'rev-1',
+      });
+
+    mockGetEventLogService.mockReturnValue({
+      loadEventsDetailed,
+      loadEvents: vi.fn(),
+      addEvent: vi.fn(),
+      appendEventData: vi.fn(),
+      exportEventsAsJson: vi.fn(),
+      importEventsFromJson: vi.fn(),
+      onEvent: vi.fn((callback: (event: Event) => void) => {
+        onEventCallback = callback;
+        return unsubscribe;
+      }),
+    });
+  });
+
+  afterEach(() => {
+    setPerfLoggingEnabled(false);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+  });
+
+  it('poll refreshes with latest event cursor instead of reloading all events（轮询刷新应带最新事件游标）', async () => {
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+    expect(loadEventsDetailed.mock.calls[0]).toEqual([]);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(2);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-initial',
+      sinceTimestamp: initialEvent.timestamp,
+    });
+    expect(mockedLog.info).toHaveBeenCalledWith(expect.stringContaining('"fetched":0'));
+  });
+
+  it('uses the timestamp+id tail event as incremental cursor（同时间戳时应使用 timestamp+id 尾事件做游标）', async () => {
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [
+          sameTimestampHigherIdEvent,
+          sameTimestampLowerIdEvent,
+        ],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-same-1',
+      })
+      .mockResolvedValueOnce({
+        events: [],
+        semantics: 'incremental_batch',
+        snapshotRevision: 'rev-same-1',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-same-b',
+      sinceTimestamp: sameTimestampBase,
+    });
+  });
+
+  it('hydrates from keep-alive state and resumes with incremental refresh on remount（回切记录页应先复用缓存再走增量刷新）', async () => {
+    const { unmount } = render(
+      <ChatPage
+        variant="new-mobile"
+        showTimerWidget={false}
+        onKeepAliveStateChange={(state) => {
+          keepAliveState = state;
+        }}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(1);
+    expect(keepAliveState?.eventsAsc.map((event) => event.id)).toEqual(['evt-initial']);
+
+    unmount();
+    loadEventsDetailed.mockClear();
+    loadEventsDetailed.mockResolvedValueOnce({
+      events: [],
+      semantics: 'incremental_batch',
+      snapshotRevision: 'rev-1',
+    });
+
+    render(
+      <ChatPage
+        variant="new-mobile"
+        showTimerWidget={false}
+        initialKeepAliveState={keepAliveState}
+        onKeepAliveStateChange={(state) => {
+          keepAliveState = state;
+        }}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(1);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(1, {
+      sinceId: 'evt-initial',
+      sinceTimestamp: initialEvent.timestamp,
+    });
+  });
+
+  it('skips keep-alive hydration when active profile changes（切换 profile 后不应复用旧记录页缓存）', async () => {
+    const bobEvent: Event = {
+      id: 'evt-bob',
+      timestamp: new Date('2026-03-30T11:00:00.000Z').getTime(),
+      content: 'Bob 的新事件',
+      tags: new Set<string>(),
+      refs: [],
+    };
+
+    const { unmount } = render(
+      <ChatPage
+        variant="new-mobile"
+        showTimerWidget={false}
+        onKeepAliveStateChange={(state) => {
+          keepAliveState = state;
+        }}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(keepAliveState?.profileId).toBe('profile-alice');
+
+    unmount();
+    loadEventsDetailed.mockReset();
+    mockUseSyncStore.mockReturnValue({
+      currentUser: 'Bob',
+      isLoggedIn: true,
+      activeProfileId: 'profile-bob',
+    } as never);
+    loadEventsDetailed.mockResolvedValueOnce({
+      events: [bobEvent],
+      semantics: 'full_snapshot',
+      snapshotRevision: 'rev-bob-1',
+    });
+
+    const secondRender = render(
+      <ChatPage
+        variant="new-mobile"
+        showTimerWidget={false}
+        initialKeepAliveState={keepAliveState}
+        onKeepAliveStateChange={(state) => {
+          keepAliveState = state;
+        }}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(1);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(1);
+    expect(secondRender.queryByText('初始事件')).not.toBeInTheDocument();
+    expect(secondRender.getByText('Bob 的新事件')).toBeInTheDocument();
+    expect(keepAliveState?.profileId).toBe('profile-bob');
+  });
+
+  it('reconciles full state immediately for refresh-only signals（仅刷新信号应立即走全量对账）', async () => {
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-1',
+      })
+      .mockResolvedValueOnce({
+        events: [lateHistoricalEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-2',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+    expect(onEventCallback).not.toBeNull();
+
+    await act(async () => {
+      onEventCallback?.(refreshOnlySignalEvent);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(2);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, undefined);
+    expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
+    expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
+    expect(mockedLog.info).toHaveBeenCalledWith(expect.stringContaining('"mode":"full"'));
+  });
+
+  it('refresh-only signals keep late historical events and new tail events together（外部刷新含历史补录和新尾事件时必须整页对账）', async () => {
+    const appendedNewestEvent: Event = {
+      id: 'evt-new-tail',
+      timestamp: new Date('2026-03-30T10:12:00.000Z').getTime(),
+      content: '外部同步带来的新尾事件',
+      tags: new Set<string>(),
+      refs: [],
+    };
+
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-mixed-1',
+      })
+      .mockResolvedValueOnce({
+        events: [lateHistoricalEvent, initialEvent, appendedNewestEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rev-mixed-2',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      onEventCallback?.(refreshOnlySignalEvent);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(2);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, undefined);
+    expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+    expect(screen.getByText('外部同步带来的新尾事件')).toBeInTheDocument();
+  });
+
+  it('replaces visible events when legacy cursor queries resolve as full snapshot（legacy 快照结果不应继续按增量 merge）', async () => {
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'legacy-rev-1',
+      })
+      .mockResolvedValueOnce({
+        events: [lateHistoricalEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'legacy-rev-2',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-initial',
+      sinceTimestamp: initialEvent.timestamp,
+    });
+    expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
+    expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
+  });
+
+  it('forces full reconcile when incremental poll sees a newer snapshot revision with empty delta（空增量但 revision 变化时应立即全量对账）', async () => {
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-1',
+      })
+      .mockResolvedValueOnce({
+        events: [],
+        semantics: 'incremental_batch',
+        snapshotRevision: 'rt-rev-2',
+      })
+      .mockResolvedValueOnce({
+        events: [lateHistoricalEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-2',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(3);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-initial',
+      sinceTimestamp: initialEvent.timestamp,
+    });
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(3);
+    expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
+    expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
+  });
+
+  it('forces full reconcile when poll sees revision drift with non-empty delta（轮询发现 revision 漂移且增量非空时也必须全量对账）', async () => {
+    const appendedNewestEvent: Event = {
+      id: 'evt-poll-new-tail',
+      timestamp: new Date('2026-03-30T10:12:30.000Z').getTime(),
+      content: '轮询先看到的新尾事件',
+      tags: new Set<string>(),
+      refs: [],
+    };
+
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-mixed-1',
+      })
+      .mockResolvedValueOnce({
+        events: [appendedNewestEvent],
+        semantics: 'incremental_batch',
+        snapshotRevision: 'rt-rev-mixed-2',
+      })
+      .mockResolvedValueOnce({
+        events: [lateHistoricalEvent, initialEvent, appendedNewestEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-mixed-2',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(3);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-initial',
+      sinceTimestamp: initialEvent.timestamp,
+    });
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(3);
+    expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
+    expect(screen.getByText('初始事件')).toBeInTheDocument();
+    expect(screen.getByText('轮询先看到的新尾事件')).toBeInTheDocument();
+    expect(mockedLog.info).toHaveBeenCalledWith(expect.stringContaining('"mode":"full"'));
+  });
+
+  it('replaces stale rows when RT cursor query is downgraded to full snapshot（RT cursor reset 后应直接按快照替换）', async () => {
+    const staleEvent: Event = {
+      id: 'evt-stale',
+      timestamp: new Date('2026-03-30T10:06:00.000Z').getTime(),
+      content: '应被移除的旧事件',
+      tags: new Set<string>(),
+      refs: [],
+    };
+    const rewrittenLatestEvent: Event = {
+      id: 'evt-rewritten-latest',
+      timestamp: new Date('2026-03-30T10:08:00.000Z').getTime(),
+      content: '重写后的新尾事件',
+      tags: new Set<string>(),
+      refs: [],
+    };
+
+    loadEventsDetailed.mockReset();
+    loadEventsDetailed
+      .mockResolvedValueOnce({
+        events: [initialEvent, staleEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-10',
+      })
+      .mockResolvedValueOnce({
+        events: [rewrittenLatestEvent],
+        semantics: 'full_snapshot',
+        snapshotRevision: 'rt-rev-11',
+      });
+
+    await act(async () => {
+      render(<ChatPage variant="new-mobile" showTimerWidget={false} />);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('应被移除的旧事件')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(loadEventsDetailed).toHaveBeenCalledTimes(2);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, {
+      sinceId: 'evt-stale',
+      sinceTimestamp: staleEvent.timestamp,
+    });
+    expect(screen.queryByText('应被移除的旧事件')).not.toBeInTheDocument();
+    expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
+    expect(screen.getByText('重写后的新尾事件')).toBeInTheDocument();
+  });
+});

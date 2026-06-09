@@ -1,0 +1,412 @@
+---
+import { ArrowDown, ArrowUp } from 'lucide-static';
+import { prependBasePath } from '../i18n';
+import { renderLucideIcon } from '../lib/lucide';
+import { localizeReleaseHighlightKind, type ReleaseHighlightKind } from '../lib/release-highlights';
+
+type Lang = 'zh' | 'en';
+
+interface Props {
+  lang: Lang;
+}
+
+const { lang } = Astro.props;
+const isZh = lang === 'zh';
+const rootId = `changelog-timeline-${lang}`;
+const kindLabels = {
+  added: localizeReleaseHighlightKind('added', lang),
+  fixed: localizeReleaseHighlightKind('fixed', lang),
+  changed: localizeReleaseHighlightKind('changed', lang),
+  docs: localizeReleaseHighlightKind('docs', lang),
+  maintenance: localizeReleaseHighlightKind('maintenance', lang),
+} satisfies Record<ReleaseHighlightKind, string>;
+
+const kindClasses = {
+  added: 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300',
+  fixed: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  changed: 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+  docs: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+  maintenance: 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300',
+} satisfies Record<ReleaseHighlightKind, string>;
+
+const tracks = {
+  release: {
+    eyebrow: isZh ? 'STABLE CHANNEL / 稳定版' : 'STABLE CHANNEL / Stable',
+    title: isZh ? '稳定版' : 'Stable',
+    description: isZh ? '正式发布，适合日常长期使用。' : 'Formal releases for everyday use.',
+    shortLabel: isZh ? '稳定版' : 'Stable',
+    dotClass: 'border-brand bg-white dark:bg-stone-950',
+    badgeClass: 'bg-brand text-white',
+    accentClass: 'text-brand/80',
+    justifyClass: 'md:justify-end',
+    textClass: 'md:text-right',
+    colClass: 'hidden md:block md:col-start-1 md:pr-12',
+  },
+  preview: {
+    eyebrow: isZh ? 'PREVIEW CHANNEL / 预览版' : 'PREVIEW CHANNEL / Preview',
+    title: isZh ? '预览版' : 'Preview',
+    description: isZh
+      ? '预览发布与阶段验证版本，更快暴露正在发生的变化。'
+      : 'Preview and staged builds for earlier visibility into changes.',
+    shortLabel: isZh ? '预览版' : 'Preview',
+    dotClass: 'border-amber-500 bg-white dark:bg-stone-950',
+    badgeClass: 'bg-amber-500 text-white',
+    accentClass: 'text-amber-600 dark:text-amber-400',
+    justifyClass: 'md:justify-start',
+    textClass: 'md:text-left',
+    colClass: 'hidden md:block md:col-start-3 md:pl-12',
+  },
+} as const;
+
+const navIcons = {
+  up: renderLucideIcon(ArrowUp, {
+    className: 'h-3.5 w-3.5',
+    size: 14,
+    strokeWidth: 2.2,
+  }),
+  down: renderLucideIcon(ArrowDown, {
+    className: 'h-3.5 w-3.5',
+    size: 14,
+    strokeWidth: 2.2,
+  }),
+};
+
+const config = {
+  id: rootId,
+  locale: isZh ? 'zh-CN' : 'en-US',
+  timelineUrl: prependBasePath('/releases/timeline.json'),
+  copy: {
+    empty: isZh ? '暂无可展示的版本时间线。' : 'No release timeline available yet.',
+    fallback: isZh
+      ? '该版本暂无结构化变更摘要，请查看对应版本详情。'
+      : 'No structured highlights for this release yet. Open the release page for details.',
+    previousInChannel: isZh ? '跳到上一个同通道版本' : 'Jump to previous release in this channel',
+    nextInChannel: isZh ? '跳到下一个同通道版本' : 'Jump to next release in this channel',
+  },
+  navIcons,
+  tracks,
+  kindLabels,
+  kindClasses,
+};
+---
+
+<section class="pb-24">
+  <div class="section-container">
+    <div class="mx-auto max-w-6xl" data-changelog-timeline={rootId}>
+      <div class="relative">
+        <div class="pointer-events-none absolute bottom-0 left-[9px] top-0 w-px bg-brand/30 dark:bg-brand/40 md:left-1/2 md:-translate-x-1/2"></div>
+
+        <div class="timeline-loading space-y-12">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div class="relative pl-10 md:grid md:grid-cols-[minmax(0,1fr)_88px_minmax(0,1fr)] md:gap-6 md:pl-0">
+              <div class:list={[index % 2 === 0 ? tracks.release.colClass : 'hidden md:block']}>
+                <div class:list={[index % 2 === 0 ? 'md:ml-auto md:text-right' : '', 'max-w-xl']}>
+                  <div class="h-6 w-36 animate-pulse rounded-full bg-stone-200 dark:bg-stone-800"></div>
+                  <div class="mt-4 space-y-3">
+                    <div class="h-14 animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-900"></div>
+                    <div class="h-14 animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-900"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="hidden md:block"></div>
+              <div class:list={[index % 2 === 1 ? tracks.preview.colClass : 'hidden md:block']}>
+                <div class="max-w-xl">
+                  <div class="h-6 w-36 animate-pulse rounded-full bg-stone-200 dark:bg-stone-800"></div>
+                  <div class="mt-4 space-y-3">
+                    <div class="h-14 animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-900"></div>
+                    <div class="h-14 animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-900"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="md:hidden">
+                <div class="h-6 w-36 animate-pulse rounded-full bg-stone-200 dark:bg-stone-800"></div>
+                <div class="mt-4 space-y-3">
+                  <div class="h-14 animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-900"></div>
+                  <div class="h-14 animate-pulse rounded-2xl bg-stone-100 dark:bg-stone-900"></div>
+                </div>
+              </div>
+              <div class:list={['absolute -left-[calc(2rem+5px)] top-0 h-3 w-3 rounded-full border-2 md:left-1/2 md:-translate-x-1/2', index % 2 === 0 ? tracks.release.dotClass : tracks.preview.dotClass]}></div>
+            </div>
+          ))}
+        </div>
+
+        <div class="timeline-empty hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-6 py-5 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-950/60 dark:text-stone-400"></div>
+
+      <div class="timeline-list hidden space-y-12"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script
+  type="application/json"
+  data-changelog-timeline-config
+  set:html={JSON.stringify(config)}
+></script>
+
+<script>
+  import { loadReleaseTimelineWithFallback } from '../lib/downloads-data';
+
+  const CHANGELOG_TIMELINE_BOUND_KEY = '__exomindChangelogTimelineBound';
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function formatDate(value, locale) {
+    const date = new Date(value);
+    return new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+  }
+
+  function toAnchorId(channel, tag) {
+    const normalized = String(tag ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return `version-${channel}-${normalized || 'unknown'}`;
+  }
+
+  function decorateChannelEntries(channel, entries) {
+    const sorted = [...entries].sort(
+      (left, right) => new Date(right.published_at).getTime() - new Date(left.published_at).getTime(),
+    );
+
+    return sorted.map((release, index) => ({
+      ...release,
+      anchorId: toAnchorId(channel, release.tag),
+      previousAnchorId: index > 0 ? toAnchorId(channel, sorted[index - 1].tag) : null,
+      nextAnchorId: index < sorted.length - 1 ? toAnchorId(channel, sorted[index + 1].tag) : null,
+    }));
+  }
+
+  function buildTimelineEntries(timeline) {
+    const releaseEntries = decorateChannelEntries('release', timeline?.release ?? []);
+    const previewEntries = decorateChannelEntries('preview', timeline?.preview ?? []);
+
+    return [...releaseEntries, ...previewEntries].sort(
+      (left, right) => new Date(right.published_at).getTime() - new Date(left.published_at).getTime(),
+    );
+  }
+
+  function renderNavArrow(targetId, iconHtml, label) {
+    if (!targetId) {
+      return '<span class="inline-flex h-7 w-7 opacity-0"></span>';
+    }
+
+    return `
+      <a
+        href="#${targetId}"
+        data-timeline-nav="${targetId}"
+        class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition-all duration-200 hover:border-brand hover:bg-brand hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-brand dark:hover:bg-brand dark:hover:text-white"
+        aria-label="${escapeHtml(label)}"
+        title="${escapeHtml(label)}"
+      >
+        ${iconHtml}
+      </a>
+    `;
+  }
+
+  function renderDetails(release, config) {
+    const highlights = Array.isArray(release.highlights) ? release.highlights.slice(0, 5) : [];
+    if (!highlights.length) {
+      return `
+        <a
+          href="${release.release_url}"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="card flex items-start gap-3 p-4 text-sm text-stone-600 transition-colors hover:text-brand dark:text-stone-300 dark:hover:text-brand"
+        >
+          ${escapeHtml(config.copy.fallback)}
+        </a>
+      `;
+    }
+
+    return highlights
+      .map((highlight) => {
+        const badgeClass = config.kindClasses[highlight.kind] ?? config.kindClasses.changed;
+        const badgeLabel = config.kindLabels[highlight.kind] ?? config.kindLabels.changed;
+        return `
+          <div class="card flex items-start gap-3 p-4">
+            <span class="inline-flex shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${badgeClass}">
+              ${escapeHtml(badgeLabel)}
+            </span>
+            <span class="text-sm text-stone-700 dark:text-stone-300">${escapeHtml(highlight.text)}</span>
+          </div>
+        `;
+      })
+      .join('');
+  }
+
+  function renderEntry(release, config) {
+    const track = config.tracks[release.channel] ?? config.tracks.release;
+    const isRelease = release.channel === 'release';
+    const navColumn = `
+      <div class="flex shrink-0 flex-col items-center gap-1">
+        ${renderNavArrow(release.previousAnchorId, config.navIcons.up, config.copy.previousInChannel)}
+        ${renderNavArrow(release.nextAnchorId, config.navIcons.down, config.copy.nextInChannel)}
+      </div>
+    `;
+
+    const content = `
+      <div class="max-w-xl ${isRelease ? 'md:ml-auto' : 'md:mr-auto'} ${track.textClass}">
+        <div class="flex flex-wrap items-center gap-3 ${track.justifyClass}">
+          <span class="text-2xl font-semibold uppercase tracking-[0.18em] ${track.accentClass}">
+            ${escapeHtml(track.shortLabel)}
+          </span>
+          <div class="inline-flex items-center gap-3">
+            ${navColumn}
+            <a
+              href="${release.release_url}"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="rounded-full px-3 py-1 text-sm font-medium ${track.badgeClass}"
+            >
+              ${escapeHtml(release.display_tag || release.tag)}
+            </a>
+          </div>
+          <span class="text-sm text-stone-400">${formatDate(release.published_at, config.locale)}</span>
+        </div>
+        <div class="mt-4 space-y-3">
+          ${renderDetails(release, config)}
+        </div>
+      </div>
+    `;
+
+    return `
+      <div id="${release.anchorId}" class="relative scroll-mt-28 pl-10 md:grid md:grid-cols-[minmax(0,1fr)_88px_minmax(0,1fr)] md:gap-6 md:pl-0">
+        <div class="${isRelease ? track.colClass : 'hidden md:block'}">
+          ${isRelease ? content : ''}
+        </div>
+        <div class="hidden md:block"></div>
+        <div class="${!isRelease ? track.colClass : 'hidden md:block'}">
+          ${!isRelease ? content : ''}
+        </div>
+        <div class="md:hidden">
+          ${content}
+        </div>
+        <div class="absolute -left-[calc(2rem+5px)] top-0 h-3 w-3 rounded-full border-2 ${track.dotClass} md:left-1/2 md:-translate-x-1/2"></div>
+      </div>
+    `;
+  }
+
+  function bindTimelineNavLinks(root) {
+    const links = Array.from(root.querySelectorAll('[data-timeline-nav]'));
+    links.forEach((link) => {
+      if (link.dataset.timelineNavBound === 'true') {
+        return;
+      }
+
+      link.dataset.timelineNavBound = 'true';
+      link.addEventListener('click', (event) => {
+        const targetId = link.dataset.timelineNav;
+        if (!targetId) {
+          return;
+        }
+
+        const target = document.getElementById(targetId);
+        if (!target) {
+          return;
+        }
+
+        event.preventDefault();
+        history.replaceState(null, '', `#${targetId}`);
+        target.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+      });
+    });
+  }
+
+  function restoreHashScroll() {
+    const hash = window.location.hash;
+    if (!hash) {
+      return;
+    }
+
+    const target = document.getElementById(hash.slice(1));
+    if (!target) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      target.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    });
+  }
+
+  async function mountTimeline(config) {
+    const root = document.querySelector(`[data-changelog-timeline="${config.id}"]`);
+    if (!root) {
+      return;
+    }
+
+    const loading = root.querySelector('.timeline-loading');
+    const empty = root.querySelector('.timeline-empty');
+    const list = root.querySelector('.timeline-list');
+
+    try {
+      const timeline = await loadReleaseTimelineWithFallback({
+        localUrl: config.timelineUrl,
+      });
+
+      const entries = buildTimelineEntries(timeline);
+      if (!entries.length) {
+        loading?.classList.add('hidden');
+        empty?.classList.remove('hidden');
+        if (empty) {
+          empty.textContent = config.copy.empty;
+        }
+        return;
+      }
+
+      if (list) {
+        list.innerHTML = entries.map((release) => renderEntry(release, config)).join('');
+        list.classList.remove('hidden');
+      }
+
+      loading?.classList.add('hidden');
+      empty?.classList.add('hidden');
+      bindTimelineNavLinks(root);
+      restoreHashScroll();
+    } catch (error) {
+      console.error('Failed to render changelog timeline:', error);
+      loading?.classList.add('hidden');
+      empty?.classList.remove('hidden');
+      if (empty) {
+        empty.textContent = config.copy.empty;
+      }
+    }
+  }
+
+  function mountAllTimelines() {
+    const configElements = Array.from(document.querySelectorAll('[data-changelog-timeline-config]'));
+    configElements.forEach((element) => {
+      const config = element.textContent ? JSON.parse(element.textContent) : null;
+      if (!config) {
+        return;
+      }
+      void mountTimeline(config);
+    });
+  }
+
+  if (!window[CHANGELOG_TIMELINE_BOUND_KEY]) {
+    document.addEventListener('astro:page-load', mountAllTimelines);
+    document.addEventListener('astro:after-swap', mountAllTimelines);
+    window[CHANGELOG_TIMELINE_BOUND_KEY] = true;
+  }
+
+  mountAllTimelines();
+</script>

@@ -7,7 +7,9 @@
 
 // 使用默认导入
 import PouchDB from 'pouchdb';
+import { getCurrentProfileOrLegacyId } from '../profile/profile-storage';
 import { buildSyncErrorLog } from './sync-error';
+import { log } from '@/lib/logger';
 
 const POUCHDB_PREFIX_ENV = 'EXOMIND_EVENT_STORAGE_PREFIX';
 const DEFAULT_TEST_POUCHDB_PREFIX = '.tmp/pouchdb-event-storage/';
@@ -22,6 +24,7 @@ export interface Event {
   updatedAt?: string;
   type?: string;
   metadata?: Record<string, unknown>;
+  replicationSeq?: number;
 }
 
 export interface EventPageCursor {
@@ -47,6 +50,16 @@ interface EventDoc extends Event {
   _id: string;
   _rev?: string;
 }
+
+interface ReplicationSeqDoc {
+  _id: string;
+  _rev?: string;
+  nextSeq: number;
+}
+
+export type ProjectReplicatedEventResult = 'inserted' | 'duplicate';
+
+const EVENTLOG_REPLICATION_SEQ_DOC_ID = 'meta:eventlog-replication-seq';
 
 const BY_CREATED_AT_MAP = `function(doc) {
   if (doc._id && doc._id.startsWith('event:')) {
@@ -109,27 +122,10 @@ function buildStorageCacheKey(userId: string, prefix?: string): string {
 }
 
 /**
- * 获取当前用户 ID（与 ChatPage 保持一致）
+ * 获取当前用户 ID / 当前档案键（Current user id / active profile key，当前用户 ID / 当前档案键）
  */
 export function getCurrentUserId(): string {
-  // 尝试从 localStorage 读取 sync-store 中的 currentUser
-  try {
-    const syncStoreData = localStorage.getItem('exomind:sync-store');
-    if (syncStoreData) {
-      const parsed = JSON.parse(syncStoreData);
-      // Zustand persist 会将状态包装在 state 对象中
-      if (parsed.state && parsed.state.currentUser) {
-        return parsed.state.currentUser;
-      }
-      // 直接存储的情况
-      if (parsed.currentUser) {
-        return parsed.currentUser;
-      }
-    }
-  } catch {
-    // 忽略解析错误
-  }
-  return 'anonymous';
+  return getCurrentProfileOrLegacyId();
 }
 
 /**
@@ -231,10 +227,10 @@ export class EventStorage {
 
           this.initialized = true;
         } catch (updateError) {
-          console.warn('更新设计文档失败:', updateError);
+          log.warn(`更新设计文档失败: ${updateError instanceof Error ? updateError.message : String(updateError)}`);
         }
       } else {
-        console.warn('创建设计文档失败:', error);
+        log.warn(`创建设计文档失败: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -244,20 +240,13 @@ export class EventStorage {
    *
    * @param event - 事件数据
    */
-  async addEvent(event: Event): Promise<void> {
+  async addEvent(
+    event: Event,
+    options?: { origin?: 'local' | 'replicated' },
+  ): Promise<void> {
     await this.initializeDesignDoc();
-
-    const doc: EventDoc = {
-      ...event,
-      _id: `event:${event.id}`,
-      createdAt: event.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    await this.db.put(doc as unknown as Parameters<typeof this.db.put>[0]);
-
-    // 触发本地变更通知
-    this.notifyChangeListeners({ type: 'local', doc });
+    const source = options?.origin === 'replicated' ? 'ecs_replication' : 'local';
+    await this.writeEventDoc(event, source);
   }
 
   /**
@@ -486,6 +475,10 @@ export class EventStorage {
     };
   }
 
+  get listenerCount(): number {
+    return this.changeListeners.length;
+  }
+
   /**
    * 通知所有变更监听器
    */
@@ -494,7 +487,7 @@ export class EventStorage {
       try {
         listener(change);
       } catch {
-        console.error('变更监听器执行错误');
+        log.error('变更监听器执行错误');
       }
     }
   }
@@ -522,7 +515,7 @@ export class EventStorage {
       return;
     }
     this.lastSyncErrorSignature = signature;
-    console.error(message, payload);
+    log.error(`${message} ${JSON.stringify(payload)}`);
   }
 
   /**
@@ -542,5 +535,100 @@ export class EventStorage {
     delete event._rev;
     delete event._conflicts;
     return event as unknown as Event;
+  }
+
+  async projectReplicatedEvent(event: Event): Promise<ProjectReplicatedEventResult> {
+    await this.initializeDesignDoc();
+    return this.writeEventDoc(event, 'ecs_replication');
+  }
+
+  private async writeEventDoc(
+    event: Event,
+    source: 'local' | 'ecs_replication',
+  ): Promise<ProjectReplicatedEventResult> {
+    const existing = await this.getEventDocById(event.id);
+    const nextEvent: Event = {
+      ...event,
+      createdAt: event.createdAt || new Date().toISOString(),
+      updatedAt: event.updatedAt ?? event.createdAt ?? new Date().toISOString(),
+      replicationSeq: typeof event.replicationSeq === 'number'
+        ? event.replicationSeq
+        : (source === 'local' ? await this.allocateNextReplicationSeq() : undefined),
+    };
+
+    if (existing) {
+      if (this.isSameLogicalEvent(existing, nextEvent)) {
+        return 'duplicate';
+      }
+
+      throw new Error(`eventlog replication protocol conflict for event.id=${event.id}`);
+    }
+
+    const doc: EventDoc = {
+      ...nextEvent,
+      _id: `event:${event.id}`,
+    };
+
+    await this.db.put(doc as unknown as Parameters<typeof this.db.put>[0]);
+
+    this.notifyChangeListeners({
+      type: source,
+      direction: source === 'ecs_replication' ? 'pull' : 'local',
+      doc,
+    });
+    return 'inserted';
+  }
+
+  private async getEventDocById(id: string): Promise<EventDoc | null> {
+    try {
+      return await this.db.get<EventDoc>(`event:${id}`);
+    } catch {
+      return null;
+    }
+  }
+
+  private async allocateNextReplicationSeq(): Promise<number> {
+    while (true) {
+      try {
+        const existing = await this.db.get<ReplicationSeqDoc>(EVENTLOG_REPLICATION_SEQ_DOC_ID);
+        const current = Number.isInteger(existing.nextSeq) && existing.nextSeq > 0
+          ? existing.nextSeq
+          : 1;
+        await this.db.put({
+          ...existing,
+          nextSeq: current + 1,
+        } as unknown as Parameters<typeof this.db.put>[0]);
+        return current;
+      } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'status' in error && (error as { status?: number }).status === 404) {
+          try {
+            await this.db.put({
+              _id: EVENTLOG_REPLICATION_SEQ_DOC_ID,
+              nextSeq: 2,
+            } as unknown as Parameters<typeof this.db.put>[0]);
+            return 1;
+          } catch (putError: unknown) {
+            if (
+              !(putError && typeof putError === 'object' && 'status' in putError && (putError as { status?: number }).status === 409)
+            ) {
+              throw putError;
+            }
+          }
+        } else if (
+          !(error && typeof error === 'object' && 'status' in error && (error as { status?: number }).status === 409)
+        ) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  private isSameLogicalEvent(existing: EventDoc, incoming: Event): boolean {
+    return existing.id === incoming.id
+      && existing.content === incoming.content
+      && existing.createdAt === incoming.createdAt
+      && (existing.type ?? null) === (incoming.type ?? null)
+      && (existing.replicationSeq ?? null) === (incoming.replicationSeq ?? null)
+      && JSON.stringify(existing.metadata ?? null) === JSON.stringify(incoming.metadata ?? null);
   }
 }

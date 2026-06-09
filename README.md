@@ -1,270 +1,188 @@
+<div align="center">
+
 # ExoMind
 
-> 本地优先（Local-first / 本地优先）的个人 AI 助手，聚焦事件日志（Event Log / 事件日志）、时间块（TimeBlock / 时间块）与多端同步（Multi-device Sync / 多端同步）。
+**Your life growth assistant.**
 
-## CI/CD
+Local-first · Event-driven · AI-powered · Cross-platform
 
-- **Black Hat Critic**: PR 自动双关评审（Codex 5.3 + Claude Opus 4.6）
+[![License: CCOPL-1.0](https://img.shields.io/badge/License-CCOPL--1.0-blue.svg)](https://github.com/exomind-team/ccopl)
+[![Build](https://img.shields.io/github/actions/workflow/status/exomind-team/exomind/release.yml?branch=dev&label=build)](https://github.com/exomind-team/exomind/actions)
+[![Website](https://img.shields.io/badge/website-exo--mind.ai-orange)](https://exo-mind.ai)
+[![Download](https://img.shields.io/badge/download-latest-green)](https://exo-mind.ai/download)
 
-## 项目概览
+[中文文档](./README-zh.md) · [Website](https://exo-mind.ai) · [Download](https://exo-mind.ai/download)
 
-ExoMind 是一个基于 Tauri v2 的跨平台应用（Windows/macOS/Linux/Android），前端使用 React + TypeScript，数据层使用 PouchDB（IndexedDB）并支持局域网同步。
+[![QQ Group](https://img.shields.io/badge/QQ群-外心ExoMind-blue?logo=tencentqq)](https://qm.qq.com/q/cmPIiH5BpS)
+[![WeChat](https://img.shields.io/badge/WeChat-join-green?logo=wechat)](./docs/wechat.md)
 
-当前主线版本：
+</div>
 
-- App Version（应用版本）: `0.2.1`
-- Package Name（包名）: `com.exomind.app`
-- Rust Crate（Rust 包名）: `exomind`
+> [!WARNING]
+> **Pre-1.0 — Expect breaking changes.** ExoMind is under active development with daily updates. APIs, data formats, and features may change without notice. We welcome contributors — come build with us!
 
-## 当前功能（v0.2.1）
+---
 
-| 模块                     | 状态     | 说明                                                |
-| ------------------------ | -------- | --------------------------------------------------- |
-| Event Log（事件日志）    | 稳定可用 | Markdown 记录、按时间分组、分页加载、JSON 导入导出  |
-| TimeBlock（时间块）      | 稳定可用 | 开始/暂停/继续/结束，结束时支持反馈记录             |
-| Sync（同步）             | 稳定可用 | 基于 PouchDB 的本地优先同步，支持按用户隔离数据库   |
-| Settings（设置）         | 稳定可用 | 主题切换、同步地址覆盖、导入策略、版本/构建哈希展示 |
-| Voice / ASR（语音/识别） | 实验中   | 提供语音聊天、ASR 测试与 MOSS 测试页面              |
-| User Manage（用户管理）  | 实验中   | 本地注册/登录流程，用于同步能力联调                 |
+## What is ExoMind
 
-## 技术栈（Tech Stack / 技术栈）
+ExoMind is a cross-platform personal AI assistant built with Tauri v2 (Windows/macOS/Linux/Android). It focuses on event logging, time blocks, and multi-device sync — helping you record, reflect, and grow.
 
-| 分类                        | 技术                             |
-| --------------------------- | -------------------------------- |
-| Runtime（运行时）           | Bun                              |
-| Frontend（前端）            | React 18 + TypeScript + Vite     |
-| Desktop/Mobile（桌面/移动） | Tauri v2                         |
-| UI（界面）                  | Tailwind CSS + Radix UI + Lucide |
-| State（状态）               | Zustand                          |
-| Storage（存储）             | PouchDB（IndexedDB）             |
-| Router（路由）              | TanStack Router                  |
-| Test（测试）                | Vitest + Playwright              |
+<div align="center">
+<img src="docs/assets/signal-network.png" alt="ExoMind Signal Network" width="800">
+<br>
+<em>Signal Network — agents, actors, and signal topics working together</em>
+<br><br>
+<img src="docs/assets/voice-input.png" alt="ExoMind Voice Input" width="800">
+<br>
+<em>Voice Input — real-time speech recognition with event logging</em>
+</div>
 
-## 快速开始（Quick Start / 快速上手）
+## Tech Stack
 
-### 1) 环境要求（Prerequisites / 先决条件）
+| Category | Technology |
+|----------|-----------|
+| Runtime | Bun |
+| Frontend | React 18 + TypeScript + Vite |
+| Desktop/Mobile | Tauri v2 |
+| UI | Tailwind CSS + Radix UI + Lucide |
+| State | Zustand |
+| Storage | PouchDB (IndexedDB) |
+| Router | TanStack Router |
+| Test | Vitest + Playwright |
 
-- Bun（必需）
-- Rust stable toolchain（必需）
-- Node.js 20+（推荐，与 CI 一致）
-- Windows 构建时需要 Visual Studio Build Tools（C++ 构建工具）
-- Android 开发需要：
-  - Android SDK（建议 API 34+）
-  - JDK 17
+## Quick Start
 
-### 2) 安装依赖（Install / 安装）
+### Prerequisites
 
-```powershell
-# 根项目依赖
+- Bun (required)
+- Rust stable toolchain (required)
+- Node.js 20+ (recommended)
+- Windows: Visual Studio Build Tools (C++)
+- Android: Android SDK (API 34+) + JDK 17
+
+### Install & Run
+
+```bash
+# Install dependencies
 bun install
 
-# 同步服务依赖（server 子项目）
-bun install --cwd server --omit optional
-```
-
-### 3) 本地开发（Development / 开发）
-
-```powershell
-# Web 前端（默认尝试 1420，被占用时自动选择空闲端口）
+# Web development
 bun run dev
 
-# PouchDB 同步服务（默认 127.0.0.1:6984）
-bun run server
-```
-
-```powershell
-# Tauri 桌面开发（自动探测空闲端口，无需手动配置）
+# Tauri desktop development
 bun run tauri dev
 
-# Tauri Android 开发
+# Tauri Android development
 bun run tauri android dev
 ```
 
-### 4) 推荐联调方式（Web + Sync / 前后端联调）
-
-```powershell
-# 建议在多 worktree 下显式设置端口，避免互相冲突
-$env:EXOMIND_WEB_PORT='1760'
-$env:EXOMIND_HMR_PORT='1761'
-$env:EXOMIND_POUCHDB_PORT='7384'
-$env:EXOMIND_POUCHDB_HOST='127.0.0.1'
-
-# 启动同步服务
-bun run server
-
-# 新终端启动前端
-bun run dev
-```
-
-可选一键脚本：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\Scripts\dev\run-test-stack.ps1
-```
-
-## 常用命令（Scripts / 常用脚本）
-
-### package.json 脚本
-
-| 命令                          | 作用                              |
-| ----------------------------- | --------------------------------- |
-| `bun run dev`               | 启动 Vite 开发服务                |
-| `bun run dev:sync`          | 通过 `dev.ps1` 启动同步开发流程 |
-| `bun run server`            | 启动 PouchDB 同步服务             |
-| `bun run tauri dev`         | 桌面端开发                        |
-| `bun run tauri android dev` | Android 开发                      |
-| `bun run build`             | TypeScript + Vite 构建            |
-| `bun run test`              | Vitest 单测                       |
-| `bun run test:e2e`          | Playwright E2E                    |
-| `bun run gh:comment -- ...` | GitHub Issue/PR 评论自动化        |
-
-### PowerShell 自动化脚本
-
-查看 `Scripts/README.md`，主要分组：
-
-- `Scripts/dev/*.ps1`：开发启动与辅助工具
-- `Scripts/build/*.ps1`：桌面/Android 构建
-- `Scripts/test/*.ps1`：测试执行
-
-## 环境变量（Environment Variables / 环境变量）
-
-建议从 `.env.example` 复制并调整：
-
-```powershell
-Copy-Item .env.example .env
-```
-
-核心变量：
-
-| 变量                     | 默认值        | 说明                                          |
-| ------------------------ | ------------- | --------------------------------------------- |
-| `EXOMIND_WEB_PORT`     | 自动探测      | Web 开发端口（默认尝试 1420，被占用自动切换） |
-| `EXOMIND_HMR_PORT`     | WEB+1         | HMR 端口                                      |
-| `EXOMIND_POUCHDB_PORT` | `6984`      | 同步服务端口                                  |
-| `EXOMIND_POUCHDB_HOST` | `127.0.0.1` | 同步服务监听地址                              |
-| `EXOMIND_ASR_PORT`     | `1949`      | ASR 服务端口                                  |
-| `VITE_SYNC_SERVER_URL` | 空            | 前端强制覆盖同步地址                          |
-| `VITE_ASR_SERVER_URL`  | 空            | 前端强制覆盖 ASR 地址                         |
-| `VITE_APP_VERSION`     | 自动解析      | 应用显示版本（CI 可注入）                     |
-| `VITE_BUILD_HASH`      | `local`     | 应用显示构建哈希（CI 注入）                   |
-
-说明：
-
-- 未设置 `VITE_SYNC_SERVER_URL` 时，前端会按 `当前 hostname + EXOMIND_POUCHDB_PORT` 自动拼接同步地址。
-- 局域网联调时，显式设置 `EXOMIND_POUCHDB_HOST=0.0.0.0`，并在客户端填写可达 IP。
-
-windows powershell指定端口启动桌面端的例子：
-
-```powershell
-$env:EXOMIND_WEB_PORT='1520'; $env:EXOMIND_HMR_PORT='1521'; bun run tauri dev
-```
-
-## 测试与验收（Testing / 测试）
-
-```powershell
-# 单元测试
-bun run test
-
-# 指定同步测试
-bun run test:sync
-
-# 端到端测试
-bun run test:e2e
-
-# Termux 端到端测试（系统 Chromium）
-pkg install x11-repo chromium
-export PLAYWRIGHT_TERMUX=1
-export PLAYWRIGHT_BROWSERS_PATH=0
-export CHROMIUM_PATH=/data/data/com.termux/files/usr/bin/chromium-browser
-bun run test:e2e:termux
-
-# Issue 专用 E2E 配置示例
-bun run test:e2e:issue27
-bun run test:e2e:issue77
-bun run test:e2e:issue82
-bun run test:e2e:issue120
-```
-
-## 构建与发布（Build & Release / 构建发布）
-
-### 本地构建
-
-```powershell
-# Web 构建
-bun run build
-
-# Tauri 桌面构建（示例：NSIS）
-bun run tauri build --bundles nsis
-
-# Android 构建
-bun run tauri android init
-bun run tauri android build --debug
-```
-
-### CI/CD（GitHub Actions）
-
-工作流文件：`.github/workflows/release.yml`
-
-Tag 触发规则：
-
-| Tag 格式                             | 触发行为              | Release 类型                |
-| ------------------------------------ | --------------------- | --------------------------- |
-| `build/v0.3.2-build.20260222T1430` | 构建 + GitHub Release | Pre-release（可直接下载）   |
-| `release/v0.3.3`                   | 构建 + GitHub Release | 正式版                      |
-| `release/v0.3.3-beta.1`            | 构建 + GitHub Release | Pre-release（由版本号判断） |
-
-日常使用：
+### Multi-instance development
 
 ```bash
-# 日常构建测试（自动生成时间戳 tag，Releases 页面可直接下载）
+# Start desktop instance
+bun tauri:manager start --name desktop
+
+# Start Android instance
+bun tauri:manager start --name phone --target android
+
+# List running instances
+bun tauri:manager list
+
+# View logs
+bun tauri:manager logs --name desktop --follow
+```
+
+## Common Commands
+
+| Command | Description |
+|---------|-------------|
+| `bun run dev` | Start Vite dev server |
+| `bun run server` | Start PouchDB sync server |
+| `bun run tauri dev` | Desktop development |
+| `bun run tauri android dev` | Android development |
+| `bun run build` | TypeScript + Vite build |
+| `bun run test` | Run unit tests |
+| `bun run test:e2e` | Run E2E tests |
+| `bun run build:tag` | Create build tag and trigger CI |
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and adjust:
+
+```bash
+cp .env.example .env
+```
+
+Key variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EXOMIND_WEB_PORT` | auto | Vite dev port (default 1420) |
+| `EXOMIND_POUCHDB_PORT` | `6984` | Sync server port |
+| `EXOMIND_ASR_PORT` | `1949` | ASR service port |
+
+See `.env.example` for the full list.
+
+## Project Structure
+
+```
+exomind/
+├─ src/                 # React frontend & business logic
+├─ src-tauri/           # Tauri Rust backend & config
+├─ crates/              # Rust crates (exomind-runtime)
+├─ server/              # PouchDB sync server
+├─ scripts/             # PowerShell/Bun automation
+├─ tests/               # Vitest + Playwright tests
+├─ docs/                # Documentation (architecture, specs, plans)
+└─ website/             # Public website source
+```
+
+## Ecosystem
+
+ExoMind is part of a larger ecosystem of open-source projects:
+
+| Project | Description |
+|---------|-------------|
+| [ExoMind Cell](https://github.com/exomind-team/exomind-cell) | Operational closure VM for Cognitive Life Science experiments (Rust) |
+| [Wattson](https://github.com/exomind-team/wattson) | Digital PSU monitoring — energy sensing layer (Rust) |
+| [CCOPL](https://github.com/exomind-team/ccopl) | Contributors' Collective Ownership Public License |
+
+## Documentation
+
+> Documentation is primarily written in Chinese. English translations are provided where available.
+
+- [Docs index](docs/README.md)
+- [Development log](https://exomind-team.github.io/exomind-devlog/) (Chinese · AI-generated · experimental)
+- [Architecture overview](docs/architecture/overview.md)
+- [Product requirements](docs/product/PRD.md)
+- [Product roadmap](docs/product/roadmap.md)
+- [Development guide](CLAUDE.md)
+- [Scripts guide](scripts/README.md)
+- [Git workflow](docs/development/git-spec.md)
+
+## Build & Release
+
+```bash
+# Daily build (auto-generates tag, uploads to R2)
 bun run build:tag
 
-# 正式发版（先 bump 版本号，再打 tag）
+# Formal release
 git tag release/v0.3.3 && git push origin release/v0.3.3
 ```
 
-发布产物命名（归一化后）：
+## Community
 
-- `ExoMind-v0.3.2-build.20260222T1430-<hash>-windows-x64-setup.exe`
-- `ExoMind-v0.3.2-build.20260222T1430-<hash>-windows-x64-installer.msi`（可选）
-- `ExoMind-v0.3.2-build.20260222T1430-<hash>-android-arm64.apk`
-- `ExoMind-v0.3.2-build.20260222T1430-<hash>-android-x86.apk`
+| Platform | Link |
+|----------|------|
+| **QQ Group** | [外心 ExoMind 用户交流群](https://qm.qq.com/q/cmPIiH5BpS) |
+| **WeChat** | [Scan QR to join](./docs/wechat.md) |
 
-## 项目结构（Repository Layout / 目录结构）
+## Contributing
 
-```text
-exomind/
-├─ src/                 # React 前端与业务逻辑
-├─ src-tauri/           # Tauri Rust 侧与打包配置
-├─ server/              # PouchDB 同步服务
-├─ Scripts/             # PowerShell/Bun 自动化脚本
-├─ tests/               # Vitest + Playwright 测试
-├─ docs/                # 文档中心（架构/规格/计划）
-├─ pm/                  # 项目管理文档
-└─ README.md            # 当前文件
-```
-
-## 文档索引（Docs / 文档）
-
-- 项目文档导航：`docs/README.md`
-- 快速上手：`docs/quickstart.md`
-- 架构说明：`docs/architecture.md`
-- 技术栈说明：`docs/stack.md`
-- 构建指南：`BUILD.md`
-- 脚本说明：`Scripts/README.md`
-- 开发规范：`CLAUDE.md`
-
-## 常见问题（FAQ / 常见问题）
-
-1. 同步服务启动报 `pouchdb-server 未找到`
-   安装 `server` 依赖：`bun install --cwd server --omit optional`。
-2. Web 端无法同步
-   检查 `EXOMIND_POUCHDB_PORT`、`EXOMIND_POUCHDB_HOST` 与设置页同步地址是否一致。
-3. Android 构建失败
-   先确认 `JAVA_HOME`、`ANDROID_SDK_ROOT` 与 `bun run tauri android init` 已完成。
-4. 多 worktree 端口冲突
-   dev 端口已支持自动探测空闲端口，通常无需手动配置。如需固定端口，可设置 `EXOMIND_WEB_PORT/EXOMIND_HMR_PORT/EXOMIND_POUCHDB_PORT/EXOMIND_ASR_PORT`。
+We welcome contributions! Please read our development guide in [CLAUDE.md](CLAUDE.md) for coding conventions and workflow.
 
 ## License
 
-MIT
+This project is licensed under the [Contributors' Collective Ownership Public License v1.0 (CCOPL-1.0)](https://github.com/exomind-team/ccopl).
+
+See [LICENSE](LICENSE) and [LICENSE-zh](LICENSE-zh) for details.

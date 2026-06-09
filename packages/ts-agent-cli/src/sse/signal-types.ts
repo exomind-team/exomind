@@ -16,7 +16,7 @@ export interface SignalEvent {
   payload: unknown;
 }
 
-export type TargetType = 'actor' | 'agent' | 'frontend';
+export type TargetType = 'actor' | 'agent' | 'frontend' | 'remote';
 
 export interface SignalRoute {
   id: string;

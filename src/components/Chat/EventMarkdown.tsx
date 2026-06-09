@@ -1,9 +1,11 @@
 import ReactMarkdown from 'react-markdown';
+import { useNavigate } from '@tanstack/react-router';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
+import { openExternalUrl, resolveMarkdownLinkTarget } from '@/lib/utils/open-external';
 import 'katex/dist/katex.min.css';
 
 /**
@@ -31,11 +33,13 @@ function preprocessHighlight(content: string): string {
  * - 小字号
  */
 export function EventMarkdown({ content }: { content: string }) {
+  const navigate = useNavigate();
   // 预处理高亮语法
   const processedContent = preprocessHighlight(content);
 
   return (
     <div className="
+      exomind-selectable
       text-xs sm:text-sm break-words leading-relaxed
       prose prose-xs dark:prose-invert max-w-none
       prose-p:my-0 prose-p:leading-normal
@@ -79,6 +83,47 @@ export function EventMarkdown({ content }: { content: string }) {
       prose-mark:dark:bg-yellow-600/50 prose-mark:dark:text-yellow-100
     ">
       <ReactMarkdown
+        components={{
+          a: ({ href, children, ...props }) => {
+            const resolvedTarget = href ? resolveMarkdownLinkTarget(href) : { kind: 'unsupported', url: null as null };
+            const className = 'text-[#C75B3A] underline underline-offset-2 transition-colors hover:text-[#B24D2F] dark:text-[#FDBA74] dark:hover:text-[#FED7AA]';
+
+            if (!href || resolvedTarget.kind === 'unsupported' || !resolvedTarget.url) {
+              return <span {...props}>{children}</span>;
+            }
+
+            if (resolvedTarget.kind === 'external') {
+              return (
+                <a
+                  {...props}
+                  href={resolvedTarget.url.toString()}
+                  className={className}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void openExternalUrl(resolvedTarget.url.toString());
+                  }}
+                >
+                  {children}
+                </a>
+              );
+            }
+
+            const to = `${resolvedTarget.url.pathname}${resolvedTarget.url.search}${resolvedTarget.url.hash}`;
+            return (
+              <a
+                {...props}
+                href={to}
+                className={className}
+                onClick={(event) => {
+                  event.preventDefault();
+                  void navigate({ to: to as never });
+                }}
+              >
+                {children}
+              </a>
+            );
+          },
+        }}
         remarkPlugins={[
           remarkGfm,
           remarkBreaks,

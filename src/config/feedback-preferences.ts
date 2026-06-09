@@ -1,3 +1,5 @@
+import { createConfigModule } from './config-factory';
+
 export const FEEDBACK_PREFERENCES_STORAGE_KEY = 'exomind:feedbackPreferences';
 export const FEEDBACK_PREFERENCES_CHANGED_EVENT = 'exomind:feedback-preferences-changed';
 export const FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS = 5;
@@ -33,37 +35,32 @@ function normalizeFeedbackPreferences(value: unknown): FeedbackPreferences {
   };
 }
 
-export function getFeedbackPreferences(): FeedbackPreferences {
-  if (typeof window === 'undefined') {
+function parseStoredFeedbackPreferences(rawValue: string | null | undefined): FeedbackPreferences {
+  if (!rawValue) {
     return DEFAULT_FEEDBACK_PREFERENCES;
   }
-
   try {
-    const raw = window.localStorage.getItem(FEEDBACK_PREFERENCES_STORAGE_KEY);
-    if (!raw) return DEFAULT_FEEDBACK_PREFERENCES;
-    return normalizeFeedbackPreferences(JSON.parse(raw));
+    return normalizeFeedbackPreferences(JSON.parse(rawValue));
   } catch {
     return DEFAULT_FEEDBACK_PREFERENCES;
   }
 }
 
-export function setFeedbackPreferences(preferences: FeedbackPreferences): void {
-  if (typeof window === 'undefined') return;
+const feedbackPreferencesModule = createConfigModule<FeedbackPreferences>({
+  storageKey: FEEDBACK_PREFERENCES_STORAGE_KEY,
+  eventName: FEEDBACK_PREFERENCES_CHANGED_EVENT,
+  defaultValue: DEFAULT_FEEDBACK_PREFERENCES,
+  normalize: parseStoredFeedbackPreferences,
+  serialize: (value) => JSON.stringify(normalizeFeedbackPreferences(value)),
+  persistMode: 'runtime-preferred',
+});
 
-  try {
-    const normalized = normalizeFeedbackPreferences(preferences);
-    window.localStorage.setItem(
-      FEEDBACK_PREFERENCES_STORAGE_KEY,
-      JSON.stringify(normalized),
-    );
-    window.dispatchEvent(
-      new CustomEvent(FEEDBACK_PREFERENCES_CHANGED_EVENT, {
-        detail: { value: normalized },
-      }),
-    );
-  } catch {
-    // ignore localStorage write errors
-  }
+export function getFeedbackPreferences(): FeedbackPreferences {
+  return feedbackPreferencesModule.get();
+}
+
+export function setFeedbackPreferences(preferences: FeedbackPreferences): void {
+  feedbackPreferencesModule.set(preferences);
 }
 
 export function updateFeedbackPreferences(
@@ -73,33 +70,11 @@ export function updateFeedbackPreferences(
     ...getFeedbackPreferences(),
     ...patch,
   };
-  const normalized = normalizeFeedbackPreferences(merged);
-  setFeedbackPreferences(normalized);
-  return normalized;
+  return feedbackPreferencesModule.set(merged);
 }
 
 export function subscribeFeedbackPreferencesChanges(
   listener: (preferences: FeedbackPreferences) => void,
 ): () => void {
-  if (typeof window === 'undefined') {
-    return () => {};
-  }
-
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key !== FEEDBACK_PREFERENCES_STORAGE_KEY) return;
-    listener(getFeedbackPreferences());
-  };
-
-  const handleCustomEvent = (event: Event) => {
-    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
-    listener(normalizeFeedbackPreferences(detail?.value));
-  };
-
-  window.addEventListener('storage', handleStorage);
-  window.addEventListener(FEEDBACK_PREFERENCES_CHANGED_EVENT, handleCustomEvent);
-
-  return () => {
-    window.removeEventListener('storage', handleStorage);
-    window.removeEventListener(FEEDBACK_PREFERENCES_CHANGED_EVENT, handleCustomEvent);
-  };
+  return feedbackPreferencesModule.subscribe(listener);
 }

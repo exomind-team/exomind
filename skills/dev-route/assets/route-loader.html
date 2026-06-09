@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ExoMind 开发航线</title>
+<link rel="icon" href="../favicon.ico">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<link rel="stylesheet" href="../assets/route-style.css">
+<style>
+.loading,.error{max-width:760px;margin:4rem auto;padding:2rem;background:var(--card,#0d1117);border:1px solid var(--border,#21262d);border-radius:10px}
+.loading{text-align:center;color:var(--text-dim,#8b949e)}
+.loading .spinner{font-size:2rem;margin-bottom:1rem;animation:spin 2s linear infinite}
+@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+.error{color:var(--p0,#f85149)}
+.error h2{margin-bottom:1rem;font-size:1.5rem;display:flex;align-items:center;gap:.5rem}
+.error .stage{margin:1.5rem 0;padding:1rem;background:var(--bg,#06080d);border-left:3px solid var(--border,#21262d);border-radius:6px}
+.error .stage.success{border-left-color:var(--green,#2ea043)}
+.error .stage.failed{border-left-color:var(--p0,#f85149)}
+.error .stage-title{font-weight:700;margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem}
+.error .stage-detail{font-size:.9rem;color:var(--text-dim,#8b949e);margin-top:.5rem;font-family:'JetBrains Mono',monospace}
+.error details{margin-top:1.5rem;cursor:pointer}
+.error summary{color:var(--accent,#58a6ff);font-weight:500}
+.error pre{margin-top:.5rem;padding:1rem;background:var(--bg,#06080d);border-radius:6px;overflow-x:auto;font-size:.85rem;color:var(--text,#e6edf3);max-height:400px;overflow-y:auto}
+</style>
+</head>
+<body>
+<div class="container" id="app">
+  <div class="loading">
+    <div class="spinner">⏳</div>
+    <div>加载航线数据中...</div>
+  </div>
+</div>
+
+<script>
+const CONFIG = {
+  dataFile: 'DATA_FILENAME.json',
+  schema: 'exomind-devlog-route',
+  engineUrl: '../assets/route-engine.js',
+  debug: new URLSearchParams(window.location.search).has('debug'),
+};
+
+const log = {
+  info: (...args) => CONFIG.debug && console.log('[RouteLoader]', ...args),
+  warn: (...args) => console.warn('[RouteLoader]', ...args),
+  error: (...args) => console.error('[RouteLoader]', ...args),
+};
+
+const stages = {
+  parse: { name: '解析配置', status: 'pending', detail: '' },
+  fetch: { name: '加载数据', status: 'pending', detail: '', source: '' },
+  validate: { name: '验证数据', status: 'pending', detail: '' },
+  engine: { name: '加载引擎', status: 'pending', detail: '' },
+  render: { name: '执行渲染', status: 'pending', detail: '' },
+};
+
+function updateStage(stage, status, detail = '') {
+  stages[stage].status = status;
+  stages[stage].detail = detail;
+  log.info(`[${stage}] ${status}:`, detail);
+}
+
+function showError(failedStage, error) {
+  const stageList = Object.entries(stages).map(([key, stage]) => {
+    const icon = stage.status === 'success' ? '✓' : stage.status === 'failed' ? '✗' : '○';
+    const className = stage.status === 'success' ? 'success' : stage.status === 'failed' ? 'failed' : '';
+    let detail = stage.detail;
+    if (key === 'fetch' && stage.source) detail += ` (来源: ${stage.source})`;
+    return `
+      <div class="stage ${className}">
+        <div class="stage-title">${icon} ${stage.name}</div>
+        ${detail ? `<div class="stage-detail">${detail}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  const debugInfo = {
+    failedStage,
+    error: error.message,
+    stack: error.stack,
+    config: CONFIG,
+    stages,
+    url: window.location.href,
+  };
+
+  document.getElementById('app').innerHTML = `
+    <div class="error">
+      <h2><span>⚠️</span><span>航线加载失败</span></h2>
+      <p>在「${stages[failedStage].name}」阶段遇到错误。</p>
+      <div style="margin-top:1.5rem;">${stageList}</div>
+      <details>
+        <summary>查看调试信息</summary>
+        <pre>${JSON.stringify(debugInfo, null, 2)}</pre>
+      </details>
+      <details>
+        <summary>查看原始错误</summary>
+        <pre>${error.stack || error.message}</pre>
+      </details>
+    </div>
+  `;
+}
+
+async function fetchData() {
+  updateStage('fetch', 'running', '按优先级尝试页面数据...');
+  const params = new URLSearchParams(window.location.search);
+  const explicitUrl = params.get('data');
+  const candidates = [];
+
+  if (explicitUrl) candidates.push({ source: 'url-param', url: explicitUrl });
+  if (CONFIG.dataFile && CONFIG.dataFile !== 'DATA_FILENAME.json') {
+    candidates.push({ source: 'page-json', url: `./${CONFIG.dataFile}` });
+  }
+
+  for (const candidate of candidates) {
+    try {
+      log.info('尝试读取', candidate);
+      const response = await fetch(candidate.url, { signal: AbortSignal.timeout(10000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      stages.fetch.source = candidate.source;
+      updateStage('fetch', 'success', `成功加载 ${candidate.url}`);
+      return data;
+    } catch (error) {
+      log.warn(`${candidate.source} 读取失败`, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  throw new Error('页面配置的数据源均不可用');
+}
+
+function validateData(data) {
+  updateStage('validate', 'running', '检查 schema 与必填字段...');
+  if (data.schema !== CONFIG.schema) throw new Error(`Schema 不匹配: ${data.schema}`);
+  if (!data.meta || !data.status || !Array.isArray(data.metrics) || !Array.isArray(data.batches)) {
+    throw new Error('航线数据缺少关键字段');
+  }
+  updateStage('validate', 'success', `Schema: ${data.schema} v${data.version || '?'}`);
+  return data;
+}
+
+function loadEngine() {
+  return new Promise((resolve, reject) => {
+    updateStage('engine', 'running', `加载: ${CONFIG.engineUrl}`);
+    const script = document.createElement('script');
+    script.src = CONFIG.engineUrl;
+    script.onload = () => {
+      updateStage('engine', 'success', '渲染引擎已加载');
+      resolve();
+    };
+    script.onerror = () => {
+      updateStage('engine', 'failed', '渲染引擎加载失败');
+      reject(new Error(`无法加载渲染引擎: ${CONFIG.engineUrl}`));
+    };
+    document.head.appendChild(script);
+  });
+}
+
+(async function main() {
+  try {
+    updateStage('parse', 'running', '解析页面配置...');
+    updateStage('parse', 'success', `数据文件: ${CONFIG.dataFile}`);
+    const data = validateData(await fetchData());
+    window.ROUTE = data;
+    document.title = `ExoMind ${data.meta.title} · ${data.meta.date}`;
+    await loadEngine();
+    updateStage('render', 'success', '渲染完成');
+  } catch (error) {
+    const failedStage = Object.keys(stages).find(key => stages[key].status === 'running' || stages[key].status === 'failed') || 'fetch';
+    updateStage(failedStage, 'failed', error instanceof Error ? error.message : String(error));
+    showError(failedStage, error instanceof Error ? error : new Error(String(error)));
+  }
+})();
+</script>
+</body>
+</html>

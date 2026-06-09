@@ -1,135 +1,122 @@
-import type { ITaskPort } from '@/lib/environment/interfaces/task.port';
 import type {
+  ITaskPort,
   CreateTaskInput,
-  TaskGoalGroup,
-  TaskItem,
-  TaskTimerMode,
-} from '@/lib/types/task';
-import { createUuidV4 } from '@/lib/utils/uuid';
+  UpdateTaskInput,
+} from "@/lib/environment/interfaces/task.port";
+import type { TaskNode, TaskStatus } from "@/lib/types/task";
 import {
-  MOCK_TASK_GOAL_GROUPS_FIXTURE,
-  MOCK_TASKS_FIXTURE,
-} from './fixtures/tasks';
+  buildInitialTaskStatusTransition,
+  canTransition,
+  normalizeTaskNode,
+  transition,
+} from "@/lib/types/task";
+import { createUuidV4 } from "@/lib/utils/uuid";
+import { MOCK_TASK_NODES_FIXTURE } from "./fixtures/tasks";
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
+const ALL_STATUSES: TaskStatus[] = [
+  "pending",
+  "in_progress",
+  "suspended",
+  "completed",
+  "cancelled",
+];
 
 export class TaskMockAdapter implements ITaskPort {
-  private tasks: TaskItem[] = deepClone(MOCK_TASKS_FIXTURE);
-  private goals: TaskGoalGroup[] = deepClone(MOCK_TASK_GOAL_GROUPS_FIXTURE);
+  private tasks: TaskNode[] = deepClone(MOCK_TASK_NODES_FIXTURE).map((task) =>
+    normalizeTaskNode(task),
+  );
 
-  async listTasks(): Promise<TaskItem[]> {
-    return deepClone(this.tasks);
+  async listTasks(includeCancelled = false): Promise<TaskNode[]> {
+    const all = deepClone(this.tasks);
+    return includeCancelled ? all : all.filter((t) => t.status !== "cancelled");
   }
 
-  async getLongTermGoals(): Promise<TaskGoalGroup[]> {
-    return deepClone(this.goals);
-  }
-
-  async getTaskById(taskId: string): Promise<TaskItem | null> {
-    const task = this.tasks.find((item) => item.id === taskId);
+  async getTaskById(id: string): Promise<TaskNode | null> {
+    const task = this.tasks.find((t) => t.id === id);
     return task ? deepClone(task) : null;
   }
 
-  async createTask(input: CreateTaskInput): Promise<TaskItem> {
-    const targetMinutes = input.targetMinutes ?? 25;
-    const mode = input.mode ?? 'countdown';
-    const createdAt = nowIso();
-    const task: TaskItem = {
-      id: `task-${createUuidV4()}`,
+  async createTask(input: CreateTaskInput): Promise<TaskNode> {
+    const now = Date.now();
+    const task: TaskNode = {
+      id: createUuidV4(),
       title: input.title.trim(),
-      note: input.note?.trim() || undefined,
-      status: 'todo',
-      progress: 0,
-      estimatedMinutes: targetMinutes,
-      spentMinutes: 0,
-      createdAt,
-      updatedAt: createdAt,
-      timer: {
-        mode,
-        paused: false,
-        elapsedMs: mode === 'countup' ? 0 : targetMinutes * 60 * 1000,
-        remainingMs: mode === 'countup' ? undefined : targetMinutes * 60 * 1000,
-        targetMinutes: mode === 'countup' ? undefined : targetMinutes,
-      },
+      description: input.description,
+      doneCondition: input.doneCondition,
+      status: "pending",
+      priority: input.priority ?? "medium",
+      dueAt: input.dueAt,
+      source: input.source,
+      parentId: input.parentId,
+      dependsOn: [],
+      tags: input.tags ?? [],
+      estimatedMinutes: input.estimatedMinutes,
+      statusTransitions: [],
+      createdAt: now,
+      updatedAt: now,
     };
-
-    this.tasks.unshift(task);
+    task.statusTransitions = [buildInitialTaskStatusTransition(task.id, now)];
+    this.tasks.push(task);
     return deepClone(task);
   }
 
-  async setTaskTimerMode(taskId: string, mode: TaskTimerMode): Promise<TaskItem | null> {
-    const index = this.tasks.findIndex((item) => item.id === taskId);
-    if (index < 0) return null;
-
-    const current = this.tasks[index];
-    const targetMinutes = current.timer.targetMinutes ?? current.estimatedMinutes ?? 25;
-    const updated: TaskItem = {
+  async updateTask(
+    id: string,
+    input: UpdateTaskInput,
+  ): Promise<TaskNode | null> {
+    const idx = this.tasks.findIndex((t) => t.id === id);
+    if (idx === -1) return null;
+    const current = this.tasks[idx];
+    const now = Date.now();
+    const nextUpdatedAt = now > current.updatedAt ? now : current.updatedAt + 1;
+    const updated: TaskNode = {
       ...current,
-      updatedAt: nowIso(),
-      timer: {
-        ...current.timer,
-        mode,
-        paused: false,
-        elapsedMs: mode === 'countup' ? current.timer.elapsedMs : targetMinutes * 60 * 1000,
-        remainingMs: mode === 'countup' ? undefined : targetMinutes * 60 * 1000,
-        targetMinutes: mode === 'countup' ? undefined : targetMinutes,
-      },
+      ...(input.title !== undefined ? { title: input.title } : {}),
+      ...(input.description !== undefined
+        ? { description: input.description ?? undefined }
+        : {}),
+      ...(input.doneCondition !== undefined
+        ? { doneCondition: input.doneCondition ?? undefined }
+        : {}),
+      ...(input.priority !== undefined ? { priority: input.priority } : {}),
+      ...(input.dueAt !== undefined ? { dueAt: input.dueAt ?? undefined } : {}),
+      ...(input.source !== undefined ? { source: input.source } : {}),
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+      ...(input.dependsOn !== undefined ? { dependsOn: input.dependsOn } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {}),
+      ...(input.estimatedMinutes !== undefined
+        ? { estimatedMinutes: input.estimatedMinutes ?? undefined }
+        : {}),
+      ...(input.timeBlockIds !== undefined ? { timeBlockIds: input.timeBlockIds } : {}),
+      updatedAt: nextUpdatedAt,
     };
-
-    this.tasks[index] = updated;
+    this.tasks[idx] = updated;
     return deepClone(updated);
   }
 
-  async pauseTask(taskId: string): Promise<TaskItem | null> {
-    const index = this.tasks.findIndex((item) => item.id === taskId);
-    if (index < 0) return null;
-
-    const updated: TaskItem = {
-      ...this.tasks[index],
-      status: 'in_progress',
-      updatedAt: nowIso(),
-      timer: {
-        ...this.tasks[index].timer,
-        paused: true,
-      },
-    };
-    this.tasks[index] = updated;
-    return deepClone(updated);
+  async cancelTask(id: string): Promise<TaskNode | null> {
+    const task = this.tasks.find((t) => t.id === id);
+    if (!task) return null;
+    const cancelled = transition(task, "cancelled");
+    this.tasks = this.tasks.map((t) => (t.id === id ? cancelled : t));
+    return deepClone(cancelled);
   }
 
-  async resumeTask(taskId: string): Promise<TaskItem | null> {
-    const index = this.tasks.findIndex((item) => item.id === taskId);
-    if (index < 0) return null;
-
-    const updated: TaskItem = {
-      ...this.tasks[index],
-      status: 'in_progress',
-      updatedAt: nowIso(),
-      timer: {
-        ...this.tasks[index].timer,
-        paused: false,
-      },
-    };
-    this.tasks[index] = updated;
-    return deepClone(updated);
+  async transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null> {
+    const task = this.tasks.find((t) => t.id === id);
+    if (!task) return null;
+    const transitioned = transition(task, to);
+    this.tasks = this.tasks.map((t) => (t.id === id ? transitioned : t));
+    return deepClone(transitioned);
   }
 
-  async upsertTask(task: TaskItem): Promise<void> {
-    const index = this.tasks.findIndex((item) => item.id === task.id);
-    const updated: TaskItem = {
-      ...task,
-      updatedAt: nowIso(),
-    };
-    if (index >= 0) {
-      this.tasks[index] = updated;
-    } else {
-      this.tasks.unshift(updated);
-    }
+  async getAvailableTransitions(id: string): Promise<TaskStatus[]> {
+    const task = await this.getTaskById(id);
+    if (!task) return [];
+    return ALL_STATUSES.filter((s) => canTransition(task.status, s));
   }
 }

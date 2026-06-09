@@ -17,21 +17,47 @@ async function resetClientStorage(page: Page) {
 
 async function seedLoggedInUser(page: Page, username: string) {
   await page.addInitScript((user) => {
-    const syncStoreState = {
-      state: {
-        isLoggedIn: true,
-        currentUser: user,
-        credentials: {
-          username: user,
-          passwordHash: 'e2e-password-hash',
-          deviceName: 'E2E Device',
-          deviceType: 'desktop',
-          platform: 'Android',
-        },
-      },
-      version: 0,
-    };
-    localStorage.setItem('exomind:sync-store', JSON.stringify(syncStoreState));
+    const normalized = user.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+    const profileId = `profile-${normalized || 'e2e'}`;
+    const linkId = `link-${normalized || 'e2e'}`;
+    const now = new Date().toISOString();
+
+    localStorage.setItem('exomind:profiles:index', JSON.stringify([profileId]));
+    localStorage.setItem(`exomind:profiles:${profileId}:meta`, JSON.stringify({
+      profileId,
+      slug: user,
+      displayName: user,
+      createdAt: now,
+      updatedAt: now,
+      authMode: 'password',
+      state: 'active',
+      defaultSyncPolicy: 'auto-sync-when-linked',
+    }));
+    localStorage.setItem('exomind:profile-session', JSON.stringify({
+      version: 1,
+      activeProfileId: profileId,
+      unlockedProfileIds: [profileId],
+    }));
+    localStorage.setItem('exomind:identity-links:index', JSON.stringify([linkId]));
+    localStorage.setItem(`exomind:identity-links:meta:${linkId}`, JSON.stringify({
+      linkId,
+      profileId,
+      providerId: 'e2e',
+      remoteIdentityId: user,
+      remoteIdentityKey: user,
+      authMode: 'basic',
+      status: 'linked',
+      syncMode: 'realtime',
+      linkedAt: now,
+    }));
+    localStorage.setItem(`exomind:identity-links:secret:${linkId}`, JSON.stringify({
+      linkId,
+      authType: 'basic',
+      authUsername: user,
+      authSecret: 'e2e-password-hash',
+      updatedAt: now,
+    }));
+
   }, username);
 }
 
@@ -108,12 +134,12 @@ test.describe('多设备同步 E2E', () => {
     await Promise.all([connectToServer(pageA), connectToServer(pageB)]);
 
     await pageA.getByRole('button', { name: '同步事件' }).click();
-    await expect(pageA.getByText(/事件同步(完成|失败)/)).toBeVisible({
+    await expect(pageA.getByText(/事件同步完成/)).toBeVisible({
       timeout: 15000,
     });
 
     await pageB.getByRole('button', { name: '同步配置' }).click();
-    await expect(pageB.getByText(/配置同步(完成|失败)/)).toBeVisible({
+    await expect(pageB.getByText(/配置同步完成/)).toBeVisible({
       timeout: 15000,
     });
 

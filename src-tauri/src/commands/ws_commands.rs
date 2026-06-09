@@ -4,12 +4,16 @@
 use futures::{SinkExt, StreamExt};
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tokio::sync::Mutex;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::{connect_async, WebSocketStream};
 use tungstenite::Message;
 use url::Url;
+
+/// Maximum time to wait for a WebSocket connection to establish.
+const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// WebSocket 连接状态
 #[derive(Debug, Clone)]
@@ -58,12 +62,13 @@ pub async fn ws_connect<R: Runtime>(
     // 解析 URL
     let parsed_url = Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
 
-    // 建立连接
-    let (ws_stream, response) = connect_async(parsed_url)
+    // 建立连接（带超时保护，防止网络不通时无限等待）
+    let (ws_stream, response) = tokio::time::timeout(WS_CONNECT_TIMEOUT, connect_async(parsed_url))
         .await
+        .map_err(|_| "Connection timed out".to_string())?
         .map_err(|e| format!("Connection failed: {}", e))?;
 
-    println!("Connected to {}, response: {:?}", url, response.status());
+    log::info!("Connected to {}, response: {:?}", url, response.status());
 
     // 保存流
     let mut stream_guard = client_state.stream.lock().await;
@@ -83,48 +88,65 @@ pub async fn ws_connect<R: Runtime>(
 }
 
 /// 断开 WebSocket 连接
+///
+/// Locks `stream` first, closes it, drops the lock, THEN locks `state`.
+/// This avoids AB-BA deadlock with `receive_messages` which holds the
+/// stream content and later locks `state`.
 #[tauri::command]
 pub async fn ws_disconnect<R: Runtime>(
     _app: AppHandle<R>,
     client_state: State<'_, Arc<WsClientState>>,
 ) -> Result<String, String> {
-    let mut state_guard = client_state.state.lock().await;
-    let mut stream_guard = client_state.stream.lock().await;
-
-    // 关闭流
-    if let Some(ref mut ws_stream) = *stream_guard {
-        ws_stream.close(None).await.ok();
+    // Phase 1: close and release the stream (lock stream only)
+    {
+        let mut stream_guard = client_state.stream.lock().await;
+        if let Some(ref mut ws_stream) = *stream_guard {
+            ws_stream.close(None).await.ok();
+        }
         *stream_guard = None;
     }
+    // stream lock dropped here
 
-    *state_guard = ConnectionState::Disconnected;
+    // Phase 2: update connection state (lock state only)
+    {
+        let mut state_guard = client_state.state.lock().await;
+        *state_guard = ConnectionState::Disconnected;
+    }
 
     Ok("Disconnected".to_string())
 }
 
 /// 发送 WebSocket 消息
+///
+/// Checks connection state first, drops that lock, then locks stream
+/// to send.  Avoids holding both locks simultaneously.
 #[tauri::command]
 pub async fn ws_send<R: Runtime>(
     _app: AppHandle<R>,
     message: String,
     client_state: State<'_, Arc<WsClientState>>,
 ) -> Result<(), String> {
-    let state_guard = client_state.state.lock().await;
-
-    match &*state_guard {
-        ConnectionState::Connected(_) => {
-            let mut stream_guard = client_state.stream.lock().await;
-            if let Some(ref mut ws_stream) = *stream_guard {
-                ws_stream
-                    .send(Message::Text(message))
-                    .await
-                    .map_err(|e| format!("Send failed: {}", e))?;
-                return Ok(());
-            }
-            Err("Stream not available".to_string())
+    // Phase 1: check state (lock state only)
+    {
+        let state_guard = client_state.state.lock().await;
+        match &*state_guard {
+            ConnectionState::Connected(_) => { /* proceed */ }
+            ConnectionState::Connecting => return Err("Still connecting".to_string()),
+            ConnectionState::Disconnected => return Err("Not connected".to_string()),
         }
-        ConnectionState::Connecting => Err("Still connecting".to_string()),
-        ConnectionState::Disconnected => Err("Not connected".to_string()),
+    }
+    // state lock dropped here
+
+    // Phase 2: send on stream (lock stream only)
+    let mut stream_guard = client_state.stream.lock().await;
+    if let Some(ref mut ws_stream) = *stream_guard {
+        ws_stream
+            .send(Message::Text(message))
+            .await
+            .map_err(|e| format!("Send failed: {}", e))?;
+        Ok(())
+    } else {
+        Err("Stream not available".to_string())
     }
 }
 
@@ -145,21 +167,18 @@ pub async fn ws_get_state<R: Runtime>(
 /// 接收消息的异步任务
 async fn receive_messages<R: Runtime>(app: AppHandle<R>, client_state: Arc<WsClientState>) {
     // 获取流的拥有权
-    let stream_opt = {
+    let mut ws_stream = {
         let mut stream_guard = client_state.stream.lock().await;
-        stream_guard.take()
+        match stream_guard.take() {
+            Some(stream) => stream,
+            None => return,
+        }
     };
-
-    if stream_opt.is_none() {
-        return;
-    }
-
-    let mut ws_stream = stream_opt.unwrap();
 
     while let Some(msg_result) = ws_stream.next().await {
         match msg_result {
             Ok(Message::Text(text)) => {
-                println!("Received message: {}", text);
+                log::trace!("Received message: {}", text);
                 app.emit("ws-message", &text).ok();
 
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
@@ -194,23 +213,23 @@ async fn receive_messages<R: Runtime>(app: AppHandle<R>, client_state: Arc<WsCli
                 }
             }
             Ok(Message::Binary(data)) => {
-                println!("Received binary data: {} bytes", data.len());
+                log::trace!("Received binary data: {} bytes", data.len());
             }
             Ok(Message::Ping(ping)) => {
-                println!("Received ping: {:?}", ping);
+                log::trace!("Received ping: {:?}", ping);
             }
             Ok(Message::Pong(pong)) => {
-                println!("Received pong: {:?}", pong);
+                log::trace!("Received pong: {:?}", pong);
             }
             Ok(Message::Close(close_frame)) => {
-                println!("Connection closed: {:?}", close_frame);
+                log::info!("Connection closed: {:?}", close_frame);
                 break;
             }
             Ok(Message::Frame(_)) => {
                 // 内部帧类型，通常不需要处理
             }
             Err(e) => {
-                println!("WebSocket error: {}", e);
+                log::warn!("WebSocket error: {}", e);
                 break;
             }
         }

@@ -1,7 +1,13 @@
 import type { TargetType, SignalRoute } from '@/lib/types/signal-pool';
 import type { RuntimeAggregatedAgent } from '@/services/runtime-manager';
+import {
+  VOICE_INPUT_NODE_ID,
+  VOICE_INPUT_NODE_LABEL,
+  VOICE_INPUT_NODE_SUBTITLE,
+  isVoiceTranscriptTopic,
+} from '@/lib/constants/signal-topics';
 
-export type SignalGraphNodeType = 'topic' | 'agent' | 'actor' | 'frontend';
+export type SignalGraphNodeType = 'signal-input' | 'topic' | 'agent' | 'actor' | 'frontend' | 'remote';
 
 export interface SignalRouteRow {
   id: string;
@@ -17,6 +23,9 @@ export interface SignalGraphNode {
   type: SignalGraphNodeType;
   label: string;
   status: string;
+  energyPhase?: string;
+  isDormant?: boolean;
+  energyRatio?: number;
   position: {
     x: number;
     y: number;
@@ -68,42 +77,89 @@ export function buildSignalRouteRows(routes: SignalRoute[], hostLabel?: string):
   }));
 }
 
-function getAgentStatusMap(agents: RuntimeAggregatedAgent[]): Map<string, string> {
-  const map = new Map<string, string>();
+function getAgentMetaMap(agents: RuntimeAggregatedAgent[]): Map<string, {
+  status: string;
+  energyPhase?: string;
+  isDormant?: boolean;
+  energyRatio?: number;
+}> {
+  const map = new Map<string, {
+    status: string;
+    energyPhase?: string;
+    isDormant?: boolean;
+    energyRatio?: number;
+  }>();
   for (const agent of agents) {
     if (!map.has(agent.id)) {
-      map.set(agent.id, agent.status);
+      map.set(agent.id, {
+        status: agent.status,
+        energyPhase: agent.energy?.phase,
+        isDormant: agent.energy?.is_dormant,
+        energyRatio: agent.energy?.ratio,
+      });
     }
   }
   return map;
 }
 
 function nodeTypeToColumn(type: SignalGraphNodeType): number {
-  if (type === 'topic') return 0;
-  if (type === 'agent') return 1;
-  if (type === 'actor') return 2;
-  return 3;
+  if (type === 'signal-input') return 0;
+  if (type === 'topic') return 1;
+  if (type === 'agent') return 2;
+  if (type === 'actor') return 3;
+  if (type === 'frontend') return 4;
+  return 5;
 }
 
 function nodeTypeLabel(type: SignalGraphNodeType): string {
+  if (type === 'signal-input') return 'signal input（信号输入）';
   if (type === 'topic') return 'signal topic（信号主题）';
   if (type === 'agent') return 'agent';
   if (type === 'actor') return 'actor';
-  return 'frontend';
+  if (type === 'frontend') return 'frontend';
+  return 'remote runtime（远端运行时）';
+}
+
+function getInputNodeForTopic(topic: string): Pick<SignalGraphNode, 'id' | 'type' | 'label' | 'status'> | null {
+  if (isVoiceTranscriptTopic(topic)) {
+    return {
+      id: VOICE_INPUT_NODE_ID,
+      type: 'signal-input',
+      label: VOICE_INPUT_NODE_LABEL,
+      status: VOICE_INPUT_NODE_SUBTITLE,
+    };
+  }
+
+  return null;
 }
 
 export function buildSignalGraph(routes: SignalRoute[], agents: RuntimeAggregatedAgent[]): SignalGraph {
   const nextNodes = new Map<string, SignalGraphNode>();
   const nextEdges = new Map<string, SignalGraphEdge>();
-  const statusByAgentId = getAgentStatusMap(agents);
+  const metaByAgentId = getAgentMetaMap(agents);
   const rowByType = new Map<SignalGraphNodeType, number>([
+    ['signal-input', 0],
     ['topic', 0],
     ['agent', 0],
     ['actor', 0],
     ['frontend', 0],
+    ['remote', 0],
   ]);
 
   for (const route of routes) {
+    const inputNode = getInputNodeForTopic(route.topic);
+    if (inputNode && !nextNodes.has(inputNode.id)) {
+      const row = rowByType.get('signal-input') ?? 0;
+      nextNodes.set(inputNode.id, {
+        ...inputNode,
+        position: {
+          x: 120 + nodeTypeToColumn('signal-input') * 240,
+          y: 80 + row * 110,
+        },
+      });
+      rowByType.set('signal-input', row + 1);
+    }
+
     const fromNodeId = topicNodeId(route.topic);
     if (!nextNodes.has(fromNodeId)) {
       const row = rowByType.get('topic') ?? 0;
@@ -120,16 +176,35 @@ export function buildSignalGraph(routes: SignalRoute[], agents: RuntimeAggregate
       rowByType.set('topic', row + 1);
     }
 
+    if (inputNode) {
+      const inputEdgeId = `input-link:${route.topic}`;
+      const previousInputEdge = nextEdges.get(inputEdgeId);
+      nextEdges.set(inputEdgeId, {
+        id: inputEdgeId,
+        source: inputNode.id,
+        target: fromNodeId,
+        label: `${inputNode.label} → ${route.topic}`,
+        topic: route.topic,
+        targetType: 'frontend',
+        targetRef: route.topic,
+        active: Boolean(previousInputEdge?.active || route.enabled),
+      });
+    }
+
     const toNodeId = targetNodeId(route.target_type, route.target_ref);
     if (!nextNodes.has(toNodeId)) {
       const kind = route.target_type as SignalGraphNodeType;
       const row = rowByType.get(kind) ?? 0;
-      const status = kind === 'agent' ? (statusByAgentId.get(route.target_ref) ?? 'unknown') : nodeTypeLabel(kind);
+      const agentMeta = kind === 'agent' ? metaByAgentId.get(route.target_ref) : undefined;
+      const status = kind === 'agent' ? (agentMeta?.status ?? 'unknown') : nodeTypeLabel(kind);
       nextNodes.set(toNodeId, {
         id: toNodeId,
         type: kind,
         label: route.target_ref,
         status,
+        energyPhase: agentMeta?.energyPhase,
+        isDormant: agentMeta?.isDormant,
+        energyRatio: agentMeta?.energyRatio,
         position: {
           x: 120 + nodeTypeToColumn(kind) * 240,
           y: 80 + row * 110,
@@ -149,6 +224,29 @@ export function buildSignalGraph(routes: SignalRoute[], agents: RuntimeAggregate
       targetRef: route.target_ref,
       active: route.enabled,
     });
+  }
+
+  // Include standalone agents not targeted by any route
+  for (const agent of agents) {
+    const agentNodeId = targetNodeId('agent', agent.id);
+    if (!nextNodes.has(agentNodeId)) {
+      const row = rowByType.get('agent') ?? 0;
+      const agentMeta = metaByAgentId.get(agent.id);
+      nextNodes.set(agentNodeId, {
+        id: agentNodeId,
+        type: 'agent',
+        label: agent.id,
+        status: agentMeta?.status ?? 'unknown',
+        energyPhase: agentMeta?.energyPhase,
+        isDormant: agentMeta?.isDormant,
+        energyRatio: agentMeta?.energyRatio,
+        position: {
+          x: 120 + nodeTypeToColumn('agent') * 240,
+          y: 80 + row * 110,
+        },
+      });
+      rowByType.set('agent', row + 1);
+    }
   }
 
   return {

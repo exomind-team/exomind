@@ -1,36 +1,85 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import type { IRuntimePort, StartRuntimeInput } from '@/lib/environment/interfaces/runtime.port';
+import type {
+  IRuntimePort,
+  RuntimeDialAddress,
+  RuntimeReachableAddress,
+  StartRuntimeInput,
+} from '@/lib/environment/interfaces/runtime.port';
 import type { RuntimeServiceStatus } from '@/lib/types/agent-hub';
+import {
+  DEFAULT_EMBEDDED_RUNTIME_PORT,
+  rememberEmbeddedRuntimeStatus,
+} from '@/config/runtime-target';
 
 const DEFAULT_RUNTIME_STATUS: RuntimeServiceStatus = {
   running: false,
   host: '127.0.0.1',
-  port: 4077,
+  port: DEFAULT_EMBEDDED_RUNTIME_PORT,
   error: 'tauri runtime control only',
 };
+
+function rememberRunningEmbeddedRuntimeStatus(status: RuntimeServiceStatus): RuntimeServiceStatus {
+  if (status.running) {
+    rememberEmbeddedRuntimeStatus({
+      host: status.host,
+      port: status.port,
+      hostId: status.hostId,
+    });
+  }
+  return status;
+}
 
 export class TauriRuntimeAdapter implements IRuntimePort {
   async startRuntime(input: StartRuntimeInput): Promise<RuntimeServiceStatus> {
     if (!(await isTauri())) {
       return { ...DEFAULT_RUNTIME_STATUS, host: input.host, port: input.port };
     }
-    return invoke<RuntimeServiceStatus>('runtime_service_start', {
+    const status = await invoke<RuntimeServiceStatus>('runtime_service_start', {
       host: input.host,
       port: input.port,
     });
+    return rememberRunningEmbeddedRuntimeStatus(status);
   }
 
   async stopRuntime(): Promise<RuntimeServiceStatus> {
     if (!(await isTauri())) {
       return DEFAULT_RUNTIME_STATUS;
     }
-    return invoke<RuntimeServiceStatus>('runtime_service_stop');
+    const status = await invoke<RuntimeServiceStatus>('runtime_service_stop');
+    return rememberRunningEmbeddedRuntimeStatus(status);
   }
 
   async getStatus(): Promise<RuntimeServiceStatus> {
     if (!(await isTauri())) {
       return DEFAULT_RUNTIME_STATUS;
     }
-    return invoke<RuntimeServiceStatus>('runtime_service_status');
+    const status = await invoke<RuntimeServiceStatus>('runtime_service_status');
+    return rememberRunningEmbeddedRuntimeStatus(status);
+  }
+
+  async getReachableAddress(remoteHost: string, remotePort: number): Promise<RuntimeReachableAddress> {
+    if (!(await isTauri())) {
+      return {
+        host: '127.0.0.1',
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      };
+    }
+    return invoke<RuntimeReachableAddress>('runtime_service_reachable_address', {
+      remoteHost,
+      remotePort,
+    });
+  }
+
+  async getPeerDialAddress(remoteHost: string, remotePort: number): Promise<RuntimeDialAddress> {
+    if (!(await isTauri())) {
+      return {
+        host: remoteHost,
+        port: remotePort,
+      };
+    }
+    return invoke<RuntimeDialAddress>('runtime_service_peer_dial_address', {
+      remoteHost,
+      remotePort,
+    });
   }
 }

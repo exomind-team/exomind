@@ -3,21 +3,45 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   getActiveBlockStorageMock,
   getCurrentSyncUserIdMock,
+  getTimeblockBackendModeMock,
   syncToRemoteMock,
   stopSyncMock,
   loadActiveBlockMock,
   saveActiveBlockMock,
   deleteActiveBlockMock,
   getEventStorageMock,
+  rtListCompletedBlocksMock,
+  rtGetActiveBlockMock,
+  rtBackfillGapBlocksMock,
+  rtStartBlockMock,
+  rtStopBlockMock,
+  rtEndBlockMock,
+  rtPauseBlockMock,
+  rtResumeBlockMock,
+  rtPatchActiveBlockTasksMock,
+  publishActiveBlockReplicationSnapshotMock,
+  appendEventWithEcsReplicationMock,
 } = vi.hoisted(() => ({
   getActiveBlockStorageMock: vi.fn(),
   getCurrentSyncUserIdMock: vi.fn(() => 'local-user'),
+  getTimeblockBackendModeMock: vi.fn(() => 'legacy'),
   syncToRemoteMock: vi.fn(),
   stopSyncMock: vi.fn(),
   loadActiveBlockMock: vi.fn(),
   saveActiveBlockMock: vi.fn(),
   deleteActiveBlockMock: vi.fn(),
   getEventStorageMock: vi.fn(() => ({ addEvent: vi.fn() })),
+  rtListCompletedBlocksMock: vi.fn(async () => []),
+  rtGetActiveBlockMock: vi.fn(async () => null),
+  rtBackfillGapBlocksMock: vi.fn(async () => ({ inserted: 0 })),
+  rtStartBlockMock: vi.fn(),
+  rtStopBlockMock: vi.fn(async () => ({ status: 'ok' })),
+  rtEndBlockMock: vi.fn(),
+  rtPauseBlockMock: vi.fn(async () => ({ status: 'ok' })),
+  rtResumeBlockMock: vi.fn(async () => ({ status: 'ok' })),
+  rtPatchActiveBlockTasksMock: vi.fn(async () => null),
+  publishActiveBlockReplicationSnapshotMock: vi.fn(),
+  appendEventWithEcsReplicationMock: vi.fn(async (event) => event),
 }));
 
 let listener: ((block: unknown, source: 'local' | 'sync') => void) | null = null;
@@ -50,6 +74,32 @@ vi.mock('@/lib/storage/event-storage', () => ({
   getEventStorage: getEventStorageMock,
 }));
 
+vi.mock('@/config/domain-backend-mode', () => ({
+  getTimeblockBackendMode: getTimeblockBackendModeMock,
+}));
+
+vi.mock('@/lib/adapters/timeblock-rt-adapter', () => ({
+  TimeBlockRtAdapter: class MockTimeBlockRtAdapter {
+    listCompletedBlocks = rtListCompletedBlocksMock;
+    getActiveBlock = rtGetActiveBlockMock;
+    rtBackfillGapBlocks = rtBackfillGapBlocksMock;
+    rtStartBlock = rtStartBlockMock;
+    rtStopBlock = rtStopBlockMock;
+    rtEndBlock = rtEndBlockMock;
+    rtPauseBlock = rtPauseBlockMock;
+    rtResumeBlock = rtResumeBlockMock;
+    rtPatchActiveBlockTasks = rtPatchActiveBlockTasksMock;
+  },
+}));
+
+vi.mock('@/lib/services/ecs-active-block-replication.service', () => ({
+  publishActiveBlockReplicationSnapshot: publishActiveBlockReplicationSnapshotMock,
+}));
+
+vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
+  appendEventWithEcsReplication: appendEventWithEcsReplicationMock,
+}));
+
 vi.mock('@/config/feedback-preferences', () => ({
   getFeedbackPreferences: vi.fn(() => ({
     timingInfoEnabled: true,
@@ -60,12 +110,18 @@ vi.mock('@/config/feedback-preferences', () => ({
 
 import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
 
+function createLegacySyncService(): TimeBlockServiceImpl {
+  return new TimeBlockServiceImpl(undefined, { backendMode: 'legacy' });
+}
+
 describe('Issue #104 TimeBlockService sync lifecycle', () => {
   beforeEach(() => {
     storageForUser = {};
     getActiveBlockStorageMock.mockReset();
     getCurrentSyncUserIdMock.mockReset();
     getCurrentSyncUserIdMock.mockReturnValue('local-user');
+    getTimeblockBackendModeMock.mockReset();
+    getTimeblockBackendModeMock.mockReturnValue('legacy');
 
     getActiveBlockStorageMock.mockImplementation((userId?: string) => {
       const id = userId ?? getCurrentSyncUserIdMock();
@@ -94,40 +150,75 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     saveActiveBlockMock.mockReset();
     deleteActiveBlockMock.mockReset();
     getEventStorageMock.mockClear();
+    rtListCompletedBlocksMock.mockReset();
+    rtListCompletedBlocksMock.mockResolvedValue([]);
+    rtGetActiveBlockMock.mockReset();
+    rtGetActiveBlockMock.mockResolvedValue(null);
+    rtBackfillGapBlocksMock.mockReset();
+    rtBackfillGapBlocksMock.mockResolvedValue({ inserted: 0 });
+    rtStartBlockMock.mockReset();
+    rtStopBlockMock.mockReset();
+    rtStopBlockMock.mockResolvedValue({ status: 'ok' });
+    rtEndBlockMock.mockReset();
+    rtPauseBlockMock.mockReset();
+    rtPauseBlockMock.mockResolvedValue({ status: 'ok' });
+    rtResumeBlockMock.mockReset();
+    rtResumeBlockMock.mockResolvedValue({ status: 'ok' });
+    rtPatchActiveBlockTasksMock.mockReset();
+    rtPatchActiveBlockTasksMock.mockResolvedValue(null);
+    publishActiveBlockReplicationSnapshotMock.mockReset();
+    appendEventWithEcsReplicationMock.mockClear();
   });
 
-  it('starts and stops storage sync by service API', async () => {
+  it('uses RT storage outside tauri when Web data domains are RT-only', async () => {
+    getTimeblockBackendModeMock.mockReturnValue('rt-sqlite');
+    loadActiveBlockMock.mockResolvedValueOnce(null);
     const service = new TimeBlockServiceImpl();
-    const remoteUrl = 'http://127.0.0.1:6984/test-user';
 
-    await service.startSync(remoteUrl);
+    await service.loadActiveBlock();
+
+    expect(loadActiveBlockMock).not.toHaveBeenCalled();
+    expect(rtGetActiveBlockMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores legacy timeblock backend preference outside tauri', async () => {
+    getTimeblockBackendModeMock.mockReturnValue('legacy');
+    loadActiveBlockMock.mockResolvedValueOnce(null);
+    const service = new TimeBlockServiceImpl();
+
+    await service.loadActiveBlock();
+
+    expect(loadActiveBlockMock).not.toHaveBeenCalled();
+    expect(rtGetActiveBlockMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts and stops ECS sync mode without calling storage syncToRemote', async () => {
+    const service = createLegacySyncService();
+
+    await service.startSync();
     await service.stopSync();
 
-    expect(syncToRemoteMock).toHaveBeenCalledWith('test-user', remoteUrl);
-    expect(stopSyncMock).toHaveBeenCalledWith('test-user');
+    expect(syncToRemoteMock).not.toHaveBeenCalled();
   });
 
-  it('rolls back subscriber count when startSync fails so retry can re-attempt', async () => {
-    const service = new TimeBlockServiceImpl();
-    const remoteUrl = 'http://127.0.0.1:6984/test-user';
+  it('rolls back subscriber count when ECS seed fails so retry can re-attempt', async () => {
+    const service = createLegacySyncService();
 
-    syncToRemoteMock
+    loadActiveBlockMock
       .mockRejectedValueOnce(new Error('sync failed once'))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce(null);
 
-    await expect(service.startSync(remoteUrl)).rejects.toThrow('sync failed once');
-    await service.startSync(remoteUrl);
+    await expect(service.startSync()).rejects.toThrow('sync failed once');
+    await service.startSync();
     const stopSyncCallsBeforeStop = stopSyncMock.mock.calls.length;
     await service.stopSync();
 
-    expect(syncToRemoteMock).toHaveBeenCalledTimes(2);
-    expect(syncToRemoteMock).toHaveBeenNthCalledWith(1, 'test-user', remoteUrl);
-    expect(syncToRemoteMock).toHaveBeenNthCalledWith(2, 'test-user', remoteUrl);
+    expect(loadActiveBlockMock).toHaveBeenCalledTimes(2);
     expect(stopSyncMock.mock.calls.length).toBe(stopSyncCallsBeforeStop + 1);
   });
 
   it('switches active storage when remote user changes', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
 
     await service.startSync('http://127.0.0.1:6984/user-a');
     await service.startSync('http://127.0.0.1:6984/user-b');
@@ -137,8 +228,8 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     expect(getActiveBlockStorageMock).toHaveBeenCalledWith('user-b');
   });
 
-  it('serializes old stopSync before starting new user sync to avoid dual-channel window', async () => {
-    const service = new TimeBlockServiceImpl();
+  it('serializes old stopSync before seeding next user storage to avoid dual-channel window', async () => {
+    const service = createLegacySyncService();
     const userAUrl = 'http://127.0.0.1:6984/user-a';
     const userBUrl = 'http://127.0.0.1:6984/user-b';
     let releaseUserAStop: (() => void) | null = null;
@@ -153,21 +244,21 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     });
 
     await service.startSync(userAUrl);
-    syncToRemoteMock.mockClear();
+    loadActiveBlockMock.mockClear();
 
     const switchPromise = service.startSync(userBUrl);
     await vi.waitFor(() => {
       expect(stopSyncMock).toHaveBeenCalledWith('user-a');
     });
-    expect(syncToRemoteMock).not.toHaveBeenCalledWith('user-b', userBUrl);
+    expect(loadActiveBlockMock).not.toHaveBeenCalled();
 
     releaseUserAStop?.();
     await switchPromise;
-    expect(syncToRemoteMock).toHaveBeenCalledWith('user-b', userBUrl);
+    expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
   });
 
   it('notifies current snapshot when switching sync user to prevent stale UI state', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
     const base = Date.now();
@@ -198,7 +289,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('forwards remote block changes to onBlockChange subscribers', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
 
@@ -224,7 +315,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('ignores local storage writes to avoid self-overwrite loops', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
 
@@ -248,7 +339,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('notifies UI subscribers even when remote block requires normalization write-back', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
 
@@ -278,7 +369,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('rejects stale running sync updates after feedback is already submitted', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
 
@@ -323,7 +414,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('writes back canonical local block when stale sync packet has older startId', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const base = Date.now();
 
     const localBaseline = {
@@ -369,8 +460,47 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     });
   });
 
+  it('rejects null sync packets while a non-completed local active block is accepted', async () => {
+    const service = createLegacySyncService();
+    const onChange = vi.fn();
+    const unsubscribe = service.onBlockChange(onChange);
+    const base = Date.now();
+
+    loadActiveBlockMock.mockResolvedValueOnce({
+      startId: 'local-running-after-feedback',
+      name: 'local next focus',
+      startTime: base - 5_000,
+      mode: 'countdown',
+      targetMinutes: 45,
+      elapsed: 45 * 60 * 1000,
+      paused: false,
+      version: 1,
+      actorId: 'actor-local',
+      lastTransitionAt: base - 5_000,
+      lastResumedAt: base - 5_000,
+      accumulatedRunMs: 0,
+      pauseAccumulatedMs: 0,
+      updatedAt: base - 5_000,
+    });
+
+    await service.startSync('http://127.0.0.1:6984/test-user');
+    onChange.mockClear();
+    saveActiveBlockMock.mockClear();
+
+    emitStorageChange('test-user', null, 'sync');
+
+    expect(onChange).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(saveActiveBlockMock).toHaveBeenCalledWith(
+        expect.objectContaining({ startId: 'local-running-after-feedback' }),
+      );
+    });
+
+    unsubscribe();
+  });
+
   it('prefers newer transition time over actorId when phase and version tie', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
     const base = Date.now();
@@ -422,7 +552,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('keeps remaining subscriber active after another subscriber unsubscribes', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChangeA = vi.fn();
     const onChangeB = vi.fn();
     const unsubscribeA = service.onBlockChange(onChangeA);
@@ -452,7 +582,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('ignores stale sync packets from previous user storage after user switch', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const onChange = vi.fn();
     const unsubscribe = service.onBlockChange(onChange);
     const base = Date.now();
@@ -502,7 +632,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('includes remote context in canonical write-back dedupe signature', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const base = Date.now();
 
     loadActiveBlockMock.mockResolvedValue({
@@ -554,7 +684,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
   });
 
   it('emits structured diagnostics when rejecting stale sync packets', async () => {
-    const service = new TimeBlockServiceImpl();
+    const service = createLegacySyncService();
     const base = Date.now();
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
@@ -598,26 +728,67 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
       expect(saveActiveBlockMock).toHaveBeenCalledTimes(1);
     });
     expect(warnSpy).toHaveBeenCalledWith(
-      '[TB-SVC] rejected non-preferred sync block',
-      expect.objectContaining({
-        reason: 'current_newer_transition',
-        compared: 'transition_time',
-        storageUserId: 'test-user',
-      }),
+      '[WARN]',
+      expect.stringContaining('"reason":"current_newer_transition"'),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[WARN]',
+      expect.stringContaining('"compared":"transition_time"'),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[WARN]',
+      expect.stringContaining('"storageUserId":"test-user"'),
     );
     await vi.waitFor(() => {
       expect(infoSpy).toHaveBeenCalledWith(
-        '[TB-SVC] canonical write-back applied',
-        expect.objectContaining({
-          trigger: 'reject_non_preferred_sync',
-          reason: 'current_newer_transition',
-          compared: 'transition_time',
-          storageUserId: 'test-user',
-        }),
+        '[INFO]',
+        expect.stringContaining('"trigger":"reject_non_preferred_sync"'),
+      );
+      expect(infoSpy).toHaveBeenCalledWith(
+        '[INFO]',
+        expect.stringContaining('"reason":"current_newer_transition"'),
+      );
+      expect(infoSpy).toHaveBeenCalledWith(
+        '[INFO]',
+        expect.stringContaining('"storageUserId":"test-user"'),
       );
     });
 
     warnSpy.mockRestore();
     infoSpy.mockRestore();
+  });
+
+  it('publishes canonical snapshot when local storage emits ECS-replicated change trigger', async () => {
+    const service = createLegacySyncService();
+    const base = Date.now();
+
+    await service.startSync('http://127.0.0.1:6984/test-user');
+
+    emitStorageChange('test-user', {
+      startId: 'ecs-local-start',
+      name: 'local running block',
+      startTime: base - 20_000,
+      mode: 'countup',
+      elapsed: 6_000,
+      paused: false,
+      phase: 'running',
+      version: 2,
+      actorId: 'desktop',
+      lastTransitionAt: base - 1_000,
+      lastResumedAt: base - 1_000,
+      accumulatedRunMs: 6_000,
+      pauseAccumulatedMs: 0,
+      updatedAt: base - 1_000,
+    }, 'local');
+
+    await vi.waitFor(() => {
+      expect(publishActiveBlockReplicationSnapshotMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          startId: 'ecs-local-start',
+          phase: 'running',
+          version: 2,
+        }),
+      );
+    });
   });
 });

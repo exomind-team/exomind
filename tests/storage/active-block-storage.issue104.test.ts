@@ -5,9 +5,13 @@ import {
   ActiveBlockStorage,
   clearAllActiveBlockStorageInstances,
   getActiveBlockStorage,
+  getCurrentSyncUserId,
   normalizeActiveBlockDbName,
 } from '@/lib/storage/active-block-storage';
+import { createLocalProfile, setProfileSession } from '@/lib/profile/profile-storage';
 import type { ActiveBlockData } from '@/lib/types/event';
+
+const openedStorages: ActiveBlockStorage[] = [];
 
 describe('Issue #104 ActiveBlockStorage', () => {
   beforeEach(() => {
@@ -16,7 +20,9 @@ describe('Issue #104 ActiveBlockStorage', () => {
   });
 
   afterEach(async () => {
+    await Promise.allSettled(openedStorages.splice(0).map((storage) => storage.close()));
     await clearAllActiveBlockStorageInstances();
+    localStorage.clear();
   });
 
   it('normalizes database names for broad usernames', () => {
@@ -138,5 +144,110 @@ describe('Issue #104 ActiveBlockStorage', () => {
     expect(loaded?.name).toBe('newer-actor-lower');
     expect(loaded?.actorId).toBe('aa-remote');
     expect(loaded?.lastTransitionAt).toBe(now - 1_000);
+  });
+
+  it('prefers active profileId over legacy currentUser as default storage key', () => {
+    const profile = createLocalProfile({
+      slug: 'exomind',
+      displayName: 'Hailay',
+    });
+    setProfileSession({
+      version: 1,
+      activeProfileId: profile.profileId,
+      unlockedProfileIds: [profile.profileId],
+    });
+    localStorage.setItem('exomind:sync-store', JSON.stringify({
+      state: { currentUser: 'legacy-user' },
+    }));
+
+    expect(getCurrentSyncUserId()).toBe(profile.profileId);
+    expect(getActiveBlockStorage()).toBe(getActiveBlockStorage(profile.profileId));
+  });
+
+  it('falls back to legacy currentUser when no active profile exists', () => {
+    localStorage.setItem('exomind:sync-store', JSON.stringify({
+      state: { currentUser: 'legacy-user' },
+    }));
+
+    expect(getCurrentSyncUserId()).toBe('legacy-user');
+    expect(getActiveBlockStorage()).toBe(getActiveBlockStorage('legacy-user'));
+  });
+
+  it('keeps explicit userId higher priority than derived profile key', () => {
+    const profile = createLocalProfile({
+      slug: 'exomind',
+      displayName: 'Hailay',
+    });
+    setProfileSession({
+      version: 1,
+      activeProfileId: profile.profileId,
+      unlockedProfileIds: [profile.profileId],
+    });
+
+    expect(getActiveBlockStorage('override-user')).toBe(getActiveBlockStorage('override-user'));
+    expect(getActiveBlockStorage('override-user')).not.toBe(getActiveBlockStorage());
+  });
+
+  it('projects replicated block as sync source for ECS projector（ECS 投影使用 sync 来源）', async () => {
+    const storage = new ActiveBlockStorage('issue104-projector-user');
+    const calls: Array<{ block: ActiveBlockData | null; source: 'local' | 'sync' }> = [];
+    const unsubscribe = storage.onBlockChange((block, source) => {
+      calls.push({ block, source });
+    });
+
+    const block: ActiveBlockData = {
+      startId: 'issue104-remote-start',
+      name: 'remote projected',
+      startTime: Date.now() - 10_000,
+      elapsed: 4_000,
+      mode: 'countup',
+      paused: false,
+      version: 2,
+      actorId: 'remote-actor',
+      lastTransitionAt: Date.now() - 1_000,
+      lastResumedAt: Date.now() - 1_000,
+      accumulatedRunMs: 4_000,
+      updatedAt: Date.now() - 1_000,
+      pauseAccumulatedMs: 0,
+    };
+
+    await storage.projectReplicatedActiveBlock(block);
+
+    expect(calls).toContainEqual({
+      block: expect.objectContaining({ startId: 'issue104-remote-start' }),
+      source: 'sync',
+    });
+
+    unsubscribe();
+  });
+
+  it('notifies a sibling storage instance when another window writes the same local db（同库其他窗口写入时也会通知当前实例）', async () => {
+    const writer = new ActiveBlockStorage('issue104-cross-window-user');
+    const reader = new ActiveBlockStorage('issue104-cross-window-user');
+    openedStorages.push(writer, reader);
+    const onReaderChange = vi.fn();
+    const unsubscribe = reader.onBlockChange(onReaderChange);
+
+    const block: ActiveBlockData = {
+      startId: 'issue104-cross-window-start',
+      name: 'cross window block',
+      startTime: Date.now() - 10_000,
+      elapsed: 3_000,
+      mode: 'countup',
+      paused: false,
+      updatedAt: Date.now(),
+      pauseAccumulatedMs: 0,
+    };
+
+    await writer.saveActiveBlock(block);
+
+    await vi.waitFor(() => {
+      expect(onReaderChange).toHaveBeenCalledWith(
+        expect.objectContaining({ startId: 'issue104-cross-window-start' }),
+        'sync',
+      );
+    });
+
+    unsubscribe();
   });
 });

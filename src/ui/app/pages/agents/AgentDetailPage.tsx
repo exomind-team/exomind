@@ -1,7 +1,171 @@
-import { ArrowLeft, CheckCheck, Clock3, MessageCircle, MoreHorizontal, Send, Sparkles } from 'lucide-react';
+import { ArrowLeft, CheckCheck, Clock3, Heart, MessageCircle, MoreHorizontal, Send, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
-import type { AgentDetailData, AgentHubListItem } from '@/lib/types/agent-hub';
+import type { AgentDetailData, AgentEnergySnapshot, AgentHubListItem } from '@/lib/types/agent-hub';
+import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
+import { RuntimeClient } from '@/services/runtime-client';
+import { findPreferredRuntimeHostForAgent, getRuntimeManager } from '@/services/runtime-manager';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import { WorkspaceTabs } from './WorkspaceTabs';
+
+export const PHASE_LABELS: Record<string, string> = {
+  normal: '正常',
+  slowing: '降频中',
+  critical: '能量不足',
+  dying: '濒死',
+  dormant: '休眠',
+};
+
+export const PHASE_COLORS: Record<string, string> = {
+  normal: '#22C55E',
+  slowing: '#EAB308',
+  critical: '#F97316',
+  dying: '#EF4444',
+  dormant: '#6B7280',
+};
+
+const AGENT_DETAIL_FALLBACK_DELAY_MS = 2500;
+
+function AgentDetailHeader({ title }: { title: string }) {
+  return (
+    <header data-testid="agent-detail-header" className="mb-3 flex items-center justify-between border-b border-border-card pb-3">
+      <button
+        type="button"
+        data-testid="agent-detail-back-button"
+        onClick={() => window.history.back()}
+        className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        aria-label="返回（Back）"
+      >
+        <ArrowLeft size={16} />
+      </button>
+      <h1 className="text-[17px] font-bold text-foreground">{title}</h1>
+      <button
+        type="button"
+        className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        aria-label="更多（More）"
+      >
+        <MoreHorizontal size={16} />
+      </button>
+    </header>
+  );
+}
+
+function AgentDetailLoadingState({ isDesktop }: { isDesktop: boolean }) {
+  return (
+    <section data-testid="agent-detail-loading" aria-live="polite" className="space-y-4">
+      <p className="text-sm text-muted-foreground">Agent 详情加载中...</p>
+
+      <section className="rounded-[18px] border border-border-card bg-card p-4 animate-pulse">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-[#C75B3A20]" aria-hidden="true" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-4 w-32 rounded-full bg-muted" aria-hidden="true" />
+            <div className="h-3 w-20 rounded-full bg-muted" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="mt-3 h-4 w-full rounded-full bg-muted" aria-hidden="true" />
+        <div className="mt-2 h-4 w-4/5 rounded-full bg-muted" aria-hidden="true" />
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={`agent-loading-stat-${index}`} className="rounded-lg bg-background py-2">
+              <div className="mx-auto h-3 w-12 rounded-full bg-muted" aria-hidden="true" />
+              <div className="mx-auto mt-2 h-4 w-10 rounded-full bg-muted" aria-hidden="true" />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {Array.from({ length: 3 }).map((_, index) => (
+        <section key={`agent-loading-section-${index}`} className="animate-pulse">
+          <div className="h-4 w-20 rounded-full bg-muted" aria-hidden="true" />
+          <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
+            {Array.from({ length: index === 2 ? 3 : 2 }).map((__, itemIndex) => (
+              <div key={`agent-loading-row-${index}-${itemIndex}`}>
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-3 w-24 rounded-full bg-muted" aria-hidden="true" />
+                    <div className="h-4 w-3/5 rounded-full bg-muted" aria-hidden="true" />
+                  </div>
+                  <div className="h-4 w-12 rounded-full bg-muted" aria-hidden="true" />
+                </div>
+                {itemIndex !== (index === 2 ? 3 : 2) - 1 ? <div className="h-px bg-border" /> : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      <div className={`pt-4 ${isDesktop ? 'pb-6' : 'pb-[calc(env(safe-area-inset-bottom,0px)+20px)]'}`}>
+        <div className="h-12 w-full rounded-[14px] bg-[#C75B3A1A] animate-pulse" aria-hidden="true" />
+      </div>
+    </section>
+  );
+}
+
+export function EnergyBar({
+  energy,
+  onRefill,
+  isRefilling = false,
+}: {
+  energy: AgentEnergySnapshot;
+  onRefill?: () => void;
+  isRefilling?: boolean;
+}) {
+  const percent = Math.round(energy.ratio * 100);
+  const color = PHASE_COLORS[energy.phase] ?? '#6B7280';
+  const label = PHASE_LABELS[energy.phase] ?? energy.phase;
+  const showRefillAction = energy.is_dormant && typeof onRefill === 'function';
+
+  return (
+    <section className="mt-4">
+      <h3 className="flex items-center gap-1.5 text-[13px] font-semibold text-muted-foreground">
+        <Heart size={12} />
+        生命能量 (C1)
+      </h3>
+      <div className="mt-2 rounded-2xl border border-border-card bg-card p-4">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <span className="text-xs text-muted-foreground">
+            {energy.current} / {energy.max}
+          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className="rounded-full px-2 py-0.5 text-xs font-semibold"
+              style={{ color, backgroundColor: `${color}15` }}
+            >
+              {label}
+            </span>
+            {showRefillAction && (
+              <button
+                type="button"
+                onClick={onRefill}
+                disabled={isRefilling}
+                className="rounded-full bg-[#C75B3A] px-3 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#C75B3A80]"
+              >
+                {isRefilling ? '充能中...' : '充能复活'}
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="h-3 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full transition-all duration-700 ease-out"
+            style={{ width: `${percent}%`, backgroundColor: color }}
+          />
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-center">
+          <div className="rounded-lg bg-background py-1.5">
+            <span className="text-[11px] text-muted-foreground">每 tick 消耗</span>
+            <p className="text-sm font-semibold text-foreground">{energy.tick_cost}</p>
+          </div>
+          <div className="rounded-lg bg-background py-1.5">
+            <span className="text-[11px] text-muted-foreground">剩余能量</span>
+            <p className="text-sm font-semibold text-foreground">{percent}%</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function getTargetIcon(target: AgentHubListItem) {
   if (target.id.includes('telegram')) return Send;
@@ -9,195 +173,268 @@ function getTargetIcon(target: AgentHubListItem) {
   return Sparkles;
 }
 
+function getStatsGridClass(count: number): string {
+  if (count <= 1) return 'grid-cols-1';
+  if (count === 2) return 'grid-cols-2';
+  return 'grid-cols-2 sm:grid-cols-3';
+}
+
+async function resolveAgentRuntimeHost(agentId: string) {
+  const snapshot = await getRuntimeManager().refreshSnapshot();
+  const preferredHost = findPreferredRuntimeHostForAgent(snapshot.hosts, agentId);
+  if (preferredHost) {
+    return preferredHost;
+  }
+
+  const hosts = await getRuntimeHostService().listHosts();
+  return hosts[0] ?? null;
+}
+
 export function AgentDetailPage({ agentId }: { agentId?: string }) {
+  const isDesktop = useIsDesktop();
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [energy, setEnergy] = useState<AgentEnergySnapshot | null>(null);
+  const [isRefilling, setIsRefilling] = useState(false);
   const targetId = agentId ?? '';
 
   useEffect(() => {
     let disposed = false;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
     const load = async () => {
       if (!targetId) {
         if (!disposed) {
           setDetail(null);
           setLoading(false);
+          setIsRefilling(false);
         }
         return;
       }
 
       setLoading(true);
+      fallbackTimer = setTimeout(() => {
+        if (!disposed) {
+          setDetail(null);
+          setLoading(false);
+        }
+      }, AGENT_DETAIL_FALLBACK_DELAY_MS);
       try {
         const response = await getAgentHubService().getAgentDetail(targetId);
         if (!disposed) {
           setDetail(response);
+          setLoading(false);
         }
       } catch {
         if (!disposed) {
           setDetail(null);
-        }
-      } finally {
-        if (!disposed) {
           setLoading(false);
         }
+      } finally {
+        if (fallbackTimer) clearTimeout(fallbackTimer);
       }
     };
     void load();
     return () => {
       disposed = true;
+      if (fallbackTimer) clearTimeout(fallbackTimer);
     };
   }, [targetId]);
 
-  if (loading) {
-    return (
-      <div data-testid="agent-detail-page" className="min-h-full px-5 py-4 text-sm text-[#A8A29E] dark:text-[#78716C]">
-        Agent 详情加载中...
-      </div>
-    );
-  }
+  // Energy polling (2s interval)
+  useEffect(() => {
+    if (!targetId) return;
+    let disposed = false;
+    const client = new RuntimeClient();
 
-  if (!detail) {
-    return (
-      <div data-testid="agent-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3 dark:bg-[#0C0A09]">
-        <section
-          data-testid="agent-detail-empty-state"
-          className="mt-6 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-6 text-center dark:border-[#292524] dark:bg-[#1C1917]"
-        >
-          <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">未找到 Agent 详情</p>
-          <p className="mt-1 text-xs text-[#A8A29E] dark:text-[#78716C]">该节点可能已删除或尚未配置详情数据。</p>
-          <button
-            type="button"
-            onClick={() => window.history.back()}
-            className="mt-4 rounded-lg bg-[#F5F0ED] px-3 py-2 text-xs font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
-          >
-            返回上一页
-          </button>
-        </section>
-      </div>
-    );
-  }
+    const poll = async () => {
+      try {
+        const host = await resolveAgentRuntimeHost(targetId);
+        if (!host || disposed) return;
+        const snap = await client.getAgentEnergy(host, targetId);
+        if (!disposed && snap) setEnergy(snap);
+      } catch {
+        // ignore polling errors
+      }
+    };
+
+    void poll();
+    const timer = setInterval(poll, 2000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [targetId]);
+
+  const handleRefillEnergy = async () => {
+    if (!targetId || !energy || isRefilling) return;
+    setIsRefilling(true);
+    try {
+      const host = await resolveAgentRuntimeHost(targetId);
+      if (!host) return;
+      const client = new RuntimeClient();
+      const result = await client.refillEnergy(host, targetId, energy.max);
+      if (result.ok) {
+        setEnergy(result.data.energy);
+      }
+    } finally {
+      setIsRefilling(false);
+    }
+  };
 
   return (
-    <div data-testid="agent-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3 dark:bg-[#0C0A09]">
-      <header data-testid="agent-detail-header" className="mb-3 flex items-center justify-between">
-        <button
-          type="button"
-          data-testid="agent-detail-back-button"
-          onClick={() => window.history.back()}
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
-          aria-label="返回（Back）"
-        >
-          <ArrowLeft size={16} />
-        </button>
-        <h1 className="text-[17px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">{detail.title}</h1>
-        <button
-          type="button"
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
-          aria-label="更多（More）"
-        >
-          <MoreHorizontal size={16} />
-        </button>
-      </header>
+    <div data-testid="agent-detail-page" className="min-h-full bg-surface px-5 py-3 text-foreground md:px-8 lg:px-10">
+      <AgentDetailHeader title={detail?.title ?? 'Agent 详情'} />
 
-      <section className="rounded-[18px] border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#C75B3A20] text-[#C75B3A]">
-            <Sparkles size={18} />
+      {loading ? <AgentDetailLoadingState isDesktop={isDesktop} /> : !detail ? (
+        <>
+          <section
+            data-testid="agent-detail-empty-state"
+            className="mt-6 rounded-2xl border border-border-card bg-card px-4 py-6 text-center"
+          >
+            <p className="text-sm font-semibold text-foreground">基础详情暂不可用</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              该节点尚未返回扩展详情数据，但仍可继续查看 workspace（工作区）内容。
+            </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-center">
+              <button
+                type="button"
+                data-testid="agent-detail-chat-button"
+                onClick={() => {
+                  if (!targetId) return;
+                  window.location.href = `/agents/chat/${targetId}`;
+                }}
+                className="rounded-lg bg-brand-accent px-3 py-2 text-xs font-medium text-white"
+              >
+                与 Agent 对话
+              </button>
+              <button
+                type="button"
+                onClick={() => window.history.back()}
+                className="rounded-lg bg-muted px-3 py-2 text-xs font-medium text-muted-foreground"
+              >
+                返回上一页
+              </button>
+            </div>
+          </section>
+
+          {energy && <EnergyBar energy={energy} onRefill={handleRefillEnergy} isRefilling={isRefilling} />}
+
+          {targetId && <WorkspaceTabs agentId={targetId} />}
+        </>
+      ) : (
+        <>
+          <section className="rounded-[18px] border border-border-card bg-card p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#C75B3A20] text-[#C75B3A]">
+                <Sparkles size={18} />
+              </div>
+              <div>
+                <p className="text-[16px] font-bold text-foreground">{detail.title}</p>
+                <p className="text-xs text-[#22C55E]">● 运行中</p>
+              </div>
+            </div>
+            <p className="mt-2 text-sm text-muted-foreground">{detail.description}</p>
+            <div data-testid="agent-detail-stats-grid" className={`mt-3 grid gap-2 ${getStatsGridClass(detail.stats.length)}`}>
+              {detail.stats.map((stat) => (
+                <div key={stat.label} className="min-w-0 rounded-lg bg-background px-2 py-2 text-center">
+                  <span className="block text-[11px] text-muted-foreground">{stat.label}</span>
+                  <p
+                    data-testid="agent-detail-stat-value"
+                    className="mt-1 whitespace-normal break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]"
+                  >
+                    {stat.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {energy && <EnergyBar energy={energy} onRefill={handleRefillEnergy} isRefilling={isRefilling} />}
+
+          {/* Workspace tabs — shown for life agents (those with workspace) */}
+          <WorkspaceTabs agentId={targetId} />
+
+          <section className="mt-4">
+            <h3 className="text-[13px] font-semibold text-muted-foreground">触发规则</h3>
+            <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
+              {detail.triggerRules.map((item, index) => (
+                <div key={`${item.key}-${item.value}`}>
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <span className="text-sm text-muted-foreground">{item.key}</span>
+                    <span className={`text-sm ${item.highlight ? 'font-semibold text-[#C75B3A]' : 'text-foreground'}`}>
+                      {item.value}
+                    </span>
+                  </div>
+                  {index !== detail.triggerRules.length - 1 && <div className="h-px bg-border" />}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="mt-4">
+            <h3 className="text-[13px] font-semibold text-muted-foreground">输出目标</h3>
+            <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
+              {detail.targets.map((item, index) => {
+                const Icon = getTargetIcon(item);
+                return (
+                  <div key={item.id}>
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                        <Icon size={14} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground">{item.name}</p>
+                        <p className="text-xs text-muted-foreground">{item.description}</p>
+                      </div>
+                    </div>
+                    {index !== detail.targets.length - 1 && <div className="h-px bg-border" />}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="mt-4">
+            <h3 className="text-[13px] font-semibold text-muted-foreground">最近执行</h3>
+            <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
+              {detail.recentLogs.map((item, index) => (
+                <div key={item.id}>
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <div className="flex items-start gap-2">
+                      <div className="mt-0.5 rounded-full bg-[#22C55E15] p-1 text-[#22C55E]">
+                        <CheckCheck size={12} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{item.title}</p>
+                        <p className="text-xs text-muted-foreground">{item.time}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock3 size={11} />
+                      {item.duration ?? '--'}
+                    </div>
+                  </div>
+                  {index !== detail.recentLogs.length - 1 && <div className="h-px bg-border" />}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <div className={`pt-4 ${isDesktop ? 'pb-6' : 'pb-[calc(env(safe-area-inset-bottom,0px)+20px)]'}`}>
+            <button
+              type="button"
+              data-testid="agent-detail-chat-button"
+              onClick={() => {
+                if (!targetId) return;
+                window.location.href = `/agents/chat/${targetId}`;
+              }}
+              className="w-full rounded-[14px] bg-[#C75B3A] px-4 py-3 text-sm font-semibold text-white"
+            >
+              与 Agent 对话
+            </button>
           </div>
-          <div>
-            <p className="text-[16px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">{detail.title}</p>
-            <p className="text-xs text-[#22C55E]">● 运行中</p>
-          </div>
-        </div>
-        <p className="mt-2 text-sm text-[#78716C] dark:text-[#A8A29E]">{detail.description}</p>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          {detail.stats.map((stat) => (
-            <div key={stat.label} className="rounded-lg bg-[#FAF7F5] py-2 text-center dark:bg-[#292524]">
-              <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">{stat.label}</span>
-              <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{stat.value}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-4">
-        <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">触发规则</h3>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
-          {detail.triggerRules.map((item, index) => (
-            <div key={`${item.key}-${item.value}`}>
-              <div className="flex items-center justify-between px-4 py-3">
-                <span className="text-sm text-[#78716C] dark:text-[#A8A29E]">{item.key}</span>
-                <span className={`text-sm ${item.highlight ? 'font-semibold text-[#C75B3A]' : 'text-[#1C1917] dark:text-[#FAFAF9]'}`}>
-                  {item.value}
-                </span>
-              </div>
-              {index !== detail.triggerRules.length - 1 && <div className="h-px bg-[#F5F0ED] dark:bg-[#292524]" />}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-4">
-        <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">输出目标</h3>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
-          {detail.targets.map((item, index) => {
-            const Icon = getTargetIcon(item);
-            return (
-              <div key={item.id}>
-                <div className="flex items-center gap-3 px-4 py-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-                    <Icon size={14} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.name}</p>
-                    <p className="text-xs text-[#A8A29E] dark:text-[#78716C]">{item.description}</p>
-                  </div>
-                </div>
-                {index !== detail.targets.length - 1 && <div className="h-px bg-[#F5F0ED] dark:bg-[#292524]" />}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="mt-4">
-        <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">最近执行</h3>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
-          {detail.recentLogs.map((item, index) => (
-            <div key={item.id}>
-              <div className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-start gap-2">
-                  <div className="mt-0.5 rounded-full bg-[#22C55E15] p-1 text-[#22C55E]">
-                    <CheckCheck size={12} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
-                    <p className="text-xs text-[#A8A29E] dark:text-[#78716C]">{item.time}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                  <Clock3 size={11} />
-                  {item.duration ?? '--'}
-                </div>
-              </div>
-              {index !== detail.recentLogs.length - 1 && <div className="h-px bg-[#F5F0ED] dark:bg-[#292524]" />}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <div className="pb-[calc(env(safe-area-inset-bottom,0px)+20px)] pt-4">
-        <button
-          type="button"
-          data-testid="agent-detail-chat-button"
-          onClick={() => {
-            if (!targetId) return;
-            window.location.href = `/agents/chat/${targetId}`;
-          }}
-          className="w-full rounded-[14px] bg-[#C75B3A] px-4 py-3 text-sm font-semibold text-white"
-        >
-          与 Agent 对话
-        </button>
-      </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,0 +1,25 @@
+---
+import { renderLucideIcon } from "../lib/lucide";
+
+interface Props {
+  icon: string;
+  class?: string;
+  size?: number | string;
+  strokeWidth?: number | string;
+}
+
+const {
+  icon,
+  class: className = "",
+  size = 24,
+  strokeWidth = 2,
+} = Astro.props;
+
+const markup = renderLucideIcon(icon, {
+  className,
+  size,
+  strokeWidth,
+});
+---
+
+<Fragment set:html={markup} />

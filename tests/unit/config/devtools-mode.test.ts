@@ -4,12 +4,17 @@ import {
   setDevtoolsEnabled,
   subscribeDevtoolsChanges,
 } from '@/config/devtools-mode';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 
 describe('devtools flag（开发者工具开关）', () => {
   let storage: Record<string, string>;
 
   beforeEach(() => {
     storage = {};
+    __resetRuntimeConfigCacheForTests();
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
       value: {
@@ -23,6 +28,13 @@ describe('devtools flag（开发者工具开关）', () => {
 
   it('defaults to false when key is missing（未设置时默认关闭）', () => {
     expect(getDevtoolsEnabled()).toBe(false);
+  });
+
+  it('reads runtime-backed value before localStorage（优先读取 Runtime 中的 devtools 开关）', () => {
+    storage['exomind:devtoolsEnabled'] = 'false';
+    __primeRuntimeConfigForTests({ 'exomind:devtoolsEnabled': 'true' });
+
+    expect(getDevtoolsEnabled()).toBe(true);
   });
 
   it('persists and emits custom event when toggled（切换时持久化并发事件）', () => {

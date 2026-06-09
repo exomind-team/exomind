@@ -31,12 +31,27 @@ describe('Tauri EventLog invoke contract', () => {
       timestamp: 1700000000000,
       content: 'hello tauri eventlog',
       tags: ['note'],
+      metadata: {
+        voiceContext: {
+          inputMode: 'voice',
+          captureSource: 'global-shortcut',
+          traceId: 'trace-voice-001',
+          windowTitle: 'ExoMind',
+          processName: 'exomind.exe',
+          targetScope: 'agent-chat',
+          agentId: 'codex',
+          agentName: 'Codex',
+          sessionId: 'session-001',
+        },
+      },
     };
 
     mockInvoke.mockImplementation((command: string) => {
       switch (command) {
         case 'eventlog_append':
-          return Promise.resolve();
+          return Promise.resolve(sample);
+        case 'eventlog_append_raw':
+          return Promise.resolve(sample);
         case 'eventlog_list':
           return Promise.resolve([sample]);
         case 'eventlog_get':
@@ -49,15 +64,48 @@ describe('Tauri EventLog invoke contract', () => {
     const { TauriEventLogStorageAdapter } = await import('@/lib/adapters/tauri-eventlog-storage');
     const adapter = new TauriEventLogStorageAdapter('user-a');
 
-    await adapter.appendEvent(sample);
+    await adapter.appendEvent({
+      id: sample.id,
+      content: sample.content,
+      tags: sample.tags,
+      metadata: sample.metadata,
+    });
     const listed = await adapter.listEvents();
     const one = await adapter.getEvent(sample.id);
 
-    expect(mockInvoke).toHaveBeenCalledWith('eventlog_append', { userId: 'user-a', event: sample });
+    expect(mockInvoke).toHaveBeenCalledWith('eventlog_append', {
+      userId: 'user-a',
+      event: {
+        id: sample.id,
+        content: sample.content,
+        tags: sample.tags,
+        metadata: sample.metadata,
+      },
+    });
     expect(mockInvoke).toHaveBeenCalledWith('eventlog_list', { userId: 'user-a' });
     expect(mockInvoke).toHaveBeenCalledWith('eventlog_get', { userId: 'user-a', id: sample.id });
     expect(listed).toHaveLength(1);
     expect(one?.id).toBe(sample.id);
+    expect(listed[0]?.metadata).toEqual(sample.metadata);
+    expect(one?.metadata).toEqual(sample.metadata);
+  });
+
+  it('invokes eventlog_append_raw for raw preserve append', async () => {
+    const sample: EventData = {
+      id: 'evt-raw-1',
+      timestamp: 1600000000000,
+      content: 'raw preserve append',
+      tags: ['note'],
+    };
+
+    mockInvoke.mockResolvedValue(sample);
+
+    const { TauriEventLogStorageAdapter } = await import('@/lib/adapters/tauri-eventlog-storage');
+    const adapter = new TauriEventLogStorageAdapter('user-a');
+
+    await adapter.appendRawEvent(sample);
+
+    expect(mockInvoke).toHaveBeenCalledWith('eventlog_append_raw', { userId: 'user-a', event: sample });
   });
 
   it('uses current user from sync store when adapter userId is omitted', async () => {
@@ -85,10 +133,13 @@ describe('Tauri EventLog invoke contract', () => {
   it('registers eventlog commands in tauri backend', () => {
     const commandModule = readFileSync('src-tauri/src/commands/mod.rs', 'utf-8');
     const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf-8');
+    const eventlogCommands = readFileSync('src-tauri/src/commands/eventlog_commands.rs', 'utf-8');
 
     expect(commandModule).toContain('eventlog_commands');
     expect(tauriLib).toContain('eventlog_append');
+    expect(tauriLib).toContain('eventlog_append_raw');
     expect(tauriLib).toContain('eventlog_list');
     expect(tauriLib).toContain('eventlog_get');
+    expect(eventlogCommands).toContain('pub metadata');
   });
 });

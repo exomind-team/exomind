@@ -1,0 +1,212 @@
+Contributors' Collective Ownership Public License v1.0 (CCOPL-1.0)
+
+Copyright (c) 2026 ExoMind Collective
+
+License canonical source: https://github.com/exomind-team/ccopl
+
+Based on the Cooperative Non-Violent Public License (CNPL, https://thufie.lain.haus/NPL.html),
+with Cognitive Sovereignty provisions.
+
+This License is published in both Chinese and English.
+Both versions have equal legal force.
+In case of ambiguity, the Chinese version shall prevail.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PREAMBLE: WHY THIS LICENSE EXISTS
+
+The current open-source ecosystem faces a fundamental dilemma:
+developers' labor is freely appropriated, while the laborers
+themselves struggle to obtain sustainable resources for survival.
+
+Traditional open-source licenses (MIT, Apache, GPL, etc.) solved
+the problem of free code circulation, but left a critical question
+unanswered: **who pays for the ongoing labor?**
+
+We observe:
+
+  - A rift between individual and public labor: when a developer's
+    individual labor becomes a public good, there is no adequate
+    mechanism for reciprocation. Open-source maintainers frequently
+    face burnout and financial hardship.
+
+  - A false dichotomy between open and closed source: proprietary
+    software profits through intellectual property monopoly; open-
+    source software sacrifices itself under the moral pressure of
+    "free." Neither achieves true ownership of labor by the laborers.
+
+  - The absence of cognitive sovereignty: in the age of AI, users'
+    cognitive data — notes, conversations, behavior logs — is more
+    valuable than code. Existing licenses offer virtually no
+    protection for users' cognitive data.
+
+This License attempts to establish a new balance:
+
+  1. Code is fully open to individuals and worker-owned
+     organizations, safeguarding freedom to learn and use;
+  2. Commercial organizations must obtain authorization,
+     ensuring laborers receive fair return for their work;
+  3. Users' cognitive data is protected by mandatory provisions
+     that cannot be circumvented;
+  4. Copyright belongs to the workers' collective, preventing
+     unilateral capture of labor's fruits by capital.
+
+We believe that software freedom and workers' rights need not
+be in opposition. This License is our practice of that conviction.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARTICLE 1. DEFINITIONS
+
+1.1 "The Software" refers to the software project that adopts this
+    License, including all its source code, documentation, and
+    related resources.
+
+1.2 "Personal Use" means a natural person running the Software
+    on devices they own or control.
+
+1.3 "Collective Use" means use by an organization meeting the
+    conditions of Article 4.
+
+1.4 "Cognitive Data" means notes, Agent memories, conversation
+    records, behavior logs, and other data directly related to
+    a user's cognitive activities produced through the Software.
+
+1.5 "Worker-Owned Organization" means an organization that meets
+    ALL of the following conditions:
+    (a) Profits, after deducting reasonable collective
+        operating reserves, are distributed among worker-owners;
+    (b) All workers have equal voting rights;
+    (c) Organizational governance is determined collectively
+        by workers.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARTICLE 2. RIGHTS GRANTED
+
+Subject to the terms of this License, the copyright holders
+grant you the following rights:
+
+2.1 To view, study, and research the source code of the Software.
+
+2.2 To copy and modify the Software for personal needs.
+
+2.3 To distribute original or modified versions of the Software,
+    provided this License is included.
+
+2.4 To run the Software for Personal Use without any restriction.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARTICLE 3. COGNITIVE SOVEREIGNTY PROTECTION
+
+3.1 Users' Cognitive Data is entirely owned by the individual user.
+    No person or organization using the Software shall:
+
+    (a) Collect, transmit, or store a user's Cognitive Data
+        without the user's explicit consent;
+
+    (b) Use a user's Cognitive Data to train machine learning models;
+
+    (c) Sell, license, or otherwise transfer a user's Cognitive Data
+        to third parties;
+
+    (d) Use a user's Cognitive Data for user profiling or
+        targeted advertising.
+
+3.2 This article cannot be circumvented by modifying the Software
+    or creating derivative works. Any derivative work based on
+    this Software must retain this article in full.
+
+3.3 Data processing with the user's explicit consent is not
+    restricted by Article 3.1. Such consent must be voluntary,
+    specific, and informed. The user may withdraw consent at
+    any time, upon which the relevant data processing must
+    cease immediately.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARTICLE 4. COMMERCIAL USE
+
+4.1 The following may use the Software for commercial purposes
+    free of charge:
+    (a) Individual workers (self-employed, freelancers);
+    (b) Worker-Owned Organizations (as defined in 1.5);
+    (c) Non-profit organizations.
+
+4.2 Other commercial organizations must obtain a written
+    commercial license from the copyright holders.
+
+4.3 The portions of any product or service that contain code
+    from this Software must be open-sourced under this License.
+    Portions of the product or service that do not contain code
+    from this Software are not subject to this requirement.
+
+4.4 The copyright holders reserve the right to provide commercial
+    hosting services, premium features, and technical support based
+    on the Software. Pricing and terms for such services are
+    determined by the copyright holders. This provision exists to
+    ensure the collective's sustainable operating resources, not to
+    restrict users' freedom of personal use.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARTICLE 5. WEAK COPYLEFT
+
+5.1 Modifications to the Software's source code must be
+    released under the same license.
+
+5.2 Applications that merely use the Software are not required
+    to be released under this License and may adopt other licenses.
+    "Use" herein means invoking the Software's functionality through
+    its public API, command-line interface, network interface, or
+    inter-process communication. Directly incorporating the
+    Software's source code into another project's source code
+    constitutes modification (subject to Article 5.1).
+
+5.3 Derivative works (modifications and extensions to the
+    Software itself) must be released under the same or a
+    compatible license.
+
+5.4 If the Software is provided as part of a network service,
+    the source code of the Software must be made available to
+    users of that service; however, other components of the
+    service are not subject to this requirement.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARTICLE 6. CONTRIBUTION
+
+6.1 Copyright of contributions (merged Pull Requests) is jointly
+    held by the individual contributor and the Copyright Holders'
+    Collective.
+
+6.2 Contributors grant the Copyright Holders' Collective a perpetual
+    right to use, distribute, and sublicense their contributions
+    under the terms of this License.
+
+6.3 The Copyright Holders' Collective commits not to relicense this
+    Software or its contributions under a more restrictive license.
+    Any license change requires unanimous consent of all
+    Maintainers before taking effect.
+    No license change may weaken any provision
+    of Article 3 (Cognitive Sovereignty Protection).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARTICLE 7. DISCLAIMER
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, OR
+CONSEQUENTIAL DAMAGES, OR OTHER LIABILITY ARISING FROM
+THE USE OF THE SOFTWARE.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARTICLE 8. LICENSE VERSIONING
+
+The Copyright Holders' Collective reserves the right to publish
+new versions of this License. New versions will be announced in
+the official repository of the adopting project. Users may choose
+to comply with this version or any subsequent version.

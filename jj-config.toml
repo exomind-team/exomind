@@ -1,0 +1,20 @@
+#:schema https://docs.jj-vcs.dev/latest/config-schema.json
+#
+# ExoMind 项目级 jj (Jujutsu) 配置模板
+#
+# 使用方式：
+#   jj config set --repo revset-aliases.'"immutable_heads()"' '"present(main@origin) | remote_bookmarks()"'
+#   jj config set --repo revset-aliases.'"trunk()"' '"main@origin"'
+#
+# 或手动将此文件内容复制到 jj 仓库配置中：
+#   jj config path --repo  → 找到配置文件路径 → 将内容粘贴进去
+
+[revset-aliases]
+# 主干分支指向 main 的远端
+"trunk()" = "main@origin"
+
+# 核心规则：已推送到远端的提交视为不可变。
+# 1. 不允许修改远端 bookmark 之前（含）的修订
+# 2. 确保与 GitHub PR 工作流兼容——推送后不 force push
+# 3. review 进度不会因为历史重写而丢失
+"immutable_heads()" = "present(main@origin) | remote_bookmarks()"

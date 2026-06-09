@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MePage } from '@/ui/app/pages/MePage';
 import { MOCK_ME_DASHBOARD_FIXTURE } from '@/lib/adapters/mock/fixtures/me';
 
@@ -21,8 +22,9 @@ describe('issue-215 me ui page（Me 三视图页面）', () => {
     render(<MePage />);
 
     expect(await screen.findByRole('heading', { name: 'Me' })).toBeInTheDocument();
-    const statusTab = screen.getByRole('button', { name: '状态' });
-    expect(statusTab).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('tablist')).toBeInTheDocument();
+    const statusTab = screen.getByRole('tab', { name: '状态' });
+    expect(statusTab).toHaveAttribute('aria-selected', 'true');
 
     await waitFor(() => {
       expect(screen.getByTestId('me-status-summary-card')).toBeInTheDocument();
@@ -37,32 +39,36 @@ describe('issue-215 me ui page（Me 三视图页面）', () => {
       expect(screen.getByText('当前状态')).toBeInTheDocument();
     });
 
-    const statusTab = screen.getByRole('button', { name: '状态' });
-    const learnTab = screen.getByRole('button', { name: '学习' });
+    const statusTab = screen.getByRole('tab', { name: '状态' });
+    const learnTab = screen.getByRole('tab', { name: '学习' });
 
-    expect(statusTab.className).toContain('rounded-2xl');
-    expect(statusTab.className).toContain('bg-[#C75B3A]');
-    expect(statusTab.className).toContain('text-white');
-    expect(learnTab.className).toContain('rounded-2xl');
-    expect(learnTab.className).toContain('bg-[#F5F0ED]');
+    expect(statusTab.className).toContain('rounded-lg');
+    expect(statusTab.className).toContain('data-[state=active]');
+    expect(learnTab.className).toContain('rounded-lg');
+    expect(learnTab.className).toContain('text-secondary');
   });
 
   it('switches to learn and implicit tabs（可切换到学习与内隐）', async () => {
+    const user = userEvent.setup();
     render(<MePage />);
 
     await waitFor(() => {
       expect(screen.getByText('当前状态')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '学习' }));
-    expect(screen.getByRole('button', { name: '学习' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('tab', { name: '学习' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '学习' })).toHaveAttribute('aria-selected', 'true');
+    });
     await waitFor(() => {
       expect(screen.getByTestId('me-learn-urgent-card')).toBeInTheDocument();
       expect(screen.getByText('急需知识')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '内隐' }));
-    expect(screen.getByRole('button', { name: '内隐' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('tab', { name: '内隐' }));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '内隐' })).toHaveAttribute('aria-selected', 'true');
+    });
     await waitFor(() => {
       expect(screen.getByTestId('me-implicit-belief-card')).toBeInTheDocument();
       expect(screen.getByText('信念网络')).toBeInTheDocument();
@@ -70,6 +76,7 @@ describe('issue-215 me ui page（Me 三视图页面）', () => {
   });
 
   it('applies dark-readable classes for key child cards（关键子卡片具备暗色可读样式）', async () => {
+    const user = userEvent.setup();
     render(<MePage />);
 
     await waitFor(() => {
@@ -81,7 +88,7 @@ describe('issue-215 me ui page（Me 三视图页面）', () => {
     expect(behaviorCard?.className).toContain('dark:bg');
     expect(behaviorTitle.className).toContain('dark:text');
 
-    fireEvent.click(screen.getByRole('button', { name: '学习' }));
+    await user.click(screen.getByRole('tab', { name: '学习' }));
     await waitFor(() => {
       expect(screen.getByText('编译器')).toBeInTheDocument();
     });

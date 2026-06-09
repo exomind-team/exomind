@@ -1,40 +1,66 @@
 ---
-import { getLangFromUrl, useTranslations, languages, getLocalizedPath } from '../i18n';
+import {
+  Blocks,
+  BookOpenText,
+  CirclePlay,
+  ScrollText,
+  UsersRound,
+} from "lucide-static";
+import BrandMark from "./BrandMark.astro";
+import LucideIcon from "./LucideIcon.astro";
+import { getLangFromUrl, useTranslations, languages, getLocalizedPath, getLanguageSwitchPath } from '../i18n';
 
 const lang = getLangFromUrl(Astro.url);
 const t = useTranslations(lang);
 const currentPath = Astro.url.pathname;
+const githubRepoUrl = 'https://github.com/exomind-team/exomind';
+const brandName = lang === 'zh' ? '外心' : 'ExoMind';
+const isDocsRoute = /^\/(?:en\/)?docs(?:\/|$)/.test(currentPath);
+const headerContainerClass = isDocsRoute
+  ? 'w-full px-5 sm:px-6 lg:px-8'
+  : 'section-container';
+const mobileMenuContainerClass = isDocsRoute
+  ? 'w-full space-y-1 px-5 py-4 sm:px-6 lg:px-8'
+  : 'section-container space-y-1 py-4';
 
 const navItems = [
-  { href: '/features', label: t('nav.features') },
-  { href: '/download', label: t('nav.download') },
-  { href: '/changelog', label: t('nav.changelog') },
-  { href: '/docs', label: t('nav.docs') },
-  { href: '/about', label: t('nav.about') },
+  { href: getLocalizedPath('/features', lang), label: t('nav.features'), icon: Blocks },
+  { href: getLocalizedPath('/changelog', lang), label: t('nav.changelog'), icon: ScrollText },
+  { href: getLocalizedPath('/getting-started', lang), label: t('nav.getting_started'), icon: CirclePlay },
+  { href: getLocalizedPath('/docs', lang), label: t('nav.docs'), icon: BookOpenText },
+  { href: getLocalizedPath('/about', lang), label: t('nav.about'), icon: UsersRound },
 ];
 ---
 
-<header class="fixed top-0 z-50 w-full border-b border-stone-200/60 bg-stone-50/80 backdrop-blur-xl dark:border-stone-800/60 dark:bg-stone-950/80">
-  <div class="section-container flex h-16 items-center justify-between">
-    <a href={getLocalizedPath('/', lang)} class="flex items-center gap-2.5">
-      <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-brand">
-        <span class="text-sm font-bold text-white">E</span>
-      </div>
-      <span class="text-lg font-semibold tracking-tight text-stone-900 dark:text-stone-50">ExoMind</span>
-    </a>
+<header data-site-header class="fixed top-0 z-50 w-full border-b border-stone-200/60 bg-stone-50/80 backdrop-blur-xl dark:border-stone-800/60 dark:bg-stone-950/80">
+  <div data-header-row class:list={[headerContainerClass, 'flex h-16 items-center justify-between gap-4']}>
+    <div class="flex min-w-0 items-center gap-1">
+      <a
+        href={getLocalizedPath('/', lang)}
+        data-header-brand
+        class="-ml-3 flex items-center gap-2.5 rounded-lg px-3 py-2 transition-colors hover:bg-stone-100 dark:hover:bg-stone-800"
+      >
+        <BrandMark class="h-9 w-9 shrink-0" imgClass="p-0.5" />
+        <span class="text-lg font-semibold tracking-tight text-stone-900 dark:text-stone-50">{brandName}</span>
+      </a>
 
-    <nav class="hidden items-center gap-1 md:flex">
-      {navItems.map(({ href, label }) => (
-        <a
-          href={getLocalizedPath(href, lang)}
-          class="rounded-lg px-3 py-2 text-sm text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-50"
-        >
-          {label}
-        </a>
-      ))}
-    </nav>
+      <nav data-desktop-nav class="hidden items-center gap-1 md:flex md:flex-nowrap">
+        {navItems.map(({ href, label, icon }) => (
+          <a
+            href={href}
+            data-desktop-nav-link
+            aria-label={label}
+            title={label}
+            class="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-50"
+          >
+            <LucideIcon icon={icon} size={16} class="h-4 w-4 shrink-0 opacity-80" />
+            <span data-desktop-nav-label class="whitespace-nowrap">{label}</span>
+          </a>
+        ))}
+      </nav>
+    </div>
 
-    <div class="flex items-center gap-3">
+    <div data-header-actions class="flex shrink-0 items-center gap-3">
       <button
         id="theme-toggle"
         type="button"
@@ -82,7 +108,7 @@ const navItems = [
       <div class="flex items-center gap-1 rounded-lg border border-stone-200 p-0.5 dark:border-stone-800">
         {Object.entries(languages).map(([code, name]) => (
           <a
-            href={code === 'zh' ? currentPath.replace(/^\/en(\/|$)/, '/') || '/' : currentPath.startsWith('/en') ? currentPath : `/en${currentPath}`}
+            href={getLanguageSwitchPath(currentPath, code)}
             class:list={[
               'rounded-md px-2 py-1 text-xs font-medium transition-colors',
               lang === code
@@ -95,8 +121,19 @@ const navItems = [
         ))}
       </div>
 
-      <a href={getLocalizedPath('/download', lang)} class="btn-primary hidden text-sm sm:inline-flex">
-        {t('hero.cta.download')}
+      <a
+        href={githubRepoUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        data-github-link
+        class="hidden h-9 items-center gap-2 rounded-lg border border-stone-200 bg-stone-50/80 px-3 text-sm font-medium text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900 md:inline-flex dark:border-stone-800 dark:bg-stone-900/70 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-50"
+        aria-label={t('nav.github_repo_aria')}
+        title="GitHub"
+      >
+        <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.38-1.33-1.75-1.33-1.75-1.08-.74.08-.73.08-.73 1.2.08 1.82 1.22 1.82 1.22 1.06 1.81 2.79 1.29 3.47.99.11-.77.42-1.29.76-1.59-2.67-.3-5.47-1.33-5.47-5.92 0-1.31.47-2.38 1.22-3.22-.12-.3-.53-1.52.12-3.16 0 0 1-.32 3.27 1.23a11.4 11.4 0 0 1 5.95 0c2.27-1.55 3.27-1.23 3.27-1.23.65 1.64.24 2.86.12 3.16.76.84 1.22 1.91 1.22 3.22 0 4.6-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.69.83.57A12 12 0 0 0 12 .5z" />
+        </svg>
+        <span data-github-label>GitHub</span>
       </a>
 
       {/* Mobile menu button */}
@@ -114,80 +151,163 @@ const navItems = [
 
   {/* Mobile menu */}
   <div id="mobile-menu" class="hidden border-t border-stone-200 bg-stone-50 md:hidden dark:border-stone-800 dark:bg-stone-950">
-    <div class="section-container space-y-1 py-4">
-      {navItems.map(({ href, label }) => (
+    <div class={mobileMenuContainerClass}>
+      {navItems.map(({ href, label, icon }) => (
         <a
-          href={getLocalizedPath(href, lang)}
-          class="block rounded-lg px-3 py-2.5 text-sm text-stone-600 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-50"
+          href={href}
+          class="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-stone-600 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-50"
         >
+          <LucideIcon icon={icon} size={16} class="h-4 w-4 shrink-0 opacity-80" />
           {label}
         </a>
       ))}
+      <a
+        href={githubRepoUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-stone-600 hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-50"
+        aria-label={t('nav.github_repo_aria')}
+      >
+        <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.38-1.33-1.75-1.33-1.75-1.08-.74.08-.73.08-.73 1.2.08 1.82 1.22 1.82 1.22 1.06 1.81 2.79 1.29 3.47.99.11-.77.42-1.29.76-1.59-2.67-.3-5.47-1.33-5.47-5.92 0-1.31.47-2.38 1.22-3.22-.12-.3-.53-1.52.12-3.16 0 0 1-.32 3.27 1.23a11.4 11.4 0 0 1 5.95 0c2.27-1.55 3.27-1.23 3.27-1.23.65 1.64.24 2.86.12 3.16.76.84 1.22 1.91 1.22 3.22 0 4.6-2.81 5.62-5.49 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.69.83.57A12 12 0 0 0 12 .5z" />
+        </svg>
+        <span>GitHub</span>
+      </a>
     </div>
   </div>
 </header>
 
+<style>
+  header[data-desktop-nav-state='icon'] [data-desktop-nav] {
+    gap: 0.25rem;
+  }
+
+  header[data-desktop-nav-state='icon'] [data-desktop-nav-link] {
+    justify-content: center;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  header[data-desktop-nav-state='icon'] [data-desktop-nav-label] {
+    display: none;
+  }
+
+  header[data-desktop-nav-state='icon'] [data-github-link] {
+    gap: 0;
+    justify-content: center;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  header[data-desktop-nav-state='icon'] [data-github-label] {
+    display: none;
+  }
+</style>
+
 <script>
-  const btn = document.getElementById('mobile-menu-btn');
-  const menu = document.getElementById('mobile-menu');
-  const themeToggle = document.getElementById('theme-toggle');
-  const root = document.documentElement;
-  const themeStorageKey = 'exomind-theme';
+  const HEADER_STATE_KEY = '__exomindHeaderLifecycle';
+  const THEME_STORAGE_KEY = 'exomind-theme';
 
-  const moonIcon = themeToggle?.querySelector('[data-theme-icon="moon"]');
-  const sunIcon = themeToggle?.querySelector('[data-theme-icon="sun"]');
-  const darkModeLabel = themeToggle?.getAttribute('data-label-dark') ?? 'Switch to dark mode';
-  const lightModeLabel = themeToggle?.getAttribute('data-label-light') ?? 'Switch to light mode';
+  const updateThemeButton = () => {
+    const themeToggle = document.getElementById('theme-toggle');
+    const moonIcon = themeToggle?.querySelector('[data-theme-icon="moon"]');
+    const sunIcon = themeToggle?.querySelector('[data-theme-icon="sun"]');
+    const darkModeLabel = themeToggle?.getAttribute('data-label-dark') ?? 'Switch to dark mode';
+    const lightModeLabel = themeToggle?.getAttribute('data-label-light') ?? 'Switch to light mode';
+    const isDark = document.documentElement.classList.contains('dark');
 
-  const getCurrentTheme = () => (root.classList.contains('dark') ? 'dark' : 'light');
-
-  const updateThemeButton = (theme) => {
-    const isDark = theme === 'dark';
     themeToggle?.setAttribute('aria-pressed', isDark ? 'true' : 'false');
     themeToggle?.setAttribute('aria-label', isDark ? lightModeLabel : darkModeLabel);
     moonIcon?.classList.toggle('hidden', isDark);
     sunIcon?.classList.toggle('hidden', !isDark);
   };
 
-  const applyTheme = (theme, persistPreference = false) => {
-    const isDark = theme === 'dark';
-    root.classList.toggle('dark', isDark);
-    root.dataset.theme = theme;
-    root.style.colorScheme = theme;
+  const updateDesktopNavState = () => {
+    const header = document.querySelector('[data-site-header]');
+    const row = document.querySelector('[data-header-row]');
+    const brand = document.querySelector('[data-header-brand]');
+    const nav = document.querySelector('[data-desktop-nav]');
+    const actions = document.querySelector('[data-header-actions]');
 
-    if (persistPreference) {
-      try {
-        window.localStorage.setItem(themeStorageKey, theme);
-      } catch {
-        // Ignore storage failures in private browsing modes.
-      }
-    }
-
-    updateThemeButton(theme);
-  };
-
-  btn?.addEventListener('click', () => {
-    menu?.classList.toggle('hidden');
-  });
-
-  updateThemeButton(getCurrentTheme());
-
-  themeToggle?.addEventListener('click', () => {
-    const nextTheme = getCurrentTheme() === 'dark' ? 'light' : 'dark';
-    applyTheme(nextTheme, true);
-  });
-
-  const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-  mediaQuery.addEventListener?.('change', (event) => {
-    let storedTheme = null;
-    try {
-      storedTheme = window.localStorage.getItem(themeStorageKey);
-    } catch {
-      storedTheme = null;
-    }
-    if (storedTheme === 'dark' || storedTheme === 'light') {
+    if (
+      !(header instanceof HTMLElement) ||
+      !(row instanceof HTMLElement) ||
+      !(brand instanceof HTMLElement) ||
+      !(nav instanceof HTMLElement) ||
+      !(actions instanceof HTMLElement)
+    ) {
       return;
     }
-    applyTheme(event.matches ? 'dark' : 'light', false);
-  });
+
+    if (window.innerWidth < 768) {
+      header.dataset.desktopNavState = 'full';
+      return;
+    }
+
+    header.dataset.desktopNavState = 'full';
+
+    const rowWidth = row.getBoundingClientRect().width;
+    const brandWidth = brand.getBoundingClientRect().width;
+    const actionsWidth = actions.getBoundingClientRect().width;
+    const availableWidth = Math.max(0, rowWidth - brandWidth - actionsWidth - 32);
+    const navWidth = nav.scrollWidth;
+
+    header.dataset.desktopNavState = navWidth > availableWidth ? 'icon' : 'full';
+  };
+
+  const bindHeaderInteractions = () => {
+    const btn = document.getElementById('mobile-menu-btn');
+    const menu = document.getElementById('mobile-menu');
+    const themeToggle = document.getElementById('theme-toggle');
+
+    if (btn && !btn.dataset.bound) {
+      btn.addEventListener('click', () => {
+        menu?.classList.toggle('hidden');
+      });
+      btn.dataset.bound = 'true';
+    }
+
+    if (themeToggle && !themeToggle.dataset.bound) {
+      themeToggle.addEventListener('click', () => {
+        const nextTheme = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
+        window.__applyExomindTheme?.(nextTheme, true);
+        updateThemeButton();
+      });
+      themeToggle.dataset.bound = 'true';
+    }
+
+    menu?.classList.add('hidden');
+    updateThemeButton();
+    window.requestAnimationFrame(() => updateDesktopNavState());
+  };
+
+  if (!window[HEADER_STATE_KEY]) {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+    const handleThemePreferenceChange = (event) => {
+      let storedTheme = null;
+      try {
+        storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+      } catch {
+        storedTheme = null;
+      }
+      if (storedTheme === 'dark' || storedTheme === 'light') {
+        return;
+      }
+      window.__applyExomindTheme?.(event.matches ? 'dark' : 'light', false);
+      updateThemeButton();
+    };
+
+    mediaQuery.addEventListener?.('change', handleThemePreferenceChange);
+    document.addEventListener('astro:page-load', bindHeaderInteractions);
+    document.addEventListener('astro:after-swap', () => {
+      updateThemeButton();
+      updateDesktopNavState();
+    });
+    window.addEventListener('resize', updateDesktopNavState);
+
+    window[HEADER_STATE_KEY] = true;
+  }
+
+  bindHeaderInteractions();
 </script>

@@ -1,5 +1,12 @@
 import type { Event as StorageEvent } from '@/lib/storage/event-storage';
-import type { Event as UiEvent } from '@/lib/types/event';
+import type { Event as UiEvent, EventMetadata, Tag } from '@/lib/types/event';
+import { readEventRefsFromMetadata } from '@/lib/eventlog/event-refs';
+
+const TAGS_METADATA_KEY = 'tags';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 function parseTimestamp(createdAt: string): number {
   const parsed = Date.parse(createdAt);
@@ -15,12 +22,41 @@ function sortByTimeAsc(events: UiEvent[]): UiEvent[] {
   });
 }
 
+function normalizeTags(rawTags: unknown, fallbackType?: string): Tag[] {
+  if (Array.isArray(rawTags)) {
+    const tags = rawTags.filter((tag): tag is Tag => typeof tag === 'string' && tag.length > 0);
+    if (tags.length > 0) {
+      return tags;
+    }
+  }
+
+  if (typeof fallbackType === 'string' && fallbackType.length > 0) {
+    return [fallbackType];
+  }
+
+  return [];
+}
+
+function toEventMetadata(rawMetadata: unknown): EventMetadata | undefined {
+  if (!isRecord(rawMetadata)) {
+    return undefined;
+  }
+
+  const metadata = { ...rawMetadata };
+  delete metadata[TAGS_METADATA_KEY];
+
+  return Object.keys(metadata).length > 0 ? (metadata as EventMetadata) : undefined;
+}
+
 export function toUiEvent(event: StorageEvent): UiEvent {
+  const tags = normalizeTags(isRecord(event.metadata) ? event.metadata[TAGS_METADATA_KEY] : undefined, event.type);
   return {
     id: event.id,
     timestamp: parseTimestamp(event.createdAt),
     content: event.content,
-    tags: new Set<string>(event.type ? [event.type] : []),
+    tags: new Set<string>(tags),
+    metadata: toEventMetadata(event.metadata),
+    refs: readEventRefsFromMetadata(isRecord(event.metadata) ? event.metadata : null),
   };
 }
 

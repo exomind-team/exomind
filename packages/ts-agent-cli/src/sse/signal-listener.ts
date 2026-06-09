@@ -6,6 +6,7 @@
  */
 
 import type { SignalEvent } from "./signal-types.js";
+import { HttpSseSignalTransport, type SignalTransport } from "./http-sse-signal-transport.js";
 
 // ── 默认配置 ──────────────────────────────────────────────────
 
@@ -26,6 +27,8 @@ export interface SignalListenerConfig {
   initialRetryDelay: number;
   /** Maximum retry delay in seconds */
   maxRetryDelay: number;
+  /** Transport adapter（传输适配器） */
+  transport: SignalTransport;
 }
 
 // ── 监听器 ────────────────────────────────────────────────────
@@ -42,21 +45,25 @@ export interface SignalListenerConfig {
  * ```
  */
 export class SignalListener {
-  private readonly rtUrl: string;
   private readonly agentId: string;
   private readonly heartbeatInterval: number;
   private retryDelay: number;
   private readonly maxRetryDelay: number;
+  private readonly transport: SignalTransport;
 
   private aborted = false;
   private lastEventId: string | null = null;
 
   constructor(config?: Partial<SignalListenerConfig>) {
-    this.rtUrl = (config?.rtUrl ?? DEFAULT_RT_URL).replace(/\/$/, "");
     this.agentId = config?.agentId ?? "agent";
     this.heartbeatInterval = config?.heartbeatInterval ?? 30;
     this.retryDelay = config?.initialRetryDelay ?? INITIAL_RETRY_DELAY_S;
     this.maxRetryDelay = config?.maxRetryDelay ?? MAX_RETRY_DELAY_S;
+    this.transport =
+      config?.transport ??
+      new HttpSseSignalTransport({
+        rtUrl: config?.rtUrl ?? DEFAULT_RT_URL,
+      });
   }
 
   /**
@@ -88,31 +95,23 @@ export class SignalListener {
     this.aborted = true;
   }
 
-  private get streamUrl(): string {
-    return `${this.rtUrl}/signals/stream?agent_id=${encodeURIComponent(this.agentId)}&heartbeat_interval=${this.heartbeatInterval}`;
-  }
-
   private async *connectAndConsume(): AsyncGenerator<SignalEvent, void, void> {
-    const headers: Record<string, string> = {
-      Accept: "text/event-stream",
-      "Cache-Control": "no-cache",
-    };
-    if (this.lastEventId) {
-      headers["Last-Event-ID"] = this.lastEventId;
-    }
+    const response = await this.transport.openStream({
+      agentId: this.agentId,
+      heartbeatInterval: this.heartbeatInterval,
+      lastEventId: this.lastEventId,
+    });
 
-    const response = await fetch(this.streamUrl, { headers });
+    console.log(
+      `[SignalListener] connected to stream for ${this.agentId} (heartbeat=${this.heartbeatInterval}s)`,
+    );
 
-    if (!response.ok) {
-      throw new Error(`SSE HTTP ${response.status}`);
-    }
-    if (!response.body) {
+    const body = response.body;
+    if (!body) {
       throw new Error("SSE response has no body");
     }
 
-    console.log(`[SignalListener] connected to ${this.streamUrl}`);
-
-    const reader = response.body.getReader();
+    const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
 

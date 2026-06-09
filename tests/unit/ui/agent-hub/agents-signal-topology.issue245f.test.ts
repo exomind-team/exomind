@@ -1,12 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import type { SignalRoute } from '@/lib/types/signal-pool';
+import type { SessionInfo } from '@/lib/types/session';
 import type { RuntimeAggregatedAgent } from '@/services/runtime-manager';
 import {
   buildSignalGraph,
   buildSignalRouteRows,
 } from '@/ui/app/pages/agents-signal-topology';
+import { buildPtyGraphNodes } from '@/ui/app/pages/agents/pty-graph-nodes';
 
 const SAMPLE_ROUTES: SignalRoute[] = [
+  {
+    id: 'route-000',
+    enabled: true,
+    topic: 'voice.input.transcript',
+    target_type: 'agent',
+    target_ref: 'classifier',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
   {
     id: 'route-001',
     enabled: true,
@@ -72,6 +83,15 @@ const SAMPLE_AGENTS: RuntimeAggregatedAgent[] = [
     sourceHostId: 'host-a',
     sourceHostName: 'RT-A',
     sourceHostAddress: '127.0.0.1:1919',
+    energy: {
+      agent_id: 'classifier',
+      current: 180,
+      max: 200,
+      ratio: 0.9,
+      tick_cost: 5,
+      phase: 'normal',
+      is_dormant: false,
+    },
   },
   {
     id: 'reviewer',
@@ -81,13 +101,42 @@ const SAMPLE_AGENTS: RuntimeAggregatedAgent[] = [
     sourceHostId: 'host-a',
     sourceHostName: 'RT-A',
     sourceHostAddress: '127.0.0.1:1919',
+    energy: {
+      agent_id: 'reviewer',
+      current: 0,
+      max: 100,
+      ratio: 0,
+      tick_cost: 10,
+      phase: 'dormant',
+      is_dormant: true,
+    },
+  },
+];
+
+const SAMPLE_SESSIONS: SessionInfo[] = [
+  {
+    id: 'session-pty-245f',
+    agent_kind: 'claude',
+    role: 'Issue 806 Terminal',
+    summary: '',
+    status: 'waiting_input',
+    interaction_mode: 'terminal',
+    pty_id: 'pty-245f',
+    context: {
+      issue_refs: ['#806'],
+      labels: [],
+    },
+    created_at: '2026-04-02T00:00:00.000Z',
+    last_active_at: '2026-04-02T00:05:00.000Z',
+    turn_count: 3,
+    source_host_id: 'runtime-host-245f',
   },
 ];
 
 describe('agents signal topology builder issue-245f（信号拓扑构建）', () => {
   it('builds route rows with active/inactive status（构建路由列表行并区分状态）', () => {
     const rows = buildSignalRouteRows(SAMPLE_ROUTES, '127.0.0.1:1919');
-    expect(rows.length).toBe(6);
+    expect(rows.length).toBe(7);
     expect(rows[0]).toMatchObject({
       topic: '*',
       targetType: 'frontend',
@@ -125,5 +174,65 @@ describe('agents signal topology builder issue-245f（信号拓扑构建）', ()
 
     const inactiveEdge = graph.edges.find((edge) => edge.id === 'route:route-004');
     expect(inactiveEdge?.active).toBe(false);
+  });
+
+  it('injects a dedicated voice input node type before transcript topic（语音转写主题前显示专用输入节点类型，避免命中 React Flow 内建 input 样式）', () => {
+    const graph = buildSignalGraph(SAMPLE_ROUTES, SAMPLE_AGENTS);
+
+    expect(graph.nodes.find((node) => node.id === 'input:voice')).toMatchObject({
+      type: 'signal-input',
+      label: 'Voice Input（语音输入）',
+    });
+    expect(graph.nodes.find((node) => node.id === 'topic:voice.input.transcript')).toMatchObject({
+      type: 'topic',
+      label: 'voice.input.transcript',
+    });
+    expect(graph.edges.find((edge) => edge.id === 'input-link:voice.input.transcript')).toMatchObject({
+      source: 'input:voice',
+      target: 'topic:voice.input.transcript',
+      topic: 'voice.input.transcript',
+    });
+  });
+
+  it('projects agent energy phase onto graph nodes（把 agent 能量阶段映射到拓扑节点）', () => {
+    const graph = buildSignalGraph(SAMPLE_ROUTES, SAMPLE_AGENTS);
+
+    expect(graph.nodes.find((node) => node.id === 'agent:classifier')).toMatchObject({
+      energyPhase: 'normal',
+      isDormant: false,
+    });
+    expect(graph.nodes.find((node) => node.id === 'agent:reviewer')).toMatchObject({
+      energyPhase: 'dormant',
+      isDormant: true,
+    });
+  });
+
+  it('projects matching session context onto existing pty nodes（把匹配 session 上下文投影到现有 pty 节点）', () => {
+    const nodes = buildPtyGraphNodes(
+      [
+        {
+          id: 'pty-245f',
+          name: 'Terminal Agent',
+          status: 'running',
+          workdir: 'H:/A137442/Develop/AGI/exomind',
+        },
+        {
+          id: 'pty-fallback',
+          name: 'Detached PTY',
+          status: 'stopped',
+          workdir: 'H:/A137442/Develop/AGI/exomind',
+        },
+      ],
+      SAMPLE_SESSIONS,
+    );
+
+    expect(nodes.find((node) => node.id === 'pty-pty-245f')).toMatchObject({
+      label: 'Issue 806 Terminal',
+      status: 'Claude · 等待输入',
+    });
+    expect(nodes.find((node) => node.id === 'pty-pty-fallback')).toMatchObject({
+      label: 'Detached PTY',
+      status: 'Terminal · offline',
+    });
   });
 });

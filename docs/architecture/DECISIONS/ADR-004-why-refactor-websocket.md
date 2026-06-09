@@ -1,5 +1,7 @@
 # ADR-004: 重构 WebSocket 模块 - 统一错误码 + 消息队列 + 重连机制
 
+> **状态：已废弃** — `src/lib/ws/` WebSocket 客户端模块已于 2026-03-15 删除，信号传输已迁移至 SSE (Server-Sent Events)。本 ADR 保留为历史决策记录。
+
 ## 状态
 
 已批准

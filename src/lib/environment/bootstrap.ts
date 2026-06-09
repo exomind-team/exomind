@@ -4,12 +4,15 @@ import { MeMockAdapter } from '@/lib/adapters/mock/me-mock-adapter';
 import { AgentWebAdapter } from '@/lib/adapters/agent-web-adapter';
 import { AgentMockAdapter } from '@/lib/adapters/mock/agent-mock-adapter';
 import { TaskMockAdapter } from '@/lib/adapters/mock/task-mock-adapter';
-import { TaskWebAdapter } from '@/lib/adapters/task-web-adapter';
+import { TaskRtAdapter } from '@/lib/adapters/task-rt-adapter';
+import { EventLogRtAdapter } from '@/lib/adapters/eventlog-rt-adapter';
+import { TauriEventLogStorageAdapter } from '@/lib/adapters/tauri-eventlog-storage';
 import { VolcanoEngineASRAdapter } from '../adapters/asr/volcano-engine-asr';
 import { TauriClipboardAdapter } from '../adapters/clipboard-tauri-adapter';
 import { WebClipboardAdapter } from '../adapters/clipboard-web-adapter';
 import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { WebStorageAdapter } from '../adapters/web-storage';
+import { getEventlogBackendMode } from '@/config/domain-backend-mode';
 import type { IAgentPort } from './interfaces/agent.port';
 import type { IASRPort } from './interfaces/asr.port';
 import type { IClipboardPort } from './interfaces/clipboard.port';
@@ -41,7 +44,7 @@ export interface RuntimeBootstrapOptions {
  * Tauri 存储适配器占位实现
  *
  * 当前沿用 WebStorageAdapter 能力，
- * 后续 Task 将替换为真正的 Tauri 存储实现。
+ * 任务数据已改由 RT SQLite 提供真实数据源。
  */
 export class TauriStorageAdapter extends WebStorageAdapter {}
 
@@ -66,9 +69,21 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
   const asr = new VolcanoEngineASRAdapter();
   const clipboard: IClipboardPort = runtime === 'tauri' ? new TauriClipboardAdapter() : new WebClipboardAdapter();
   const useMockData = options.useMockData ?? getUseMockDataEnabled();
-  const task: ITaskPort = useMockData ? new TaskMockAdapter() : new TaskWebAdapter();
+  const eventlogBackendMode = runtime === 'tauri' ? getEventlogBackendMode() : 'rt-sqlite';
+  const task: ITaskPort = useMockData
+    ? new TaskMockAdapter()
+    : new TaskRtAdapter();
   const me: IMePort = useMockData ? new MeMockAdapter() : new MeWebAdapter();
   const agent: IAgentPort = useMockData ? new AgentMockAdapter() : new AgentWebAdapter();
+  const eventlog: IEventLogPort = useMockData
+    ? new WebEventLogStorageAdapter()
+    : (
+      runtime === 'tauri'
+        ? (eventlogBackendMode === 'legacy'
+          ? new TauriEventLogStorageAdapter()
+          : new EventLogRtAdapter())
+        : new EventLogRtAdapter()
+    );
 
   if (runtime === 'tauri') {
     return {
@@ -76,8 +91,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
       asr,
       clipboard,
       storage: new TauriStorageAdapter(),
-      // 临时统一到 PouchDB，避免 Tauri 原生 EventLog 与 UI 读取源分裂（#144）
-      eventlog: new WebEventLogStorageAdapter(),
+      eventlog,
       task,
       me,
       agent,
@@ -89,7 +103,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
     asr,
     clipboard,
     storage: new WebStorageAdapter(),
-    eventlog: new WebEventLogStorageAdapter(),
+    eventlog,
     task,
     me,
     agent,

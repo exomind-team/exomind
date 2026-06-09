@@ -1,8 +1,9 @@
 ---
 import '../styles/global.css';
+import { ClientRouter } from 'astro:transitions';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
-import { getLangFromUrl, useTranslations } from '../i18n';
+import { getLangFromUrl, isDocsPath, prependBasePath } from '../i18n';
 
 interface Props {
   title: string;
@@ -10,28 +11,59 @@ interface Props {
 }
 
 const lang = getLangFromUrl(Astro.url);
-const defaultDescription = lang === 'zh' ? 'ExoMind - 你的生命成长助手' : 'ExoMind - Your Life Growth Companion';
+const isDocsRoute = isDocsPath(Astro.url.pathname);
+const brandName = lang === 'zh'
+  ? isDocsRoute
+    ? '外心文档'
+    : '外心'
+  : isDocsRoute
+    ? 'ExoMind Docs'
+    : 'ExoMind';
+const defaultDescription = lang === 'zh' ? '外心 - 你的生命成长助手' : 'ExoMind - Your Life Growth Companion';
 const { title, description = defaultDescription } = Astro.props;
 const themeBootScript = String.raw`
 (() => {
   const THEME_STORAGE_KEY = 'exomind-theme';
   const root = document.documentElement;
 
-  let storedTheme = null;
-  try {
-    storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-  } catch {
-    storedTheme = null;
+  const resolveTheme = () => {
+    let storedTheme = null;
+    try {
+      storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    } catch {
+      storedTheme = null;
+    }
+
+    const isStoredThemeValid = storedTheme === 'dark' || storedTheme === 'light';
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return isStoredThemeValid ? storedTheme : prefersDark ? 'dark' : 'light';
+  };
+
+  const applyTheme = (theme = resolveTheme(), persistPreference = false) => {
+    const isDark = theme === 'dark';
+    root.classList.toggle('dark', isDark);
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+
+    if (persistPreference) {
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+      } catch {
+        // Ignore storage failures in private browsing modes.
+      }
+    }
+
+    return theme;
+  };
+
+  window.__applyExomindTheme = applyTheme;
+
+  if (!window.__exomindThemeBootstrapped) {
+    document.addEventListener('astro:after-swap', () => applyTheme());
+    window.__exomindThemeBootstrapped = true;
   }
 
-  const isStoredThemeValid = storedTheme === 'dark' || storedTheme === 'light';
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const theme = isStoredThemeValid ? storedTheme : prefersDark ? 'dark' : 'light';
-  const isDark = theme === 'dark';
-
-  root.classList.toggle('dark', isDark);
-  root.dataset.theme = theme;
-  root.style.colorScheme = theme;
+  applyTheme();
 })();
 `;
 ---
@@ -43,9 +75,10 @@ const themeBootScript = String.raw`
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
     <meta name="color-scheme" content="light dark" />
+    <ClientRouter fallback="swap" />
     <script is:inline set:html={themeBootScript}></script>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>{title} | ExoMind</title>
+    <link rel="icon" type="image/svg+xml" href={prependBasePath('/brandmark.svg')} />
+    <title>{title} | {brandName}</title>
   </head>
   <body class="min-h-screen font-body antialiased">
     <Header />

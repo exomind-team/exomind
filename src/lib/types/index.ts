@@ -16,3 +16,6 @@ export * from './runtime-topology';
 
 // SignalPool 类型定义
 export * from './signal-pool';
+
+// Proposal 类型定义
+export * from './proposal';

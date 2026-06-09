@@ -1,13 +1,81 @@
-import type { EventData, Tag } from '../types/event';
-import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
-import { getEventStorage, type Event as StorageEvent } from '../storage/event-storage';
+import type { EventData, EventMetadata, Tag } from "../types/event";
+import type {
+  EventLogAppendInput,
+  EventLogImportResult,
+  EventLogListOptions,
+  EventLogListResult,
+  EventLogListSemantics,
+  IEventLogPort,
+} from "../environment/interfaces/eventlog.port";
+import {
+  mergeMetadataWithEventRefs,
+  normalizeEventRefs,
+  readEventRefsFromMetadata,
+  stripEventRefsFromMetadata,
+} from "../eventlog/event-refs";
+import { mergeEventsById } from "../eventlog/transfer";
+import {
+  getEventStorage,
+  type Event as StorageEvent,
+} from "../storage/event-storage";
+import { appendEventWithEcsReplication } from "../services/ecs-eventlog-replication.service";
 
-const NOTE_TAG: Tag = 'note';
+const NOTE_TAG: Tag = "note";
+const TAGS_METADATA_KEY = "tags";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function resolveEventLogListSemantics(
+  _options?: EventLogListOptions,
+): EventLogListSemantics {
+  return "full_snapshot";
+}
+
+export function applyEventLogListOptions(
+  events: EventData[],
+  options?: EventLogListOptions,
+): EventData[] {
+  if (!options) {
+    return events;
+  }
+
+  const hasIncrementalCursor =
+    (typeof options.sinceId === "string" && options.sinceId.length > 0) ||
+    (typeof options.sinceTimestamp === "number" &&
+      typeof options.untilTimestamp !== "number");
+
+  // Legacy PouchDB / Tauri JSON backends are ordered by event timestamp（事件时间）, not arrival order（到达顺序）.
+  // Applying local since* filters here can permanently hide late-arriving historical events（晚到旧事件）.
+  if (hasIncrementalCursor) {
+    return events;
+  }
+
+  let next = events;
+
+  if (typeof options.sinceTimestamp === "number") {
+    next = next.filter((event) => event.timestamp >= options.sinceTimestamp!);
+  }
+
+  if (typeof options.untilTimestamp === "number") {
+    next = next.filter((event) => event.timestamp <= options.untilTimestamp!);
+  }
+
+  if (typeof options.limit === "number") {
+    next = next.slice(0, Math.max(0, options.limit));
+  }
+
+  return next;
+}
 
 /**
  * WebEventLogStorageAdapter
  *
- * 基于 PouchDB EventStorage 实现 IEventLogPort
+ * 基于 PouchDB EventStorage 实现 IEventLogPort。
+ *
+ * 已弃用待删除：业务数据链路已切换到 RT EventLog，本适配器仅保留给
+ * 旧版迁移/兼容路径使用，后续迁移完成后应整体移除。
  */
 export class WebEventLogStorageAdapter implements IEventLogPort {
   constructor(private readonly userId?: string) {}
@@ -16,13 +84,76 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
     return getEventStorage(this.userId);
   }
 
-  async listEvents(): Promise<EventData[]> {
-    const events = await this.storage.getEvents();
-    return events.map((event) => this.fromStorageEvent(event));
+  async listEvents(options?: EventLogListOptions): Promise<EventData[]> {
+    const result = await this.listEventsDetailed(options);
+    return result.events;
   }
 
-  async appendEvent(event: EventData): Promise<void> {
-    await this.storage.addEvent(this.toStorageEvent(event));
+  async listEventsDetailed(
+    options?: EventLogListOptions,
+  ): Promise<EventLogListResult> {
+    const events = await this.storage.getEvents();
+    return {
+      events: applyEventLogListOptions(
+        events.map((event) => this.fromStorageEvent(event)),
+        options,
+      ),
+      semantics: resolveEventLogListSemantics(options),
+    };
+  }
+
+  async appendEvent(event: EventLogAppendInput): Promise<EventData> {
+    const persisted = await appendEventWithEcsReplication(
+      this.toStorageEvent({
+        ...event,
+        timestamp: Date.now(),
+      }),
+      this.userId,
+    );
+    return this.fromStorageEvent(persisted);
+  }
+
+  async appendRawEvent(event: EventData): Promise<EventData> {
+    const persisted = await appendEventWithEcsReplication(
+      this.toStorageEvent(event),
+      this.userId,
+    );
+    return this.fromStorageEvent(persisted);
+  }
+
+  async importEventsFromJson(
+    json: string,
+    strategy: "merge" | "overwrite",
+  ): Promise<EventLogImportResult> {
+    const payload = JSON.parse(json) as { events?: EventData[] };
+    const incoming = Array.isArray(payload.events) ? payload.events : [];
+    const existing = await this.listEvents();
+
+    let next: EventData[];
+    let imported = 0;
+    let skipped = 0;
+
+    if (strategy === "overwrite") {
+      next = incoming;
+      imported = incoming.length;
+    } else {
+      const existingIds = new Set(existing.map((event) => event.id));
+      imported = incoming.filter((event) => !existingIds.has(event.id)).length;
+      skipped = incoming.length - imported;
+      next = mergeEventsById(existing, incoming);
+    }
+
+    await this.clearEvents();
+    const sorted = [...next].sort((a, b) => a.timestamp - b.timestamp);
+    for (const event of sorted) {
+      await this.appendRawEvent(event);
+    }
+
+    return {
+      imported,
+      skipped,
+      total: next.length,
+    };
   }
 
   async getEvent(id: string): Promise<EventData | null> {
@@ -38,40 +169,89 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
   }
 
   private toStorageEvent(event: EventData): StorageEvent {
+    const metadata = this.mergeMetadataWithTags(
+      event.metadata,
+      event.tags,
+      event.refs,
+    );
     return {
       id: event.id,
       content: event.content,
       createdAt: new Date(event.timestamp).toISOString(),
       type: event.tags[0] || NOTE_TAG,
-      metadata: {
-        tags: event.tags,
-      },
+      metadata,
     };
   }
 
   private fromStorageEvent(event: StorageEvent): EventData {
     const parsedTimestamp = Date.parse(event.createdAt);
+    const metadataRecord = this.toMetadataRecord(event.metadata);
+    const tags = this.normalizeTags(
+      metadataRecord?.[TAGS_METADATA_KEY],
+      event.type,
+    );
+    const refs = readEventRefsFromMetadata(metadataRecord);
+    const metadata = this.stripTagsFromMetadata(metadataRecord);
+
     return {
       id: event.id,
       timestamp: Number.isNaN(parsedTimestamp) ? Date.now() : parsedTimestamp,
       content: event.content,
-      tags: this.normalizeTags(event.metadata?.tags, event.type),
+      tags,
+      metadata,
+      refs,
     };
+  }
+
+  private mergeMetadataWithTags(
+    metadata: EventMetadata | undefined,
+    tags: Tag[],
+    refs: EventData["refs"],
+  ): Record<string, unknown> {
+    const baseMetadata = mergeMetadataWithEventRefs(
+      metadata,
+      normalizeEventRefs(refs),
+    );
+    return {
+      ...baseMetadata,
+      [TAGS_METADATA_KEY]: [...tags],
+    };
+  }
+
+  private toMetadataRecord(
+    rawMetadata: unknown,
+  ): Record<string, unknown> | null {
+    if (!isRecord(rawMetadata)) {
+      return null;
+    }
+    return { ...rawMetadata };
+  }
+
+  private stripTagsFromMetadata(
+    metadata: Record<string, unknown> | null,
+  ): EventMetadata | undefined {
+    if (!metadata) {
+      return undefined;
+    }
+    const nextMetadata = { ...metadata };
+    delete nextMetadata[TAGS_METADATA_KEY];
+    return stripEventRefsFromMetadata(nextMetadata);
   }
 
   private normalizeTags(rawTags: unknown, fallbackType?: string): Tag[] {
     if (Array.isArray(rawTags)) {
-      const tags = rawTags.filter((tag): tag is Tag => typeof tag === 'string' && tag.length > 0);
+      const tags = rawTags.filter(
+        (tag): tag is Tag => typeof tag === "string" && tag.length > 0,
+      );
       if (tags.length > 0) {
         return tags;
       }
     }
 
-    if (typeof fallbackType === 'string' && fallbackType.length > 0) {
+    if (typeof fallbackType === "string" && fallbackType.length > 0) {
       return [fallbackType];
     }
 
     return [NOTE_TAG];
   }
 }
-

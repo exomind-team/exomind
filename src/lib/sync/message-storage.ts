@@ -6,17 +6,18 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { EventLog } from '../eventlog/format';
+import { log } from '@/lib/logger';
+import { isTauriWindow } from '@/config/runtime-target';
 
 // Detect environment more reliably - wrap in typeof check to avoid SSR errors
-const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
+const isTauri = isTauriWindow();
 
 // Only log in browser/tauri environment, not during SSR/build
 if (typeof window !== 'undefined') {
-  console.log('[MessageStorage] Environment detection:', {
+  log.info(`[MessageStorage] Environment detection: ${JSON.stringify({
     isTauri,
     hasWindow: typeof window !== 'undefined',
-    hasTauri: window.__TAURI__ !== undefined,
-  });
+  })}`);
 }
 
 // Web Storage Adapter (localStorage fallback)
@@ -24,9 +25,9 @@ const webStorage = {
   async writeFile(path: string, data: string): Promise<void> {
     try {
       localStorage.setItem(`exomind:${path}`, data);
-      console.log('[MessageStorage] Web write success:', path, 'data length:', data.length);
+      log.info(`[MessageStorage] Web write success: ${path} data length: ${data.length}`);
     } catch (error) {
-      console.error('[MessageStorage] Web write failed:', path, error);
+      log.error(`[MessageStorage] Web write failed: ${path} ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
   },
@@ -34,10 +35,10 @@ const webStorage = {
   async readTextFile(path: string): Promise<string> {
     try {
       const result = localStorage.getItem(`exomind:${path}`);
-      console.log('[MessageStorage] Web read:', path, 'found:', !!result);
+      log.info(`[MessageStorage] Web read: ${path} found: ${!!result}`);
       return result || '';
     } catch (error) {
-      console.error('[MessageStorage] Web read failed:', path, error);
+      log.error(`[MessageStorage] Web read failed: ${path} ${error instanceof Error ? error.message : String(error)}`);
       return '';
     }
   },
@@ -48,9 +49,9 @@ const webStorage = {
       const existing = localStorage.getItem(key) || '';
       const newContent = existing + data;
       localStorage.setItem(key, newContent);
-      console.log('[MessageStorage] Web append success:', path, 'appended:', data.length, 'total:', newContent.length);
+      log.info(`[MessageStorage] Web append success: ${path} appended: ${data.length} total: ${newContent.length}`);
     } catch (error) {
-      console.error('[MessageStorage] Web append failed:', path, error);
+      log.error(`[MessageStorage] Web append failed: ${path} ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
   },
@@ -74,7 +75,7 @@ const tauriStorage = {
 // Use appropriate storage based on environment
 const fs = isTauri ? tauriStorage : webStorage;
 if (typeof window !== 'undefined') {
-  console.log('[MessageStorage] Using storage:', isTauri ? 'Tauri' : 'Web (localStorage)');
+  log.info(`[MessageStorage] Using storage: ${isTauri ? 'Tauri' : 'Web (localStorage)'}`);
 }
 
 // Message types
@@ -154,24 +155,24 @@ export class MessageStorage {
   }
 
   private async initDeviceId(): Promise<void> {
-    console.log('[MessageStorage] Initializing device ID...');
+    log.info('[MessageStorage] Initializing device ID...');
     if (isTauri) {
       try {
         this.deviceId = await invoke('get_device_id') as string;
         localStorage.setItem('exomind:deviceId', this.deviceId);
-        console.log('[MessageStorage] Tauri device ID:', this.deviceId);
+        log.info(`[MessageStorage] Tauri device ID: ${this.deviceId}`);
       } catch {
         const stored = localStorage.getItem('exomind:deviceId');
         this.deviceId = stored || this.deviceId || `device-${Date.now()}`;
         localStorage.setItem('exomind:deviceId', this.deviceId);
-        console.log('[MessageStorage] Fallback device ID:', this.deviceId);
+        log.info(`[MessageStorage] Fallback device ID: ${this.deviceId}`);
       }
     } else {
       // Web: try to get from localStorage
       const stored = localStorage.getItem('exomind:deviceId');
       this.deviceId = stored || `device-${Date.now()}`;
       localStorage.setItem('exomind:deviceId', this.deviceId);
-      console.log('[MessageStorage] Web device ID:', this.deviceId, 'from storage:', !!stored);
+      log.info(`[MessageStorage] Web device ID: ${this.deviceId} from storage: ${!!stored}`);
     }
   }
 
@@ -241,11 +242,11 @@ export class MessageStorage {
     const line = JSON.stringify(event) + '\n';
     const storagePath = `${this.storagePath}/messages.jsonl`;
 
-    console.log('[MessageStorage] Saving message:', message.id, 'to:', storagePath);
+    log.info(`[MessageStorage] Saving message: ${message.id} to: ${storagePath}`);
 
     try {
       if (await this.isMessagePersisted(storagePath, message)) {
-        console.log('[MessageStorage] Duplicate message skipped:', message.id);
+        log.info(`[MessageStorage] Duplicate message skipped: ${message.id}`);
         return {
           saved: false,
           deduplicated: true,
@@ -258,7 +259,7 @@ export class MessageStorage {
       // 使用 append_file 追加写入，永不覆盖
       await fs.appendFile(storagePath, line);
       this.persistedMessageKeys.add(messageKey);
-      console.log('[MessageStorage] Message saved successfully:', message.id);
+      log.info(`[MessageStorage] Message saved successfully: ${message.id}`);
       return {
         saved: true,
         deduplicated: false,
@@ -267,21 +268,21 @@ export class MessageStorage {
         clientNonce,
       };
     } catch (error) {
-      console.error('[MessageStorage] Failed to save message:', message.id, error);
+      log.error(`[MessageStorage] Failed to save message: ${message.id} ${error instanceof Error ? error.message : String(error)}`);
       throw error; // Re-throw so caller knows it failed
     }
   }
 
   async getMessages(limit: number = 50): Promise<ChatMessage[]> {
     const storagePath = `${this.storagePath}/messages.jsonl`;
-    console.log('[MessageStorage] Loading messages from:', storagePath, 'limit:', limit);
+    log.info(`[MessageStorage] Loading messages from: ${storagePath} limit: ${limit}`);
 
     try {
       const content = await fs.readTextFile(storagePath);
-      console.log('[MessageStorage] Raw content length:', content.length);
+      log.info(`[MessageStorage] Raw content length: ${content.length}`);
 
       if (!content) {
-        console.log('[MessageStorage] No content found, returning empty array');
+        log.info('[MessageStorage] No content found, returning empty array');
         return [];
       }
 
@@ -292,7 +293,7 @@ export class MessageStorage {
         .filter(evt => evt.type === 'message_send')
         .slice(-limit);
 
-      console.log('[MessageStorage] Parsed', events.length, 'messages');
+      log.info(`[MessageStorage] Parsed ${events.length} messages`);
 
       return events.map(evt => {
         const isOutgoing = evt.device_id === this.deviceId;
@@ -309,7 +310,7 @@ export class MessageStorage {
         };
       });
     } catch (error) {
-      console.error('[MessageStorage] Failed to load messages:', error);
+      log.error(`[MessageStorage] Failed to load messages: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
   }

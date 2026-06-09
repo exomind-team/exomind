@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test';
+import { websiteRoute } from './website-route';
 
 test.describe('官网暗色模式 (Website Dark Mode)', () => {
   test('should toggle dark mode and persist the preference', async ({ page }) => {
-    await page.goto('/');
+    await page.goto(websiteRoute('/'));
     await page.waitForLoadState('domcontentloaded');
 
     const html = page.locator('html');

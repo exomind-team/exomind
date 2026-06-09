@@ -48,12 +48,14 @@ vi.mock('@/components/ui/toast-hook', () => ({
 describe('TimeBlockWidget countdown end sound', () => {
   let now = 0;
   let rafCallback: FrameRequestCallback | null = null;
+  let createdAudioUrls: string[] = [];
 
   const playMock = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
     now = 0;
     rafCallback = null;
+    createdAudioUrls = [];
 
     vi.spyOn(Date, 'now').mockImplementation(() => now);
 
@@ -74,6 +76,7 @@ describe('TimeBlockWidget countdown end sound', () => {
 
       constructor(url: string) {
         this.url = url;
+        createdAudioUrls.push(url);
       }
 
       play = playMock;
@@ -200,5 +203,40 @@ describe('TimeBlockWidget countdown end sound', () => {
     });
 
     await waitFor(() => expect(screen.getByText('+0:02')).toBeVisible());
+  });
+
+  it('uses shared select to switch the countdown sound preset（提示音预设走共享 Select 并切换音频源）', async () => {
+    const user = userEvent.setup();
+
+    loadActiveBlockMock.mockResolvedValue(null);
+    startBlockMock.mockResolvedValue({
+      startId: 'block-4',
+      name: 'Meditation',
+      startTime: 0,
+      elapsed: 10,
+      mode: 'countdown',
+      paused: false,
+    });
+
+    render(<TimeBlockWidget expanded />);
+
+    const presetTrigger = screen.getByRole('combobox', { name: '提示音预设' });
+    expect(presetTrigger.tagName).not.toBe('SELECT');
+
+    await user.click(presetTrigger);
+    await user.click(await screen.findByRole('option', { name: 'Ring 10' }));
+
+    await user.type(screen.getByPlaceholderText('输入任务标题...'), 'Meditation');
+    await user.click(screen.getByRole('button', { name: '开始' }));
+
+    await waitFor(() => expect(requestAnimationFrame).toHaveBeenCalled());
+
+    now = 100;
+    await act(async () => {
+      rafCallback?.(0);
+    });
+
+    await waitFor(() => expect(playMock).toHaveBeenCalledTimes(1));
+    expect(createdAudioUrls.some((url) => url.includes('timer-end-ring-10'))).toBe(true);
   });
 });

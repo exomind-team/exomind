@@ -3,17 +3,18 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use futures_util::stream::{self, Stream};
 use futures_util::StreamExt;
+use futures_util::stream::{self, Stream};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::broadcast;
-use tokio::time::{Duration, Interval};
+use tokio::time::{Duration, Instant, Interval};
+use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
 
-use crate::signal::types::{SignalEvent, SignalRoute, TargetType};
 use crate::AppState;
+use crate::signal::types::{SignalEvent, SignalRoute, TargetType};
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -47,6 +48,9 @@ fn default_heartbeat_interval() -> u64 {
 struct HistoryQuery {
     #[serde(default = "default_history_limit")]
     limit: usize,
+    topic_prefix: Option<String>,
+    after_event_id: Option<String>,
+    exclude_topic_prefix: Option<String>,
 }
 
 fn default_history_limit() -> usize {
@@ -88,14 +92,17 @@ async fn publish_handler(
         topic: req.topic,
         ts: chrono::Utc::now().timestamp_millis() as u64,
         source: req.source.unwrap_or_else(|| "unknown".to_string()),
-        origin_host_id: req.origin_host_id.unwrap_or_else(|| "local".to_string()),
+        origin_host_id: req.origin_host_id.unwrap_or_else(|| state.host_id.clone()),
         hop: 0,
         trace_id: req.trace_id,
         payload: req.payload,
     };
 
     // publish() internally pushes to window cache via bus.publish
-    state.signal_pool.publish(event);
+    state.signal_pool.publish(event.clone());
+    if let Some(mesh_relay) = &state.mesh_relay {
+        mesh_relay.forward_event_to_peers(event).await;
+    }
 
     Json(PublishResponse {
         accepted: true,
@@ -124,7 +131,7 @@ async fn stream_handler(
     let route_table = state.signal_pool.routes();
     let replay: Vec<Event> = replay_events
         .into_iter()
-        .filter(|evt| routes_target_agent(route_table, &evt.topic, &agent_id))
+        .filter(|evt| routes_target_stream_subscriber(route_table, &evt.topic, &agent_id))
         .filter_map(|evt| {
             serde_json::to_string(&evt).ok().map(|json| {
                 Event::default()
@@ -149,7 +156,12 @@ async fn history_handler(
     State(state): State<AppState>,
     Query(query): Query<HistoryQuery>,
 ) -> Json<Vec<SignalEvent>> {
-    let events = state.signal_pool.window().recent(query.limit);
+    let events = state.signal_pool.window().recent_filtered(
+        query.limit,
+        query.topic_prefix.as_deref(),
+        query.exclude_topic_prefix.as_deref(),
+        query.after_event_id.as_deref(),
+    );
     Json(events)
 }
 
@@ -162,7 +174,7 @@ async fn list_routes(State(state): State<AppState>) -> Json<Vec<SignalRoute>> {
 async fn create_route(
     State(state): State<AppState>,
     Json(req): Json<CreateRouteRequest>,
-) -> (StatusCode, Json<SignalRoute>) {
+) -> Result<(StatusCode, Json<SignalRoute>), StatusCode> {
     let now = chrono::Utc::now().to_rfc3339();
     let route = SignalRoute {
         id: uuid::Uuid::new_v4().to_string(),
@@ -175,9 +187,19 @@ async fn create_route(
     };
 
     let response = route.clone();
-    state.signal_pool.routes().add(route);
+    state.signal_pool.routes().add(route).map_err(|error| {
+        tracing::warn!(
+            route_id = %response.id,
+            error = %error,
+            "signal route persistence failed on create (路由持久化失败)"
+        );
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    if let Some(mesh_relay) = &state.mesh_relay {
+        mesh_relay.sync_local_interests_to_all_peers().await;
+    }
 
-    (StatusCode::CREATED, Json(response))
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// PUT /signal-routes/{id}
@@ -186,23 +208,38 @@ async fn update_route(
     State(state): State<AppState>,
     Json(req): Json<UpdateRouteRequest>,
 ) -> Result<Json<SignalRoute>, StatusCode> {
-    let updated = state.signal_pool.routes().update(&id, |route| {
-        if let Some(topic) = &req.topic {
-            route.topic = topic.clone();
-        }
-        if let Some(target_type) = &req.target_type {
-            route.target_type = target_type.clone();
-        }
-        if let Some(target_ref) = &req.target_ref {
-            route.target_ref = target_ref.clone();
-        }
-        if let Some(enabled) = req.enabled {
-            route.enabled = enabled;
-        }
-    });
+    let updated = state
+        .signal_pool
+        .routes()
+        .update(&id, |route| {
+            if let Some(topic) = &req.topic {
+                route.topic = topic.clone();
+            }
+            if let Some(target_type) = &req.target_type {
+                route.target_type = target_type.clone();
+            }
+            if let Some(target_ref) = &req.target_ref {
+                route.target_ref = target_ref.clone();
+            }
+            if let Some(enabled) = req.enabled {
+                route.enabled = enabled;
+            }
+        })
+        .map_err(|error| {
+            tracing::warn!(
+                route_id = %id,
+                error = %error,
+                "signal route persistence failed on update (路由持久化失败)"
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     if !updated {
         return Err(StatusCode::NOT_FOUND);
+    }
+
+    if let Some(mesh_relay) = &state.mesh_relay {
+        mesh_relay.sync_local_interests_to_all_peers().await;
     }
 
     state
@@ -214,11 +251,23 @@ async fn update_route(
 }
 
 /// DELETE /signal-routes/{id}
-async fn delete_route(
-    Path(id): Path<String>,
-    State(state): State<AppState>,
-) -> StatusCode {
-    if state.signal_pool.routes().delete(&id) {
+async fn delete_route(Path(id): Path<String>, State(state): State<AppState>) -> StatusCode {
+    let deleted = match state.signal_pool.routes().delete(&id) {
+        Ok(deleted) => deleted,
+        Err(error) => {
+            tracing::warn!(
+                route_id = %id,
+                error = %error,
+                "signal route persistence failed on delete (路由持久化失败)"
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
+
+    if deleted {
+        if let Some(mesh_relay) = &state.mesh_relay {
+            mesh_relay.sync_local_interests_to_all_peers().await;
+        }
         StatusCode::NO_CONTENT
     } else {
         StatusCode::NOT_FOUND
@@ -233,27 +282,31 @@ pub fn router() -> Router<AppState> {
         .route("/signals/stream", get(stream_handler))
         .route("/signals/history", get(history_handler))
         .route("/signal-routes", get(list_routes).post(create_route))
-        .route(
-            "/signal-routes/:id",
-            put(update_route).delete(delete_route),
-        )
+        .route("/signal-routes/:id", put(update_route).delete(delete_route))
 }
 
 // ── SSE stream implementation ───────────────────────────────────
 
-/// Check whether any route for the given topic targets the specified agent.
-fn routes_target_agent(
+/// Check whether any route for the given topic targets the current SSE subscriber.
+///
+/// `frontend:ui` and `agent:ui` intentionally share the same `agent_id=ui`
+/// subscription contract so the existing frontend SSE client can project UI-targeted
+/// signals without inventing a second stream endpoint.
+fn routes_target_stream_subscriber(
     route_table: &crate::signal::RouteTable,
     topic: &str,
-    agent_id: &str,
+    subscriber_id: &str,
 ) -> bool {
     let matched = route_table.match_routes(topic);
-    matched.iter().any(|r| r.target_ref == agent_id)
+    matched.iter().any(|route| {
+        matches!(route.target_type, TargetType::Agent | TargetType::Frontend)
+            && route.target_ref == subscriber_id
+    })
 }
 
 /// A custom stream that merges broadcast events with periodic heartbeats.
 struct SignalSseStream {
-    rx: broadcast::Receiver<SignalEvent>,
+    rx: BroadcastStream<SignalEvent>,
     agent_id: String,
     heartbeat: Interval,
     state: AppState,
@@ -266,9 +319,12 @@ impl SignalSseStream {
         heartbeat_secs: u64,
         state: AppState,
     ) -> Self {
-        let interval = tokio::time::interval(Duration::from_secs(heartbeat_secs));
+        let interval = tokio::time::interval_at(
+            Instant::now() + Duration::from_secs(heartbeat_secs),
+            Duration::from_secs(heartbeat_secs),
+        );
         Self {
-            rx,
+            rx: BroadcastStream::new(rx),
             agent_id,
             heartbeat: interval,
             state,
@@ -282,10 +338,9 @@ impl Stream for SignalSseStream {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        // Check for broadcast events first.
-        match this.rx.try_recv() {
-            Ok(event) => {
-                if routes_target_agent(
+        match Pin::new(&mut this.rx).poll_next(cx) {
+            Poll::Ready(Some(Ok(event))) => {
+                if routes_target_stream_subscriber(
                     this.state.signal_pool.routes(),
                     &event.topic,
                     &this.agent_id,
@@ -296,22 +351,15 @@ impl Stream for SignalSseStream {
                         .id(event.id)
                         .data(json))));
                 }
-                // Event not for this agent or serialization failed; wake to poll again.
                 cx.waker().wake_by_ref();
                 return Poll::Pending;
             }
-            Err(broadcast::error::TryRecvError::Empty) => {
-                // No events available right now; fall through to heartbeat check.
-            }
-            Err(broadcast::error::TryRecvError::Lagged(n)) => {
-                // Missed some events; log and continue.
+            Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(n)))) => {
                 let msg = format!("{{\"warning\":\"lagged\",\"missed\":{n}}}");
                 return Poll::Ready(Some(Ok(Event::default().event("warning").data(msg))));
             }
-            Err(broadcast::error::TryRecvError::Closed) => {
-                // Channel closed; end the stream.
-                return Poll::Ready(None);
-            }
+            Poll::Ready(None) => return Poll::Ready(None),
+            Poll::Pending => {}
         }
 
         // Check heartbeat timer.
@@ -321,32 +369,7 @@ impl Stream for SignalSseStream {
             return Poll::Ready(Some(Ok(Event::default().event("heartbeat").data(data))));
         }
 
-        // Register waker for broadcast channel by attempting an async recv.
-        // We use a future to poll the receiver.
-        let mut recv_fut = Box::pin(this.rx.recv());
-        match Pin::new(&mut recv_fut).poll(cx) {
-            Poll::Ready(Ok(event)) => {
-                if routes_target_agent(
-                    this.state.signal_pool.routes(),
-                    &event.topic,
-                    &this.agent_id,
-                ) && let Ok(json) = serde_json::to_string(&event)
-                {
-                    return Poll::Ready(Some(Ok(Event::default()
-                        .event("signal")
-                        .id(event.id)
-                        .data(json))));
-                }
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-            Poll::Ready(Err(broadcast::error::RecvError::Lagged(n))) => {
-                let msg = format!("{{\"warning\":\"lagged\",\"missed\":{n}}}");
-                Poll::Ready(Some(Ok(Event::default().event("warning").data(msg))))
-            }
-            Poll::Ready(Err(broadcast::error::RecvError::Closed)) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
+        Poll::Pending
     }
 }
 
@@ -355,6 +378,7 @@ impl Stream for SignalSseStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mesh::MeshState;
     use crate::signal::SignalPool;
     use axum::body::Body;
     use axum::http::Request;
@@ -364,10 +388,54 @@ mod tests {
     use tower::util::ServiceExt;
 
     fn test_state() -> AppState {
+        let signal_pool = Arc::new(SignalPool::new(None));
+        let host_id = "signals-test-host".to_string();
+        let registry = crate::agent::AgentRegistry::new();
+        let energy_registry = crate::energy::EnergyRegistry::new();
         AppState {
             port: 0,
-            registry: crate::agent::AgentRegistry::new(),
-            signal_pool: Arc::new(SignalPool::new(None)),
+            host_id: host_id.clone(),
+            device_id: "dev-signals-test-host".to_string(),
+            registry: registry.clone(),
+            signal_pool: Arc::clone(&signal_pool),
+            mesh: Arc::new(MeshState::new(
+                host_id.clone(),
+                Arc::clone(&signal_pool),
+                None,
+            )),
+            mesh_relay: None,
+            auth_secret: None,
+            allow_lan_without_auth: false,
+            mdns: None,
+            pairing: Arc::new(crate::pairing::PairingManager::new()),
+            config_store: Arc::new(crate::config::ConfigStore::new()),
+            reminder_store: Arc::new(crate::reminder::ReminderStore::new()),
+            task_store: Arc::new(crate::task::TaskStore::new()),
+            proposal_store: Arc::new(crate::proposal::ProposalStore::new()),
+            session_store: Arc::new(crate::session::SessionStore::new()),
+            agent_api_session_store: Arc::new(crate::agent::session::AgentSessionStore::new()),
+            session_event_tx: None,
+            eventlog_watch_tx: {
+                let (tx, _rx) = crate::routes::eventlog::eventlog_watch_channel();
+                tx
+            },
+            timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
+            energy_registry: energy_registry.clone(),
+            tick_manager: Arc::new(crate::tick::TickManager::new(
+                host_id.clone(),
+                registry,
+                energy_registry,
+                Arc::clone(&signal_pool),
+            )),
+            life_agents: std::collections::HashMap::new(),
+            eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(
+                std::env::temp_dir().join("exomind-test-signals"),
+            )),
+            #[cfg(not(target_os = "android"))]
+            pty_manager: Arc::new(crate::pty::PtyManager::new(
+                Arc::clone(&signal_pool),
+                host_id,
+            )),
         }
     }
 
@@ -415,9 +483,7 @@ mod tests {
                     .method("POST")
                     .uri("/signals/publish")
                     .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"topic":"test","payload":{}}"#,
-                    ))
+                    .body(Body::from(r#"{"topic":"test","payload":{}}"#))
                     .unwrap(),
             )
             .await
@@ -475,6 +541,127 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/signals/history")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert!(payload.is_empty());
+    }
+
+    #[tokio::test]
+    async fn history_filters_by_topic_prefix_and_after_event_id() {
+        let state = test_state();
+        let _rx = state.signal_pool.subscribe();
+
+        for (id, topic) in [
+            ("evt-0", "user.input.text"),
+            ("evt-1", "system.link_proof.request"),
+            ("evt-2", "system.link_proof.ack"),
+            ("evt-3", "system.link_proof.ack"),
+        ] {
+            state.signal_pool.publish(SignalEvent {
+                schema_version: 1,
+                id: id.to_string(),
+                topic: topic.to_string(),
+                ts: 1700000000000,
+                source: "test".to_string(),
+                origin_host_id: "local".to_string(),
+                hop: 0,
+                trace_id: None,
+                payload: serde_json::json!({ "id": id }),
+            });
+        }
+
+        let app = test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/signals/history?limit=10&topic_prefix=system.link_proof.&after_event_id=evt-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.len(), 2);
+        assert_eq!(payload[0]["id"], "evt-2");
+        assert_eq!(payload[1]["id"], "evt-3");
+    }
+
+    #[tokio::test]
+    async fn history_excludes_topic_prefix() {
+        let state = test_state();
+        let _rx = state.signal_pool.subscribe();
+
+        for (id, topic) in [
+            ("evt-0", "user.input.text"),
+            ("evt-1", "system.link_proof.request"),
+            ("evt-2", "task.created"),
+        ] {
+            state.signal_pool.publish(SignalEvent {
+                schema_version: 1,
+                id: id.to_string(),
+                topic: topic.to_string(),
+                ts: 1700000000000,
+                source: "test".to_string(),
+                origin_host_id: "local".to_string(),
+                hop: 0,
+                trace_id: None,
+                payload: serde_json::json!({ "id": id }),
+            });
+        }
+
+        let app = test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/signals/history?limit=10&exclude_topic_prefix=system.link_proof.")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        let ids = payload
+            .iter()
+            .map(|item| item["id"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["evt-0".to_string(), "evt-2".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn history_strict_cursor_returns_empty_when_after_event_id_is_unknown() {
+        let state = test_state();
+        let _rx = state.signal_pool.subscribe();
+
+        state.signal_pool.publish(SignalEvent {
+            schema_version: 1,
+            id: "evt-0".to_string(),
+            topic: "system.link_proof.request".to_string(),
+            ts: 1700000000000,
+            source: "test".to_string(),
+            origin_host_id: "local".to_string(),
+            hop: 0,
+            trace_id: None,
+            payload: serde_json::json!({}),
+        });
+
+        let app = test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/signals/history?limit=10&topic_prefix=system.link_proof.&after_event_id=missing-cursor")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -667,5 +854,59 @@ mod tests {
         assert_eq!(events[0].trace_id.as_deref(), Some("trace-123"));
         assert_eq!(events[0].hop, 0);
         assert_eq!(events[0].schema_version, 1);
+    }
+
+    #[test]
+    fn stream_route_matching_accepts_frontend_ui_targets() {
+        let signal_pool = SignalPool::new(None);
+        let now = chrono::Utc::now().to_rfc3339();
+        signal_pool
+            .routes()
+            .add(SignalRoute {
+                id: "route-ui".to_string(),
+                enabled: true,
+                topic: "eventlog.replication.appended".to_string(),
+                target_type: TargetType::Frontend,
+                target_ref: "ui".to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .unwrap();
+
+        assert!(
+            routes_target_stream_subscriber(
+                signal_pool.routes(),
+                "eventlog.replication.appended",
+                "ui",
+            ),
+            "frontend:ui routes should be deliverable to the UI SSE subscriber"
+        );
+    }
+
+    #[test]
+    fn stream_route_matching_keeps_actor_targets_out_of_sse_subscriber() {
+        let signal_pool = SignalPool::new(None);
+        let now = chrono::Utc::now().to_rfc3339();
+        signal_pool
+            .routes()
+            .add(SignalRoute {
+                id: "route-actor".to_string(),
+                enabled: true,
+                topic: "eventlog.replication.appended".to_string(),
+                target_type: TargetType::Actor,
+                target_ref: "eventlog".to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .unwrap();
+
+        assert!(
+            !routes_target_stream_subscriber(
+                signal_pool.routes(),
+                "eventlog.replication.appended",
+                "ui",
+            ),
+            "actor routes should not leak into the SSE subscriber stream"
+        );
     }
 }

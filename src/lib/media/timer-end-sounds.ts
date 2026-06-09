@@ -16,7 +16,7 @@ export const TIMER_END_SOUND_PRESETS: readonly TimerEndSoundPreset[] = [
   {
     id: 'dang',
     label: 'Dang',
-    url: new URL('../../assets/sounds/timer-end/timer-end-dang.wav', import.meta.url).toString(),
+    url: new URL('../../assets/sounds/timer-end/timer-end-dang.ogg', import.meta.url).toString(),
   },
   {
     id: 'ring-10',
@@ -41,7 +41,7 @@ export const TIMER_END_SOUND_PRESETS: readonly TimerEndSoundPreset[] = [
   {
     id: 'space-center-alert',
     label: 'Space center alert',
-    url: new URL('../../assets/sounds/timer-end/timer-end-space-center-alert.wav', import.meta.url).toString(),
+    url: new URL('../../assets/sounds/timer-end/timer-end-space-center-alert.ogg', import.meta.url).toString(),
   },
 ] as const;
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentDetailPage } from '@/ui/app/pages/agents/AgentDetailPage';
 import { ActorDetailPage } from '@/ui/app/pages/agents/ActorDetailPage';
 import { AGENT_HUB_MOCK_FIXTURE } from '@/lib/adapters/mock/fixtures/agent-hub';
@@ -9,6 +9,14 @@ const serviceMocks = vi.hoisted(() => ({
   getActorDetail: vi.fn(),
 }));
 
+const runtimeManagerMocks = vi.hoisted(() => ({
+  refreshSnapshot: vi.fn(),
+}));
+
+const runtimeHostServiceMocks = vi.hoisted(() => ({
+  listHosts: vi.fn(),
+}));
+
 vi.mock('@/lib/services', () => ({
   getAgentHubService: () => ({
     getAgentDetail: serviceMocks.getAgentDetail,
@@ -16,10 +24,28 @@ vi.mock('@/lib/services', () => ({
   }),
 }));
 
+vi.mock('@/services/runtime-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/runtime-manager')>();
+  return {
+    ...actual,
+    getRuntimeManager: () => runtimeManagerMocks,
+  };
+});
+
+vi.mock('@/lib/services/runtime-host.service', () => ({
+  getRuntimeHostService: () => runtimeHostServiceMocks,
+}));
+
 describe('agent/actor detail pages issue-204（详情页）', () => {
   beforeEach(() => {
     serviceMocks.getAgentDetail.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.agentDetails['agent-daily']);
     serviceMocks.getActorDetail.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.actorDetails['actor-timer']);
+    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
+      updatedAt: '2026-03-11T00:00:00.000Z',
+      agents: [],
+      hosts: [],
+    });
+    runtimeHostServiceMocks.listHosts.mockResolvedValue([]);
   });
 
   it('renders agent detail sections and chat CTA（Agent 详情区块与对话入口）', async () => {
@@ -34,8 +60,38 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
     expect(screen.getByTestId('agent-detail-back-button')).toBeInTheDocument();
     expect(screen.getByText('触发规则')).toBeInTheDocument();
     expect(screen.getByText('输出目标')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '行动日志' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '身份' })).toBeInTheDocument();
     expect(screen.getByTestId('agent-detail-chat-button')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-detail-page').className).toContain('dark:bg-[#0C0A09]');
+    expect(screen.getByTestId('agent-detail-page').className).toContain('bg-surface');
+    expect(screen.getByTestId('agent-detail-page').className).toContain('text-foreground');
+  });
+
+  it('keeps long runtime stats wrapped on mobile detail cards（移动端长路由统计不溢出）', async () => {
+    serviceMocks.getAgentDetail.mockResolvedValueOnce({
+      ...AGENT_HUB_MOCK_FIXTURE.agentDetails['agent-daily'],
+      stats: [
+        { label: '状态', value: '可用' },
+        {
+          label: '订阅信号',
+          value: 'timeblock.replication.completed、timeblock.replication.active_upserted',
+        },
+      ],
+    });
+
+    render(<AgentDetailPage agentId="agent-summary" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-detail-stats-grid')).toBeInTheDocument();
+    });
+
+    const statsGrid = screen.getByTestId('agent-detail-stats-grid');
+    expect(statsGrid.className).toContain('grid-cols-2');
+    expect(statsGrid.className).not.toContain('grid-cols-3');
+    expect(screen.getByText('状态')).toBeInTheDocument();
+    expect(screen.getByText('可用')).toBeInTheDocument();
+    expect(screen.getByText('订阅信号')).toBeInTheDocument();
+    expect(screen.getByText(/timeblock\.replication\.completed/).className).toContain('[overflow-wrap:anywhere]');
   });
 
   it('renders actor detail sections（Actor 详情区块）', async () => {
@@ -49,7 +105,32 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
     expect(screen.getByTestId('actor-detail-header')).toBeInTheDocument();
     expect(screen.getByText('触发规则')).toBeInTheDocument();
     expect(screen.getByText('最近执行')).toBeInTheDocument();
-    expect(screen.getByTestId('actor-detail-page').className).toContain('dark:bg-[#0C0A09]');
+    expect(screen.getByTestId('actor-detail-page').className).toContain('bg-surface');
+    expect(screen.getByTestId('actor-detail-page').className).toContain('text-foreground');
+  });
+
+  it('keeps agent detail shell visible while loading（Agent 加载中也应保留页面骨架）', () => {
+    serviceMocks.getAgentDetail.mockImplementationOnce(() => new Promise(() => {}));
+
+    render(<AgentDetailPage agentId="agent-daily" />);
+
+    expect(screen.getByTestId('agent-detail-page')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-detail-header')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-detail-back-button')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-detail-loading')).toBeInTheDocument();
+    expect(screen.getByText('Agent 详情加载中...')).toBeInTheDocument();
+  });
+
+  it('keeps actor detail shell visible while loading（Actor 加载中也应保留页面骨架）', () => {
+    serviceMocks.getActorDetail.mockImplementationOnce(() => new Promise(() => {}));
+
+    render(<ActorDetailPage actorId="actor-timer" />);
+
+    expect(screen.getByTestId('actor-detail-page')).toBeInTheDocument();
+    expect(screen.getByTestId('actor-detail-header')).toBeInTheDocument();
+    expect(screen.getByTestId('actor-detail-back-button')).toBeInTheDocument();
+    expect(screen.getByTestId('actor-detail-loading')).toBeInTheDocument();
+    expect(screen.getByText('Actor 详情加载中...')).toBeInTheDocument();
   });
 
   it('renders agent empty state when detail is missing（Agent 空详情应展示空态）', async () => {
@@ -61,7 +142,10 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
     });
 
     expect(screen.queryByText('Agent 详情加载中...')).not.toBeInTheDocument();
-    expect(screen.getByText('未找到 Agent 详情')).toBeInTheDocument();
+    expect(screen.getByText('基础详情暂不可用')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '行动日志' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '身份' })).toBeInTheDocument();
+    expect(screen.getByTestId('agent-detail-chat-button')).toBeInTheDocument();
   });
 
   it('renders actor empty state when detail is missing（Actor 空详情应展示空态）', async () => {
@@ -74,5 +158,151 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
 
     expect(screen.queryByText('Actor 详情加载中...')).not.toBeInTheDocument();
     expect(screen.getByText('未找到 Actor 详情')).toBeInTheDocument();
+  });
+
+  it('uses preferred runtime host for energy polling and refill（能量轮询与充能应命中目标 agent 所在主机）', async () => {
+    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
+      updatedAt: '2026-03-11T00:00:00.000Z',
+      agents: [
+        {
+          id: 'agent-daily',
+          name: '日报 Agent',
+          description: 'Daily summary',
+          status: 'available',
+          sourceHostId: 'host-b',
+          sourceHostName: 'Host B',
+          sourceHostAddress: '10.0.0.2:2999',
+        },
+      ],
+      hosts: [
+        {
+          host: {
+            id: 'host-a',
+            name: 'Host A',
+            host: '10.0.0.1',
+            port: 1999,
+            status: 'unknown',
+            createdAt: '2026-03-11T00:00:00.000Z',
+            updatedAt: '2026-03-11T00:00:00.000Z',
+          },
+          connectionState: 'online',
+          agents: [],
+          topology: null,
+        },
+        {
+          host: {
+            id: 'host-b',
+            name: 'Host B',
+            host: '10.0.0.2',
+            port: 2999,
+            status: 'unknown',
+            createdAt: '2026-03-11T00:00:00.000Z',
+            updatedAt: '2026-03-11T00:00:00.000Z',
+          },
+          connectionState: 'online',
+          agents: [
+            {
+              id: 'agent-daily',
+              name: '日报 Agent',
+              description: 'Daily summary',
+              status: 'available',
+              sourceHostId: 'host-b',
+              sourceHostName: 'Host B',
+              sourceHostAddress: '10.0.0.2:2999',
+            },
+          ],
+          topology: null,
+        },
+      ],
+    });
+
+    runtimeHostServiceMocks.listHosts.mockResolvedValue([
+      {
+        id: 'host-a',
+        name: 'Host A',
+        host: '10.0.0.1',
+        port: 1999,
+        status: 'unknown',
+        createdAt: '2026-03-11T00:00:00.000Z',
+        updatedAt: '2026-03-11T00:00:00.000Z',
+      },
+      {
+        id: 'host-b',
+        name: 'Host B',
+        host: '10.0.0.2',
+        port: 2999,
+        status: 'unknown',
+        createdAt: '2026-03-11T00:00:00.000Z',
+        updatedAt: '2026-03-11T00:00:00.000Z',
+      },
+    ]);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === 'http://10.0.0.2:2999/agents/agent-daily/energy' && (!init || init.method === 'GET' || init.method === undefined)) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            agent_id: 'agent-daily',
+            current: 0,
+            max: 100,
+            ratio: 0,
+            tick_cost: 5,
+            phase: 'dormant',
+            is_dormant: true,
+          }),
+        } as Response;
+      }
+      if (url === 'http://10.0.0.2:2999/agents/agent-daily/energy/refill' && init?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            energy: {
+              agent_id: 'agent-daily',
+              current: 100,
+              max: 100,
+              ratio: 1,
+              tick_cost: 5,
+              phase: 'normal',
+              is_dormant: false,
+            },
+            revived: true,
+            tick_spawned: true,
+          }),
+        } as Response;
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AgentDetailPage agentId="agent-daily" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '充能复活' })).toBeInTheDocument();
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://10.0.0.2:2999/agents/agent-daily/energy',
+      expect.any(Object),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '充能复活' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://10.0.0.2:2999/agents/agent-daily/energy/refill',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input).startsWith('http://10.0.0.1:1999/agents/agent-daily/energy')),
+    ).toBe(false);
   });
 });

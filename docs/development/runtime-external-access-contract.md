@@ -1,0 +1,323 @@
+# ExoMind RT 外部接入契约草案
+
+> 状态：Draft
+>
+> 目的：
+> - 收敛外心 RT 的对外功能定位
+> - 统一 UI / curl / CLI / MCP / Agent 的接入语义
+> - 为后续 `/act`、bootstrap、token、profile discovery 与提案箱追踪提供共同术语
+>
+> 相关 issue：
+> - [#569](https://github.com/exomind-team/exomind/issues/569)
+> - [#666](https://github.com/exomind-team/exomind/issues/666)
+> - [#667](https://github.com/exomind-team/exomind/issues/667)
+> - [#676](https://github.com/exomind-team/exomind/issues/676)
+> - [#677](https://github.com/exomind-team/exomind/issues/677)
+
+## 1. 目标
+
+ExoMind RT 的长期定位不是“只服务 UI 的后端”。
+
+它更像是：
+
+- 业务真相源
+- 对外统一能力面
+- 多种客户端共享的应用契约
+
+因此：
+
+- UI 是客户端
+- curl 是客户端
+- CLI 是客户端
+- MCP 是客户端
+- 外部 Agent 也是客户端
+
+这些客户端不应继续各自发明一套路由、身份、作用域与联动语义。
+
+## 2. 当前现状与目标分层
+
+### 当前现状
+
+当前外部接入主要依赖 raw 资源路由，例如：
+
+- `/eventlog`
+- `/eventlog/watch`
+- `/tasks`
+- `/timeblocks`
+- `/signals/history`
+
+这层 raw API 已经足够让人类或 Agent 用 `curl` 做排障、读写和旁路验证。
+
+其中需要特别区分：
+
+- `GET /eventlog`：读取历史事件列表，适合拉取上下文、分页和按条件过滤
+- `GET /eventlog/watch`：长轮询观察事件变化，默认从调用时刻开始等未来新事件
+
+`watch` 的默认语义应保持为“watch from now”，而不是“无 cursor 时先回放历史 backlog”。
+
+只有在显式提供 `since_id` 或 `since_timestamp` 时，`GET /eventlog/watch` 才进入 catch-up 模式，允许先返回 cursor 之后已经存在的事件。
+
+### 目标分层
+
+长期应明确分成两层：
+
+#### A. feature / capability API
+
+这是对外默认入口。
+
+建议统一挂在新的根路径下：
+
+```text
+/act/*
+```
+
+特点：
+
+- 表达完整动作语义
+- 由 RT 自己保证联动副作用
+- 外部客户端不需要自己拼底层状态机
+
+补充实现原则：
+
+- HTTP 路由只负责 transport adapter：收请求、做协议映射、回响应
+- 真正的 feature 编排应落在 RT 内部可复用的 Rust API / domain service，而不是直接塞进 route handler
+- 同一套内部能力应能被 HTTP / CLI / MCP / 未来其他入口复用，而不是每个入口各带一份业务逻辑
+
+#### B. raw resource API
+
+这是兼容/内部/调试层。
+
+特点：
+
+- 保留现有资源路由
+- 继续给 UI 迁移期和运维排障使用
+- 不再作为未来外部客户端的首选入口
+
+默认方向：
+
+- 外部客户端优先走 `/act/*`
+- raw API 继续保留，但部分 token 不应拥有其访问权
+
+### 契约文档表达约定
+
+后续撰写对外 HTTP / SSE / JSON 类契约文档时，默认采用统一的双重表达：
+
+- **TypeScript 类型**：负责描述结构、判别联合、可选字段与命名形态
+- **JSON 样例**：负责描述真实请求、响应或 SSE `data` 载荷实例
+
+默认排版要求也一并固定：
+
+- 采用“**一个 TypeScript 子类型代码块，紧跟一个 JSON 样例**”的局部配对写法
+- 颗粒度以“任务相关请求体”“时间块相关 SSE fulfilled 数据”这类成组结构为宜
+- 避免先把所有对象类型内联堆成一个大联合，再把样例散落到后文
+
+目标是减少“主要靠 prose 逐条解释字段是否可选”的写法，让请求体、响应体、SSE 事件载荷都能用同一种描述语言被复用到 issue、计划文档与实现文档中。
+
+## 3. 核心术语
+
+### identity
+
+谁在发起操作。
+
+例如：
+
+- 人类 UI 客户端
+- Codex curl
+- Claude Code
+- Termux Agent
+
+### profile scope
+
+操作落到哪个档案/数据空间。
+
+当前实践里常通过 `user_id` 透传，但长期不应让客户端自己猜这一层。
+
+### grant
+
+某个外部客户端是否被允许访问某个档案。
+
+默认粒度：
+
+- `外部客户端 × 档案`
+
+### session
+
+一次具体接入会话。
+
+外部客户端的稳定身份和某次会话不应混为一谈。
+
+### permission scopes
+
+当前 token 或会话被允许使用哪些 RT 能力。
+
+## 4. token 与授权模型
+
+推荐采用双 token 模型：
+
+### identity token
+
+长寿命、可记忆。
+
+用途：
+
+- 标识稳定的外部客户端身份
+- 由人类在 UI 侧统一管理、撤销、查看
+- 后续用于登记外部 Agent 的来源、名称、模型、声明能力
+
+### session token
+
+会话级、可过期。
+
+用途：
+
+- 绑定一次具体连接
+- 显式绑定当前选定的档案
+- 为后续“会话过期”“自动续期”“重新确认”留下空间
+
+### 默认约束
+
+- 外部客户端可以被批准访问多个档案
+- 但执行任何 feature 前，必须显式选定目标档案或建立 scoped session
+- 不采用“一个 token 无限制跨多个档案直接执行”的默认模式
+
+## 5. bootstrap 与 discovery
+
+RT 应提供机器可读 discovery，而不是让客户端背路由。
+
+建议先从一个轻量 bootstrap 入口开始，例如：
+
+```text
+GET /act/bootstrap
+```
+
+它至少应能回答：
+
+- 当前 RT 版本
+- 当前 auth 模式
+- 哪些入口是公开的
+- 哪些入口需要授权
+- 当前支持哪些 `/act/*` 能力
+- 哪个入口可以继续做 profile discovery
+- 哪个入口可以建立会话
+
+### profile discovery
+
+profile discovery 默认只暴露安全元信息，不暴露完整会话态。
+
+建议返回字段至少包括：
+
+- `displayName`
+- `slug`
+- `profileId`
+- `scopeKey`
+- `state`
+
+注意：
+
+- `displayName`
+- `slug`
+- `profileId`
+- `scopeKey`
+
+不是同一个东西。
+
+当前它们在部分实现里可能恰好可相互推出，但这不是长期契约保证。
+
+## 6. 第一批 feature 样板：时间块工作流
+
+第一批 feature 样板建议从时间块开始。
+
+原因：
+
+- 它最能体现“完整动作语义”而不是单点 CRUD
+- 它有明显联动副作用
+- 它能验证“无 UI 的 RT 也能像有 UI 的 RT 一样跑完整工作流”
+
+建议对外动作形态：
+
+```text
+POST /act/timeblocks/start
+POST /act/timeblocks/pause
+POST /act/timeblocks/resume
+POST /act/timeblocks/prepare-end
+POST /act/timeblocks/end
+```
+
+设计要求：
+
+- RT 自己负责联动事件、状态变更和必要副作用
+- 外部客户端不再直接改 active timeblock 原始结构来拼语义
+- `prepare-end` 对应当前 UI 内部的“开始填写反馈”语义
+
+### 关于等待类能力的补充原则
+
+若后续在 `/act/*` 下引入等待类 feature API，应额外满足：
+
+- 等待能力默认优先做 **single-shot await**，表示“等待条件成立一次后返回并结束”
+- 若未来需要持续订阅 / 持久监听，可另行使用 `watch` 命名，但不应与 `await` 混用
+- 等待请求必须是**被动观察者**，不能阻塞 UI 正常使用或 RT 正常状态推进
+- 若等待类 feature API 允许省略具体资源 id，则省略后的默认语义应是 **wait any from now**，且 fulfill 结果必须返回实际命中的资源 id；除非合同显式声明，否则不回扫历史 backlog
+- 合理的时序应是：
+  - RT 正常运行
+  - 事件 / signal / 状态变化自然发生
+  - 内部 await 能力被动收到唤醒并复核真相
+  - transport 层返回结果并结束本次等待
+
+## 7. Agent 提案箱（长期模型）
+
+“Agent 提案箱”不只是一个页面，而是一种更高层的人机审批模型。
+
+相关追踪：
+
+- [#677](https://github.com/exomind-team/exomind/issues/677)
+
+按当前代码真相，提案箱首先是 **Agent 行动审批队列**，而不是“档案登录授权队列”。
+
+当前已经有代码落地、并能形成完整“创建提案 -> 人类批准 -> RT 执行”的动作类型是：
+
+- Agent 推荐创建任务（`create_task`）
+- Agent 推荐追加记录（`append_event`）
+- Agent 推荐启动时间块（`start_timeblock`）
+
+当前仍属于**预留动作类型、尚未执行落地**的是：
+
+- 外部 Agent 请求授权访问某个档案（`approve_agent_access`）
+  - 当前 store / 路由 / UI 标签已接受该动作类型
+  - 但批准后执行仍会进入 `NotYetImplemented("approve_agent_access")`
+
+未来可扩展为：
+
+- 更完整的外部 Agent 档案访问授权提案
+- Agent 请求执行高权限动作
+- Agent 请求绑定新能力
+
+### 本轮边界
+
+当前只把它作为：
+
+- 契约模型
+- issue 追踪对象
+
+不要求本轮直接实现完整 UI。
+
+## 8. 非目标
+
+以下内容不属于本轮直接实现目标：
+
+- 立即迁移现有 UI 全量改走 `/act`
+- 立即废弃 raw `/eventlog`、`/tasks`、`/timeblocks`
+- 立即完成完整提案箱 UI 与审批流程
+- 立即把 Agent 消息工作流升级成第一批样板
+
+## 9. 设计验收标准
+
+当后续进入实现前，至少应能满足这些设计层验收：
+
+- 外部客户端不读源码，也能通过 RT 自描述入口知道下一步怎么接入
+- `identity`、`profile scope`、`grant`、`session`、`permission scopes` 五层术语不再混用
+- `/act` 与 raw API 的职责边界清晰
+- `/act` 路由保持 thin adapter，内部编排逻辑不直接写在 HTTP handler 中
+- 时间块 feature 样板能覆盖“完整工作流而非裸状态改写”
+- 长连接 / 等待型 feature API 不会阻塞正常 RT 状态推进或 UI 使用
+- profile discovery 的权限边界可解释
+- 提案箱与登录审批模型被明确挂到后续 issue，而不是停留在聊天描述

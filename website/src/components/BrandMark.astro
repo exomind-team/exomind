@@ -1,0 +1,30 @@
+---
+import { prependBasePath } from '../i18n';
+
+interface Props {
+  class?: string;
+  imgClass?: string;
+  alt?: string;
+}
+
+const className = Astro.props.class ?? '';
+const imgClassName = Astro.props.imgClass ?? '';
+const alt = Astro.props.alt ?? '';
+const iconPath = prependBasePath('/brandmark.svg');
+const resolvedImgClassName = imgClassName || 'p-1';
+---
+
+<span
+  class:list={[
+    'inline-flex items-center justify-center overflow-hidden rounded-xl border border-stone-200/80 bg-white/90 shadow-sm shadow-stone-950/5 dark:border-stone-700/70 dark:bg-stone-900/90 dark:shadow-black/20',
+    className,
+  ]}
+>
+  <img
+    src={iconPath}
+    alt={alt}
+    loading="eager"
+    decoding="async"
+    class:list={['h-full w-full object-contain', resolvedImgClassName]}
+  />
+</span>

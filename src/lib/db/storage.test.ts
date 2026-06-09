@@ -13,12 +13,18 @@ const mockReadFileSync = vi.fn();
 const mockWriteFileSync = vi.fn();
 const mockMkdirSync = vi.fn();
 
-vi.mock('fs', () => ({
-  existsSync: (...args: unknown[]) => mockExistsSync(...args),
-  readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
-  writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
-  mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
-}));
+vi.mock('fs', () => {
+  const api = {
+    existsSync: (...args: unknown[]) => mockExistsSync(...args),
+    readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
+    writeFileSync: (...args: unknown[]) => mockWriteFileSync(...args),
+    mkdirSync: (...args: unknown[]) => mockMkdirSync(...args),
+  };
+  return {
+    ...api,
+    default: api,
+  };
+});
 
 describe('JSONLStorage', () => {
   beforeEach(() => {

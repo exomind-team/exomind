@@ -49,18 +49,10 @@ async fn runtime_spawns_reviewer_and_classifier_with_rt_url() {
     let root = make_temp_root("rt-ts-agents");
     let reviewer = root.join("packages/ts-agent-cli/agents/reviewer/index.ts");
     let classifier = root.join("packages/ts-agent-cli/agents/classifier/index.ts");
-    fs::create_dir_all(
-        reviewer
-            .parent()
-            .expect("reviewer parent should exist"),
-    )
-    .expect("should create reviewer directory");
-    fs::create_dir_all(
-        classifier
-            .parent()
-            .expect("classifier parent should exist"),
-    )
-    .expect("should create classifier directory");
+    fs::create_dir_all(reviewer.parent().expect("reviewer parent should exist"))
+        .expect("should create reviewer directory");
+    fs::create_dir_all(classifier.parent().expect("classifier parent should exist"))
+        .expect("should create classifier directory");
     write_agent_script(&reviewer, "reviewer");
     write_agent_script(&classifier, "classifier");
 
@@ -73,10 +65,12 @@ async fn runtime_spawns_reviewer_and_classifier_with_rt_url() {
     let mut handle = start_with_options(RuntimeStartOptions {
         bind_host: "127.0.0.1".to_string(),
         port: 0,
+        host_id: "runtime-ts-agents".to_string(),
         spawn_builtin_actors: false,
         spawn_ts_agents: true,
         ts_agent_command: "bun".to_string(),
         ts_agent_workdir: Some(root.clone()),
+        ..RuntimeStartOptions::default()
     })
     .await
     .expect("runtime should start with ts agents");

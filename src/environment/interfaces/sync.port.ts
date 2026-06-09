@@ -99,8 +99,15 @@ export interface SyncConfig {
  * 同步凭据
  */
 export interface SyncCredentials {
+  localProfileId?: string;
   username: string;
   passwordHash: string;
+  providerId?: string;
+  remoteIdentityId?: string;
+  remoteIdentityKey?: string;
+  authType?: 'none' | 'basic' | 'token';
+  authUsername?: string;
+  authSecret?: string;
   deviceName: string;
   deviceType: DeviceType;
   platform: string;

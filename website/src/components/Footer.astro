@@ -1,8 +1,10 @@
 ---
+import BrandMark from './BrandMark.astro';
 import { getLangFromUrl, useTranslations, getLocalizedPath } from '../i18n';
 
 const lang = getLangFromUrl(Astro.url);
 const t = useTranslations(lang);
+const brandName = lang === 'zh' ? '外心' : 'ExoMind';
 ---
 
 <footer class="border-t border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-950">
@@ -11,10 +13,8 @@ const t = useTranslations(lang);
       {/* Brand */}
       <div class="col-span-2 md:col-span-1">
         <a href={getLocalizedPath('/', lang)} class="flex items-center gap-2.5">
-          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-brand">
-            <span class="text-sm font-bold text-white">E</span>
-          </div>
-          <span class="text-lg font-semibold tracking-tight">ExoMind</span>
+          <BrandMark class="h-10 w-10 shrink-0" imgClass="p-0.5" />
+          <span class="text-lg font-semibold tracking-tight">{brandName}</span>
         </a>
         <p class="mt-4 text-sm leading-relaxed text-stone-500">
           {lang === 'zh' ? '你的生命成长助手' : 'Your Life Growth Companion'}
@@ -26,7 +26,6 @@ const t = useTranslations(lang);
         <h3 class="text-sm font-semibold text-stone-900 dark:text-stone-50">{t('footer.product')}</h3>
         <ul class="mt-4 space-y-3">
           <li><a href={getLocalizedPath('/features', lang)} class="text-sm text-stone-500 hover:text-brand">{t('nav.features')}</a></li>
-          <li><a href={getLocalizedPath('/download', lang)} class="text-sm text-stone-500 hover:text-brand">{t('nav.download')}</a></li>
           <li><a href={getLocalizedPath('/changelog', lang)} class="text-sm text-stone-500 hover:text-brand">{t('nav.changelog')}</a></li>
         </ul>
       </div>
@@ -35,6 +34,7 @@ const t = useTranslations(lang);
       <div>
         <h3 class="text-sm font-semibold text-stone-900 dark:text-stone-50">{t('footer.resources')}</h3>
         <ul class="mt-4 space-y-3">
+          <li><a href={getLocalizedPath('/getting-started', lang)} class="text-sm text-stone-500 hover:text-brand">{t('nav.getting_started')}</a></li>
           <li><a href={getLocalizedPath('/docs', lang)} class="text-sm text-stone-500 hover:text-brand">{t('nav.docs')}</a></li>
           <li><a href={getLocalizedPath('/about', lang)} class="text-sm text-stone-500 hover:text-brand">{t('nav.about')}</a></li>
         </ul>

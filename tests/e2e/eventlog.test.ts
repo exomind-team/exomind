@@ -12,9 +12,10 @@ test.describe('EventLog Page', () => {
           localStorage.removeItem(key);
         }
       }
+      localStorage.setItem('exomind:inputSendMode', 'ctrl-enter-send');
     });
     await page.goto('/eventlog');
-    await page.waitForLoadState('networkidle');
+    await expect(eventInput(page)).toBeVisible();
   });
 
   test('loads eventlog shell and input area', async ({ page }) => {
@@ -31,6 +32,24 @@ test.describe('EventLog Page', () => {
     await input.press('Control+Enter');
 
     await expect(page.getByText(marker)).toBeVisible();
+  });
+
+  test('Enter mode does not send on Ctrl+Enter', async ({ page }) => {
+    await page.evaluate(() => {
+      localStorage.setItem('exomind:inputSendMode', 'enter-send');
+      window.dispatchEvent(new CustomEvent('exomind:input-send-mode-changed', { detail: 'enter-send' }));
+    });
+
+    const marker = `eventlog-enter-mode-${Date.now()}`;
+    const input = eventInput(page);
+    const eventList = page.getByTestId('event-list');
+
+    await input.fill(marker);
+    await expect(eventList.getByTestId('new-mobile-user-message-row')).toHaveCount(0);
+    await input.press('Control+Enter');
+
+    await expect(input).toHaveValue(`${marker}\n`);
+    await expect(eventList.getByTestId('new-mobile-user-message-row')).toHaveCount(0);
   });
 
   test('Shift+Enter inserts newline without sending', async ({ page }) => {

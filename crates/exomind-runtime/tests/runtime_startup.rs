@@ -6,9 +6,11 @@
 //! - runtime can start/stop via lib API（可通过库 API 启停）
 
 use exomind_runtime::{
-    configured_port_from_env, start_with_options, RuntimeStartOptions, DEFAULT_RT_PORT,
+    DEFAULT_RT_PORT, RuntimeStartOptions, configured_port_from_env,
+    spawn_ts_agents_default_for_platform, start_with_options,
 };
 use std::sync::Mutex;
+use tempfile::tempdir;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -35,6 +37,42 @@ fn configured_port_accepts_zero_for_random_assignment() {
     assert_eq!(port, 0);
 }
 
+#[test]
+fn spawn_ts_agents_default_is_disabled_on_mobile_platforms() {
+    let _guard = ENV_LOCK.lock().expect("env lock should be available");
+    // SAFETY: tests guard env mutation with a global mutex（用全局锁保护环境变量修改）
+    unsafe {
+        std::env::remove_var("EXOMIND_RT_DISABLE_TS_AGENTS");
+    }
+
+    assert!(
+        !spawn_ts_agents_default_for_platform(true, None),
+        "mobile platforms should default to not spawning Bun-based TS agents"
+    );
+}
+
+#[test]
+fn spawn_ts_agents_default_stays_enabled_on_desktop_when_env_missing() {
+    let _guard = ENV_LOCK.lock().expect("env lock should be available");
+    // SAFETY: tests guard env mutation with a global mutex（用全局锁保护环境变量修改）
+    unsafe {
+        std::env::remove_var("EXOMIND_RT_DISABLE_TS_AGENTS");
+    }
+
+    assert!(
+        spawn_ts_agents_default_for_platform(false, None),
+        "desktop platforms should keep existing default behavior"
+    );
+}
+
+#[test]
+fn spawn_ts_agents_disable_flag_can_be_explicitly_cleared_on_mobile() {
+    assert!(
+        spawn_ts_agents_default_for_platform(true, Some("false")),
+        "mobile should still allow explicit opt-in for TS agents"
+    );
+}
+
 #[tokio::test]
 async fn start_with_port_zero_binds_a_random_available_port() {
     let mut handle = start_with_options(RuntimeStartOptions {
@@ -50,4 +88,35 @@ async fn start_with_port_zero_binds_a_random_available_port() {
     assert_eq!(handle.host(), "127.0.0.1");
 
     handle.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn start_with_options_uses_persistent_sqlite_task_backend_by_default() {
+    let dir = tempdir().expect("temp dir should be available");
+
+    let mut handle = start_with_options(RuntimeStartOptions {
+        bind_host: "127.0.0.1".to_string(),
+        port: 0,
+        spawn_ts_agents: false,
+        data_dir: Some(dir.path().to_path_buf()),
+        ..Default::default()
+    })
+    .await
+    .expect("runtime should start");
+
+    let response = reqwest::get(format!(
+        "http://127.0.0.1:{}/tasks/backend/status",
+        handle.port()
+    ))
+    .await
+    .expect("backend status request should succeed");
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .expect("backend status payload should decode");
+
+    handle.stop().await.expect("runtime should stop");
+
+    assert_eq!(payload["backend"], "rt-sqlite");
+    assert_eq!(payload["supports_sqlite_snapshot"], true);
 }

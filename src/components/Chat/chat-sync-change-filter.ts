@@ -21,8 +21,9 @@ export function shouldSkipSyncRefresh(change: unknown): boolean {
     return true;
   }
 
-  const docs = Array.isArray(payload.change?.docs)
-    ? payload.change.docs
+  const changeDocs = payload.change?.docs;
+  const docs = Array.isArray(changeDocs)
+    ? changeDocs
     : (Array.isArray(payload.docs) ? payload.docs : []);
 
   if (docs.length > 0) {

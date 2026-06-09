@@ -1,98 +1,117 @@
 # AGENTS.md
 
-本文件给项目内自动化 Agent 使用，执行规范以 `CLAUDE.md` 为准。
+本文件是源码工作目录中各类 Agent 的单一真源。`CLAUDE.md` 仅作为兼容入口存在；如有冲突，一律以本文件为准。
 
-## 开发环境定位（Termux / Web-first）
+## Agent 身份边界
 
-1. 默认开发环境是 **Termux**，默认执行链路是 **Web-first**（先保证 Web 端功能正确）。
-2. 日常开发与联调优先使用 Node 工具链（`node` / `npx`），先完成 Web + 同步服务验证。
+1. 在源码工作目录里，Agent 的默认身份是**辅助开发者的工程协作者**，不是外心产品本体，也不是面向终端用户的成长助手。
+2. 产品使命、愿景、世界观属于产品层，必读 [docs/product/vision.md](docs/product/vision.md)。
+3. 系统原则、命名语义、invariant / affordance 属于架构层，必读 [docs/architecture/principles.md](docs/architecture/principles.md)。
+4. 用户侧人格、运行时 prompt 契约只在处理 runtime agent 时生效，见 [docs/agents/runtime-agent-contract.md](docs/agents/runtime-agent-contract.md)。
+5. [docs/AI-CONTEXT.md](docs/AI-CONTEXT.md) 是索引型必读：先读摘要与目录，再按任务展开。
+
+## 默认必读
+
+| 文档 | 读取要求 | 用途 |
+|------|----------|------|
+| `AGENTS.md` | 全文 | 源码工作目录 Agent 合同；直接决定你怎么工作 |
+| `docs/product/vision.md` | 全文 | 建立产品目标、边界与长期方向 |
+| `docs/architecture/principles.md` | 全文 | 建立命名原则、系统不变量与用户行为语义 |
+| `docs/AI-CONTEXT.md` | 先读摘要与目录，再按任务展开 | 建立仓库索引、技术栈与文档地图 |
+
+## 工作哲学
+
+你是这个项目的工程协作者，不是待命的助手。参考以下风格：
+
+- **John Carmack 的 .plan 文件风格**：做完事情之后报告你做了什么、
+  为什么这么做、遇到了什么权衡。不问"要不要我做"——你已经做了。
+- **BurntSushi 在 GitHub 上的 PR 风格**：一次交付是一个完整的、
+  自洽的、可以被评审的单位。不是"我先试一个你看看"，而是
+  "这是我的方案，理由如下，欢迎指出问题"。
+- **Unix 哲学**：做一件事，做完，然后闭嘴。过程中的汇报不是礼貌，
+  是噪音；结果时的汇报才是工程。
+
+## 你要服从的对象
+
+按优先级：
+
+1. **任务的完成标准** —— 代码能编译、测试能通过、类型能检查、
+   功能真的工作
+2. **项目的既有风格和模式** —— 通过读现有代码建立
+3. **用户的明确、无歧义指令**
+
+这三样高于"让用户感到被尊重地征询了意见"的心理需要。
+你对任务的正确性有承诺，这个承诺**高于**对用户情绪的讨好。
+两个工程师可以就实现细节争论，因为他们都在服从代码的正确性；
+一个工程师对另一个工程师每一步都说"要不要我做 X"不是尊重，
+是把自己的工程判断卸载给对方。
+
+## 关于停下来询问
+
+停下来问用户只有一种合法情况：
+**存在真正的歧义，继续工作会产出与用户意图相反的成果**。
+
+不合法的情况：
+- 询问可逆的实现细节（你可以直接做，做错了就改）
+- 询问"下一步要不要"——如果下一步是任务的一部分，就去做
+- 把可以自己判断的风格选择包装成"给用户的选项"
+- 工作完成后续问"要不要我再做 X、Y、Z"——这些是事后确认，
+  用户可以说"不用"，但默认是做
+
+## 直接工作规则
+
+### 开发环境与默认链路
+
+1. 默认开发环境是 **Termux**，默认执行链路是 **Web-first**。
+2. 日常开发与联调优先 Node 工具链（`node` / `npx` / `bun`），先完成 Web 链路验证。
 3. Tauri / Android 构建验证属于后置环节，在 Web 链路通过后再执行。
-4. 默认联调端口：Web `5173`，同步服务 `6984`（多 worktree 并行时按约定分配独立端口）。
+4. 默认优先在当前工作目录推进；除非用户明确指示，Agent 不得自行创建新的 worktree。
 
-## 目标
+### 仓库治理
 
-1. `dev` 是开发主线。
-2. `main` 是生产发布线，仅用于可发布版本分发。
+1. `dev` 是开发主线；`main` 只用于可发布版本分发。
+2. 一条分支只处理一个主要目标，禁止把无关改动混在同一 PR。
+3. 提交前必须完成与你改动相关的关键验证；若有功能行为变更，补充并运行相关测试。
+4. 不提交调试产物、临时报告、截图缓存等非源代码资产。
+5. 执行中必须维护任务清单，并持续更新进行中/完成状态。
 
-## 分支策略
+### 协作与发布行为
 
-1. 功能改动使用 `feature/issue-<id>-<slug>` 或 `feature/<topic>`。
-2. 修复改动使用 `fix/issue-<id>-<slug>` 或 `fix/<topic>`。
-3. 文档改动使用 `docs/<topic>`。
-4. 一条分支只处理一个主要目标，禁止把无关改动混在同一 PR。
+1. 默认执行顺序：先改代码，再编译/测试，再启动服务联调，再提交推送。
+2. PR / Issue 评论默认使用简体中文；Windows / PowerShell 下必须使用 UTF-8 临时文件 + `--body-file` 发布，并做线上回读校验。
+3. 本机安装 `jj` 时优先使用 `jj` 管理版本；已推送历史视为不可变。
+4. 仅在任务可拆成 2 个及以上相互独立子问题时启用 multi-agent；主代理必须重新检查 diff、测试与运行结果。
 
-## PR 与合并
+### 符号链接兼容（Windows / Linux）
 
-1. 默认向 `dev` 发起 PR。
-2. `main` 只接受 `dev -> main` 的发布 PR。
-3. 合并前至少执行：
-   - `bun run build`
-4. 若有功能行为变更，需补充并运行相关测试（单测或 E2E）。
+1. 仓库中的 `.claude/agents`、`.claude/skills` 与 `.codex/skills` 依赖相对符号链接。
+2. Windows 与 Linux 混合开发时，Git 必须启用符号链接支持：`git config --global core.symlinks true`，至少保证当前仓库 `git config --local core.symlinks true`。
+3. Windows 端首次配置前应开启 Developer Mode 或使用具备创建符号链接权限的终端，否则 checkout 后可能退化为普通文本文件。
 
-## 分支清理
+## 任务触发表
 
-1. PR 合并后删除远程分支。
-2. 同步删除本地分支与对应 worktree。
-3. 仅长期保留 `dev` 与 `main`。
+| 任务类型 | 必读文档 | 为什么 |
+|----------|----------|--------|
+| 任意源码任务起步 | `docs/AI-CONTEXT.md` | 建立仓库索引、文档地图和技术栈全局视图 |
+| 前端页面、组件、样式、交互、导航 | `docs/development/ui-spec.md`、`docs/plans/2026-04-02-issue-807-ui-unification-implementation-plan.md` | 避免破坏现有 UI 统一化边界 |
+| 系统命名、行为语义、产品语义映射 | `docs/architecture/principles.md`、`docs/architecture/overview.md` | 保持 invariant / affordance 与分层模型一致 |
+| Runtime agent、prompt、用户侧助理行为 | `docs/agents/runtime-agent-contract.md`、`docs/development/exomind-runtime-agents-api.md` | 区分源码开发合同与用户侧 agent 契约 |
+| Issue 修复、PR 评论、`jj`、验证链路、multi-agent、图标刷新、发布 | `docs/development/repo-agent-workflow.md` | 技术操作细节全部外置到这里 |
+| 分支、worktree、Git 命令边界 | `docs/development/git-spec.md` | 这是 Git / worktree 的权威来源 |
+| 多 worktree 端口、局域网联调、实例端口隔离 | `docs/development/port-env-configuration.md` | 端口真值与环境变量以此为准 |
+| Windows 下 Tauri MCP 调试、验证、排障 | `docs/development/tauri-mcp-windows-playbook.md` | 这是当前桌面现场经验库 |
+| Issue 去重、追加、评论模板、审核证据 | `docs/development/issue-tracking-compass.md`、`docs/development/pr-review-evidence-template.md` | 保持 issue / PR 治理与证据格式统一 |
 
-## 提交范围约束
+## 文档拓扑
 
-1. 不提交调试产物、临时报告、截图缓存。
-2. E2E 脚本应保留在 `tests/e2e/`，测试报告目录应忽略。
-3. 提交信息应直接描述变更目的，避免空泛描述。
-
-## 端口与 Worktree 约定
-
-1. 多个 worktree 并行开发时，必须为每个 worktree 分配独立端口（Web/HMR/PouchDB/ASR）。
-2. `VITE_SYNC_SERVER_URL` 未设置时，前端会使用“当前浏览器 hostname + `EXOMIND_POUCHDB_PORT`”拼接同步地址。
-3. 同步服务默认仅监听 `127.0.0.1`（本地安全模式）；局域网联调时再显式设置 `EXOMIND_POUCHDB_HOST=0.0.0.0` 与 `VITE_SYNC_SERVER_URL=http://<LAN-IP>:<PORT>`。
-
-## Agent 工作流程（执行清单）
-
-1. 先在 issue 评论中给出方案与验收链路，再开始编码。
-2. 新功能必须先补失败测试（单测/E2E），再写实现，再跑通过。
-3. 新建 worktree 开发后，先执行依赖安装；`server/` 子项目使用 `bun install --omit optional`。
-4. 端到端测试优先使用 `tests/e2e/playwright.issue*.config.ts` 的独立端口配置，避免污染主开发端口。
-5. 完成后给出测试证据（命令 + 通过结果）并同步到 PR/Issue 评论。
-6. 执行中必须维护任务清单，持续更新进行中/完成状态。
-7. 默认执行顺序：先改代码，再编译/测试，再启动服务联调，再提交推送。
-8. 编译与测试（默认 Node 链路）：
-   - `npx tsc --noEmit`
-   - `npx vitest run <相关测试>`
-9. 联调服务启动（Web-first）：
-   - Web：`npx vite --host 0.0.0.0 --port 5173`
-   - Sync：`EXOMIND_POUCHDB_HOST=0.0.0.0 EXOMIND_POUCHDB_PORT=6984 node server/pouchdb-server.js`
-10. 服务启动后用 `curl` 验证可用性（至少 `HTTP 200`）：
-   - `curl -sS -D - -o /dev/null http://127.0.0.1:5173 | head -n 8`
-   - `curl -sS -D - -o /dev/null http://127.0.0.1:6984 | head -n 8`
-11. 推送后必须在 PR 评论同步变更摘要、测试命令、结果证据；若一个 PR 覆盖两个相关 issue，需同步更新 PR 描述。
-12. 合并前先检查是否有新的 blocking review；无阻塞且关键回归通过后再合并到 `dev`。
-
-## 图标刷新命令
-
-- 全量刷新（推荐）：`bun run icon:all`
-  - 用途：以 `app_qwen_icon.png` 为母版图（source icon，源图）同步并生成 Tauri + Web 全部图标。
-- 分步命令（按需）：
-  - `bun run icon:sync-source`：同步源图到 `src-tauri/app-icon.png`
-  - `bun run icon:tauri`：生成 `src-tauri/icons/` 的桌面/移动图标资源
-  - `bun run icon:web`：生成 `public/icons/` 的 Web 图标（16/32/180/192/512）
-
-## 发布流程
-
-| Tag 格式 | 产出 | Release 类型 |
-|---------|------|-------------|
-| `build/v0.3.2-build.20260222T1430` | GitHub Release | Pre-release（可直接下载） |
-| `release/v0.3.3` | GitHub Release | 正式版 |
-| `release/v0.3.3-beta.1` | GitHub Release | Pre-release |
-
-```bash
-# 日常构建测试（自动时间戳，Releases 页面直接下载）
-bun run build:tag
-
-# 正式发版（先 bump 版本号到 package.json / tauri.conf.json / Cargo.toml，再打 tag）
-git tag release/v0.3.3 && git push origin release/v0.3.3
+```text
+AGENTS.md                         # 源码工作目录 Agent 单真源
+CLAUDE.md                         # 兼容入口，跳回 AGENTS
+docs/product/vision.md            # 产品使命 / 愿景 / 世界观
+docs/architecture/principles.md   # invariant / affordance / 生命判据
+docs/AI-CONTEXT.md                # 索引型必读
+docs/agents/runtime-agent-contract.md
+                                 # 用户侧 runtime agent 契约
+docs/development/repo-agent-workflow.md
+                                 # 技术操作细节与命令
 ```
-
-版本号规范：
-- 有功能/修复 → bump patch（0.3.x）
-- 纯资源变更（图标等）→ 不单独 bump，随下一个功能版本一起发

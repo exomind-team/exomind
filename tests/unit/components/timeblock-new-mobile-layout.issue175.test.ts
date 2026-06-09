@@ -8,7 +8,7 @@ describe('TimeBlockWidget issue-175 new-mobile structure', () => {
 
   it('uses a dedicated action row in running state for mobile layout', () => {
     expect(source).toContain('data-testid="timeblock-action-row"');
-    expect(source).toContain('rounded-[24px] border-0 bg-[#EDECE9]');
+    expect(source).toContain('rounded-[24px] border-0 bg-warning');
     expect(source).toContain('rounded-[24px] border-0 bg-[#FDECEB]');
   });
 });

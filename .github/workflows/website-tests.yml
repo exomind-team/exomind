@@ -1,5 +1,8 @@
 name: Website Tests
 
+env:
+  BUN_VERSION: "1.3.8"
+
 on:
   # PAUSED: 额度不足，暂停自动触发。手动触发仍可用。
   # pull_request:
@@ -21,9 +24,9 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: 'Production base URL / 线上基准地址'
+        description: "Production base URL / 线上基准地址"
         required: false
-        default: 'https://exo-mind.ai'
+        default: "https://exo-mind.ai"
 
 jobs:
   website-local-e2e:
@@ -31,15 +34,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository (检出代码)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Bun (安装 Bun)
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install root dependencies (安装根目录依赖)
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Install website dependencies (安装 website 依赖)
         run: bun run website:install
@@ -56,15 +59,15 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout repository (检出代码)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Bun (安装 Bun)
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install root dependencies (安装根目录依赖)
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Install Playwright Chromium (安装 Playwright Chromium 浏览器)
         run: bun x playwright install chromium --with-deps

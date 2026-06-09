@@ -1,6 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentHubServiceImpl } from '@/lib/services/agent-hub.service';
 import type { IAgentPort } from '@/lib/environment/interfaces/agent.port';
+
+const runtimeHostServiceMocks = vi.hoisted(() => ({
+  listHosts: vi.fn(),
+}));
+
+vi.mock('@/lib/services/runtime-host.service', () => ({
+  getRuntimeHostService: () => runtimeHostServiceMocks,
+}));
 
 describe('agent hub service issue-204（Agent Hub 服务）', () => {
   let agentPort: IAgentPort;
@@ -25,8 +33,13 @@ describe('agent hub service issue-204（Agent Hub 服务）', () => {
         };
       }),
     };
+    runtimeHostServiceMocks.listHosts.mockResolvedValue([]);
 
     service = new AgentHubServiceImpl({ agent: agentPort });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('delegates reads to agent port（读取请求转发到 agent port）', async () => {
@@ -61,5 +74,44 @@ describe('agent hub service issue-204（Agent Hub 服务）', () => {
     expect(chunks).toHaveLength(1);
     expect(chunks[0]?.done).toBe(true);
   });
-});
 
+  it('localizes runtime fallback detail stats（Runtime fallback 详情统计中文化）', async () => {
+    runtimeHostServiceMocks.listHosts.mockResolvedValue([
+      {
+        id: 'local-runtime',
+        name: 'Local Runtime',
+        host: '127.0.0.1',
+        port: 9530,
+        status: 'unknown',
+        createdAt: '2026-03-11T00:00:00.000Z',
+        updatedAt: '2026-03-11T00:00:00.000Z',
+      },
+    ]);
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => [
+        {
+          id: 'agent-summary',
+          name: '时间块总结 Agent',
+          description: 'summarizes timeblocks',
+          status: 'available',
+          subscriptions: [
+            'timeblock.replication.completed',
+            'timeblock.replication.active_upserted',
+          ],
+        },
+      ],
+    } as Response)));
+
+    const detail = await service.getAgentDetail('agent-summary');
+
+    expect(detail?.stats).toEqual([
+      { label: '状态', value: '可用' },
+      {
+        label: '订阅信号',
+        value: 'timeblock.replication.completed、timeblock.replication.active_upserted',
+      },
+    ]);
+  });
+});

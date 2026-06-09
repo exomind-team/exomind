@@ -1,26 +1,47 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { TasksPage } from '@/ui/app/pages/TasksPage';
 
 const openPaletteMock = vi.fn();
 const listTasksMock = vi.fn();
-const longTermGoalsMock = vi.fn();
 
 const runtimeFlags = vi.hoisted(() => ({
   developerModeEnabled: true,
   commandPaletteEnabled: true,
 }));
 
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-router')>();
+  return {
+    ...actual,
+    Link: ({ children, ...props }: { children?: ReactNode }) => <a {...props}>{children}</a>,
+    useNavigate: () => vi.fn(),
+    createRootRoute: vi.fn(() => ({ addChildren: vi.fn() })),
+  };
+});
+
 vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
     listTasks: listTasksMock,
-    getLongTermGoals: longTermGoalsMock,
     createTask: vi.fn(),
     getTask: vi.fn(),
-    setTimerMode: vi.fn(),
-    pauseTask: vi.fn(),
-    resumeTask: vi.fn(),
-    upsertTask: vi.fn(),
+    updateTask: vi.fn(),
+    cancelTask: vi.fn(),
+    transitionTask: vi.fn(),
+    getAvailableTransitions: vi.fn(async () => []),
+    getChildTasks: vi.fn(async () => []),
+    addDependency: vi.fn(),
+    removeDependency: vi.fn(),
+    checkDependenciesMet: vi.fn(async () => ({ met: true, blocking: [] })),
+    startSync: vi.fn(async () => {}),
+    stopSync: vi.fn(async () => {}),
+    onTaskChange: vi.fn(() => () => {}),
+  }),
+  getTimeBlockService: () => ({
+    loadTimeBlocks: vi.fn(async () => []),
+    loadActiveBlock: vi.fn(async () => null),
+    onBlockChange: vi.fn(() => () => {}),
   }),
 }));
 
@@ -47,11 +68,16 @@ vi.mock('@/config/command-palette-enabled', () => ({
   subscribeCommandPaletteEnabledChanges: () => () => {},
 }));
 
+vi.mock('@/config/task-create-success-action', () => ({
+  getTaskCreateSuccessAction: vi.fn(() => 'refocus'),
+  setTaskCreateSuccessAction: vi.fn((value: string) => value),
+  subscribeTaskCreateSuccessActionChanges: vi.fn(() => () => {}),
+}));
+
 describe('new tasks page command palette entry issue-243（任务页命令面板入口）', () => {
   beforeEach(() => {
     openPaletteMock.mockReset();
     listTasksMock.mockResolvedValue([]);
-    longTermGoalsMock.mockResolvedValue([]);
     runtimeFlags.developerModeEnabled = true;
     runtimeFlags.commandPaletteEnabled = true;
   });
@@ -60,7 +86,6 @@ describe('new tasks page command palette entry issue-243（任务页命令面板
     render(<TasksPage />);
     await waitFor(() => {
       expect(listTasksMock).toHaveBeenCalled();
-      expect(longTermGoalsMock).toHaveBeenCalled();
     });
 
     fireEvent.click(screen.getByRole('button', { name: '更多菜单' }));
@@ -76,7 +101,6 @@ describe('new tasks page command palette entry issue-243（任务页命令面板
     render(<TasksPage />);
     await waitFor(() => {
       expect(listTasksMock).toHaveBeenCalled();
-      expect(longTermGoalsMock).toHaveBeenCalled();
     });
 
     fireEvent.click(screen.getByRole('button', { name: '更多菜单' }));

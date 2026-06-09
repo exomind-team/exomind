@@ -1,10 +1,21 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { EventData } from '@/lib/types/event';
 import { EventLogServiceImpl } from '@/lib/services/eventlog.service';
+import type {
+  EventLogAppendInput,
+  EventLogImportResult,
+} from '@/lib/environment/interfaces/eventlog.port';
 
 type EventLogPortShape = {
   listEvents: () => Promise<EventData[]>;
-  appendEvent: (event: EventData) => Promise<void>;
+  listEventsDetailed: () => Promise<{
+    events: EventData[];
+    semantics: 'full_snapshot' | 'incremental_batch';
+    snapshotRevision?: string;
+  }>;
+  appendEvent: (event: EventLogAppendInput) => Promise<EventData>;
+  appendRawEvent: (event: EventData) => Promise<EventData>;
+  importEventsFromJson?: (json: string, strategy: 'merge' | 'overwrite') => Promise<EventLogImportResult>;
   getEvent: (id: string) => Promise<EventData | null>;
   clearEvents: () => Promise<void>;
 };
@@ -13,8 +24,21 @@ function createMockPort(initialEvents: EventData[] = []): EventLogPortShape {
   let current = initialEvents;
   return {
     listEvents: vi.fn(async () => [...current]),
-    appendEvent: vi.fn(async (event: EventData) => {
+    listEventsDetailed: vi.fn(async () => ({
+      events: [...current],
+      semantics: 'full_snapshot',
+    })),
+    appendEvent: vi.fn(async (event: EventLogAppendInput) => {
+      const persisted: EventData = {
+        ...event,
+        timestamp: 9_999,
+      };
+      current = [persisted, ...current];
+      return persisted;
+    }),
+    appendRawEvent: vi.fn(async (event: EventData) => {
       current = [event, ...current];
+      return event;
     }),
     getEvent: vi.fn(async (id: string) => current.find((event) => event.id === id) ?? null),
     clearEvents: vi.fn(async () => {
@@ -43,6 +67,8 @@ describe('EventLogService import/export', () => {
 
   it('imports backup with merge strategy', async () => {
     const service = new EventLogServiceImpl({ port });
+    const onEvent = vi.fn();
+    service.onEvent(onEvent);
     const backup = JSON.stringify({
       version: 1,
       exportedAt: new Date().toISOString(),
@@ -56,5 +82,72 @@ describe('EventLogService import/export', () => {
     expect(result.imported).toBe(1);
     expect(result.skipped).toBe(1);
     expect(result.total).toBe(3);
+    expect(onEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('prefers port import when adapter provides native import capability', async () => {
+    port.importEventsFromJson = vi.fn(async () => ({
+      imported: 2,
+      skipped: 0,
+      total: 4,
+    }));
+    const service = new EventLogServiceImpl({ port });
+
+    const result = await service.importEventsFromJson(JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      events: [
+        { id: 'e4', timestamp: 5000, content: 'new-4', tags: ['note'] },
+      ],
+    }), 'overwrite');
+
+    expect(port.importEventsFromJson).toHaveBeenCalledTimes(1);
+    expect(port.clearEvents).not.toHaveBeenCalled();
+    expect(result).toEqual({ imported: 2, skipped: 0, total: 4 });
+  });
+
+  it('appends raw event data without regenerating timestamp or tags', async () => {
+    const service = new EventLogServiceImpl({ port });
+
+    const appended = await service.appendEventData({
+      id: 'evt-block-start',
+      timestamp: 1700000000000,
+      content: 'Deep Work started',
+      tags: ['block_start'],
+      metadata: {
+        source: {
+          deviceId: 'desktop-1',
+          deviceName: 'Desktop',
+          platform: 'windows',
+          app: 'ExoMind',
+        },
+      },
+      refs: [
+        { kind: 'event', eventId: 'evt-anchor', summary: '上游事件' },
+      ],
+    });
+
+    expect(port.appendRawEvent).toHaveBeenCalledWith({
+      id: 'evt-block-start',
+      timestamp: 1700000000000,
+      content: 'Deep Work started',
+      tags: ['block_start'],
+      metadata: {
+        source: {
+          deviceId: 'desktop-1',
+          deviceName: 'Desktop',
+          platform: 'windows',
+          app: 'ExoMind',
+        },
+      },
+      refs: [
+        { kind: 'event', eventId: 'evt-anchor', summary: '上游事件' },
+      ],
+    });
+    expect(appended.tags.has('block_start')).toBe(true);
+    expect(appended.timestamp).toBe(1700000000000);
+    expect(appended.refs).toEqual([
+      { kind: 'event', eventId: 'evt-anchor', summary: '上游事件' },
+    ]);
   });
 });

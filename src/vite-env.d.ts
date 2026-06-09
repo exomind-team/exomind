@@ -7,10 +7,15 @@ declare module 'rehype-katex';
 interface ImportMetaEnv {
   readonly VITE_APP_VERSION?: string; // App Version（应用版本）
   readonly VITE_BUILD_HASH?: string; // Build Hash（构建哈希）
+  readonly VITE_UPDATE_BASE_URL?: string; // Update base URL（更新元数据基准地址）
+  readonly TAURI_ENV_DEBUG?: string; // Tauri debug/release build flag（Tauri 调试/发布构建标记）
 }
 
 interface Window {
   __TAURI__: {
+    [key: string]: unknown;
+  };
+  __TAURI_INTERNALS__: {
     [key: string]: unknown;
   };
   SpeechRecognition: typeof SpeechRecognition;

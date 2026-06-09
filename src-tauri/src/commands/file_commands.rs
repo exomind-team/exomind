@@ -1,10 +1,11 @@
 //! 文件操作命令
 //! 用于消息持久化存储 - 重构版（同步版本）
 
+use crate::dev_instance_paths::resolve_instance_app_data_dir;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{ipc::InvokeError, AppHandle, Manager};
+use tauri::{ipc::InvokeError, AppHandle};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_fs::{FsExt, OpenOptions};
 use thiserror::Error;
@@ -45,9 +46,9 @@ impl std::convert::From<FileError> for InvokeError {
 
 /// 获取应用数据目录
 fn get_data_dir(app: &AppHandle) -> Result<PathBuf, FileError> {
-    let path = app.path().app_data_dir().map_err(|e| FileError::IoError {
+    let path = resolve_instance_app_data_dir(app).map_err(|e| FileError::IoError {
         message: format!("获取应用数据目录失败: {}", e),
-        source: std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+        source: std::io::Error::other(e),
     })?;
 
     // 确保目录存在
@@ -397,6 +398,37 @@ pub struct PickedJsonFile {
     content: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PickedAudioFile {
+    path: String,
+    name: String,
+}
+
+fn resolve_selected_file_path(selected: &FilePath) -> String {
+    match selected {
+        FilePath::Path(path) => path.to_string_lossy().to_string(),
+        uri_like => uri_like.to_string(),
+    }
+}
+
+fn resolve_selected_file_name(selected: &FilePath) -> String {
+    match selected {
+        FilePath::Path(path) => path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string()),
+        uri_like => {
+            let display = uri_like.to_string();
+            display
+                .split('/')
+                .next_back()
+                .map(|value| value.to_string())
+                .unwrap_or(display)
+        }
+    }
+}
+
 fn read_import_content_from_selected_file<PR, UR>(
     selected: FilePath,
     path_reader: PR,
@@ -499,6 +531,54 @@ pub fn save_json_file(
     Ok(Some(saved))
 }
 
+/// 保存二进制内容到系统文件选择路径
+#[tauri::command]
+pub fn save_binary_file(
+    app: AppHandle,
+    content: Vec<u8>,
+    default_name: String,
+    filters: Option<Vec<String>>,
+) -> FileResult<Option<String>> {
+    let mut dialog = app.dialog().file().set_file_name(&default_name);
+
+    if let Some(filters) = filters.as_ref() {
+        if !filters.is_empty() {
+            let owned_filters: Vec<String> = filters
+                .iter()
+                .map(|value| value.trim().trim_start_matches('.').to_string())
+                .filter(|value| !value.is_empty())
+                .collect();
+            let filter_refs: Vec<&str> = owned_filters.iter().map(String::as_str).collect();
+            if !filter_refs.is_empty() {
+                dialog = dialog.add_filter("Binary", &filter_refs);
+            }
+        }
+    }
+
+    let file_path = dialog.blocking_save_file();
+
+    let Some(file_path) = file_path else {
+        return Ok(None);
+    };
+
+    let saved = persist_export_content_for_selected_file(
+        file_path,
+        &content,
+        |path, bytes| fs::write(path, bytes),
+        |uri_like, bytes| {
+            let mut options = OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+
+            let mut file = app.fs().open(uri_like.clone(), options)?;
+            use std::io::Write;
+            file.write_all(bytes)?;
+            Ok(())
+        },
+    )?;
+
+    Ok(Some(saved))
+}
+
 /// 从系统文件选择器选择 JSON 文件并读取内容
 #[tauri::command]
 pub fn pick_json_file(app: AppHandle) -> FileResult<Option<PickedJsonFile>> {
@@ -528,6 +608,29 @@ pub fn pick_json_file(app: AppHandle) -> FileResult<Option<PickedJsonFile>> {
     )?;
 
     Ok(Some(picked))
+}
+
+#[tauri::command]
+pub fn pick_audio_files(app: AppHandle) -> FileResult<Option<Vec<PickedAudioFile>>> {
+    let selected = app
+        .dialog()
+        .file()
+        .add_filter("Audio", &["mp3", "wav", "ogg", "m4a", "flac"])
+        .blocking_pick_files();
+
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+
+    Ok(Some(
+        selected
+            .iter()
+            .map(|file| PickedAudioFile {
+                path: resolve_selected_file_path(file),
+                name: resolve_selected_file_name(file),
+            })
+            .collect(),
+    ))
 }
 
 #[cfg(test)]

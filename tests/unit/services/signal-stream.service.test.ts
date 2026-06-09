@@ -1,5 +1,8 @@
 // signal-stream.service.test.ts — SignalStream 前端服务测试
 //
+// @ghost-test 所有 it() 断言为注释掉的 TODO，实际覆盖率为 0。
+// 需要实现真正的断言后移除此标注。 See #534
+//
 // 测试目标:
 //   1. SSE 连接建立（EventSource mock）
 //   2. 信号接收与回调

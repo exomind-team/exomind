@@ -26,8 +26,10 @@ describe('SettingsPage feedback section（反馈分组配置）', () => {
   it('renders feedback section and defaults to quick-feedback only', () => {
     render(<SettingsPage />);
 
+    expect(screen.getByText('时间块反馈')).toBeInTheDocument();
     expect(screen.getByTestId('new-settings-feedback-section')).toBeInTheDocument();
     expect(screen.getByTestId('new-settings-feedback-content-row')).toBeInTheDocument();
+    expect(screen.getByText('可多选，默认仅开启快速反馈')).toBeInTheDocument();
 
     expect(screen.getByTestId('new-settings-feedback-content-timing')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('new-settings-feedback-content-statistics')).toHaveAttribute('aria-pressed', 'false');

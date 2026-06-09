@@ -1,14 +1,47 @@
 // Re-export split types for backward compatibility
-export type { RuntimeHostStatus, RuntimeHostRecord, RuntimeServiceStatus } from './agent-hub-runtime';
+export type {
+  RuntimeHostAuthTokenSource,
+  RuntimeHostStatus,
+  RuntimeHostRecord,
+  RuntimeHostTrustState,
+  RuntimeHostVerificationStatus,
+  RuntimeHostVerificationTrigger,
+  RuntimeServiceStatus,
+} from './agent-hub-runtime';
 export type { AgentMarketCategory, AgentMarketItem } from './agent-hub-market';
 
 // Agent Hub view modes（视图模式）
-export const AGENT_HUB_VIEW_MODES = ['topology', 'list', 'device'] as const;
+export const AGENT_HUB_VIEW_MODES = ['topology', 'sessions', 'tiled', 'list', 'history', 'routes', 'device', 'api-agent'] as const;
 export type AgentHubViewMode = (typeof AGENT_HUB_VIEW_MODES)[number];
+
+// 右侧栏状态机
+export const AGENT_HUB_RIGHT_PANEL_STATES = [
+  'CLOSED',
+  'ROUTE_EDIT',
+  'SIGNAL_DETAIL',
+  'AGENT_DETAIL',
+  'ACTOR_DETAIL',
+  'AGENT_CHAT',
+  'PTY_TERMINAL',
+] as const;
+export type AgentHubRightPanelState = (typeof AGENT_HUB_RIGHT_PANEL_STATES)[number];
+
+// 右侧栏上下文（携带所选实体 ID 等）
+export interface AgentHubRightPanelContext {
+  state: AgentHubRightPanelState;
+  // ROUTE_EDIT: routeId（null = 新建模式）
+  routeId?: string | null;
+  // AGENT_DETAIL / ACTOR_DETAIL / AGENT_CHAT: nodeId
+  nodeId?: string | null;
+  // SIGNAL_DETAIL: signalId
+  signalId?: string | null;
+  // PTY_TERMINAL: ptyId
+  ptyId?: string | null;
+}
 
 // Node type（节点类型）and status（运行状态）
 export type AgentHubNodeType = 'input' | 'agent' | 'actor' | 'output';
-export type AgentHubNodeStatus = 'running' | 'idle' | 'warning' | 'offline';
+export type AgentHubNodeStatus = 'running' | 'idle' | 'warning' | 'offline' | 'dormant' | 'critical' | 'dying';
 export type AgentHubNodeLayer = 'top' | 'middle' | 'bottom';
 
 export interface AgentHubNode {
@@ -43,6 +76,7 @@ export interface AgentHubListItem {
   status: AgentHubNodeStatus;
   icon: string;
   badgeText?: string;
+  energy?: AgentEnergySnapshot;
 }
 
 export interface AgentHubListSection {
@@ -128,12 +162,22 @@ export interface AgentDetailData {
 }
 
 export type AgentConversationRole = 'agent' | 'user';
+export type AgentConversationMessageSource = 'history' | 'runtime';
+export type AgentConversationRuntimeMessageType =
+  | 'output.delta'
+  | 'thinking.delta'
+  | 'tool.call'
+  | 'tool.result'
+  | 'error';
 
 export interface AgentConversationMessage {
   id: string;
   role: AgentConversationRole;
   content: string;
   createdAt: string;
+  source?: AgentConversationMessageSource;
+  runtimeEventType?: AgentConversationRuntimeMessageType;
+  title?: string;
 }
 
 export interface AgentConversationChunk {
@@ -142,3 +186,64 @@ export interface AgentConversationChunk {
   done: boolean;
 }
 
+export type RuntimeAgentEventType =
+  | 'session.started'
+  | 'output.delta'
+  | 'thinking.delta'
+  | 'tool.call'
+  | 'tool.result'
+  | 'error'
+  | 'done';
+
+export interface RuntimeAgentEventBase {
+  type: RuntimeAgentEventType;
+  sessionId?: string;
+  content?: string;
+  name?: string;
+  payload?: unknown;
+  message?: string;
+  finishReason?: string;
+  done?: boolean;
+}
+
+export type RuntimeAgentEvent =
+  | (RuntimeAgentEventBase & {
+      type: 'session.started';
+      sessionId: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'output.delta';
+      content: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'thinking.delta';
+      content: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'tool.call';
+      name: string;
+      payload?: unknown;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'tool.result';
+      name: string;
+      payload?: unknown;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'error';
+      message: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'done';
+    });
+
+// Agent 能量快照（对应 RT GET /agents/:id/energy）
+export interface AgentEnergySnapshot {
+  agent_id: string;
+  current: number;
+  max: number;
+  ratio: number;
+  tick_cost: number;
+  phase: string; // 'normal' | 'slowing' | 'critical' | 'dying' | 'dormant'
+  is_dormant: boolean;
+}

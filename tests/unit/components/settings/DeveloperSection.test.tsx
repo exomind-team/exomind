@@ -7,8 +7,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import './setup-settings-mocks.tsx';
 import { getDeveloperModeEnabled } from '@/config/developer-mode';
+import { setApiAgentTabEnabled } from '@/config/api-agent-tab-enabled';
 import { setDevtoolsEnabled } from '@/config/devtools-mode';
 import { setCommandPaletteEnabled } from '@/config/command-palette-enabled';
+import { setMePageEnabled } from '@/config/me-page-enabled';
+import { setProposalInboxEnabled } from '@/config/proposal-inbox-enabled';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 
@@ -17,16 +20,13 @@ beforeEach(() => {
 });
 
 describe('SettingsPage - Developer Section (developerMode=true)', () => {
-  it('renders feature toggles row', () => {
+  it('renders inline feature toggles directly inside developer section（直接在开发者分组渲染功能开关）', () => {
     render(<SettingsPage />);
-    expect(screen.getByText('功能开关')).toBeInTheDocument();
-  });
-
-  it('opens feature toggles drawer on click', () => {
-    render(<SettingsPage />);
-    const row = screen.getByText('功能开关');
-    fireEvent.click(row);
-    expect(screen.getByText('Agent 页面')).toBeInTheDocument();
+    expect(screen.getByText('Me 页面')).toBeInTheDocument();
+    expect(screen.getByText('网络页面')).toBeInTheDocument();
+    expect(screen.getByText('API Agent Tab')).toBeInTheDocument();
+    expect(screen.getByText('提案箱（任务域）')).toBeInTheDocument();
+    expect(screen.getByText('桌面端适配')).toBeInTheDocument();
     expect(screen.getByText('命令面板')).toBeInTheDocument();
   });
 
@@ -48,13 +48,35 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
     expect(vi.mocked(syncDevtoolsWithSettings)).toHaveBeenCalled();
   });
 
-  it('updates command palette state inside feature toggles drawer', () => {
+  it('updates command palette state inline in developer section（在开发者分组内联更新命令面板开关）', () => {
     render(<SettingsPage />);
-    fireEvent.click(screen.getByText('功能开关'));
-
     const toggle = screen.getByTestId('feature-toggle-command-palette-switch');
     fireEvent.click(toggle);
 
     expect(vi.mocked(setCommandPaletteEnabled)).toHaveBeenCalledWith(true);
+  });
+
+  it('updates api agent tab state inline in developer section（在开发者分组内联更新 API Agent Tab 开关）', () => {
+    render(<SettingsPage />);
+    const toggle = screen.getByTestId('new-settings-api-agent-tab-switch');
+    fireEvent.click(toggle);
+
+    expect(vi.mocked(setApiAgentTabEnabled)).toHaveBeenCalledWith(true);
+  });
+
+  it('updates me page state inline in developer section（在开发者分组内联更新 Me 页面开关）', () => {
+    render(<SettingsPage />);
+    const toggle = screen.getByTestId('feature-toggle-me-page-switch');
+    fireEvent.click(toggle);
+
+    expect(vi.mocked(setMePageEnabled)).toHaveBeenCalledWith(true);
+  });
+
+  it('updates proposal inbox state inline（直接更新提案箱任务域开关）', () => {
+    render(<SettingsPage />);
+    const toggle = screen.getByTestId('feature-toggle-proposal-inbox-switch');
+    fireEvent.click(toggle);
+
+    expect(vi.mocked(setProposalInboxEnabled)).toHaveBeenCalledWith(false);
   });
 });

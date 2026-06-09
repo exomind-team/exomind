@@ -14,7 +14,7 @@ describe('environment mock-data sync issue-204（环境应在运行中同步 moc
     ExoMindEnvironment.resetForTests();
     const environmentBeforeToggle = ExoMindEnvironment.getInstance();
     expect(environmentBeforeToggle.agent.constructor.name).toBe('AgentWebAdapter');
-    expect(environmentBeforeToggle.task.constructor.name).toBe('TaskWebAdapter');
+    expect(environmentBeforeToggle.task.constructor.name).toBe('TaskRtAdapter');
 
     window.localStorage.setItem('exomind:useMockData', 'true');
 

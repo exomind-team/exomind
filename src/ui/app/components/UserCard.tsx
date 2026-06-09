@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { Sparkles, Users, LogOut, LogIn, UserPlus } from 'lucide-react';
+import { useState } from 'react';
+import { Users, LogOut, LogIn, UserPlus } from 'lucide-react';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { SwitchAccountSheet } from './SwitchAccountSheet';
 
@@ -7,14 +7,6 @@ export function UserCard() {
   const { isLoggedIn, currentUser, logout } = useSyncStore();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetMode, setSheetMode] = useState<'switch' | 'login' | 'register'>('login');
-  const [comingSoonVisible, setComingSoonVisible] = useState(false);
-  const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  function showComingSoon() {
-    if (comingSoonTimer.current) clearTimeout(comingSoonTimer.current);
-    setComingSoonVisible(true);
-    comingSoonTimer.current = setTimeout(() => setComingSoonVisible(false), 1500);
-  }
 
   function openSheet(mode: 'switch' | 'login' | 'register') {
     setSheetMode(mode);
@@ -53,10 +45,10 @@ export function UserCard() {
           {/* User Info */}
           <div className="min-w-0 flex-1">
             <div className="truncate text-xl font-bold text-white">
-              {isLoggedIn && currentUser ? currentUser : '未登录'}
+              {isLoggedIn && currentUser ? currentUser : '未打开档案'}
             </div>
             <div className="text-[13px] text-white/60">
-              {isLoggedIn ? '轻触头像更换' : '登录以启用多设备同步'}
+              {isLoggedIn ? '轻触查看或切换本地档案' : '打开本地档案后可绑定远端同步身份'}
             </div>
           </div>
         </div>
@@ -66,18 +58,11 @@ export function UserCard() {
           {isLoggedIn ? (
             <>
               <button
-                className="flex items-center gap-1.5 rounded-[10px] bg-white/[0.22] px-3 py-2"
-                onClick={showComingSoon}
-              >
-                <Sparkles className="h-[15px] w-[15px] text-[#FFE4B5]" />
-                <span className="text-[13px] font-medium text-[#FFE4B5]">激活</span>
-              </button>
-              <button
                 className="flex items-center gap-1.5 rounded-[10px] bg-white/20 px-3 py-2"
                 onClick={() => openSheet('switch')}
               >
                 <Users className="h-[15px] w-[15px] text-white/75" />
-                <span className="text-[13px] font-medium text-white/80">切换账户</span>
+                <span className="text-[13px] font-medium text-white/80">切换档案</span>
               </button>
               <button
                 className="flex items-center gap-1.5 rounded-[10px] bg-white/20 px-3 py-2"
@@ -94,14 +79,14 @@ export function UserCard() {
                 onClick={() => openSheet('login')}
               >
                 <LogIn className="h-[15px] w-[15px] text-white/75" />
-                <span className="text-[13px] font-medium text-white/80">登录</span>
+                <span className="text-[13px] font-medium text-white/80">打开档案</span>
               </button>
               <button
                 className="flex items-center gap-1.5 rounded-[10px] bg-white/20 px-3 py-2"
                 onClick={() => openSheet('register')}
               >
                 <UserPlus className="h-[15px] w-[15px] text-white/75" />
-                <span className="text-[13px] font-medium text-white/80">注册</span>
+                <span className="text-[13px] font-medium text-white/80">创建档案</span>
               </button>
             </>
           )}
@@ -113,14 +98,6 @@ export function UserCard() {
         onOpenChange={setSheetOpen}
         initialMode={sheetMode}
       />
-
-      {comingSoonVisible && (
-        <div className="fixed inset-x-0 bottom-28 z-50 flex justify-center">
-          <div className="rounded-full bg-[#1C1917] px-4 py-2 text-sm text-white shadow-lg dark:bg-[#FAFAF9] dark:text-[#1C1917]">
-            即将推出
-          </div>
-        </div>
-      )}
     </>
   );
 }

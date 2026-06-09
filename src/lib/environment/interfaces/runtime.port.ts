@@ -5,8 +5,21 @@ export interface StartRuntimeInput {
   port: number;
 }
 
+export interface RuntimeReachableAddress {
+  host: string;
+  port: number;
+  hostId?: string;
+}
+
+export interface RuntimeDialAddress {
+  host: string;
+  port: number;
+}
+
 export interface IRuntimePort {
   startRuntime(input: StartRuntimeInput): Promise<RuntimeServiceStatus>;
   stopRuntime(): Promise<RuntimeServiceStatus>;
   getStatus(): Promise<RuntimeServiceStatus>;
+  getReachableAddress(remoteHost: string, remotePort: number): Promise<RuntimeReachableAddress>;
+  getPeerDialAddress(remoteHost: string, remotePort: number): Promise<RuntimeDialAddress>;
 }

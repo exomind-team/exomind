@@ -1,0 +1,987 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Keycap from "../components/Keycap.astro";
+import { getLocalizedPath } from "../i18n";
+import { ArrowLeft, ArrowRight, ChevronDown, CornerUpLeft } from "lucide-static";
+
+const docsPath = getLocalizedPath("/docs", "zh");
+const taskDocsPath = getLocalizedPath("/docs/tasks", "zh");
+const voiceInputDocsPath = getLocalizedPath("/docs/voice-input", "zh");
+const timeBlocksDocsPath = getLocalizedPath("/docs/time-blocks", "zh");
+const devicePairingDocsPath = getLocalizedPath("/docs/device-pairing", "zh");
+const changelogPath = getLocalizedPath("/changelog", "zh");
+const secondaryBackShortcutKeys = ["W", "E", "R", "T", "Y", "U", "I", "O"] as const;
+
+const scenarioDefinitions = [
+  {
+    id: "capture",
+    entry: true,
+    badge: "记点什么",
+    title: "先记下一件事",
+    summary: "先把线索留下来，再决定要不要继续整理。",
+    intro: "还没想清楚也没关系，先记一条，让这件事先从脑子里落到时间线上。",
+    returnActionLabel: "回去先记下一件事",
+    defaultBackTarget: "page-top",
+    defaultBackLabel: "回到入口重新选",
+    steps: [
+      "在输入框里写一句你现在正在做的事。",
+      "不用分类，也不用整理。碎片也可以。",
+      "写完就发送，让页面不再是空白。",
+    ],
+    done: "你已经把这件事从脑子里挪进了时间线，后面可以继续整理，也可以直接开始行动。",
+    externalLinks: [],
+  },
+  {
+    id: "voice",
+    badge: "不想打字",
+    title: "直接说出来",
+    summary: "先把念头留下来。",
+    intro: "来不及打字，就直接说。",
+    returnActionLabel: "回去直接说出来",
+    defaultBackTarget: "capture",
+    defaultBackLabel: "回去先记下一件事",
+    steps: [
+      "点麦克风开始录音，再点一次停止。",
+      "等识别结果进到输入框。",
+      "确认没问题就直接发送。",
+    ],
+    done: "你已经完成一次“想到就留住”的闭环。",
+    externalLinks: [
+      { label: "直接看语音输入说明", href: voiceInputDocsPath, direction: "right" },
+    ],
+  },
+  {
+    id: "timeblock",
+    entry: true,
+    badge: "聚焦行动",
+    title: "先开一个时间块",
+    summary: "如果你现在就想开始做，就先开一个时间块。",
+    intro: "时间块不是结果页，而是当前动作真正开始发生的地方。",
+    returnActionLabel: "回去先开一个时间块",
+    defaultBackTarget: "page-top",
+    defaultBackLabel: "回到入口重新选",
+    steps: [
+      "给时间块写一个短标题。",
+      "开始后先去做事，不用盯着页面。",
+      "结束时补一句反馈。",
+    ],
+    done: "你已经把当前这一小步接进了真实的执行时段，后面可以回看、记记录，或把它收进任务结构里。",
+    externalLinks: [],
+  },
+  {
+    id: "task",
+    entry: true,
+    badge: "规划事情",
+    title: "先建一个任务",
+    summary: "已经知道要推进什么，就直接建任务。",
+    intro: "任务系统在这里是零依赖入口。你不需要先写记录，也不需要先开时间块。",
+    returnActionLabel: "回去先建一个任务",
+    defaultBackTarget: "page-top",
+    defaultBackLabel: "回到入口重新选",
+    steps: [
+      "先建一个清楚的当前任务，标题写成你现在真的要推进的动作。",
+      "补一句下一步、描述或关系，让任务不只是一个空名字。",
+      "准备好了，就让时间块承接这一小步，开始真实执行。",
+    ],
+    done: "当你看到任务已经创建，并能继续补充描述、关系或状态时，就算完成。",
+    externalLinks: [
+      { label: "继续补充任务关系", href: taskDocsPath, direction: "right" },
+    ],
+  },
+  {
+    id: "pairing",
+    badge: "接入设备",
+    title: "把另一台设备接进来",
+    summary: "先配对，再验证。",
+    intro: "要换设备继续用，就先配对。",
+    returnActionLabel: "回去先接入另一台设备",
+    defaultBackTarget: "capture",
+    defaultBackLabel: "回去先记下一件事",
+    steps: [
+      "先确认两台设备在同一个 Wi-Fi 或局域网里。",
+      "进入“网络 -> 设备 -> 设备配对”。",
+      "完成 PIN 后，再做一次互通验证。",
+    ],
+    done: "你会看到设备完成配对，并进入已验证互通状态。",
+    externalLinks: [
+      { label: "直接看设备配对说明", href: devicePairingDocsPath, direction: "right" },
+    ],
+  },
+  {
+    id: "review",
+    badge: "回看一下",
+    title: "看看刚才留下了什么",
+    summary: "回看最近的动作与记录。",
+    intro: "刚做完，就回看一次。",
+    returnActionLabel: "回去先看看刚才留下了什么",
+    defaultBackTarget: "timeblock",
+    defaultBackLabel: "回去先开一个时间块",
+    steps: [
+      "打开时间线或最近记录区域。",
+      "找到你刚才新建的记录或时间块。",
+      "确认它已经保存，并且还能继续追加。",
+    ],
+    done: "你已经完成了第一次“记录 -> 回看 -> 再行动”的闭环。",
+    externalLinks: [
+      { label: "直接看时间块说明", href: timeBlocksDocsPath, direction: "right" },
+    ],
+  },
+] as const;
+
+const scenarioLinks = [
+  {
+    from: "task",
+    to: "timeblock",
+    label: "立刻开始一个时间块",
+    reverseLabel: "回去先建一个任务",
+  },
+  {
+    from: "timeblock",
+    to: "review",
+    label: "做完后回看一下",
+    reverseLabel: "回去先开一个时间块",
+  },
+  {
+    from: "timeblock",
+    to: "capture",
+    label: "结束后记一条事件",
+    reverseLabel: "回去先开一个时间块",
+  },
+  {
+    from: "timeblock",
+    to: "task",
+    label: "把这段动作收敛成任务",
+    reverseLabel: "回去先开一个时间块",
+  },
+  {
+    from: "capture",
+    to: "voice",
+    label: "直接说出来",
+    reverseLabel: "回去先记下一件事",
+  },
+  {
+    from: "capture",
+    to: "task",
+    label: "把刚才这件事收敛成任务",
+    reverseLabel: "回去先记下一件事",
+  },
+  {
+    from: "capture",
+    to: "pairing",
+    label: "如果需要换设备继续，就去接入设备",
+    reverseLabel: "回去先记下一件事",
+  },
+] as const;
+
+type ScenarioId = (typeof scenarioDefinitions)[number]["id"];
+type ScenarioLink = (typeof scenarioLinks)[number];
+
+const outgoingLinksByScenario = Object.fromEntries(
+  scenarioDefinitions.map((scenario) => [scenario.id, [] as Array<ScenarioLink>]),
+) as Record<ScenarioId, Array<ScenarioLink>>;
+
+const incomingLinksByScenario = Object.fromEntries(
+  scenarioDefinitions.map(
+    (scenario) =>
+      [scenario.id, [] as Array<{ from: ScenarioId; label: string }>],
+  ),
+) as Record<ScenarioId, Array<{ from: ScenarioId; label: string }>>;
+
+for (const link of scenarioLinks) {
+  outgoingLinksByScenario[link.from].push(link);
+  incomingLinksByScenario[link.to].push({
+    from: link.from,
+    label: link.reverseLabel,
+  });
+}
+
+const scenarios = scenarioDefinitions.map((scenario) => {
+  const nextLinks = [
+    ...outgoingLinksByScenario[scenario.id].map((link) => ({
+      label: link.label,
+      href: `#${link.to}`,
+      direction: "right" as const,
+    })),
+    ...scenario.externalLinks,
+  ].map((link, index) => ({
+    ...link,
+    shortcutKey: index === 0 ? "ArrowRight" : undefined,
+  }));
+
+  const backLinks = incomingLinksByScenario[scenario.id].filter(
+    (link) => `#${link.from}` !== `#${scenario.defaultBackTarget}`,
+  ).map((link) => ({
+    href: `#${link.from}`,
+    label: link.label,
+  }));
+
+  return {
+    ...scenario,
+    nextLinks,
+    backLinks,
+  };
+});
+
+const rootScenarios = scenarios.filter((scenario) => scenario.entry);
+
+const faqs = [
+  {
+    question: "如果我完全不知道该点哪个入口？",
+    answer:
+      "拿不准时，先选“先记下一件事”。如果你已经准备马上开始，就选“先开一个时间块”；如果你已经知道要推进什么，就直接选“先建一个任务”。",
+  },
+  {
+    question: "这个页面能直接用键盘跳转吗？",
+    answer:
+      "可以。按 0 会回到页首。其余时候更适合直接点页面里的入口。",
+  },
+  {
+    question: "没有网的时候还能用吗？",
+    answer:
+      "可以。写记录、看历史、本地数据都不该因为断网停下来。通常需要联网的是语音识别、某些在线能力或跨设备连接。",
+  },
+  {
+    question: "看不到待配对设备怎么办？",
+    answer:
+      "先确认两台设备在同一个 Wi-Fi 或局域网里，再到两边的设备页刷新一次。还看不到时，退出再进入设备页，或者重试配对。",
+  },
+  {
+    question: "麦克风权限被拒绝怎么办？",
+    answer:
+      "先去系统或浏览器权限里把麦克风打开，再回到页面刷新重试。先把权限打通，再判断是不是识别服务问题。",
+  },
+] as const;
+
+const iconSvg = (svg: string, className: string) =>
+  svg
+    .replace(/class="([^"]+)"/, `class="$1 ${className}"`)
+    .replace("<svg", '<svg aria-hidden="true"');
+---
+
+<BaseLayout
+  title="起步"
+  description="刚下载并打开外心时，从这里决定是先记一条、开一个时间块，还是直接建一个任务。"
+>
+  <div id="page-top" data-default-entry={rootScenarios[0]?.id ?? "capture"}></div>
+
+  <section data-anchor-stop="page-top" class="relative overflow-hidden pt-32 pb-14">
+    <div class="section-container relative z-10">
+      <div class="mx-auto max-w-5xl">
+        <p class="text-xs font-semibold uppercase tracking-[0.28em] text-brand/80">
+          Getting Started / 起步
+        </p>
+        <h1 class="heading-display mt-5 max-w-4xl text-4xl leading-tight text-stone-900 sm:text-5xl lg:text-6xl dark:text-stone-50">
+          先选你现在
+          <br class="hidden sm:block" />
+          最接近的一步
+        </h1>
+        <p class="mt-6 max-w-3xl text-lg leading-relaxed text-stone-500 sm:text-xl">
+          先记一条、马上开一个时间块，或者直接建任务。页面上的顺序是事件、时间块、任务；
+          但卡片之间会按动作依赖互相跳转。
+        </p>
+
+        <div class="mt-10 grid max-w-5xl gap-4 md:grid-cols-3">
+          {rootScenarios.map((scenario, index) => (
+            <a
+              href={`#${scenario.id}`}
+              data-jump-card={scenario.id}
+              data-root-shortcut={String(index + 1)}
+              class="group block w-full rounded-3xl border border-stone-200 bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-brand/30 dark:border-stone-800 dark:bg-stone-900"
+              aria-label={`${scenario.title}，入口 ${index + 1}`}
+            >
+              <div class="flex items-center justify-between gap-3">
+                <span class="rounded-full bg-brand/10 px-3 py-1 text-xs font-medium text-brand">
+                  {scenario.badge}
+                </span>
+                <span
+                  data-keyhint-root
+                  class="translate-y-0 opacity-100 transition-all duration-200"
+                >
+                  <Keycap value={String(index + 1)} ariaLabel={`入口 ${index + 1}`} />
+                </span>
+              </div>
+              <h2 class="mt-4 text-lg font-semibold leading-snug text-stone-900 dark:text-stone-50">
+                {scenario.title}
+              </h2>
+              <p class="mt-3 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+                {scenario.summary}
+              </p>
+              <span class="mt-6 inline-flex items-center gap-2 text-sm font-medium text-brand">
+                <span>进入</span>
+                <Fragment
+                  set:html={iconSvg(ArrowRight, "size-4 transition-transform duration-300 group-hover:translate-x-1")}
+                />
+              </span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+    <div class="absolute inset-0 -z-10">
+      <div class="absolute left-1/2 top-0 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/10 blur-3xl"></div>
+    </div>
+  </section>
+
+  <section class="pb-20">
+    <div class="section-container">
+      <div class="space-y-8">
+        {scenarios.map((scenario) => (
+          <article
+            id={scenario.id}
+            data-section-panel={scenario.id}
+            data-anchor-stop={scenario.id}
+            data-return-action-label={scenario.returnActionLabel}
+            data-default-back-target={scenario.defaultBackTarget}
+            data-default-back-label={scenario.defaultBackLabel}
+            class="scroll-mt-24 rounded-[32px] border border-stone-200 bg-white p-8 shadow-sm transition-[transform,box-shadow,border-color,background-color] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform dark:border-stone-800 dark:bg-stone-900 md:p-10"
+          >
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div class="max-w-3xl">
+                <div class="flex items-center gap-3">
+                  <span class="rounded-full bg-brand/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-brand">
+                    {scenario.badge}
+                  </span>
+                </div>
+                <h2 class="heading-display mt-4 text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">
+                  {scenario.title}
+                </h2>
+                <p class="mt-4 text-base leading-relaxed text-stone-500">
+                  {scenario.intro}
+                </p>
+              </div>
+
+              <a
+                href="#page-top"
+                aria-label="回到入口，快捷键 0"
+                class="inline-flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-4 py-2 text-sm font-medium text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:border-stone-800 dark:bg-stone-950 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-50"
+              >
+                <Fragment set:html={iconSvg(CornerUpLeft, "size-4")} />
+                <span
+                  data-keyhint-panel={scenario.id}
+                  aria-hidden="true"
+                  class="translate-y-1 opacity-0 transition-all duration-200"
+                >
+                  <Keycap value="0" class="rounded-md bg-white px-2 py-0.5 text-stone-500 dark:bg-stone-900" />
+                </span>
+                <span>回到入口</span>
+              </a>
+            </div>
+
+            <div class="mt-8 grid gap-4 lg:grid-cols-10">
+              <div class="space-y-4 lg:col-span-6">
+                <div class="rounded-3xl border border-stone-200 bg-stone-50/80 p-6 dark:border-stone-800 dark:bg-stone-950/60">
+                  <h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-stone-500 dark:text-stone-400">
+                    现在先做
+                  </h3>
+                  <ul class="mt-4 space-y-3 text-sm leading-relaxed text-stone-600 dark:text-stone-300">
+                    {scenario.steps.map((step) => (
+                      <li class="flex gap-3">
+                        <Fragment set:html={iconSvg(ArrowRight, "mt-0.5 size-4 shrink-0 text-brand")} />
+                        <span>{step}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div class="rounded-3xl border border-brand/20 bg-brand/5 p-6 dark:border-brand/30 dark:bg-brand/10">
+                  <h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-brand">
+                    做到这里就够了
+                  </h3>
+                  <p class="mt-4 text-base leading-relaxed text-stone-700 dark:text-stone-200">
+                    {scenario.done}
+                  </p>
+                </div>
+              </div>
+
+              <div class="rounded-3xl border border-stone-200 p-6 dark:border-stone-800 lg:col-span-4">
+                <h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-stone-500 dark:text-stone-400">
+                  接下来去哪里
+                </h3>
+                <div class="mt-4 space-y-3">
+                  {scenario.nextLinks.map((link, index) => (
+                    <a
+                      href={link.href}
+                      data-link-shortcut={link.shortcutKey ?? undefined}
+                      data-link-number-shortcut={scenario.nextLinks.length > 1 ? String(index + 1) : undefined}
+                      aria-label={link.label}
+                      class:list={[
+                        "flex items-center justify-between gap-4 rounded-2xl px-4 py-3 text-sm font-medium transition-colors",
+                        index === 0
+                          ? "bg-stone-900 text-white hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-stone-200"
+                          : "border border-stone-200 bg-transparent text-stone-700 hover:bg-stone-50 dark:border-stone-800 dark:text-stone-300 dark:hover:bg-stone-950/60",
+                      ]}
+                    >
+                      <span class="min-w-0">
+                        <span>{link.label}</span>
+                      </span>
+                      <span class="ml-auto flex shrink-0 items-center gap-2">
+                        {scenario.nextLinks.length > 1 ? (
+                          <span
+                            data-keyhint-panel={scenario.id}
+                            aria-hidden="true"
+                            class="translate-y-1 opacity-0 transition-all duration-200"
+                          >
+                            <Keycap
+                              value={String(index + 1)}
+                              tone={index === 0 ? "inverse" : "default"}
+                              ariaLabel={`分支 ${index + 1}`}
+                              class={index === 0 ? "dark:border-stone-400/30 dark:bg-stone-900 dark:text-stone-100" : ""}
+                            />
+                          </span>
+                        ) : null}
+                        {link.direction === "right" ? (
+                          <Fragment set:html={iconSvg(ArrowRight, "size-4 shrink-0")} />
+                        ) : null}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+                <div class="mt-4 space-y-3">
+                  <a
+                    href={`#${scenario.defaultBackTarget}`}
+                    data-link-shortcut="ArrowLeft"
+                    data-link-letter-shortcut={scenario.backLinks.length ? "Q" : undefined}
+                    data-history-back
+                    data-default-back-target={scenario.defaultBackTarget}
+                    data-default-back-label={scenario.defaultBackLabel}
+                    class="flex items-center justify-between gap-4 rounded-2xl bg-stone-700 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-stone-600 dark:bg-stone-300 dark:text-stone-950 dark:hover:bg-stone-200"
+                  >
+                    <span class="flex shrink-0 items-center gap-3">
+                      <Fragment set:html={iconSvg(ArrowLeft, "size-4 shrink-0")} />
+                      {scenario.backLinks.length ? (
+                        <span
+                          data-keyhint-panel={scenario.id}
+                          aria-hidden="true"
+                          class="translate-y-1 opacity-0 transition-all duration-200"
+                        >
+                          <Keycap
+                            value="Q"
+                            tone="inverse"
+                            ariaLabel="主返回 Q"
+                            class="dark:border-stone-700/60 dark:bg-stone-900/80 dark:text-stone-100"
+                          />
+                        </span>
+                      ) : null}
+                    </span>
+                    <span data-history-back-label class="min-w-0 text-right">
+                      {scenario.defaultBackLabel}
+                    </span>
+                  </a>
+                  {scenario.backLinks.map((link, index) => (
+                    <a
+                      href={link.href}
+                      data-link-letter-shortcut={secondaryBackShortcutKeys[index]}
+                      aria-label={link.label}
+                      class="flex items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-transparent px-4 py-3 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 dark:border-stone-800 dark:text-stone-300 dark:hover:bg-stone-950/60"
+                    >
+                      <span class="flex shrink-0 items-center gap-3">
+                        <Fragment set:html={iconSvg(ArrowLeft, "size-4 shrink-0")} />
+                        <span class="shrink-0">
+                          <span
+                            data-keyhint-panel={scenario.id}
+                            aria-hidden="true"
+                            class="translate-y-1 opacity-0 transition-all duration-200"
+                          >
+                            <Keycap
+                              value={secondaryBackShortcutKeys[index]}
+                              ariaLabel={`返回分支 ${secondaryBackShortcutKeys[index]}`}
+                            />
+                          </span>
+                        </span>
+                      </span>
+                      <span class="min-w-0 text-right">{link.label}</span>
+                    </span>
+                  </a>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section id="faq" class="bg-stone-100/60 py-20 dark:bg-stone-900/50">
+    <div class="section-container">
+      <div class="mx-auto max-w-3xl text-center">
+        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">
+          FAQ / 常见问题
+        </p>
+        <h2 class="heading-display mt-4 text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">
+          如果你已经开始用了，却在某一步卡住了
+        </h2>
+        <p class="mt-4 text-base leading-relaxed text-stone-500">
+          这里只回答最容易阻止你继续用下去的问题。
+        </p>
+      </div>
+
+      <div class="mx-auto mt-12 max-w-4xl space-y-4">
+        {faqs.map((item) => (
+          <details class="group rounded-3xl border border-stone-200 bg-white p-6 shadow-sm transition-colors open:border-brand/30 dark:border-stone-800 dark:bg-stone-900 dark:open:border-brand/30">
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-6 text-left text-lg font-semibold text-stone-900 marker:hidden dark:text-stone-50">
+              <span>{item.question}</span>
+              <Fragment
+                set:html={iconSvg(ChevronDown, "size-5 shrink-0 text-brand transition-transform duration-300 group-open:rotate-180")}
+              />
+            </summary>
+            <p class="mt-4 pr-8 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+              {item.answer}
+            </p>
+          </details>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="py-20">
+    <div class="section-container">
+      <div class="mx-auto max-w-4xl rounded-[32px] border border-stone-200 bg-white p-8 shadow-sm dark:border-stone-800 dark:bg-stone-900 md:p-10">
+        <div class="grid gap-8 md:grid-cols-[1.2fr_1fr] md:items-center">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-brand/80">
+              Next / 用完这页之后
+            </p>
+            <h2 class="heading-display mt-4 text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">
+              如果你已经完成第一轮起步
+            </h2>
+            <p class="mt-4 text-base leading-relaxed text-stone-500">
+              下一步通常是回到文档导航，继续看记录、时间块或任务系统的说明；如果你还想确认版本边界，再去看版本日志。
+            </p>
+          </div>
+
+          <div class="space-y-3">
+            <a href={docsPath} class="btn-primary flex w-full items-center justify-center px-6 py-3 text-base">
+              进入文档导航
+            </a>
+            <a href={changelogPath} class="btn-secondary flex w-full items-center justify-center px-6 py-3 text-base">
+              看版本日志
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    @media (prefers-reduced-motion: no-preference) {
+      [data-anchor-stop] {
+        scroll-margin-top: 6rem;
+      }
+    }
+  </style>
+
+  <script>
+    const pageTop = document.getElementById('page-top');
+    const defaultEntryId = pageTop?.getAttribute('data-default-entry') ?? 'capture';
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const anchorStops = Array.from(document.querySelectorAll('[data-anchor-stop]'))
+      .map((element) => {
+        const anchorId = element.getAttribute('data-anchor-stop');
+        return anchorId ? { anchorId, element } : null;
+      })
+      .filter(Boolean);
+    const headerOffset = 96;
+    const rootOffset = 24;
+    const programmaticScrollLockMs = prefersReducedMotion.matches ? 160 : 540;
+
+    const shortcutTargets = {
+      '0': 'page-top',
+    };
+
+    const jumpCards = Array.from(document.querySelectorAll('[data-jump-card]'));
+    const rootCards = Array.from(document.querySelectorAll('[data-root-shortcut]'));
+    const rootKeyHints = Array.from(document.querySelectorAll('[data-keyhint-root]'));
+    const panelKeyHints = Array.from(document.querySelectorAll('[data-keyhint-panel]'));
+    const panels = Array.from(document.querySelectorAll('[data-section-panel]'));
+    const historyBackLinks = Array.from(document.querySelectorAll('[data-history-back]'));
+    const panelIds = new Set(panels.map((panel) => panel.getAttribute('data-section-panel')).filter(Boolean));
+    const navigationHistory = ['page-top'];
+    let activePanelId = null;
+    let programmaticScrollTimer = null;
+    let isProgrammaticScroll = false;
+
+    const setActiveCard = (targetId) => {
+      for (const card of jumpCards) {
+        const isActive = card.getAttribute('data-jump-card') === targetId;
+        card.classList.toggle('border-brand', isActive);
+        card.classList.toggle('bg-brand/5', isActive);
+        card.classList.toggle('dark:bg-brand/10', isActive);
+      }
+    };
+
+    const getDocumentTop = (element) => window.scrollY + element.getBoundingClientRect().top;
+
+    const getAnchorStop = (targetId) =>
+      anchorStops.find((anchorStop) => anchorStop.anchorId === targetId) ?? null;
+
+    const getPanelById = (targetId) =>
+      panels.find((panel) => panel.getAttribute('data-section-panel') === targetId) ?? null;
+
+    const getScrollTopForTarget = (targetId) => {
+      const anchorStop = getAnchorStop(targetId);
+      if (!anchorStop) return null;
+
+      const offset = targetId === 'page-top' ? rootOffset : headerOffset;
+      return Math.max(0, getDocumentTop(anchorStop.element) - offset);
+    };
+
+    const syncHistoryHash = (targetId) => {
+      const nextHash = targetId === 'page-top' ? '#page-top' : `#${targetId}`;
+      if (window.location.hash === nextHash) return;
+      history.replaceState(null, '', nextHash);
+    };
+
+    const lockProgrammaticScroll = (duration = programmaticScrollLockMs) => {
+      isProgrammaticScroll = true;
+      window.clearTimeout(programmaticScrollTimer);
+      programmaticScrollTimer = window.setTimeout(() => {
+        isProgrammaticScroll = false;
+      }, duration);
+    };
+
+    const setKeyHintVisible = (hint, isVisible) => {
+      hint.classList.toggle('opacity-0', !isVisible);
+      hint.classList.toggle('translate-y-1', !isVisible);
+      hint.classList.toggle('pointer-events-none', !isVisible);
+      hint.classList.toggle('opacity-100', isVisible);
+      hint.classList.toggle('translate-y-0', isVisible);
+      hint.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+    };
+
+    const syncKeyHintVisibility = () => {
+      const showRootHints = !activePanelId;
+
+      for (const hint of rootKeyHints) {
+        setKeyHintVisible(hint, showRootHints);
+      }
+
+      for (const hint of panelKeyHints) {
+        const panelId = hint.getAttribute('data-keyhint-panel');
+        setKeyHintVisible(hint, panelId === activePanelId);
+      }
+    };
+
+    const getReturnActionLabel = (targetId) => {
+      if (targetId === 'page-top') return '回到入口重新选';
+
+      const panel = getPanelById(targetId);
+      return panel?.getAttribute('data-return-action-label') ?? '回到上一步';
+    };
+
+    const getDefaultBackConfig = (panelId) => {
+      const panel = getPanelById(panelId);
+      return {
+        targetId: panel?.getAttribute('data-default-back-target') ?? 'page-top',
+        label: panel?.getAttribute('data-default-back-label') ?? '回到上一步',
+      };
+    };
+
+    const getPreviousHistoryTarget = () => {
+      for (let index = navigationHistory.length - 2; index >= 0; index -= 1) {
+        const targetId = navigationHistory[index];
+        if (targetId && targetId !== activePanelId) {
+          return targetId;
+        }
+      }
+
+      return null;
+    };
+
+    const syncHistoryBackLinks = () => {
+      for (const link of historyBackLinks) {
+        const panel = link.closest('[data-section-panel]');
+        if (!(panel instanceof HTMLElement)) continue;
+
+        const panelId = panel.getAttribute('data-section-panel');
+        if (!panelId) continue;
+
+        const defaultBack = getDefaultBackConfig(panelId);
+        const previousTargetId = panelId === activePanelId ? getPreviousHistoryTarget() : null;
+        const targetId = previousTargetId ?? defaultBack.targetId;
+        const label = previousTargetId ? getReturnActionLabel(previousTargetId) : defaultBack.label;
+        const labelNode = link.querySelector('[data-history-back-label]');
+
+        link.setAttribute('href', `#${targetId}`);
+        link.setAttribute('aria-label', label);
+        if (labelNode) {
+          labelNode.textContent = label;
+        }
+      }
+    };
+
+    const pushHistoryTarget = (targetId) => {
+      if (!targetId) return;
+
+      const lastTargetId = navigationHistory[navigationHistory.length - 1];
+      if (lastTargetId === targetId) return;
+
+      navigationHistory.push(targetId);
+      if (navigationHistory.length > 24) {
+        navigationHistory.splice(1, navigationHistory.length - 24);
+      }
+    };
+
+    const isWithinAnchorFlow = () => {
+      const firstAnchor = anchorStops[0];
+      const lastAnchor = anchorStops[anchorStops.length - 1];
+      if (!firstAnchor || !lastAnchor) return false;
+
+      const focusY = window.scrollY + Math.min(window.innerHeight * 0.28, 240);
+      const flowStart = Math.max(0, getDocumentTop(firstAnchor.element) - rootOffset - 32);
+      const flowEnd =
+        getDocumentTop(lastAnchor.element) +
+        lastAnchor.element.clientHeight -
+        Math.min(window.innerHeight * 0.35, 320);
+
+      return focusY >= flowStart && focusY <= flowEnd;
+    };
+
+    const findClosestAnchorId = () => {
+      const focusY = window.scrollY + headerOffset + Math.min(window.innerHeight * 0.18, 120);
+      let closestAnchorId = null;
+      let closestDistance = Number.POSITIVE_INFINITY;
+
+      for (const anchorStop of anchorStops) {
+        const distance = Math.abs(getDocumentTop(anchorStop.element) - focusY);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestAnchorId = anchorStop.anchorId;
+        }
+      }
+
+      return closestAnchorId;
+    };
+
+    const syncFocusedAnchorFromScroll = () => {
+      if (isWithinAnchorFlow()) {
+        const closestAnchorId = findClosestAnchorId();
+        if (!closestAnchorId) return;
+        setActivePanel(closestAnchorId);
+        syncHistoryHash(closestAnchorId);
+        return;
+      }
+
+      const firstPanelTop = getScrollTopForTarget(defaultEntryId) ?? Number.POSITIVE_INFINITY;
+      if (window.scrollY < firstPanelTop - 48) {
+        setActivePanel('page-top');
+        syncHistoryHash('page-top');
+        return;
+      }
+
+      setActivePanel(null);
+    };
+
+    const setActivePanel = (targetId) => {
+      activePanelId = targetId && panelIds.has(targetId) ? targetId : null;
+      setActiveCard(targetId);
+      syncKeyHintVisibility();
+      syncHistoryBackLinks();
+
+      for (const panel of panels) {
+        const panelId = panel.getAttribute('data-section-panel');
+        const isActive = panelId === activePanelId;
+        panel.classList.toggle('-translate-y-1', isActive);
+        panel.classList.toggle('border-brand/30', isActive);
+        panel.classList.toggle('shadow-[0_24px_60px_-28px_rgba(28,25,23,0.28)]', isActive);
+      }
+    };
+
+    const hasAnchoredPanel = () => {
+      const hash = window.location.hash.replace('#', '');
+      return panelIds.has(hash);
+    };
+
+    const navigateBackInHistory = () => {
+      if (!activePanelId) return false;
+
+      const previousTargetId = getPreviousHistoryTarget();
+      if (previousTargetId) {
+        navigationHistory.pop();
+        return navigateToTarget(previousTargetId, { trackHistory: false });
+      }
+
+      const defaultBack = getDefaultBackConfig(activePanelId);
+      return navigateToTarget(defaultBack.targetId, { trackHistory: false });
+    };
+
+    const navigateToTarget = (targetId, options = {}) => {
+      const nextTop = getScrollTopForTarget(targetId);
+      if (nextTop === null) return false;
+
+      const behavior = options.behavior ?? (prefersReducedMotion.matches ? 'auto' : 'smooth');
+      if (options.updateHash !== false) {
+        syncHistoryHash(targetId);
+      }
+
+      if (options.trackHistory !== false) {
+        pushHistoryTarget(targetId);
+      }
+
+      if (Math.abs(window.scrollY - nextTop) > 6) {
+        lockProgrammaticScroll(behavior === 'smooth' ? programmaticScrollLockMs : 120);
+        window.scrollTo({ top: nextTop, behavior });
+      }
+
+      setActivePanel(targetId);
+      return true;
+    };
+
+    const isTypingTarget = (target) => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tagName = target.tagName;
+      return target.isContentEditable || tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
+    };
+
+    const triggerPanelShortcut = (shortcutKey) => {
+      if (!activePanelId) return false;
+
+      const targetLink = document.querySelector(
+        `[data-section-panel="${activePanelId}"] [data-link-shortcut="${shortcutKey}"]`,
+      );
+      if (!(targetLink instanceof HTMLAnchorElement)) return false;
+
+      targetLink.click();
+      return true;
+    };
+
+    const triggerPanelNumberShortcut = (shortcutKey) => {
+      if (!activePanelId) return false;
+
+      const targetLink = document.querySelector(
+        `[data-section-panel="${activePanelId}"] [data-link-number-shortcut="${shortcutKey}"]`,
+      );
+      if (!(targetLink instanceof HTMLAnchorElement)) return false;
+
+      targetLink.click();
+      return true;
+    };
+
+    const triggerPanelLetterShortcut = (shortcutKey) => {
+      if (!activePanelId) return false;
+
+      const targetLink = document.querySelector(
+        `[data-section-panel="${activePanelId}"] [data-link-letter-shortcut="${shortcutKey}"]`,
+      );
+      if (!(targetLink instanceof HTMLAnchorElement)) return false;
+
+      targetLink.click();
+      return true;
+    };
+
+    const triggerRootShortcut = (shortcutKey) => {
+      const targetLink = rootCards.find((card) => card.getAttribute('data-root-shortcut') === shortcutKey);
+      if (!(targetLink instanceof HTMLAnchorElement)) return false;
+
+      targetLink.click();
+      return true;
+    };
+
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+
+      const anchor = target.closest('a[href^="#"]');
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+
+      const href = anchor.getAttribute('href');
+      if (!href || href === '#') return;
+
+      const targetId = href.slice(1);
+      if (!document.getElementById(targetId)) return;
+
+      event.preventDefault();
+      navigateToTarget(targetId);
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (isTypingTarget(event.target)) return;
+
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        if (event.key === 'ArrowLeft') {
+          if (navigateBackInHistory()) {
+            event.preventDefault();
+          }
+          return;
+        }
+
+        if (event.key === 'ArrowRight' && !hasAnchoredPanel()) {
+          if (navigateToTarget(defaultEntryId)) {
+            event.preventDefault();
+          }
+          return;
+        }
+
+        if (triggerPanelShortcut(event.key)) {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      if (/^[1-9]$/.test(event.key)) {
+        if (!hasAnchoredPanel() && triggerRootShortcut(event.key)) {
+          event.preventDefault();
+          return;
+        }
+
+        if (triggerPanelNumberShortcut(event.key)) {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      if (/^[qwertyuiop]$/i.test(event.key)) {
+        if (triggerPanelLetterShortcut(event.key.toUpperCase())) {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      const targetId = shortcutTargets[event.key];
+      if (!targetId) return;
+
+      event.preventDefault();
+      navigateToTarget(targetId);
+    });
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (!visible) return;
+        const panelId = visible.target.getAttribute('data-section-panel');
+        if (panelId) setActivePanel(panelId);
+      },
+      {
+        rootMargin: '-20% 0px -55% 0px',
+        threshold: [0.2, 0.4, 0.6],
+      },
+    );
+
+    for (const panel of panels) {
+      observer.observe(panel);
+    }
+
+    window.addEventListener(
+      'scroll',
+      () => {
+        if (isProgrammaticScroll) return;
+        syncFocusedAnchorFromScroll();
+      },
+      { passive: true },
+    );
+
+    window.addEventListener('resize', () => {
+      syncFocusedAnchorFromScroll();
+    });
+
+    const currentHash = window.location.hash.replace('#', '');
+    if (currentHash) {
+      navigateToTarget(currentHash, { behavior: 'auto', trackHistory: false });
+    } else {
+      syncFocusedAnchorFromScroll();
+    }
+  </script>
+</BaseLayout>

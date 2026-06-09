@@ -2,8 +2,76 @@ import { AlarmClock, ArrowLeft, Clock3, MoreHorizontal, TriangleAlert } from 'lu
 import { useEffect, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentDetailData } from '@/lib/types/agent-hub';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+
+function ActorDetailHeader({ title }: { title: string }) {
+  return (
+    <header data-testid="actor-detail-header" className="mb-3 flex items-center justify-between border-b border-border-card pb-3">
+      <button
+        type="button"
+        data-testid="actor-detail-back-button"
+        onClick={() => window.history.back()}
+        className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        aria-label="返回（Back）"
+      >
+        <ArrowLeft size={16} />
+      </button>
+      <h1 className="text-[17px] font-bold text-foreground">{title}</h1>
+      <button
+        type="button"
+        className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        aria-label="更多（More）"
+      >
+        <MoreHorizontal size={16} />
+      </button>
+    </header>
+  );
+}
+
+function ActorDetailLoadingState({ isDesktop }: { isDesktop: boolean }) {
+  return (
+    <section data-testid="actor-detail-loading" aria-live="polite" className="space-y-4">
+      <p className="text-sm text-muted-foreground">Actor 详情加载中...</p>
+
+      <section className="rounded-[18px] border border-border-card bg-card p-4 animate-pulse">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-[#78716C20]" aria-hidden="true" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-4 w-28 rounded-full bg-muted" aria-hidden="true" />
+            <div className="h-3 w-16 rounded-full bg-muted" aria-hidden="true" />
+          </div>
+        </div>
+        <div className="mt-3 h-4 w-full rounded-full bg-muted" aria-hidden="true" />
+        <div className="mt-2 h-4 w-3/4 rounded-full bg-muted" aria-hidden="true" />
+      </section>
+
+      {Array.from({ length: 2 }).map((_, index) => (
+        <section key={`actor-loading-section-${index}`} className="animate-pulse">
+          <div className="h-4 w-20 rounded-full bg-muted" aria-hidden="true" />
+          <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
+            {Array.from({ length: 3 }).map((__, itemIndex) => (
+              <div key={`actor-loading-row-${index}-${itemIndex}`}>
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-3 w-24 rounded-full bg-muted" aria-hidden="true" />
+                    <div className="h-4 w-2/3 rounded-full bg-muted" aria-hidden="true" />
+                  </div>
+                  <div className="h-4 w-12 rounded-full bg-muted" aria-hidden="true" />
+                </div>
+                {itemIndex !== 2 ? <div className="h-px bg-border" /> : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      <div className={isDesktop ? 'pb-6' : 'pb-[calc(env(safe-area-inset-bottom,0px)+20px)]'} />
+    </section>
+  );
+}
 
 export function ActorDetailPage({ actorId }: { actorId?: string }) {
+  const isDesktop = useIsDesktop();
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const targetId = actorId ?? '';
@@ -41,114 +109,88 @@ export function ActorDetailPage({ actorId }: { actorId?: string }) {
     };
   }, [targetId]);
 
-  if (loading) {
-    return (
-      <div data-testid="actor-detail-page" className="min-h-full px-5 py-4 text-sm text-[#A8A29E] dark:text-[#78716C]">
-        Actor 详情加载中...
-      </div>
-    );
-  }
+  return (
+    <div data-testid="actor-detail-page" className="min-h-full bg-surface px-5 py-3 text-foreground md:px-8 lg:px-10">
+      <ActorDetailHeader title={detail?.title ?? 'Actor 详情'} />
 
-  if (!detail) {
-    return (
-      <div data-testid="actor-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3 dark:bg-[#0C0A09]">
+      {loading ? <ActorDetailLoadingState isDesktop={isDesktop} /> : !detail ? (
         <section
           data-testid="actor-detail-empty-state"
-          className="mt-6 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-6 text-center dark:border-[#292524] dark:bg-[#1C1917]"
+          className="mt-6 rounded-2xl border border-border-card bg-card px-4 py-6 text-center"
         >
-          <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">未找到 Actor 详情</p>
-          <p className="mt-1 text-xs text-[#A8A29E] dark:text-[#78716C]">该节点可能已删除或尚未配置详情数据。</p>
+          <p className="text-sm font-semibold text-foreground">未找到 Actor 详情</p>
+          <p className="mt-1 text-xs text-muted-foreground">该节点可能已删除或尚未配置详情数据。</p>
           <button
             type="button"
             onClick={() => window.history.back()}
-            className="mt-4 rounded-lg bg-[#F5F0ED] px-3 py-2 text-xs font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+            className="mt-4 rounded-lg bg-muted px-3 py-2 text-xs font-medium text-muted-foreground"
           >
             返回上一页
           </button>
         </section>
-      </div>
-    );
-  }
-
-  return (
-    <div data-testid="actor-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3 dark:bg-[#0C0A09]">
-      <header data-testid="actor-detail-header" className="mb-3 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => window.history.back()}
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
-          aria-label="返回（Back）"
-        >
-          <ArrowLeft size={16} />
-        </button>
-        <h1 className="text-[17px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">{detail.title}</h1>
-        <button
-          type="button"
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
-          aria-label="更多（More）"
-        >
-          <MoreHorizontal size={16} />
-        </button>
-      </header>
-
-      <section className="rounded-[18px] border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#78716C20] text-[#78716C]">
-            <AlarmClock size={18} />
-          </div>
-          <div>
-            <p className="text-[16px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">{detail.title}</p>
-            <p className="text-xs text-[#22C55E]">● 运行中</p>
-          </div>
-        </div>
-        <p className="mt-2 text-sm text-[#78716C] dark:text-[#A8A29E]">{detail.description}</p>
-      </section>
-
-      <section className="mt-4">
-        <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">触发规则</h3>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
-          {detail.triggerRules.map((item, index) => (
-            <div key={`${item.key}-${item.value}`}>
-              <div className="flex items-center justify-between px-4 py-3">
-                <span className="text-sm text-[#78716C] dark:text-[#A8A29E]">{item.key}</span>
-                <span className={`text-sm ${item.highlight ? 'font-semibold text-[#C75B3A]' : 'text-[#1C1917] dark:text-[#FAFAF9]'}`}>
-                  {item.value}
-                </span>
+      ) : (
+        <>
+          <section className="rounded-[18px] border border-border-card bg-card p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#78716C20] text-[#78716C]">
+                <AlarmClock size={18} />
               </div>
-              {index !== detail.triggerRules.length - 1 && <div className="h-px bg-[#F5F0ED] dark:bg-[#292524]" />}
+              <div>
+                <p className="text-[16px] font-bold text-foreground">{detail.title}</p>
+                <p className="text-xs text-[#22C55E]">● 运行中</p>
+              </div>
             </div>
-          ))}
-        </div>
-      </section>
+            <p className="mt-2 text-sm text-muted-foreground">{detail.description}</p>
+          </section>
 
-      <section className="mt-4">
-        <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">最近执行</h3>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
-          {detail.recentLogs.map((item, index) => {
-            const warning = item.status === 'warning';
-            return (
-              <div key={item.id}>
-                <div className="flex items-center justify-between px-4 py-3">
-                  <div className="flex items-start gap-2">
-                    <div className={`mt-0.5 rounded-full p-1 ${warning ? 'bg-[#F973161A] text-[#F97316]' : 'bg-[#22C55E15] text-[#22C55E]'}`}>
-                      <TriangleAlert size={12} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
-                      <p className="text-xs text-[#A8A29E] dark:text-[#78716C]">{item.time}</p>
-                    </div>
+          <section className="mt-4">
+            <h3 className="text-[13px] font-semibold text-muted-foreground">触发规则</h3>
+            <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
+              {detail.triggerRules.map((item, index) => (
+                <div key={`${item.key}-${item.value}`}>
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <span className="text-sm text-muted-foreground">{item.key}</span>
+                    <span className={`text-sm ${item.highlight ? 'font-semibold text-[#C75B3A]' : 'text-foreground'}`}>
+                      {item.value}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                    <Clock3 size={11} />
-                    {item.duration ?? '--'}
-                  </div>
+                  {index !== detail.triggerRules.length - 1 && <div className="h-px bg-border" />}
                 </div>
-                {index !== detail.recentLogs.length - 1 && <div className="h-px bg-[#F5F0ED] dark:bg-[#292524]" />}
-              </div>
-            );
-          })}
-        </div>
-      </section>
+              ))}
+            </div>
+          </section>
+
+          <section className="mt-4">
+            <h3 className="text-[13px] font-semibold text-muted-foreground">最近执行</h3>
+            <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
+              {detail.recentLogs.map((item, index) => {
+                const warning = item.status === 'warning';
+                return (
+                  <div key={item.id}>
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div className="flex items-start gap-2">
+                        <div className={`mt-0.5 rounded-full p-1 ${warning ? 'bg-[#F973161A] text-[#F97316]' : 'bg-[#22C55E15] text-[#22C55E]'}`}>
+                          <TriangleAlert size={12} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{item.title}</p>
+                          <p className="text-xs text-muted-foreground">{item.time}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Clock3 size={11} />
+                        {item.duration ?? '--'}
+                      </div>
+                    </div>
+                    {index !== detail.recentLogs.length - 1 && <div className="h-px bg-border" />}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+          <div className={isDesktop ? 'pb-6' : 'pb-[calc(env(safe-area-inset-bottom,0px)+20px)]'} />
+        </>
+      )}
     </div>
   );
 }

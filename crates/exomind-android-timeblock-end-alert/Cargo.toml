@@ -1,0 +1,18 @@
+[package]
+name = "exomind-android-timeblock-end-alert"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+links = "exomind-android-timeblock-end-alert"
+
+[lib]
+name = "exomind_android_timeblock_end_alert"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", default-features = false }
+thiserror = "1"
+
+[build-dependencies]
+tauri-plugin = { version = "2.4", features = ["build"] }

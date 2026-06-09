@@ -12,10 +12,33 @@ import type {
   AgentMarketItem,
 } from '@/lib/types/agent-hub';
 import { getRuntimeAggregatorService } from './runtime-aggregator.service';
+import { getRuntimeHostService } from './runtime-host.service';
+import {
+  resolveRuntimeHostBaseUrl,
+  buildRuntimeAuthHeaders,
+} from '@/lib/utils/runtime-host-address';
+import { buildDirectRuntimeCandidates } from '@/ui/app/pages/agents/agents-utils';
 
 type AgentEnvironmentLike = {
   agent: IAgentPort;
 };
+
+const RUNTIME_AGENT_STATUS_LABELS: Record<string, string> = {
+  available: '可用',
+  running: '运行中',
+  idle: '空闲',
+  busy: '忙碌',
+  offline: '离线',
+  error: '异常',
+  unknown: '未知',
+};
+
+function formatRuntimeAgentStatus(status: unknown): string {
+  if (typeof status !== 'string' || status.length === 0) {
+    return RUNTIME_AGENT_STATUS_LABELS.unknown;
+  }
+  return RUNTIME_AGENT_STATUS_LABELS[status] ?? status;
+}
 
 export interface AgentHubService {
   getTopology(): Promise<AgentHubTopologyData>;
@@ -105,7 +128,62 @@ export class AgentHubServiceImpl implements AgentHubService {
   }
 
   async getAgentDetail(agentId: string): Promise<AgentDetailData | null> {
-    return this.getAgentPort().getAgentDetail(agentId);
+    // Try localStorage first (agent hub registered agents)
+    const detail = await this.getAgentPort().getAgentDetail(agentId);
+    if (detail) return detail;
+
+    // Fallback: built-in agents not in localStorage — fetch from Runtime API
+    // Use direct runtime candidates (same mechanism as AgentsPage)
+    try {
+      const existingHosts = await getRuntimeHostService().listHosts();
+      const existingSnapshots = existingHosts.map((h) => ({
+        host: h,
+        connectionState: 'connected',
+        topology: null,
+        agents: [],
+      }));
+      const candidates = buildDirectRuntimeCandidates(existingSnapshots as any[]);
+      const allHosts = [...existingHosts, ...candidates];
+      for (const host of allHosts) {
+        try {
+          const response = await fetch(
+            `${resolveRuntimeHostBaseUrl(host)}/agents`,
+            {
+              headers: buildRuntimeAuthHeaders(host.authToken),
+            },
+          );
+          if (!response.ok) continue;
+          const agents = await response.json();
+          if (!Array.isArray(agents)) continue;
+          const match = agents.find((a: any) => a.id === agentId);
+          if (match) {
+            return {
+              id: match.id,
+              type: 'agent',
+              title: match.name || match.id,
+              status: match.status === 'available' ? 'running' : 'offline',
+              description: match.description || '',
+              icon: 'brain',
+              tintColor: '#0D9488',
+              stats: [
+                { label: '状态', value: formatRuntimeAgentStatus(match.status) },
+                ...(match.subscriptions?.length
+                  ? [{ label: '订阅信号', value: match.subscriptions.join('、') }]
+                  : []),
+              ],
+              triggerRules: [],
+              targets: [],
+              recentLogs: [],
+            };
+          }
+        } catch {
+          // Host unreachable — try next candidate
+        }
+      }
+    } catch {
+      // Ignore errors — return null as before
+    }
+    return null;
   }
 
   async getActorDetail(actorId: string): Promise<AgentDetailData | null> {

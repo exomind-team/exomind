@@ -70,7 +70,7 @@ export function UpdateToast() {
 
       {/* 文本 */}
       <span className="flex-1 text-sm font-medium truncate">
-        发现新版本 v{updateAvailable.latestVersion}
+        发现新版本 v{updateAvailable.latestVersion.replace(/^v/, '')}
       </span>
 
       {/* 查看详情 */}
@@ -78,7 +78,7 @@ export function UpdateToast() {
         type="button"
         className="shrink-0 rounded-md px-3 py-1 text-xs font-medium text-white transition-colors bg-[#C75B3A] hover:bg-[#b5502f]"
         onClick={() => {
-          navigate({ to: '/settings/update' });
+          navigate({ to: '/update' });
           dismissToast();
         }}
       >

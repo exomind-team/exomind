@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{PAGE_TITLE}}</title>
+  <style>
+    :root {
+      --bg: #f4efe9;
+      --panel: rgba(255, 250, 246, 0.88);
+      --panel-strong: #fffaf6;
+      --line: #ddd2c7;
+      --text: #2f241e;
+      --muted: #786b62;
+      --accent: #b45a3c;
+      --accent-soft: rgba(180, 90, 60, 0.12);
+      --ok: #1f7a44;
+      --shadow: 0 24px 60px -36px rgba(47, 36, 30, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei UI", "PingFang SC", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(180, 90, 60, 0.08), transparent 28%),
+        radial-gradient(circle at right 20%, rgba(120, 107, 98, 0.08), transparent 20%),
+        linear-gradient(180deg, #f8f3ee 0%, var(--bg) 100%);
+    }
+
+    .wrap { width: min(1120px, calc(100vw - 32px)); margin: 24px auto 48px; }
+    .hero, .side, .main-card {
+      border: 1px solid rgba(221, 210, 199, 0.95);
+      border-radius: 24px;
+      background: var(--panel);
+      backdrop-filter: blur(14px);
+      box-shadow: var(--shadow);
+    }
+    .hero { padding: 28px 30px; }
+    .grid { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; margin-top: 18px; }
+    .side { padding: 18px; height: fit-content; position: sticky; top: 18px; }
+    .main-card { padding: 20px; }
+    .eyebrow {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    h1 { margin: 14px 0 10px; font-size: clamp(28px, 4vw, 42px); line-height: 1.15; }
+    .lead { margin: 0; color: var(--muted); line-height: 1.75; font-size: 15px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
+    button {
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+      color: var(--text);
+      border-radius: 14px;
+      padding: 10px 14px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .progress { margin-left: auto; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 14px; }
+    .bar { width: 220px; height: 10px; border-radius: 999px; overflow: hidden; background: #eadfd4; }
+    .bar > span { display: block; width: 0%; height: 100%; background: linear-gradient(90deg, #d08a6f, var(--accent)); }
+    .section { border: 1px solid var(--line); border-radius: 20px; background: rgba(255,255,255,0.48); padding: 18px; margin-bottom: 16px; }
+    .section-header { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: baseline; margin-bottom: 12px; }
+    .section-title { margin: 0; font-size: 20px; }
+    .section-note { color: var(--muted); font-size: 13px; }
+    .item { border-top: 1px dashed var(--line); padding-top: 14px; margin-top: 14px; }
+    .item:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+    .item-top { display: flex; gap: 12px; align-items: flex-start; }
+    .item-top input[type="checkbox"] { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--accent); }
+    .item-body { flex: 1; min-width: 0; }
+    .issue { display: inline-block; min-width: 52px; margin-right: 8px; color: var(--accent); font-weight: 700; }
+    .item-title { font-size: 16px; font-weight: 700; line-height: 1.5; }
+    .steps, .expect { margin: 8px 0 0; color: var(--muted); line-height: 1.8; font-size: 14px; }
+    .expect strong { color: var(--ok); }
+    .evidence { margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .evidence input, .memo textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,0.9);
+      color: var(--text);
+      padding: 10px 12px;
+      font: inherit;
+    }
+    .memo textarea { min-height: 86px; resize: vertical; margin-top: 10px; }
+    .done .item-title { text-decoration: line-through; color: #8a7d74; }
+    .footer { margin-top: 18px; color: var(--muted); font-size: 13px; text-align: center; }
+    @media (max-width: 920px) {
+      .grid { grid-template-columns: 1fr; }
+      .side { position: static; }
+      .progress { width: 100%; margin-left: 0; }
+      .bar { flex: 1; width: auto; }
+      .evidence { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <span class="eyebrow">{{EYEBROW}}</span>
+      <h1>{{PAGE_TITLE}}</h1>
+      <p class="lead">{{PAGE_LEAD}}</p>
+      <div class="toolbar">
+        <button id="expand-all" type="button">展开全部说明</button>
+        <button id="collapse-all" type="button">收起说明</button>
+        <button id="clear-checks" type="button">清空所有勾选</button>
+        <button id="clear-notes" type="button">清空备注与证据</button>
+        <div class="progress">
+          <span id="progress-text">0 / 0 已验证</span>
+          <div class="bar"><span id="progress-bar"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <aside class="side">
+        <h2>使用方式</h2>
+        <ul>
+          <li>{{USAGE_1}}</li>
+          <li>{{USAGE_2}}</li>
+          <li>{{USAGE_3}}</li>
+          <li>{{USAGE_4}}</li>
+          <li>{{USAGE_5}}</li>
+        </ul>
+      </aside>
+
+      <main class="main-card">
+        <!-- 复制 section 块来构建你的验收分组 -->
+        <section class="section">
+          <div class="section-header">
+            <h2 class="section-title">{{SECTION_TITLE}}</h2>
+            <span class="section-note">{{SECTION_NOTE}}</span>
+          </div>
+
+          <div class="item" data-item>
+            <div class="item-top">
+              <input type="checkbox" data-check>
+              <div class="item-body">
+                <div class="item-title"><span class="issue">{{ISSUE_ID}}</span>{{ITEM_TITLE}}</div>
+                <p class="steps">{{ITEM_STEPS}}</p>
+                <p class="expect"><strong>期望：</strong>{{ITEM_EXPECT}}</p>
+                <div class="evidence">
+                  <input placeholder="证据 1">
+                  <input placeholder="证据 2">
+                  <input placeholder="证据 3">
+                </div>
+                <div class="memo"><textarea placeholder="备注 / 偏差 / 复现条件"></textarea></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="footer">{{FOOTER_TEXT}}</div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const storageKey = "{{STORAGE_KEY}}";
+    const checks = Array.from(document.querySelectorAll("[data-check]"));
+    const items = Array.from(document.querySelectorAll("[data-item]"));
+    const inputs = Array.from(document.querySelectorAll(".evidence input, .memo textarea"));
+    const progressText = document.getElementById("progress-text");
+    const progressBar = document.getElementById("progress-bar");
+
+    function saveState() {
+      const data = {
+        checks: checks.map((el) => el.checked),
+        inputs: inputs.map((el) => el.value)
+      };
+      localStorage.setItem(storageKey, JSON.stringify(data));
+      updateProgress();
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        (data.checks || []).forEach((value, index) => {
+          if (checks[index]) checks[index].checked = Boolean(value);
+        });
+        (data.inputs || []).forEach((value, index) => {
+          if (inputs[index]) inputs[index].value = value || "";
+        });
+      } catch {}
+      updateProgress();
+    }
+
+    function updateProgress() {
+      let done = 0;
+      checks.forEach((check, index) => {
+        const item = items[index];
+        if (!item) return;
+        if (check.checked) {
+          done += 1;
+          item.classList.add("done");
+        } else {
+          item.classList.remove("done");
+        }
+      });
+      const total = checks.length;
+      const percent = total === 0 ? 0 : Math.round((done / total) * 100);
+      progressText.textContent = `${done} / ${total} 已验证`;
+      progressBar.style.width = `${percent}%`;
+    }
+
+    checks.forEach((check) => check.addEventListener("change", saveState));
+    inputs.forEach((input) => input.addEventListener("input", saveState));
+
+    document.getElementById("clear-checks").addEventListener("click", () => {
+      checks.forEach((check) => check.checked = false);
+      saveState();
+    });
+
+    document.getElementById("clear-notes").addEventListener("click", () => {
+      inputs.forEach((input) => input.value = "");
+      saveState();
+    });
+
+    document.getElementById("expand-all").addEventListener("click", () => {
+      document.querySelectorAll(".steps, .expect, .evidence, .memo").forEach((el) => {
+        el.style.display = "";
+      });
+    });
+
+    document.getElementById("collapse-all").addEventListener("click", () => {
+      document.querySelectorAll(".steps, .expect, .evidence, .memo").forEach((el) => {
+        el.style.display = "none";
+      });
+    });
+
+    loadState();
+  </script>
+</body>
+</html>

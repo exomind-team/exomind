@@ -23,6 +23,8 @@
 
 import type { IASRPort, ASRInput, ASRResult, ASRPartialResult } from '../../environment/interfaces/asr.port';
 import { createUuidV4 } from '../../utils/uuid';
+import { log } from '@/lib/logger';
+import { isTauriWindow } from '@/config/runtime-target';
 
 // ========== 配置 ==========
 
@@ -38,7 +40,7 @@ export interface VolcanoEngineASRConfig {
 const DEFAULT_CONFIG: VolcanoEngineASRConfig = {
   appKey: (import.meta.env?.VITE_VOLCANO_APP_KEY as string) || '',
   accessKey: (import.meta.env?.VITE_VOLCANO_ACCESS_KEY as string) || '',
-  resourceId: (import.meta.env?.VITE_VOLCANO_RESOURCE_ID as string) || 'volc.bigasr.sauc.duration',
+  resourceId: (import.meta.env?.VITE_VOLCANO_RESOURCE_ID as string) || 'volc.seedasr.sauc.duration',
 };
 
 // ========== 请求/响应 类型 ==========
@@ -150,12 +152,12 @@ export class VolcanoEngineASRAdapter implements IASRPort {
 
   constructor(config?: Partial<VolcanoEngineASRConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    console.log('[ASR-Volcano] 适配器初始化');
-    console.log('[ASR-Volcano] AppKey:', this.config.appKey.slice(0, 8) + '***');
-    console.log('[ASR-Volcano] ResourceId:', this.config.resourceId);
+    log.info('[ASR-Volcano] 适配器初始化');
+    log.info(`[ASR-Volcano] AppKey: ${this.config.appKey.slice(0, 8)}***`);
+    log.info(`[ASR-Volcano] ResourceId: ${this.config.resourceId}`);
 
     if (!this.config.appKey || !this.config.accessKey) {
-      console.warn('[ASR-Volcano] ⚠️ 缺少认证信息，请检查 .env 配置');
+      log.warn('[ASR-Volcano] ⚠️ 缺少认证信息，请检查 .env 配置');
     }
   }
 
@@ -172,8 +174,8 @@ export class VolcanoEngineASRAdapter implements IASRPort {
    * 一次性识别
    */
   async transcribe(input: ASRInput): Promise<ASRResult> {
-    console.log('[ASR-Volcano] 开始识别');
-    console.log('[ASR-Volcano] 提示: 浏览器可能因 CORS 限制无法直接连接火山引擎 API');
+    log.info('[ASR-Volcano] 开始识别');
+    log.info('[ASR-Volcano] 提示: 浏览器可能因 CORS 限制无法直接连接火山引擎 API');
 
     if (!input.stream) {
       throw new Error('需要传入 MediaStream');
@@ -210,32 +212,41 @@ export class VolcanoEngineASRAdapter implements IASRPort {
   private async connectAndRecognize(stream: MediaStream, lang?: string): Promise<void> {
     this.connectId = createUuidV4();
 
-    console.log('[ASR-Volcano] 准备连接 WebSocket...');
+    log.info('[ASR-Volcano] 准备连接 WebSocket...');
 
     // 检查是否为 Tauri 环境（可以使用原生 HTTP）
-    const isTauri = !!(window as any).__TAURI__;
+    const isTauri = isTauriWindow();
 
     if (isTauri) {
-      console.log('[ASR-Volcano] 检测到 Tauri 环境，可以使用原生 HTTP');
+      log.info('[ASR-Volcano] 检测到 Tauri 环境，可以使用原生 HTTP');
       // 在 Tauri 中可以使用 invoke 调用后端
       await this.connectWithTauri(stream, lang);
     } else {
-      console.log('[ASR-Volcano] 浏览器环境，需要后端代理');
+      log.info('[ASR-Volcano] 浏览器环境，需要后端代理');
       await this.connectWithBrowser(stream, lang);
     }
   }
 
   /**
    * Tauri 环境连接（使用 Rust 后端）
+   *
+   * 流程：录制 MediaStream → PCM 16kHz 16bit mono → 传给 Rust → 火山引擎 WebSocket
    */
   private async connectWithTauri(stream: MediaStream, lang?: string): Promise<void> {
     try {
-      // 通过 Tauri invoke 调用 Rust 后端
       const { invoke } = await import('@tauri-apps/api/core');
 
-      // 发送音频数据到后端处理
+      // 录制音频并转换为 PCM
+      const pcmData = await this.recordStreamToPcm(stream);
+      log.info(`[ASR-Volcano] PCM 录制完成: ${pcmData.length} bytes`);
+
+      if (pcmData.length === 0) {
+        throw new Error('没有录制到音频数据');
+      }
+
+      // 传 PCM 字节给 Rust 后端
       const result = await invoke('volcano_asr_recognize', {
-        audioStream: stream,
+        audioData: Array.from(pcmData),
         config: {
           appKey: this.config.appKey,
           accessKey: this.config.accessKey,
@@ -244,12 +255,64 @@ export class VolcanoEngineASRAdapter implements IASRPort {
         },
       }) as ASRResult;
 
-      console.log('[ASR-Volcano] 识别结果:', result.text);
+      log.info(`[ASR-Volcano] 识别结果: ${result.text}`);
       this.onResult(result);
     } catch (error) {
-      console.error('[ASR-Volcano] Tauri 调用失败:', error);
+      log.error(`[ASR-Volcano] Tauri 调用失败: ${error}`);
       this.onError(new Error(`识别失败: ${error}`));
     }
+  }
+
+  /**
+   * 从 MediaStream 录制音频并转换为 PCM 16kHz 16bit mono
+   */
+  private recordStreamToPcm(stream: MediaStream): Promise<Uint8Array> {
+    return new Promise((resolve) => {
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const chunks: Float32Array[] = [];
+      let stopped = false;
+
+      processor.onaudioprocess = (event) => {
+        if (stopped) return;
+        chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      const stop = async () => {
+        if (stopped) return;
+        stopped = true;
+        processor.disconnect();
+        source.disconnect();
+        await audioContext.close();
+
+        const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+        if (totalLength === 0) { resolve(new Uint8Array(0)); return; }
+
+        const merged = new Float32Array(totalLength);
+        let offset = 0;
+        for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.length; }
+
+        // Float32 → PCM 16bit
+        const pcm = new Int16Array(totalLength);
+        for (let i = 0; i < totalLength; i++) {
+          const s = Math.max(-1, Math.min(1, merged[i]));
+          pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        resolve(new Uint8Array(pcm.buffer));
+      };
+
+      // 等待外部停止信号
+      const checkStop = setInterval(() => {
+        if (!(window as any).__asrRecordingActive) {
+          clearInterval(checkStop);
+          stop();
+        }
+      }, 100);
+    });
   }
 
   /**
@@ -262,25 +325,22 @@ export class VolcanoEngineASRAdapter implements IASRPort {
 
     const wsUrl = `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel`;
 
-    console.log('[ASR-Volcano] ⚠️ 警告：浏览器无法设置 WebSocket 认证头部');
-    console.log('[ASR-Volcano] 解决方案：');
-    console.log('  1. 使用 Tauri/Rust 后端代理');
-    console.log('  2. 部署后端服务器转发请求');
-    console.log('  3. 使用 Cloudflare Workers/Vercel Edge Functions');
+    log.warn('[ASR-Volcano] ⚠️ 警告：浏览器无法设置 WebSocket 认证头部');
+    log.warn('[ASR-Volcano] 解决方案：1. 使用 Tauri/Rust 后端代理 2. 部署后端服务器转发请求 3. 使用 Cloudflare Workers/Vercel Edge Functions');
 
     // 尝试连接（会失败，但可以确认问题）
     try {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
-        console.log('[ASR-Volcano] WebSocket 已连接（意外成功？）');
+        log.info('[ASR-Volcano] WebSocket 已连接（意外成功？）');
         this.sendInitialRequest(stream, lang);
       };
 
       this.ws.onmessage = (event) => {
         const data = event.data as Uint8Array;
         const response = parseResponseMessage(data);
-        console.log('[ASR-Volcano] 收到响应:', JSON.stringify(response));
+        log.info(`[ASR-Volcano] 收到响应: ${JSON.stringify(response)}`);
 
         if (response.code && response.code !== 20000000) {
           this.onError(new Error(`API 错误: ${response.code} ${response.message}`));
@@ -295,39 +355,26 @@ export class VolcanoEngineASRAdapter implements IASRPort {
             lang: lang || 'zh-CN',
             duration: response.audio_info.duration,
           };
-          console.log('[ASR-Volcano] 识别完成:', result.text);
+          log.info(`[ASR-Volcano] 识别完成: ${result.text}`);
           this.onResult(result);
           this.cleanup();
         }
       };
 
       this.ws.onerror = () => {
-        console.error('[ASR-Volcano] WebSocket 错误');
-        console.error('[ASR-Volcano] 可能原因:');
-        console.error('  1. CORS 限制 - 火山引擎不允许跨域访问');
-        console.error('  2. 缺少认证 - 浏览器无法设置必要的 HTTP 头部');
-        console.error('');
-        console.error('【解决方案】');
-        console.error('请选择以下方案之一:');
-        console.error('');
-        console.error('方案 A: 使用 Tauri 后端（推荐）');
-        console.error('  1. 在 Rust 后端实现火山引擎 API 调用');
-        console.error('  2. 前端通过 tauri.invoke() 调用');
-        console.error('');
-        console.error('方案 B: 部署后端代理');
-        console.error('  1. 部署 Node.js/Python 后端服务器');
-        console.error('  2. 后端转发音频到火山引擎 API');
-        console.error('  3. 前端通过 HTTP POST 发送音频');
+        log.error('[ASR-Volcano] WebSocket 错误');
+        log.error('[ASR-Volcano] 可能原因: 1. CORS 限制 - 火山引擎不允许跨域访问 2. 缺少认证 - 浏览器无法设置必要的 HTTP 头部');
+        log.error('[ASR-Volcano] 解决方案: 方案A - 使用 Tauri 后端（推荐），在 Rust 后端实现火山引擎 API 调用，前端通过 tauri.invoke() 调用；方案B - 部署后端代理，后端转发音频到火山引擎 API');
 
         this.onError(new Error('浏览器无法直接连接火山引擎 API，请使用 Tauri 后端或部署代理服务器'));
         this.cleanup();
       };
 
       this.ws.onclose = (event) => {
-        console.log('[ASR-Volcano] WebSocket 已关闭, code:', event.code);
+        log.info(`[ASR-Volcano] WebSocket 已关闭, code: ${event.code}`);
       };
     } catch (error) {
-      console.error('[ASR-Volcano] 连接异常:', error);
+      log.error(`[ASR-Volcano] 连接异常: ${error}`);
       this.onError(new Error(`连接失败: ${error}`));
     }
   }
@@ -355,7 +402,7 @@ export class VolcanoEngineASRAdapter implements IASRPort {
 
     const message = buildRequestMessage(request);
     this.ws?.send(message);
-    console.log('[ASR-Volcano] 初始请求已发送');
+    log.info('[ASR-Volcano] 初始请求已发送');
 
     // 开始录制音频
     this.startRecording(stream);
@@ -365,7 +412,7 @@ export class VolcanoEngineASRAdapter implements IASRPort {
    * 开始录制音频并实时发送
    */
   private startRecording(stream: MediaStream): void {
-    console.log('[ASR-Volcano] 开始录制音频...');
+    log.info('[ASR-Volcano] 开始录制音频...');
 
     this.isRecording = true;
     this.audioChunks = [];
@@ -412,7 +459,7 @@ export class VolcanoEngineASRAdapter implements IASRPort {
    * 停止录制并发送结束标记
    */
   stopRecording(): void {
-    console.log('[ASR-Volcano] 停止录制...');
+    log.info('[ASR-Volcano] 停止录制...');
     this.isRecording = false;
 
     // 清理音频处理资源
@@ -433,7 +480,7 @@ export class VolcanoEngineASRAdapter implements IASRPort {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       const endMark = buildAudioMessage(new Uint8Array(0), true);
       this.ws.send(endMark);
-      console.log('[ASR-Volcano] 发送结束标记');
+      log.info('[ASR-Volcano] 发送结束标记');
     }
   }
 

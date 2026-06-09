@@ -1,0 +1,437 @@
+---
+import { Apple, Monitor, Smartphone, SquareTerminal } from 'lucide-static';
+import LucideIcon from './LucideIcon.astro';
+import { getLocalizedPath, prependBasePath, useTranslations } from '../i18n';
+
+type Lang = 'zh' | 'en';
+
+interface Props {
+  lang: Lang;
+  embedded?: boolean;
+  showHero?: boolean;
+  title?: string;
+  subtitle?: string;
+}
+
+const { lang, embedded = false, showHero = !embedded, title, subtitle } = Astro.props;
+const t = useTranslations(lang);
+const isZh = lang === 'zh';
+const versionLogPath = getLocalizedPath('/changelog', lang);
+const sectionTitle = title ?? t('download.title');
+const sectionSubtitle = subtitle ?? t('download.subtitle');
+
+const platforms = [
+  { name: 'Windows', icon: Monitor, req: t('download.sysreq.windows'), assetKey: 'windows-x64-setup' },
+  { name: 'Android', icon: Smartphone, req: t('download.sysreq.android'), assetKey: 'android-arm64' },
+  { name: 'macOS', icon: Apple, req: t('download.sysreq.macos'), assetKey: 'macos-aarch64' },
+  { name: 'Linux', icon: SquareTerminal, req: t('download.sysreq.linux'), assetKey: 'linux-x64-appimage' },
+] as const;
+
+const channels = [
+  {
+    key: 'release',
+    eyebrow: isZh ? 'STABLE CHANNEL / 正式通道' : 'STABLE CHANNEL / Release',
+    title: isZh ? '长期使用' : 'For Daily Use',
+    description: isZh ? '正式发布，适合日常长期使用。' : 'Formal releases for everyday use.',
+    shortLabel: isZh ? '稳定版' : 'Stable',
+    accentClass: 'text-brand/80',
+    emptyText: isZh ? '暂无正式版' : 'No stable release yet',
+  },
+  {
+    key: 'preview',
+    eyebrow: isZh ? 'PREVIEW CHANNEL / 预览通道' : 'PREVIEW CHANNEL / Preview',
+    title: isZh ? '抢先体验' : 'Early Access',
+    description: isZh ? '预览发布与阶段验证版本，更快看到变化。' : 'Preview builds for earlier access to changes.',
+    shortLabel: isZh ? '预览版' : 'Preview',
+    accentClass: 'text-amber-600 dark:text-amber-400',
+    emptyText: isZh ? '暂无预览版' : 'No preview release yet',
+  },
+] as const;
+
+const extraLabels = isZh
+  ? {
+      'windows-x64-installer': 'MSI 安装包 / MSI installer',
+      'android-x86': 'x86 版本 / x86 build',
+      'linux-x64-deb': 'DEB 包 / DEB package',
+    }
+  : {
+      'windows-x64-installer': 'MSI installer / MSI 安装包',
+      'android-x86': 'x86 build / x86 版本',
+      'linux-x64-deb': 'DEB package / DEB 包',
+    };
+
+const config = {
+  locale: isZh ? 'zh-CN' : 'en-US',
+  urls: {
+    release: prependBasePath('/releases/release/versions.json'),
+    preview: prependBasePath('/releases/preview/versions.json'),
+    fallback: 'https://github.com/exomind-team/exomind/releases',
+  },
+  copy: {
+    loading: isZh ? '正在加载版本信息…' : 'Loading release metadata…',
+    loadFailed: isZh ? '版本信息加载失败，请直接前往 GitHub Releases。' : 'Failed to load release metadata. Open GitHub Releases directly.',
+    noBuilds: isZh ? '当前通道暂无该平台安装包' : 'No build for this platform in this channel',
+    releaseLink: isZh ? '查看 Release' : 'View Release',
+    fallbackLink: isZh ? '查看全部 Releases' : 'View all releases',
+    downloadLabel: t('download.btn'),
+    more: isZh ? '查看更多版本' : 'View more versions',
+    versionLabel: isZh ? '当前版本' : 'Current version',
+    publishedLabel: isZh ? '发布时间' : 'Published',
+    refreshedLabel: isZh ? '元数据刷新' : 'Metadata synced',
+  },
+  extraLabels,
+};
+
+---
+
+{showHero && (
+  <section class="relative overflow-hidden pt-32 pb-16">
+    <div class="section-container relative z-10">
+      <div class="mx-auto max-w-3xl text-center">
+        <h1 class="heading-display text-5xl leading-tight text-stone-900 sm:text-6xl dark:text-stone-50">
+          {sectionTitle}
+        </h1>
+        <p class="mt-6 text-lg leading-relaxed text-stone-500 sm:text-xl">
+          {sectionSubtitle}
+        </p>
+      </div>
+    </div>
+    <div class="absolute inset-0 -z-10">
+      <div class="absolute left-1/2 top-0 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/5 blur-3xl"></div>
+    </div>
+  </section>
+)}
+
+<section id={embedded ? 'download' : undefined} class={embedded ? 'pb-24 pt-8' : 'pb-20'}>
+  <div class="section-container">
+    {embedded && (
+      <div class="mx-auto max-w-3xl text-center">
+        <h2 class="heading-display text-3xl leading-tight text-stone-900 sm:text-4xl dark:text-stone-50">
+          {sectionTitle}
+        </h2>
+        <p class="mt-4 text-base leading-relaxed text-stone-500 sm:text-lg">
+          {sectionSubtitle}
+        </p>
+        <div class="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <a href={versionLogPath} class="btn-secondary px-6 py-2.5 text-sm">
+            {config.copy.more}
+          </a>
+          <a
+            href={config.urls.fallback}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center gap-2 text-sm font-medium text-brand transition-colors hover:text-brand-600"
+          >
+            {config.copy.fallbackLink}
+          </a>
+        </div>
+      </div>
+    )}
+    {!embedded && (
+      <div class="mx-auto max-w-6xl">
+        <div class="mb-6 flex flex-wrap items-center justify-center gap-3 md:hidden">
+          {channels.map((channel) => (
+            <span class:list={['inline-flex rounded-full px-4 py-2 text-2xl font-semibold uppercase tracking-[0.18em]', channel.key === 'release' ? 'bg-brand text-white' : 'bg-amber-500 text-white']}>
+              {channel.shortLabel}
+            </span>
+          ))}
+        </div>
+
+        <div class="mb-10 hidden grid-cols-[minmax(0,1fr)_88px_minmax(0,1fr)] gap-6 md:grid">
+          <div class="pr-12 text-right">
+            <p class:list={['text-2xl font-semibold uppercase tracking-[0.24em]', channels[0].accentClass]}>
+              {channels[0].eyebrow}
+            </p>
+            <h2 class="mt-3 heading-display text-3xl text-stone-900 dark:text-stone-50">
+              {channels[0].title}
+            </h2>
+            <p class="mt-3 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+              {channels[0].description}
+            </p>
+          </div>
+          <div></div>
+          <div class="pl-12 text-left">
+            <p class:list={['text-2xl font-semibold uppercase tracking-[0.24em]', channels[1].accentClass]}>
+              {channels[1].eyebrow}
+            </p>
+            <h2 class="mt-3 heading-display text-3xl text-stone-900 dark:text-stone-50">
+              {channels[1].title}
+            </h2>
+            <p class="mt-3 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+              {channels[1].description}
+            </p>
+          </div>
+        </div>
+
+        <div class="grid gap-8 md:grid-cols-2 md:gap-6">
+        {channels.map((channel) => (
+        <article
+          class="min-w-0 rounded-[28px] border border-stone-200/80 bg-white/90 p-8 shadow-sm backdrop-blur dark:border-stone-800 dark:bg-stone-900/90"
+          data-channel-panel={channel.key}
+          data-empty-text={channel.emptyText}
+          data-load-failed-text={config.copy.loadFailed}
+          data-testid={`download-channel-${channel.key}`}
+        >
+          <div class="channel-empty hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 p-5 dark:border-stone-700 dark:bg-stone-950/60">
+            <p class="channel-empty-text text-sm text-stone-500 dark:text-stone-400">{channel.emptyText}</p>
+            <a
+              href={config.urls.fallback}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="channel-fallback-link mt-4 inline-flex text-sm font-medium text-brand transition-colors hover:text-brand-600"
+              data-testid={`download-channel-${channel.key}-fallback`}
+            >
+              {config.copy.fallbackLink}
+            </a>
+          </div>
+
+          <div class="channel-content hidden">
+            <div class:list={['grid gap-4', embedded ? 'sm:grid-cols-2 lg:grid-cols-3' : 'xl:grid-cols-3']}>
+              <a
+                href="#"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="channel-release-card rounded-2xl border border-stone-200 bg-stone-50/80 px-5 py-4 transition-all duration-200 hover:border-brand/40 hover:bg-brand-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 dark:border-stone-800 dark:bg-stone-950/60 dark:hover:border-brand/50 dark:hover:bg-stone-900/90"
+                data-testid={`download-channel-${channel.key}-link`}
+              >
+                <p class="text-xs font-medium uppercase tracking-[0.2em] text-stone-400">
+                  {config.copy.versionLabel}
+                </p>
+                <p class="channel-version mt-2 text-lg font-semibold text-stone-900 dark:text-stone-50"></p>
+              </a>
+              <div class="rounded-2xl border border-stone-200 bg-stone-50/80 px-5 py-4 dark:border-stone-800 dark:bg-stone-950/60">
+                <p class="text-xs font-medium uppercase tracking-[0.2em] text-stone-400">
+                  {config.copy.publishedLabel}
+                </p>
+                <p class="channel-published mt-2 text-sm font-medium text-stone-900 dark:text-stone-50"></p>
+              </div>
+              <div class:list={['rounded-2xl border border-stone-200 bg-stone-50/80 px-5 py-4 dark:border-stone-800 dark:bg-stone-950/60', embedded ? 'sm:col-span-2 lg:col-span-1' : '']}>
+                <p class="text-xs font-medium uppercase tracking-[0.2em] text-stone-400">
+                  {config.copy.refreshedLabel}
+                </p>
+                <p class="channel-refreshed mt-2 text-sm font-medium text-stone-900 dark:text-stone-50"></p>
+              </div>
+            </div>
+
+            <div class="mt-6 grid gap-4 xl:grid-cols-2">
+              {platforms.map((platform) => (
+                <div
+                  class="group rounded-2xl border border-stone-200 bg-stone-50/70 p-6 text-center transition-all duration-200 dark:border-stone-800 dark:bg-stone-950/60"
+                  data-platform-card={platform.assetKey}
+                  data-testid={`download-${channel.key}-${platform.assetKey}`}
+                >
+                  <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300">
+                    <LucideIcon icon={platform.icon} class="h-8 w-8" size={32} strokeWidth={1.8} />
+                  </div>
+                  <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{platform.name}</h3>
+                  <p class="mt-2 text-sm text-stone-500 dark:text-stone-400">{platform.req}</p>
+
+                  <div class="platform-loading mt-4">
+                    <div class="mx-auto h-4 w-20 animate-pulse rounded bg-stone-200 dark:bg-stone-700"></div>
+                    <div class="mx-auto mt-2 h-3 w-28 animate-pulse rounded bg-stone-100 dark:bg-stone-800"></div>
+                  </div>
+
+                  <div class="platform-loaded hidden">
+                    <p class="platform-meta mt-4 text-xs text-stone-400"></p>
+                    <div class="platform-extra-links mt-3 flex flex-wrap justify-center gap-3"></div>
+                  </div>
+
+                  <div class="platform-empty hidden">
+                    <p class="mt-4 text-sm text-stone-400">{config.copy.noBuilds}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </article>
+        ))}
+        </div>
+      </div>
+    )}
+  </div>
+</section>
+
+{!embedded && (
+  <script type="application/json" id="download-page-config" set:html={JSON.stringify(config)}></script>
+)}
+
+{!embedded && (
+  <script>
+    import {
+      loadReleaseIndexWithFallback,
+      resolvePlatformDownload,
+    } from '../lib/downloads-data';
+
+    const configElement = document.getElementById('download-page-config');
+    const config = configElement?.textContent ? JSON.parse(configElement.textContent) : null;
+    const panels = Array.from(document.querySelectorAll('[data-channel-panel]'));
+    const platformCardInteractiveClasses = [
+      'cursor-pointer',
+      'hover:-translate-y-0.5',
+      'hover:border-brand/40',
+      'hover:bg-brand-50/40',
+      'focus:outline-none',
+      'focus-visible:ring-2',
+      'focus-visible:ring-brand/40',
+      'dark:hover:border-brand/50',
+      'dark:hover:bg-stone-900/90',
+    ];
+
+    function formatSize(bytes) {
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    function formatDate(isoString, locale) {
+      const date = new Date(isoString);
+      return new Intl.DateTimeFormat(locale, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(date);
+    }
+
+    function setPanelError(panel, message) {
+      panel.querySelector('.channel-content')?.classList.add('hidden');
+      const emptyBlock = panel.querySelector('.channel-empty');
+      emptyBlock?.classList.remove('hidden');
+      const emptyText = panel.querySelector('.channel-empty-text');
+      if (emptyText) emptyText.textContent = message;
+    }
+
+    function setPlatformFallback(card, message) {
+      card.removeAttribute('data-download-url');
+      card.removeAttribute('tabindex');
+      card.removeAttribute('role');
+      card.removeAttribute('aria-label');
+      card.removeAttribute('title');
+      card.classList.remove(...platformCardInteractiveClasses);
+      card.querySelector('.platform-loading')?.classList.add('hidden');
+      card.querySelector('.platform-loaded')?.classList.add('hidden');
+      card.querySelector('.platform-empty')?.classList.remove('hidden');
+      const fallbackText = card.querySelector('.platform-empty p');
+      if (fallbackText) fallbackText.textContent = message;
+    }
+
+    function navigateToDownload(url) {
+      if (!url) return;
+      window.location.assign(url);
+    }
+
+    function bindPlatformCard(card) {
+      if (card.dataset.downloadBound === 'true') {
+        return;
+      }
+
+      card.addEventListener('click', (event) => {
+        if (event.target instanceof Element && event.target.closest('a')) {
+          return;
+        }
+
+        navigateToDownload(card.dataset.downloadUrl);
+      });
+
+      card.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+          return;
+        }
+
+        event.preventDefault();
+        navigateToDownload(card.dataset.downloadUrl);
+      });
+
+      card.dataset.downloadBound = 'true';
+    }
+
+    function renderPlatformCards(panel, channelKey, latest) {
+      const platformCards = Array.from(panel.querySelectorAll('[data-platform-card]'));
+
+      platformCards.forEach((card) => {
+        if (!card) return;
+        const assetKey = card.getAttribute('data-platform-card') ?? '';
+        const resolved = resolvePlatformDownload(latest, assetKey);
+
+        if (!resolved) {
+          setPlatformFallback(card, config.copy.noBuilds);
+          return;
+        }
+
+        const metaElement = card.querySelector('.platform-meta');
+        const extraLinks = card.querySelector('.platform-extra-links');
+
+        card.querySelector('.platform-loading')?.classList.add('hidden');
+        card.querySelector('.platform-empty')?.classList.add('hidden');
+        card.querySelector('.platform-loaded')?.classList.remove('hidden');
+        card.dataset.downloadUrl = resolved.primary.url;
+        card.tabIndex = 0;
+        card.setAttribute('role', 'link');
+        card.setAttribute('aria-label', `${config.copy.downloadLabel} ${card.querySelector('h3')?.textContent ?? ''}`);
+        card.setAttribute('title', config.copy.downloadLabel);
+        card.classList.add(...platformCardInteractiveClasses);
+        bindPlatformCard(card);
+
+        if (metaElement) {
+          metaElement.textContent = resolved.primary.size ? formatSize(resolved.primary.size) : '';
+        }
+        if (extraLinks) {
+          extraLinks.innerHTML = resolved.extras
+            .map((extra) => {
+              const label = config.extraLabels[extra.key] ?? extra.label;
+              const sizeLabel = extra.size ? ` (${formatSize(extra.size)})` : '';
+              return `<a href="${extra.url}" target="_blank" rel="noopener noreferrer" class="text-xs text-brand transition-colors underline underline-offset-2 hover:text-brand-600">${label}${sizeLabel}</a>`;
+            })
+            .join('');
+        }
+      });
+    }
+
+    function renderChannel(panel, channelKey, index) {
+      const latest = index?.latest ?? null;
+      const releaseCard = panel.querySelector('.channel-release-card');
+
+      if (!latest) {
+        setPanelError(panel, panel.dataset.emptyText ?? config.copy.loadFailed);
+        return;
+      }
+
+      panel.querySelector('.channel-empty')?.classList.add('hidden');
+      panel.querySelector('.channel-content')?.classList.remove('hidden');
+
+      const version = panel.querySelector('.channel-version');
+      const published = panel.querySelector('.channel-published');
+      const refreshed = panel.querySelector('.channel-refreshed');
+
+      if (version) version.textContent = `v${latest.version}`;
+      if (published) published.textContent = formatDate(latest.published_at, config.locale);
+      if (refreshed) refreshed.textContent = formatDate(index.generated_at, config.locale);
+      if (releaseCard instanceof HTMLAnchorElement) {
+        releaseCard.href = latest.release_url;
+        releaseCard.setAttribute('aria-label', `${config.copy.releaseLink} v${latest.version}`);
+        releaseCard.setAttribute('title', `${config.copy.releaseLink} v${latest.version}`);
+      }
+
+      renderPlatformCards(panel, channelKey, latest);
+    }
+
+    async function loadChannel(panel) {
+      const channelKey = panel.dataset.channelPanel;
+      if (!channelKey || !config?.urls?.[channelKey]) {
+        return;
+      }
+
+      try {
+        const index = await loadReleaseIndexWithFallback({
+          channel: channelKey,
+          localUrl: config.urls[channelKey],
+        });
+        renderChannel(panel, channelKey, index);
+      } catch (error) {
+        console.error(`Failed to load ${channelKey} release metadata:`, error);
+        setPanelError(panel, panel.dataset.loadFailedText ?? config.copy.loadFailed);
+      }
+    }
+
+    if (config && panels.length > 0) {
+      void Promise.all(panels.map((panel) => loadChannel(panel)));
+    }
+  </script>
+)}

@@ -6,12 +6,17 @@ import {
   setThemePreference,
   subscribeThemePreferenceChanges,
 } from '@/config/theme';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 
 describe('theme preference', () => {
   beforeEach(() => {
     window.localStorage.clear();
     document.documentElement.classList.remove('dark');
     document.documentElement.style.colorScheme = '';
+    __resetRuntimeConfigCacheForTests();
   });
 
   it('defaults to system when not set', () => {
@@ -23,6 +28,13 @@ describe('theme preference', () => {
     expect(getThemePreference()).toBe('system');
   });
 
+  it('prefers runtime snapshot over localStorage when available（优先读取 Runtime 快照）', () => {
+    window.localStorage.setItem('exomind:themePreference', 'light');
+    __primeRuntimeConfigForTests({ 'exomind:themePreference': 'dark' });
+
+    expect(getThemePreference()).toBe('dark');
+  });
+
   it('persists preference and notifies subscribers', () => {
     const listener = vi.fn();
     const unsubscribe = subscribeThemePreferenceChanges(listener);
@@ -31,6 +43,19 @@ describe('theme preference', () => {
     expect(window.localStorage.getItem('exomind:themePreference')).toBe('dark');
     expect(listener).toHaveBeenCalledWith('dark');
 
+    unsubscribe();
+  });
+
+  it('handles storage event updates（支持跨窗口 storage 事件同步）', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeThemePreferenceChanges(listener);
+
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'exomind:themePreference',
+      newValue: 'dark',
+    }));
+
+    expect(listener).toHaveBeenCalledWith('dark');
     unsubscribe();
   });
 
@@ -69,4 +94,3 @@ describe('theme preference', () => {
     window.matchMedia = originalMatchMedia;
   });
 });
-

@@ -12,7 +12,6 @@
   "dependencies": {
     "astro": "^5.5.0",
     "@astrojs/tailwind": "^6.0.2",
-    "@astrojs/cloudflare": "^12.2.3",
     "tailwindcss": "^3.4.17",
     "lucide-static": "^0.575.0"
   },

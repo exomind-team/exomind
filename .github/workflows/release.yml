@@ -3,63 +3,62 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'build/**'      # 构建触发：只构建，不发布
-      - 'release/**'     # 发布触发：构建 + GitHub Release
+      - "v*" # 单一发布 tag：v0.x.y
   workflow_dispatch:
     inputs:
-      build_scope:
-        description: Build scope（构建范围）
+      promote_tag:
+        description: Existing tag to promote（要晋升的既有 tag）
         required: true
-        default: all
-        type: choice
-        options:
-          - all
-          - android
-          - windows
-          - macos
-          - linux
+        type: string
 
 permissions:
   contents: write
 
 env:
   RUST_TOOLCHAIN: stable
-  BUN_VERSION: '1.3.8'           # 固定版本，v1.3.10 在 Windows 上有 resolving hang bug
+  BUN_VERSION: "1.3.8" # 固定版本，v1.3.10 在 Windows 上有 resolving hang bug
+  VITE_UPDATE_BASE_URL: https://exo-mind.ai/
 
 jobs:
   # ─────────────────────────────────────────────────────────────
-  # Job 1: Android APK + Windows EXE on self-hosted Windows runner
-  # Shared setup runs once; platform-specific builds gated by step-level `if`.
+  # Job 1: Android APK on Windows runner
+  # Split from the old combined Windows job so Android/Windows can run in parallel.
   # ─────────────────────────────────────────────────────────────
-  build-apk-exe-selfhosted:
-    if: |
-      github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.build_scope == 'all' ||
-      github.event.inputs.build_scope == 'android' ||
-      github.event.inputs.build_scope == 'windows'
-    runs-on: [self-hosted, Windows, X64]
+  build-android-windows:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Determine build targets (确定构建目标)
         id: targets
-        shell: powershell
+        shell: pwsh
         run: |
-          $scope = "${{ github.event.inputs.build_scope }}"
-          $isDispatch = "${{ github.event_name }}" -eq "workflow_dispatch"
-          $android = ((-not $isDispatch) -or ($scope -eq "all") -or ($scope -eq "android")).ToString().ToLower()
-          $windows = ((-not $isDispatch) -or ($scope -eq "all") -or ($scope -eq "windows")).ToString().ToLower()
+          $android = "true"
+          $windows = "false"
           "BUILD_ANDROID=$android" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "BUILD_WINDOWS=$windows" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "Build Android=$android Windows=$windows (scope=$scope, dispatch=$isDispatch)"
+          Write-Host "Build Android=$android Windows=$windows (parallel Android job / 并行 Android job)"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: "20"
 
-      - name: Ensure local Bun is available (确保本机 Bun 可用，版本锁定)
-        shell: powershell
+      - name: Setup Java 17
+        if: steps.targets.outputs.BUILD_ANDROID == 'true'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Ensure Bun is available on Windows runner (确保 Windows runner 上 Bun 可用，版本锁定)
+        shell: pwsh
         run: |
           $requiredVersion = "${{ env.BUN_VERSION }}"
           $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
@@ -96,52 +95,42 @@ jobs:
           bun --version
 
       - name: Rust diagnostics (Rust 诊断输出)
-        shell: powershell
+        shell: pwsh
         run: |
-          Write-Host "=== Rust diagnostics / Rust 诊断输出 ==="
-          Write-Host "event_name=${{ github.event_name }}"
-          Write-Host "ref=${{ github.ref }}"
-          Write-Host "build_scope=${{ github.event.inputs.build_scope || 'n/a' }}"
-          Write-Host "runner=$env:RUNNER_NAME os=$env:RUNNER_OS arch=$env:RUNNER_ARCH"
-          Write-Host "whoami=$(whoami)"
-          Write-Host "USERPROFILE=$env:USERPROFILE"
-          Write-Host "HOME=$env:HOME"
-          Write-Host "CARGO_HOME=$env:CARGO_HOME"
-          Write-Host "RUSTUP_HOME=$env:RUSTUP_HOME"
+          Write-Host '=== Rust diagnostics / Rust 诊断输出 ==='
+          Write-Host ('event_name={0}' -f '${{ github.event_name }}')
+          Write-Host ('ref={0}' -f '${{ github.ref }}')
+          Write-Host ('runner={0} os={1} arch={2}' -f $env:RUNNER_NAME, $env:RUNNER_OS, $env:RUNNER_ARCH)
+          $currentUser = whoami
+          Write-Host ('whoami={0}' -f $currentUser)
+          Write-Host ('USERPROFILE={0}' -f $env:USERPROFILE)
+          Write-Host ('HOME={0}' -f $env:HOME)
+          Write-Host ('CARGO_HOME={0}' -f $env:CARGO_HOME)
+          Write-Host ('RUSTUP_HOME={0}' -f $env:RUSTUP_HOME)
 
-          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
-          Write-Host "cargoBin=$cargoBin exists=$(Test-Path $cargoBin)"
+          $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+          $cargoBinExists = Test-Path $cargoBin
+          Write-Host ('cargoBin={0} exists={1}' -f $cargoBin, $cargoBinExists)
 
-          foreach ($name in @("rustup.exe", "rustc.exe", "cargo.exe", "rustup", "rustc", "cargo")) {
+          foreach ($name in @('rustup.exe', 'rustc.exe', 'cargo.exe', 'rustup', 'rustc', 'cargo')) {
             $candidate = Join-Path $cargoBin $name
-            Write-Host "candidate=$candidate exists=$(Test-Path $candidate)"
+            $candidateExists = Test-Path $candidate
+            Write-Host ('candidate={0} exists={1}' -f $candidate, $candidateExists)
           }
 
-          Write-Host "Get-Command (before prepend PATH):"
-          foreach ($cmd in @("rustup", "rustc", "cargo")) {
+          Write-Host 'Get-Command (before prepend PATH)'
+          foreach ($cmd in @('rustup', 'rustc', 'cargo')) {
             $resolved = Get-Command $cmd -ErrorAction SilentlyContinue
             if ($resolved) {
-              Write-Host " - $cmd => $($resolved.Source)"
+              Write-Host (' - {0} [{1}]' -f $cmd, $resolved.Source)
             } else {
-              Write-Host " - $cmd => NOT_FOUND"
+              Write-Host (' - {0} [NOT_FOUND]' -f $cmd)
             }
           }
 
-      - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
-        shell: powershell
+      - name: Ensure Rust toolchain on Windows runner (确保 Windows runner Rust 工具链可用，禁止 WSL)
+        shell: pwsh
         run: |
-          $preferredCargoHome = "D:\actions-runner\rust\cargo"
-          $preferredRustupHome = "D:\actions-runner\rust\rustup"
-          $preferredCargoBin = Join-Path $preferredCargoHome "bin"
-          if (Test-Path $preferredCargoBin) {
-            $env:CARGO_HOME = $preferredCargoHome
-            $env:RUSTUP_HOME = $preferredRustupHome
-            "CARGO_HOME=$preferredCargoHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            "RUSTUP_HOME=$preferredRustupHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            $env:Path = "$preferredCargoBin;$env:Path"
-            "$preferredCargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          }
-
           $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
           if (Test-Path $cargoBin) {
             $env:Path = "$cargoBin;$env:Path"
@@ -152,7 +141,7 @@ jobs:
           $rustcCmd = Get-Command rustc -ErrorAction SilentlyContinue
           $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
           if ((-not $rustupCmd) -or (-not $rustcCmd) -or (-not $cargoCmd)) {
-            throw "Rust toolchain not found on self-hosted Windows runner. Please pre-install rustup/cargo/rustc."
+            throw "Rust toolchain not found on Windows runner."
           }
 
           if (($rustupCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($rustcCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($cargoCmd.Source -match '(?i)wsl|\\ubuntu\\')) {
@@ -170,22 +159,20 @@ jobs:
 
       - name: Get short commit hash
         id: hash
-        shell: powershell
+        shell: pwsh
         run: |
           $short = $env:GITHUB_SHA.Substring(0, 7)
           "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Resolve app version (解析应用版本)
         id: app_version
-        shell: powershell
+        shell: pwsh
         run: |
           $refName = "${{ github.ref_name }}"
           $appVersion = ""
 
-          if ($refName.StartsWith("release/")) {
-            $appVersion = $refName.Substring("release/".Length)
-          } elseif ($refName.StartsWith("build/")) {
-            $appVersion = $refName.Substring("build/".Length)
+          if ($refName.StartsWith("v")) {
+            $appVersion = $refName.Substring(1)
           }
 
           if (-not $appVersion) {
@@ -204,8 +191,13 @@ jobs:
           "APP_VERSION=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Resolved app version: $appVersion"
 
+      - name: Validate version consistency (版本号一致性校验)
+        if: steps.targets.outputs.BUILD_ANDROID == 'true'
+        shell: pwsh
+        run: bun scripts/dev/check-version-consistency.ts
+
       - name: Clean stale node_modules (清理残留依赖，避免 bun 校验卡死)
-        shell: powershell
+        shell: pwsh
         run: |
           if (Test-Path node_modules) {
             Write-Host "Removing stale node_modules from previous run..."
@@ -213,7 +205,7 @@ jobs:
           }
 
       - name: Clear bun global cache (清理 bun 全局缓存)
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Continue"
           try {
@@ -236,7 +228,7 @@ jobs:
           }
 
       - name: Install dependencies with isolated cache and retry (安装依赖：隔离缓存 + 重试)
-        shell: powershell
+        shell: pwsh
         timeout-minutes: 10
         run: |
           $ErrorActionPreference = "Stop"
@@ -254,7 +246,7 @@ jobs:
             New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
 
             $env:BUN_INSTALL_CACHE_DIR = $CacheDir
-            $arguments = @("install", "--frozen-lockfile", "--cache-dir", $CacheDir)
+            $arguments = @("install", "--cache-dir", $CacheDir)
             Write-Host "[$AttemptLabel] Running: bun $($arguments -join ' ')"
 
             $commandText = "bun $($arguments -join ' ')"
@@ -288,11 +280,14 @@ jobs:
             Invoke-BunInstallWithCache -CacheDir $secondAttemptCacheDir -AttemptLabel "attempt 2 / 第二次"
           }
 
+          "EXOMIND_SKIP_BUN_INSTALL=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "EXOMIND_SKIP_BUN_INSTALL=1 (reuse bootstrapped dependencies / 复用前置依赖安装)"
+
       # ─── Android build ──────────────────────────────────────
 
       - name: Configure local Android toolchain (配置本地 Android 工具链)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           $defaultJavaHome = "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot"
           $javaHome = $env:JAVA_HOME
@@ -309,21 +304,36 @@ jobs:
           }
 
           $defaultAndroidSdkRoot = "D:\data\AndroidSDK"
+          $hostedAndroidSdkRoot = "C:\Android\android-sdk"
           $androidSdkRoot = $env:ANDROID_SDK_ROOT
           if (-not $androidSdkRoot -or -not (Test-Path $androidSdkRoot)) {
-            if (-not (Test-Path $defaultAndroidSdkRoot)) {
-              throw "ANDROID_SDK_ROOT is invalid and default path not found: $defaultAndroidSdkRoot"
+            if (Test-Path $hostedAndroidSdkRoot) {
+              $androidSdkRoot = $hostedAndroidSdkRoot
+            } elseif (Test-Path $defaultAndroidSdkRoot) {
+              $androidSdkRoot = $defaultAndroidSdkRoot
+            } else {
+              throw "ANDROID_SDK_ROOT is invalid and no known SDK path exists."
             }
-            $androidSdkRoot = $defaultAndroidSdkRoot
           }
           "ANDROID_SDK_ROOT=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           if (-not $env:ANDROID_HOME -or -not (Test-Path $env:ANDROID_HOME)) {
             "ANDROID_HOME=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
 
+          foreach ($candidate in @(
+            (Join-Path $androidSdkRoot "platform-tools"),
+            (Join-Path $androidSdkRoot "cmdline-tools\latest\bin"),
+            (Join-Path $androidSdkRoot "cmdline-tools\bin"),
+            (Join-Path $androidSdkRoot "emulator")
+          )) {
+            if (Test-Path $candidate) {
+              "$candidate" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            }
+          }
+
       - name: Validate Android signing secrets early (提前校验 Android 签名密钥)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -338,7 +348,7 @@ jobs:
 
       - name: Ensure Rust Android targets (确保 Rust Android 目标)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         run: rustup target add aarch64-linux-android i686-linux-android
 
       - name: Init Android
@@ -347,23 +357,48 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Patch Android audio permissions and release cleartext（注入音频权限与 release cleartext）
+      - name: Patch Android network discovery prerequisites（注入 Android 发现权限 / 组播锁 / release cleartext）
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
-          bun Scripts/dev/android-manifest-permission.ts
+          bun scripts/dev/android-manifest-permission.ts
 
-      - name: Verify Android permission and cleartext patch persisted（校验权限与 cleartext 配置）
+      - name: Verify Android discovery patch persisted（校验 Android 发现权限 / 组播锁 / cleartext 配置）
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           $manifestPath = "src-tauri/gen/android/app/src/main/AndroidManifest.xml"
           if (-not (Test-Path $manifestPath)) {
             throw "Manifest not found: $manifestPath"
           }
-          foreach ($permission in @("android.permission.RECORD_AUDIO", "android.permission.MODIFY_AUDIO_SETTINGS")) {
+          foreach ($permission in @(
+            "android.permission.RECORD_AUDIO",
+            "android.permission.MODIFY_AUDIO_SETTINGS",
+            "android.permission.ACCESS_NETWORK_STATE",
+            "android.permission.ACCESS_WIFI_STATE",
+            "android.permission.CHANGE_WIFI_MULTICAST_STATE"
+          )) {
             if (-not (Select-String -Path $manifestPath -Pattern $permission -SimpleMatch -Quiet)) {
               throw "Missing $permission in AndroidManifest.xml"
+            }
+          }
+          if (-not (Select-String -Path $manifestPath -Pattern 'android:usesCleartextTraffic="true"' -SimpleMatch -Quiet)) {
+            throw 'Missing android:usesCleartextTraffic="true" in AndroidManifest.xml'
+          }
+
+          $mainActivityPath = "src-tauri/gen/android/app/src/main/java/com/exomind/app/MainActivity.kt"
+          if (-not (Test-Path $mainActivityPath)) {
+            throw "MainActivity not found: $mainActivityPath"
+          }
+          $mainActivityContent = Get-Content -Path $mainActivityPath -Raw -Encoding UTF8
+          foreach ($pattern in @(
+            'WifiManager\.MulticastLock',
+            'acquireMulticastLock\(\)',
+            'releaseMulticastLock\(\)',
+            'createMulticastLock\("exomind-mdns-lock"\)'
+          )) {
+            if (-not ($mainActivityContent -match $pattern)) {
+              throw "Missing Android multicast patch pattern: $pattern"
             }
           }
 
@@ -376,8 +411,12 @@ jobs:
           if (-not ($buildGradleContent -match $releaseCleartextPattern)) {
             throw "Missing usesCleartextTraffic=true in release block."
           }
+          $debugCleartextPattern = 'getByName\("debug"\)\s*\{[\s\S]*manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"true"'
+          if (-not ($buildGradleContent -match $debugCleartextPattern)) {
+            throw "Missing usesCleartextTraffic=true in debug block."
+          }
 
-          Write-Host "Android permissions and cleartext release placeholder verified."
+          Write-Host "Android discovery permissions, multicast lock, and cleartext release placeholder verified."
 
       - name: Build Android APK only (仅构建 APK，aarch64 + i686)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
@@ -387,7 +426,7 @@ jobs:
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
           # Stabilize Kotlin/Gradle on Windows runners (稳定 Windows 上 Kotlin/Gradle 构建)
-          GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7890 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7890
+          GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false
 
       - name: Validate Android app name/icon/artifact size (门禁校验)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
@@ -397,7 +436,7 @@ jobs:
 
       - name: Prepare Android signing keystore (准备签名密钥库)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
@@ -415,7 +454,7 @@ jobs:
 
       - name: Sign Android APK artifacts (签名 APK 产物)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
-        shell: powershell
+        shell: pwsh
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -481,31 +520,295 @@ jobs:
           }
 
       - name: Upload Android signed APK Artifact (上传已签名 APK)
-        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
+        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         id: upload_apk
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
           path: src-tauri/gen/android/app/build/outputs/apk-signed/
         continue-on-error: true
 
       - name: Retry Upload Android signed APK Artifact
-        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/') && steps.upload_apk.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && steps.upload_apk.outcome == 'failure'
+        uses: actions/upload-artifact@v7
         with:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
           path: src-tauri/gen/android/app/build/outputs/apk-signed/
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 2: Windows EXE/MSI on Windows runner
+  # Split from the old combined Windows job so Android/Windows can run in parallel.
+  # ─────────────────────────────────────────────────────────────
+  build-windows:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Determine build targets (确定构建目标)
+        id: targets
+        shell: pwsh
+        run: |
+          $android = "false"
+          $windows = "true"
+          "BUILD_ANDROID=$android" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "BUILD_WINDOWS=$windows" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Build Android=$android Windows=$windows (parallel Windows job / 并行 Windows job)"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Ensure Bun is available on Windows runner (确保 Windows runner 上 Bun 可用，版本锁定)
+        shell: pwsh
+        run: |
+          $requiredVersion = "${{ env.BUN_VERSION }}"
+          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          $needInstall = $false
+
+          if (-not $bunCmd -or ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\')) {
+            Write-Host "Bun not found or is WSL version."
+            $needInstall = $true
+          } else {
+            $currentVersion = (bun --version 2>$null)
+            if ($currentVersion -ne $requiredVersion) {
+              Write-Host "Bun version mismatch: found $currentVersion, need $requiredVersion"
+              $needInstall = $true
+            } else {
+              Write-Host "Found matching Bun $currentVersion at $($bunCmd.Source)"
+            }
+          }
+
+          if ($needInstall) {
+            Write-Host "Installing bun@$requiredVersion via npm..."
+            npm install -g "bun@$requiredVersion"
+            $npmPrefix = (npm config get prefix).Trim()
+            if ($npmPrefix) {
+              $env:Path = "$npmPrefix;$env:Path"
+              "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            }
+            $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+            if (-not $bunCmd) { throw "Bun is unavailable after installation." }
+            if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
+              throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+            }
+          }
+          Write-Host "Using Bun from: $($bunCmd.Source)"
+          bun --version
+
+      - name: Rust diagnostics (Rust 诊断输出)
+        shell: pwsh
+        run: |
+          Write-Host '=== Rust diagnostics / Rust 诊断输出 ==='
+          Write-Host ('event_name={0}' -f '${{ github.event_name }}')
+          Write-Host ('ref={0}' -f '${{ github.ref }}')
+          Write-Host ('runner={0} os={1} arch={2}' -f $env:RUNNER_NAME, $env:RUNNER_OS, $env:RUNNER_ARCH)
+          $currentUser = whoami
+          Write-Host ('whoami={0}' -f $currentUser)
+          Write-Host ('USERPROFILE={0}' -f $env:USERPROFILE)
+          Write-Host ('HOME={0}' -f $env:HOME)
+          Write-Host ('CARGO_HOME={0}' -f $env:CARGO_HOME)
+          Write-Host ('RUSTUP_HOME={0}' -f $env:RUSTUP_HOME)
+
+          $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+          $cargoBinExists = Test-Path $cargoBin
+          Write-Host ('cargoBin={0} exists={1}' -f $cargoBin, $cargoBinExists)
+
+          foreach ($name in @('rustup.exe', 'rustc.exe', 'cargo.exe', 'rustup', 'rustc', 'cargo')) {
+            $candidate = Join-Path $cargoBin $name
+            $candidateExists = Test-Path $candidate
+            Write-Host ('candidate={0} exists={1}' -f $candidate, $candidateExists)
+          }
+
+          Write-Host 'Get-Command (before prepend PATH)'
+          foreach ($cmd in @('rustup', 'rustc', 'cargo')) {
+            $resolved = Get-Command $cmd -ErrorAction SilentlyContinue
+            if ($resolved) {
+              Write-Host (' - {0} [{1}]' -f $cmd, $resolved.Source)
+            } else {
+              Write-Host (' - {0} [NOT_FOUND]' -f $cmd)
+            }
+          }
+
+      - name: Ensure Rust toolchain on Windows runner (确保 Windows runner Rust 工具链可用，禁止 WSL)
+        shell: pwsh
+        run: |
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          if (Test-Path $cargoBin) {
+            $env:Path = "$cargoBin;$env:Path"
+            "$cargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $rustupCmd = Get-Command rustup -ErrorAction SilentlyContinue
+          $rustcCmd = Get-Command rustc -ErrorAction SilentlyContinue
+          $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+          if ((-not $rustupCmd) -or (-not $rustcCmd) -or (-not $cargoCmd)) {
+            throw "Rust toolchain not found on Windows runner."
+          }
+
+          if (($rustupCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($rustcCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($cargoCmd.Source -match '(?i)wsl|\\ubuntu\\')) {
+            throw "Detected Rust command from WSL path. Please use native Windows Rust toolchain."
+          }
+
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to select stable Rust toolchain. Please install stable locally first (例如: rustup toolchain install stable)."
+          }
+
+          rustup show active-toolchain
+          rustc -vV
+          cargo -V
+
+      - name: Get short commit hash
+        id: hash
+        shell: pwsh
+        run: |
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Resolve app version (解析应用版本)
+        id: app_version
+        shell: pwsh
+        run: |
+          $refName = "${{ github.ref_name }}"
+          $appVersion = ""
+
+          if ($refName.StartsWith("v")) {
+            $appVersion = $refName.Substring(1)
+          }
+
+          if (-not $appVersion) {
+            $packageVersion = (Get-Content -Path "package.json" -Raw | ConvertFrom-Json).version
+            $appVersion = [string]$packageVersion
+          }
+
+          if ($appVersion.StartsWith("v")) {
+            $appVersion = $appVersion.Substring(1)
+          }
+
+          if (-not $appVersion) {
+            throw "Cannot resolve app version from tag or package.json."
+          }
+
+          "APP_VERSION=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Resolved app version: $appVersion"
+
+      - name: Validate version consistency (版本号一致性校验)
+        shell: pwsh
+        run: bun scripts/dev/check-version-consistency.ts
+
+      - name: Clean stale node_modules (清理残留依赖，避免 bun 校验卡死)
+        shell: pwsh
+        run: |
+          if (Test-Path node_modules) {
+            Write-Host "Removing stale node_modules from previous run..."
+            Remove-Item -Recurse -Force node_modules
+          }
+
+      - name: Clear bun global cache (清理 bun 全局缓存)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          try {
+            Write-Host "Running bun pm cache rm (best effort)..."
+            bun pm cache rm
+          } catch {
+            Write-Warning "bun pm cache rm failed: $($_.Exception.Message)"
+          }
+
+          $bunCacheDir = Join-Path $env:USERPROFILE ".bun\install\cache"
+          if (Test-Path $bunCacheDir) {
+            try {
+              Write-Host "Removing bun global cache directory: $bunCacheDir"
+              Remove-Item -Recurse -Force $bunCacheDir -ErrorAction Stop
+            } catch {
+              Write-Warning "Failed to remove bun global cache directory: $($_.Exception.Message)"
+            }
+          } else {
+            Write-Host "Bun global cache directory not found, skip cleanup."
+          }
+
+      - name: Install dependencies with isolated cache and retry (安装依赖：隔离缓存 + 重试)
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Invoke-BunInstallWithCache {
+            param(
+              [Parameter(Mandatory = $true)][string]$CacheDir,
+              [Parameter(Mandatory = $true)][string]$AttemptLabel,
+              [int]$TimeoutSeconds = 180
+            )
+
+            if (Test-Path $CacheDir) {
+              Remove-Item -Recurse -Force $CacheDir -ErrorAction SilentlyContinue
+            }
+            New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
+
+            $env:BUN_INSTALL_CACHE_DIR = $CacheDir
+            $arguments = @("install", "--cache-dir", $CacheDir)
+            Write-Host "[$AttemptLabel] Running: bun $($arguments -join ' ')"
+
+            $commandText = "bun $($arguments -join ' ')"
+            $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $commandText -PassThru
+            $finished = $process.WaitForExit($TimeoutSeconds * 1000)
+
+            if (-not $finished) {
+              Write-Warning "[$AttemptLabel] bun install timed out after $TimeoutSeconds seconds."
+              try {
+                & taskkill /PID $process.Id /T /F | Out-Null
+              } catch {
+                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              }
+              throw "bun install timeout in $AttemptLabel"
+            }
+
+            if ($process.ExitCode -ne 0) {
+              throw "bun install failed in $AttemptLabel with exit code $($process.ExitCode)"
+            }
+          }
+
+          $baseCacheDir = Join-Path $env:RUNNER_TEMP "bun-install-cache"
+          $firstAttemptCacheDir = Join-Path $baseCacheDir "attempt-1"
+          $secondAttemptCacheDir = Join-Path $baseCacheDir "attempt-2"
+
+          try {
+            Invoke-BunInstallWithCache -CacheDir $firstAttemptCacheDir -AttemptLabel "attempt 1 / 第一次"
+          } catch {
+            Write-Warning "First install attempt failed: $($_.Exception.Message)"
+            Write-Host "Retry bun install / 重试 bun install with fresh isolated cache."
+            Invoke-BunInstallWithCache -CacheDir $secondAttemptCacheDir -AttemptLabel "attempt 2 / 第二次"
+          }
+
+          "EXOMIND_SKIP_BUN_INSTALL=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "EXOMIND_SKIP_BUN_INSTALL=1 (reuse bootstrapped dependencies / 复用前置依赖安装)"
+
+      - name: Build frontend dist for Windows cargo build (为 Windows cargo 构建预先产出前端 dist)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        shell: pwsh
+        run: bun run build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
       # ─── Windows build ──────────────────────────────────────
 
       - name: Build Windows EXE binary (构建 Windows EXE 可执行文件)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           # Build EXE via cargo to avoid a second tauri beforeBuild bun install in CI.
           #（使用 cargo 构建 EXE，避免 CI 中 tauri beforeBuild 再次触发 bun install 卡死）
-          cargo build --manifest-path src-tauri/Cargo.toml --release -p exomind
+          cargo build --manifest-path src-tauri/Cargo.toml --release -p exomind --features custom-protocol
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
@@ -514,64 +817,59 @@ jobs:
       - name: Prepare MSI prerequisites (准备 MSI 前置检查)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
         id: msi_prereq
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Continue"
           $msiReady = $true
           $runnerIdentity = (whoami).Trim().ToLowerInvariant()
           Write-Host "Runner identity / 运行账号: $runnerIdentity"
 
-          if ($runnerIdentity -eq "nt authority\network service") {
-            Write-Warning "NetworkService account is detected. MSI build is disabled because WiX ICE validation often fails in service context."
+          $wshKey = "HKCU:\Software\Microsoft\Windows Script Host\Settings"
+          try {
+            New-Item -Path $wshKey -Force | Out-Null
+            New-ItemProperty -Path $wshKey -Name Enabled -PropertyType DWord -Value 1 -Force | Out-Null
+            $enabled = (Get-ItemProperty -Path $wshKey -Name Enabled -ErrorAction SilentlyContinue).Enabled
+            Write-Host "Windows Script Host (WSH) Enabled=$enabled"
+          } catch {
+            Write-Warning "Unable to set WSH registry key: $($_.Exception.Message)"
             $msiReady = $false
-          } else {
-            $wshKey = "HKCU:\Software\Microsoft\Windows Script Host\Settings"
-            try {
-              New-Item -Path $wshKey -Force | Out-Null
-              New-ItemProperty -Path $wshKey -Name Enabled -PropertyType DWord -Value 1 -Force | Out-Null
-              $enabled = (Get-ItemProperty -Path $wshKey -Name Enabled -ErrorAction SilentlyContinue).Enabled
-              Write-Host "Windows Script Host (WSH) Enabled=$enabled"
-            } catch {
-              Write-Warning "Unable to set WSH registry key: $($_.Exception.Message)"
+          }
+
+          $probePath = Join-Path $env:RUNNER_TEMP "wix-vbscript-probe.vbs"
+          Set-Content -Path $probePath -Value 'WScript.Echo "VBSCRIPT_OK"' -Encoding ASCII
+
+          try {
+            & cscript.exe //NoLogo $probePath
+            Write-Host "cscript probe exit code=$LASTEXITCODE"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "cscript probe returned non-zero exit code: $LASTEXITCODE"
               $msiReady = $false
             }
+          } catch {
+            Write-Warning "cscript probe failed: $($_.Exception.Message)"
+            $msiReady = $false
+          }
 
-            $probePath = Join-Path $env:RUNNER_TEMP "wix-vbscript-probe.vbs"
-            Set-Content -Path $probePath -Value 'WScript.Echo "VBSCRIPT_OK"' -Encoding ASCII
-
-            try {
-              & cscript.exe //NoLogo $probePath
-              Write-Host "cscript probe exit code=$LASTEXITCODE"
-              if ($LASTEXITCODE -ne 0) {
-                Write-Warning "cscript probe returned non-zero exit code: $LASTEXITCODE"
-                $msiReady = $false
-              }
-            } catch {
-              Write-Warning "cscript probe failed: $($_.Exception.Message)"
-              $msiReady = $false
-            }
-
-            try {
+          try {
+            $service = Get-Service -Name msiserver -ErrorAction Stop
+            Write-Host "Windows Installer service status=$($service.Status) startType=$($service.StartType)"
+            if ($service.Status -ne "Running") {
+              Start-Service -Name msiserver -ErrorAction Stop
+              Start-Sleep -Seconds 1
               $service = Get-Service -Name msiserver -ErrorAction Stop
-              Write-Host "Windows Installer service status=$($service.Status) startType=$($service.StartType)"
-              if ($service.Status -ne "Running") {
-                Start-Service -Name msiserver -ErrorAction Stop
-                Start-Sleep -Seconds 1
-                $service = Get-Service -Name msiserver -ErrorAction Stop
-                Write-Host "Windows Installer service status after start=$($service.Status)"
-              }
-            } catch {
-              Write-Warning "Windows Installer service probe failed: $($_.Exception.Message)"
-              $msiReady = $false
+              Write-Host "Windows Installer service status after start=$($service.Status)"
             }
+          } catch {
+            Write-Warning "Windows Installer service probe failed: $($_.Exception.Message)"
+            $msiReady = $false
+          }
 
-            try {
-              $null = New-Object -ComObject WindowsInstaller.Installer
-              Write-Host "WindowsInstaller COM probe: OK"
-            } catch {
-              Write-Warning "WindowsInstaller COM probe failed: $($_.Exception.Message)"
-              $msiReady = $false
-            }
+          try {
+            $null = New-Object -ComObject WindowsInstaller.Installer
+            Write-Host "WindowsInstaller COM probe: OK"
+          } catch {
+            Write-Warning "WindowsInstaller COM probe failed: $($_.Exception.Message)"
+            $msiReady = $false
           }
 
           "MSI_READY=$($msiReady.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -587,295 +885,118 @@ jobs:
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
           RUST_LOG: tauri_bundler=debug
 
+      - name: Recover Windows MSI artifact via WiX light fallback (通过 WiX light 回退恢复 MSI)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.msi_prereq.outputs.MSI_READY == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Find-FirstExistingPath([string[]]$Candidates) {
+            foreach ($candidate in $Candidates) {
+              if (Test-Path $candidate) {
+                return (Resolve-Path $candidate).Path
+              }
+            }
+            return $null
+          }
+
+          $existingMsiDirs = @(
+            "target/release/bundle/msi",
+            "src-tauri/target/release/bundle/msi"
+          )
+          foreach ($msiDir in $existingMsiDirs) {
+            if (-not (Test-Path $msiDir)) { continue }
+            $existingMsi = Get-ChildItem -Path $msiDir -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($existingMsi) {
+              Write-Host "MSI already exists, skip WiX fallback: $($existingMsi.FullName)"
+              exit 0
+            }
+          }
+
+          $wixRoot = Find-FirstExistingPath @(
+            "target/.tauri/WixTools314",
+            "src-tauri/target/.tauri/WixTools314"
+          )
+          $wixBuildDir = Find-FirstExistingPath @(
+            "target/release/wix/x64",
+            "src-tauri/target/release/wix/x64"
+          )
+
+          if (-not $wixRoot -or -not $wixBuildDir) {
+            Write-Warning "WiX fallback inputs are missing. Skip MSI recovery."
+            exit 0
+          }
+
+          $lightExe = Join-Path $wixRoot "light.exe"
+          $wixUtilExt = Join-Path $wixRoot "WixUtilExtension.dll"
+          $wixUiExt = Join-Path $wixRoot "WixUIExtension.dll"
+          $localeFile = Join-Path $wixBuildDir "locale.wxl"
+          $wixObjFiles = Get-ChildItem -Path $wixBuildDir -Filter "*.wixobj" -File -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty FullName
+
+          foreach ($requiredPath in @($lightExe, $wixUtilExt, $wixUiExt, $localeFile)) {
+            if (-not (Test-Path $requiredPath)) {
+              throw "Missing WiX fallback dependency: $requiredPath"
+            }
+          }
+          if (-not $wixObjFiles -or $wixObjFiles.Count -eq 0) {
+            throw "Missing .wixobj files for WiX fallback under $wixBuildDir"
+          }
+
+          $releaseDir = Split-Path -Parent (Split-Path -Parent $wixBuildDir)
+          $bundleDir = Join-Path $releaseDir "bundle/msi"
+          New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
+
+          $appVersion = "${{ steps.app_version.outputs.APP_VERSION }}"
+          $outputMsi = Join-Path $bundleDir "ExoMind_${appVersion}_x64_en-US.msi"
+          $lightArgs = @(
+            "-ext", $wixUtilExt,
+            "-ext", $wixUiExt,
+            "-sval",
+            "-o", $outputMsi,
+            "-cultures:en-us",
+            "-loc", $localeFile
+          ) + $wixObjFiles
+
+          Write-Host "Recover MSI with WiX light fallback / 通过 WiX light 回退恢复 MSI"
+          Write-Host "Command: $lightExe $($lightArgs -join ' ')"
+          & $lightExe @lightArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "WiX light fallback failed with exit code $LASTEXITCODE"
+          }
+          if (-not (Test-Path $outputMsi)) {
+            throw "WiX light fallback completed but MSI was not created: $outputMsi"
+          }
+          Write-Host "Recovered MSI artifact: $outputMsi"
+
       - name: Skip MSI build when prerequisites are unavailable (前置检查失败时跳过 MSI)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.msi_prereq.outputs.MSI_READY != 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           Write-Warning "MSI prerequisites are unavailable on this runner. Skipping MSI build to keep EXE/APK pipeline stable."
 
       - name: Build exomind-rt runtime (构建 exomind-rt 运行时二进制)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
-        shell: powershell
+        shell: pwsh
         run: cargo build --release -p exomind-runtime
 
       - name: Package exomind-rt runtime (打包 exomind-rt 运行时产物)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
-        shell: powershell
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/runtime | Out-Null
           Copy-Item -Path target/release/exomind-rt.exe -Destination artifacts/runtime/exomind-rt-windows-x64.exe -Force
 
-      - name: Upload self-hosted artifacts to Cloudflare R2 (self-hosted 直传 Cloudflare R2)
-        if: |
-          (
-            github.event_name == 'workflow_dispatch' ||
-            (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/build/'))
-          ) &&
-          (steps.targets.outputs.BUILD_WINDOWS == 'true' || steps.targets.outputs.BUILD_ANDROID == 'true')
-        shell: powershell
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          if (-not $env:CLOUDFLARE_API_TOKEN -or -not $env:CLOUDFLARE_ACCOUNT_ID) {
-            throw "Missing Cloudflare credentials (CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID)."
-          }
-
-          $buildWindows = "${{ steps.targets.outputs.BUILD_WINDOWS }}" -eq "true"
-          $buildAndroid = "${{ steps.targets.outputs.BUILD_ANDROID }}" -eq "true"
-          $version = "${{ steps.app_version.outputs.APP_VERSION }}"
-          $shortHash = "${{ steps.hash.outputs.HASH }}"
-          $runNumber = "${{ github.run_number }}"
-          $scope = "${{ github.event.inputs.build_scope }}"
-          if ([string]::IsNullOrWhiteSpace($scope)) {
-            $scope = "tag-build"
-          }
-          $isBuildTagPush = "${{ github.event_name }}" -eq "push" -and "${{ github.ref }}".StartsWith("refs/tags/build/")
-
-          $bucket = "exomind-releases"
-          $channel = "preview"
-          if ($isBuildTagPush) {
-            $versionDir = "${{ github.ref_name }}" -replace '^build/', ''
-          } else {
-            $versionDir = "v$version-manual.$runNumber.$shortHash"
-          }
-          # artifactVersion (产物版本号): build tag uses "v..." for website API compatibility.
-          # （build tag 使用带 v 前缀，确保官网下载 API 与文件名一致）
-          $artifactVersion = if ($isBuildTagPush) { $versionDir } else { $version }
-
-          $stagingDir = Join-Path $env:RUNNER_TEMP "r2-direct-upload"
-          if (Test-Path $stagingDir) {
-            Remove-Item -Path $stagingDir -Recurse -Force
-          }
-          New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
-
-          if ($buildWindows) {
-            $exeCandidates = @(
-              "target/release/exomind.exe",
-              "target/release/ExoMind.exe",
-              "src-tauri/target/release/exomind.exe",
-              "src-tauri/target/release/ExoMind.exe"
-            )
-            $exePath = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-            if (-not $exePath) {
-              throw "Missing Windows EXE output in src-tauri/target/release/."
-            }
-            Copy-Item -Path $exePath -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-windows-x64-setup.exe") -Force
-
-            $runtimePath = "artifacts/runtime/exomind-rt-windows-x64.exe"
-            if (Test-Path $runtimePath) {
-              Copy-Item -Path $runtimePath -Destination (Join-Path $stagingDir "ExoMind-RT-$artifactVersion-windows-x64.exe") -Force
-            }
-
-            $msiCandidates = @(
-              "target/release/bundle/msi",
-              "src-tauri/target/release/bundle/msi"
-            )
-            $msiFile = $null
-            foreach ($msiDir in $msiCandidates) {
-              if (Test-Path $msiDir) {
-                $msiFile = Get-ChildItem -Path $msiDir -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($msiFile) { break }
-              }
-            }
-            if ($msiFile) {
-              Copy-Item -Path $msiFile.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-windows-x64-installer.msi") -Force
-            } else {
-              Write-Warning "MSI artifact not found. Continue with EXE upload only."
-            }
-          }
-
-          if ($buildAndroid) {
-            $apkDir = "src-tauri/gen/android/app/build/outputs/apk-signed"
-            if (-not (Test-Path $apkDir)) {
-              throw "Missing Android signed APK directory: $apkDir"
-            }
-
-            $apkFiles = Get-ChildItem -Path $apkDir -Filter "*-signed.apk" -Recurse
-            if (-not $apkFiles -or $apkFiles.Count -eq 0) {
-              throw "No signed APK files found under $apkDir"
-            }
-
-            $arm64Apk = $apkFiles | Where-Object { $_.Name -match "(?i)arm64|aarch64|arm64-v8a" } | Select-Object -First 1
-            if (-not $arm64Apk) {
-              throw "Missing Android arm64 signed APK."
-            }
-            Copy-Item -Path $arm64Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-android-arm64.apk") -Force
-
-            $x86Apk = $apkFiles | Where-Object { $_.Name -match "(?i)i686|x86" -and $_.Name -notmatch "(?i)x86_64" } | Select-Object -First 1
-            if ($x86Apk) {
-              Copy-Item -Path $x86Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-android-x86.apk") -Force
-            } else {
-              Write-Warning "Android x86 signed APK not found. Uploading arm64 only."
-            }
-          }
-
-          function Write-Utf8NoBom([string]$Path, [string]$Content) {
-            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-            [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
-          }
-
-          $preparedFiles = Get-ChildItem -Path $stagingDir -File
-          if (-not $preparedFiles -or $preparedFiles.Count -eq 0) {
-            throw "No artifacts prepared for direct R2 upload."
-          }
-
-          Write-Host "Prepared files for R2 direct upload (R2 直传文件):"
-          foreach ($file in $preparedFiles) {
-            Write-Host " - $($file.FullName)"
-          }
-
-          function Get-ContentType([string]$fileName) {
-            $name = $fileName.ToLowerInvariant()
-            if ($name.EndsWith(".apk")) { return "application/vnd.android.package-archive" }
-            if ($name.EndsWith(".json")) { return "application/json" }
-            return "application/octet-stream"
-          }
-
-          foreach ($file in $preparedFiles) {
-            $contentType = Get-ContentType $file.Name
-            $r2Key = "$channel/$versionDir/$($file.Name)"
-            Write-Host "Uploading (上传) $($file.Name) => $r2Key (Content-Type=$contentType)"
-            & npx wrangler r2 object put "$bucket/$r2Key" --file "$($file.FullName)" --content-type "$contentType" --remote
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to upload file to R2: $($file.Name)"
-            }
-          }
-
-          $manifestPath = Join-Path $stagingDir "selfhosted-upload-manifest.json"
-          $manifest = @{
-            channel = $channel
-            version = $artifactVersion
-            versionDir = $versionDir
-            hash = $shortHash
-            runNumber = $runNumber
-            scope = $scope
-            files = @($preparedFiles.Name)
-          } | ConvertTo-Json -Depth 5
-          Write-Utf8NoBom -Path $manifestPath -Content $manifest
-          & npx wrangler r2 object put "$bucket/$channel/$versionDir/selfhosted-upload-manifest.json" --file "$manifestPath" --content-type "application/json" --remote
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to upload self-hosted manifest to R2."
-          }
-
-          if ($isBuildTagPush) {
-            Write-Host "Build tag detected. Generate preview metadata (检测到 build tag，生成预览元数据)."
-            $publishedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-
-            function Get-AssetKey([string]$fileName) {
-              $name = $fileName.ToLowerInvariant()
-              if ($name -match '^exomind-.*-windows-x64-setup\.exe$') { return "windows-x64-setup" }
-              if ($name -match '^exomind-.*-windows-x64-installer\.msi$') { return "windows-x64-installer" }
-              if ($name -match '^exomind-.*-android-arm64\.apk$') { return "android-arm64" }
-              if ($name -match '^exomind-.*-android-x86\.apk$') { return "android-x86" }
-              if ($name -match '^exomind-rt-.*-windows-x64\.exe$') { return "runtime-windows-x64" }
-              if ($name -match '^exomind-rt-.*-macos-aarch64\.tar\.gz$') { return "runtime-macos-aarch64" }
-              if ($name -match '^exomind-rt-.*-linux-x64\.tar\.gz$') { return "runtime-linux-x64" }
-              return $null
-            }
-
-            $assets = [ordered]@{}
-            foreach ($file in $preparedFiles) {
-              $assetKey = Get-AssetKey $file.Name
-              if (-not $assetKey) { continue }
-              $sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-              $assets[$assetKey] = @{
-                url = "$channel/$versionDir/$($file.Name)"
-                size = [int64]$file.Length
-                sha256 = $sha256
-              }
-            }
-
-            $latestPath = Join-Path $stagingDir "latest.json"
-            $latestPayload = @{
-              version = $artifactVersion
-              tag = "${{ github.ref_name }}"
-              published_at = $publishedAt
-              assets = $assets
-            } | ConvertTo-Json -Depth 20
-            Write-Utf8NoBom -Path $latestPath -Content $latestPayload
-            & npx wrangler r2 object put "$bucket/$channel/latest.json" --file "$latestPath" --content-type "application/json" --remote
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to upload preview latest.json."
-            }
-
-            $retention = 15
-            $existingVersionsPath = Join-Path $stagingDir "existing-versions.json"
-            $existingVersions = @()
-
-            & npx wrangler r2 object get "$bucket/$channel/versions.json" --file "$existingVersionsPath" --remote *> $null
-            if ($LASTEXITCODE -eq 0 -and (Test-Path $existingVersionsPath)) {
-              try {
-                $rawVersions = Get-Content -Path $existingVersionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                if ($rawVersions -is [System.Array]) {
-                  $existingVersions = @($rawVersions)
-                } elseif ($rawVersions -and $rawVersions.PSObject.Properties.Name -contains "versions") {
-                  $existingVersions = @($rawVersions.versions)
-                  if ($rawVersions.PSObject.Properties.Name -contains "retention") {
-                    $parsedRetention = 0
-                    if ([int]::TryParse([string]$rawVersions.retention, [ref]$parsedRetention) -and $parsedRetention -gt 0) {
-                      $retention = $parsedRetention
-                    }
-                  }
-                }
-              } catch {
-                Write-Warning "Failed to parse preview versions.json, fallback to empty list."
-              }
-            }
-
-            $newEntry = [ordered]@{
-              version = $artifactVersion
-              tag = "${{ github.ref_name }}"
-              published_at = $publishedAt
-              version_dir = $versionDir
-            }
-
-            $mergedVersions = @($newEntry)
-            foreach ($entry in $existingVersions) {
-              if (-not $entry) { continue }
-              $versionValue = ""
-              if ($entry.PSObject.Properties.Name -contains "version") {
-                $versionValue = [string]$entry.version
-              }
-              if ([string]::IsNullOrWhiteSpace($versionValue)) { continue }
-              $alreadyExists = $mergedVersions | Where-Object { $_.version -eq $versionValue } | Select-Object -First 1
-              if ($alreadyExists) { continue }
-              $mergedVersions += [ordered]@{
-                version = $versionValue
-                tag = [string]$entry.tag
-                published_at = [string]$entry.published_at
-                version_dir = if ($entry.PSObject.Properties.Name -contains "version_dir") { [string]$entry.version_dir } else { $versionValue }
-              }
-            }
-
-            if ($mergedVersions.Count -gt $retention) {
-              $mergedVersions = @($mergedVersions | Select-Object -First $retention)
-            }
-
-            $versionsPath = Join-Path $stagingDir "versions.json"
-            $versionsPayload = @{
-              versions = $mergedVersions
-              retention = $retention
-            } | ConvertTo-Json -Depth 20
-            Write-Utf8NoBom -Path $versionsPath -Content $versionsPayload
-            & npx wrangler r2 object put "$bucket/$channel/versions.json" --file "$versionsPath" --content-type "application/json" --remote
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to upload preview versions.json."
-            }
-          }
-
       - name: Upload Windows runtime Artifact (上传 Windows runtime)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
-        uses: actions/upload-artifact@v4
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v7
         with:
           name: windows-runtime-${{ steps.hash.outputs.HASH }}
           path: artifacts/runtime/exomind-rt-windows-x64.exe
 
       - name: Upload Windows EXE Artifact (上传 EXE)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
-        uses: actions/upload-artifact@v4
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v7
         with:
           name: windows-exe-${{ steps.hash.outputs.HASH }}
           path: |
@@ -886,8 +1007,8 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Windows MSI Artifact (上传 MSI)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
-        uses: actions/upload-artifact@v4
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v7
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
           path: |
@@ -896,17 +1017,15 @@ jobs:
           if-no-files-found: ignore
 
   build-macos:
-    # release only: 非 release 不运行 macOS job（发布专用）
-    if: |
-      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install Bun
         run: npm install -g bun
@@ -924,10 +1043,8 @@ jobs:
           ref_name="${{ github.ref_name }}"
           app_version=""
 
-          if [[ "$ref_name" == release/* ]]; then
-            app_version="${ref_name#release/}"
-          elif [[ "$ref_name" == build/* ]]; then
-            app_version="${ref_name#build/}"
+          if [[ "$ref_name" == v* ]]; then
+            app_version="${ref_name#v}"
           fi
 
           if [ -z "$app_version" ]; then
@@ -943,6 +1060,9 @@ jobs:
 
           echo "APP_VERSION=$app_version" >> "$GITHUB_OUTPUT"
           echo "Resolved app version: $app_version"
+
+      - name: Validate version consistency (版本号一致性校验)
+        run: bun scripts/dev/check-version-consistency.ts
 
       - name: Install dependencies
         run: bun install
@@ -966,30 +1086,30 @@ jobs:
           tar -czf artifacts/runtime/exomind-rt-macos-aarch64.tar.gz -C artifacts/runtime exomind-rt-macos-aarch64
 
       - name: Upload macOS runtime Artifact (上传 macOS runtime)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-runtime-${{ steps.hash.outputs.HASH }}
           path: artifacts/runtime/exomind-rt-macos-aarch64.tar.gz
 
       - name: Upload macOS DMG Artifact (上传 DMG)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-dmg-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/dmg/
+          path: |
+            target/release/bundle/dmg/
+            src-tauri/target/release/bundle/dmg/
           if-no-files-found: ignore
 
   build-linux:
-    # release only: 非 release 不运行 Linux job（发布专用）
-    if: |
-      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install Bun
         run: npm install -g bun
@@ -1001,6 +1121,7 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
+            libxdo-dev \
             librsvg2-dev \
             patchelf \
             libssl-dev \
@@ -1019,10 +1140,8 @@ jobs:
           ref_name="${{ github.ref_name }}"
           app_version=""
 
-          if [[ "$ref_name" == release/* ]]; then
-            app_version="${ref_name#release/}"
-          elif [[ "$ref_name" == build/* ]]; then
-            app_version="${ref_name#build/}"
+          if [[ "$ref_name" == v* ]]; then
+            app_version="${ref_name#v}"
           fi
 
           if [ -z "$app_version" ]; then
@@ -1038,6 +1157,9 @@ jobs:
 
           echo "APP_VERSION=$app_version" >> "$GITHUB_OUTPUT"
           echo "Resolved app version: $app_version"
+
+      - name: Validate version consistency (版本号一致性校验)
+        run: bun scripts/dev/check-version-consistency.ts
 
       - name: Install dependencies
         run: bun install
@@ -1061,40 +1183,54 @@ jobs:
           tar -czf artifacts/runtime/exomind-rt-linux-x64.tar.gz -C artifacts/runtime exomind-rt-linux-x64
 
       - name: Upload Linux runtime Artifact (上传 Linux runtime)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-runtime-${{ steps.hash.outputs.HASH }}
           path: artifacts/runtime/exomind-rt-linux-x64.tar.gz
 
       - name: Upload Linux DEB Artifact (上传 DEB)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-deb-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/deb/
+          path: |
+            target/release/bundle/deb/
+            src-tauri/target/release/bundle/deb/
           if-no-files-found: ignore
 
       - name: Upload Linux AppImage Artifact (上传 AppImage)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-appimage-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/appimage/
+          path: |
+            target/release/bundle/appimage/
+            src-tauri/target/release/bundle/appimage/
           if-no-files-found: ignore
 
   create-release:
-    needs: [build-apk-exe-selfhosted, build-macos, build-linux]
+    needs:
+      [
+        build-android-windows,
+        build-windows,
+        build-macos,
+        build-linux,
+      ]
     runs-on: ubuntu-latest
-    # 仅 release/* tag 执行发布步骤（build/* 仅做构建与 R2 直传）
     if: |
-      always() &&
-      startsWith(github.ref, 'refs/tags/release/') &&
-      (
-        needs.build-apk-exe-selfhosted.result == 'success' ||
-        needs.build-macos.result == 'success' ||
-        needs.build-linux.result == 'success'
-      )
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.build-android-windows.result == 'success' &&
+      needs.build-windows.result == 'success'
     steps:
+      - name: Checkout repository (检出代码以生成 release notes)
+        uses: actions/checkout@v6
+
+      - name: Setup Bun (安装 Bun 以生成 release notes)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
       - name: Download Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-files
           merge-multiple: true
@@ -1107,38 +1243,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          short_hash="${GITHUB_SHA::7}"
-
-          if [[ "$GITHUB_REF_NAME" == build/* ]]; then
-            # build/v0.3.3-build.20260222T1430 → version=v0.3.3-build.20260222T1430
-            version="${GITHUB_REF_NAME#build/}"
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "title=Pre-release $version" >> "$GITHUB_OUTPUT"
-          else
-            # release/v0.3.3 → version=v0.3.3
-            version="${GITHUB_REF_NAME#release/}"
-            lower_version="$(echo "$version" | tr '[:upper:]' '[:lower:]')"
-            channel=""
-            if [[ "$lower_version" == *"-alpha."* ]]; then
-              channel="Alpha"
-            elif [[ "$lower_version" == *"-beta."* ]]; then
-              channel="Beta"
-            elif [[ "$lower_version" == *"-rc."* ]]; then
-              channel="RC"
-            elif [[ "$lower_version" == *"-preview."* ]]; then
-              channel="Preview"
-            fi
-
-            if [[ -n "$channel" ]]; then
-              echo "prerelease=true" >> "$GITHUB_OUTPUT"
-              echo "title=$channel $version" >> "$GITHUB_OUTPUT"
-            else
-              echo "prerelease=false" >> "$GITHUB_OUTPUT"
-              echo "title=Release $version" >> "$GITHUB_OUTPUT"
-            fi
-          fi
+          version="${GITHUB_REF_NAME#v}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "short_hash=$short_hash" >> "$GITHUB_OUTPUT"
+          echo "title=Preview ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Normalize release artifact names (统一发布产物命名)
         shell: bash
@@ -1147,7 +1254,6 @@ jobs:
           shopt -s nullglob globstar
 
           version="${{ steps.meta.outputs.version }}"
-          short_hash="${{ steps.meta.outputs.short_hash }}"
           source_dir="release-files"
           output_dir="release-assets"
           mkdir -p "$output_dir"
@@ -1172,11 +1278,11 @@ jobs:
             echo "::error::Cannot find non-runtime Windows EXE artifact."
             exit 1
           fi
-          cp "$app_exe" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-setup.exe"
+          cp "$app_exe" "$output_dir/ExoMind-${version}-windows-x64-setup.exe"
 
           msi_files=("$source_dir"/**/*.msi)
           if (( ${#msi_files[@]} > 0 )); then
-            cp "${msi_files[0]}" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-installer.msi"
+            cp "${msi_files[0]}" "$output_dir/ExoMind-${version}-windows-x64-installer.msi"
           fi
 
           apk_files=("$source_dir"/**/*signed.apk)
@@ -1206,430 +1312,161 @@ jobs:
             exit 1
           fi
 
-          cp "$arm64_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-arm64.apk"
-          cp "$x86_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-x86.apk"
+          cp "$arm64_apk" "$output_dir/ExoMind-${version}-android-arm64.apk"
+          cp "$x86_apk" "$output_dir/ExoMind-${version}-android-x86.apk"
+
+          dmg_files=("$source_dir"/**/*.dmg)
+          if (( ${#dmg_files[@]} > 0 )); then
+            macos_aarch64_dmg=""
+            macos_x64_dmg=""
+
+            for dmg in "${dmg_files[@]}"; do
+              file_name="$(basename "$dmg" | tr '[:upper:]' '[:lower:]')"
+              if [[ -z "$macos_x64_dmg" && ( "$file_name" == *"x64"* || "$file_name" == *"x86_64"* || "$file_name" == *"amd64"* ) ]]; then
+                macos_x64_dmg="$dmg"
+                continue
+              fi
+              if [[ -z "$macos_aarch64_dmg" && ( "$file_name" == *"arm64"* || "$file_name" == *"aarch64"* || "$file_name" == *"universal"* ) ]]; then
+                macos_aarch64_dmg="$dmg"
+              fi
+            done
+
+            if [[ -z "$macos_aarch64_dmg" ]]; then
+              macos_aarch64_dmg="${dmg_files[0]}"
+            fi
+
+            cp "$macos_aarch64_dmg" "$output_dir/ExoMind-${version}-macos-aarch64.dmg"
+
+            if [[ -n "$macos_x64_dmg" ]]; then
+              cp "$macos_x64_dmg" "$output_dir/ExoMind-${version}-macos-x64.dmg"
+            fi
+          fi
+
+          deb_files=("$source_dir"/**/*.deb)
+          if (( ${#deb_files[@]} > 0 )); then
+            cp "${deb_files[0]}" "$output_dir/ExoMind-${version}-linux-x64.deb"
+          fi
+
+          appimage_files=("$source_dir"/**/*.AppImage "$source_dir"/**/*.appimage)
+          if (( ${#appimage_files[@]} > 0 )); then
+            cp "${appimage_files[0]}" "$output_dir/ExoMind-${version}-linux-x64.AppImage"
+          fi
 
           runtime_win_files=("$source_dir"/**/exomind-rt-windows-x64.exe)
           if (( ${#runtime_win_files[@]} > 0 )); then
-            cp "${runtime_win_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-windows-x64.exe"
+            cp "${runtime_win_files[0]}" "$output_dir/ExoMind-RT-${version}-windows-x64.exe"
           fi
 
           runtime_macos_files=("$source_dir"/**/exomind-rt-macos-aarch64.tar.gz)
           if (( ${#runtime_macos_files[@]} > 0 )); then
-            cp "${runtime_macos_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-macos-aarch64.tar.gz"
+            cp "${runtime_macos_files[0]}" "$output_dir/ExoMind-RT-${version}-macos-aarch64.tar.gz"
           fi
 
           runtime_linux_files=("$source_dir"/**/exomind-rt-linux-x64.tar.gz)
           if (( ${#runtime_linux_files[@]} > 0 )); then
-            cp "${runtime_linux_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-linux-x64.tar.gz"
+            cp "${runtime_linux_files[0]}" "$output_dir/ExoMind-RT-${version}-linux-x64.tar.gz"
           fi
 
       - name: List Normalized Files
         run: ls -la release-assets/
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release-assets/**
-          # 从 tag 名称提取版本号 (去掉 release/ 前缀)
-          tag_name: ${{ github.ref_name }}
-          name: ${{ steps.meta.outputs.title }}
-          draft: false
-          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
-          generate_release_notes: true
+      - name: Generate release manifest (生成 release manifest)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${{ steps.meta.outputs.version }}"
+          output_dir="release-assets"
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          assets_json='{}'
+
+          add_asset() {
+            local key="$1"
+            local file="$2"
+            if [[ ! -f "$file" ]]; then
+              return
+            fi
+
+            local size sha256 name
+            size="$(stat --format=%s "$file")"
+            sha256="$(sha256sum "$file" | awk '{print $1}')"
+            name="$(basename "$file")"
+            assets_json="$(echo "$assets_json" | jq \
+              --arg key "$key" \
+              --arg name "$name" \
+              --argjson size "$size" \
+              --arg sha256 "$sha256" \
+              '. + {($key): {name: $name, size: $size, sha256: $sha256}}')"
+          }
+
+          add_asset "windows-x64-setup" "$output_dir/ExoMind-${version}-windows-x64-setup.exe"
+          add_asset "windows-x64-installer" "$output_dir/ExoMind-${version}-windows-x64-installer.msi"
+          add_asset "android-arm64" "$output_dir/ExoMind-${version}-android-arm64.apk"
+          add_asset "android-x86" "$output_dir/ExoMind-${version}-android-x86.apk"
+          add_asset "macos-aarch64" "$output_dir/ExoMind-${version}-macos-aarch64.dmg"
+          add_asset "macos-x64" "$output_dir/ExoMind-${version}-macos-x64.dmg"
+          add_asset "linux-x64-appimage" "$output_dir/ExoMind-${version}-linux-x64.AppImage"
+          add_asset "linux-x64-deb" "$output_dir/ExoMind-${version}-linux-x64.deb"
+          add_asset "runtime-windows-x64" "$output_dir/ExoMind-RT-${version}-windows-x64.exe"
+          add_asset "runtime-macos-aarch64" "$output_dir/ExoMind-RT-${version}-macos-aarch64.tar.gz"
+          add_asset "runtime-linux-x64" "$output_dir/ExoMind-RT-${version}-linux-x64.tar.gz"
+
+          jq -n \
+            --arg version "$version" \
+            --arg tag "${GITHUB_REF_NAME}" \
+            --arg commit "${GITHUB_SHA}" \
+            --arg generated_at "$generated_at" \
+            --argjson assets "$assets_json" \
+            '{version: $version, tag: $tag, commit: $commit, generated_at: $generated_at, assets: $assets}' \
+            > "$output_dir/exomind-release-manifest.json"
+
+      - name: Generate release notes (生成 release notes)
+        run: >
+          bun scripts/dev/generate-release-notes.ts
+          --repo ${{ github.repository }}
+          --tag ${{ github.ref_name }}
+          --title "${{ steps.meta.outputs.title }}"
+          --manifest release-assets/exomind-release-manifest.json
+          --output .tmp/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ─────────────────────────────────────────────────────────────
-  # Job 4: Upload to Cloudflare R2 (构建产物上传 R2)
-  # ─────────────────────────────────────────────────────────────
-  upload-r2:
-    needs: create-release
-    if: always() && needs.create-release.result == 'success'
+      - name: Create or Update GitHub Release (创建或更新 GitHub Release)
+        uses: softprops/action-gh-release@v2.6.1
+        with:
+          files: release-assets/**
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.meta.outputs.title }}
+          body_path: .tmp/release-notes.md
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  promote-release:
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
     steps:
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
+      - name: Promote existing GitHub Release (晋升既有 GitHub Release)
+        uses: actions/github-script@v8
         with:
-          pattern: windows-*
-          path: download-artifacts
-          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = `${{ github.event.inputs.promote_tag }}`.trim();
+            if (!/^v\d+\.\d+\.\d+$/.test(tag)) {
+              core.setFailed(`Invalid promote_tag: ${tag}`);
+              return;
+            }
 
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: macos-*
-          path: download-artifacts
-          merge-multiple: true
-
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: linux-*
-          path: download-artifacts
-          merge-multiple: true
-
-      - name: Download Android artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: android-*
-          path: download-artifacts
-          merge-multiple: true
-
-      - name: List downloaded artifacts
-        run: ls -laR download-artifacts/
-
-      - name: Determine channel and version (确定通道与版本)
-        id: r2meta
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          tag_name="${GITHUB_REF_NAME}"
-          short_hash="${GITHUB_SHA::7}"
-
-          if [[ "$tag_name" == release/* ]]; then
-            channel="release"
-            version="${tag_name#release/}"
-          elif [[ "$tag_name" == build/* ]]; then
-            channel="preview"
-            version="${tag_name#build/}"
-          else
-            echo "::error::Unexpected tag format: $tag_name"
-            exit 1
-          fi
-
-          # version_dir: release → v0.3.3, preview → v0.3.4-build.20260227T1430
-          version_dir="$version"
-
-          echo "channel=$channel" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "version_dir=$version_dir" >> "$GITHUB_OUTPUT"
-          echo "short_hash=$short_hash" >> "$GITHUB_OUTPUT"
-          echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
-
-          echo "Channel: $channel"
-          echo "Version: $version"
-          echo "Version dir: $version_dir"
-
-      - name: Normalize filenames for R2 (去掉 hash 重命名)
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob globstar
-
-          version="${{ steps.r2meta.outputs.version }}"
-          short_hash="${{ steps.r2meta.outputs.short_hash }}"
-          src="download-artifacts"
-          dest="r2-upload"
-          mkdir -p "$dest"
-
-          # Find and copy Windows EXE
-          exe_files=("$src"/**/*.exe)
-          app_exe=""
-          for exe in "${exe_files[@]}"; do
-            file_name="$(basename "$exe" | tr '[:upper:]' '[:lower:]')"
-            if [[ "$file_name" == *"exomind-rt"* ]]; then
-              continue
-            fi
-            app_exe="$exe"
-            if [[ "$file_name" == "exomind.exe" || "$file_name" == *"setup"* || "$file_name" == *"installer"* ]]; then
-              break
-            fi
-          done
-          if [[ -n "$app_exe" ]]; then
-            cp "$app_exe" "$dest/ExoMind-${version}-windows-x64-setup.exe"
-          fi
-
-          # Find and copy Windows MSI
-          msi_files=("$src"/**/*.msi)
-          if (( ${#msi_files[@]} > 0 )); then
-            cp "${msi_files[0]}" "$dest/ExoMind-${version}-windows-x64-installer.msi"
-          fi
-
-          # Find and copy Android APKs
-          apk_files=("$src"/**/*signed.apk)
-          if (( ${#apk_files[@]} == 0 )); then
-            apk_files=("$src"/**/*.apk)
-          fi
-
-          for apk in "${apk_files[@]}"; do
-            file_name="$(basename "$apk" | tr '[:upper:]' '[:lower:]')"
-            if [[ "$file_name" == *"arm64"* || "$file_name" == *"aarch64"* || "$file_name" == *"arm64-v8a"* ]]; then
-              cp "$apk" "$dest/ExoMind-${version}-android-arm64.apk"
-            elif [[ "$file_name" == *"i686"* || "$file_name" == *"x86"* ]] && [[ "$file_name" != *"x86_64"* ]]; then
-              cp "$apk" "$dest/ExoMind-${version}-android-x86.apk"
-            fi
-          done
-
-          # Find and copy macOS DMG
-          dmg_files=("$src"/**/*.dmg)
-          for dmg in "${dmg_files[@]}"; do
-            file_name="$(basename "$dmg" | tr '[:upper:]' '[:lower:]')"
-            if [[ "$file_name" == *"aarch64"* || "$file_name" == *"arm64"* ]]; then
-              cp "$dmg" "$dest/ExoMind-${version}-macos-aarch64.dmg"
-            elif [[ "$file_name" == *"x64"* || "$file_name" == *"x86_64"* ]]; then
-              cp "$dmg" "$dest/ExoMind-${version}-macos-x64.dmg"
-            else
-              # macos-latest is Apple Silicon (aarch64)
-              cp "$dmg" "$dest/ExoMind-${version}-macos-aarch64.dmg"
-            fi
-          done
-
-          # Find and copy Linux AppImage
-          appimage_files=("$src"/**/*.AppImage)
-          for ai in "${appimage_files[@]}"; do
-            cp "$ai" "$dest/ExoMind-${version}-linux-x64.AppImage"
-          done
-
-          # Find and copy Linux DEB
-          deb_files=("$src"/**/*.deb)
-          for deb in "${deb_files[@]}"; do
-            cp "$deb" "$dest/ExoMind-${version}-linux-x64.deb"
-          done
-
-          # Find and copy exomind-rt runtime binaries
-          runtime_win_files=("$src"/**/exomind-rt-windows-x64.exe)
-          if (( ${#runtime_win_files[@]} > 0 )); then
-            cp "${runtime_win_files[0]}" "$dest/ExoMind-RT-${version}-windows-x64.exe"
-          fi
-
-          runtime_macos_files=("$src"/**/exomind-rt-macos-aarch64.tar.gz)
-          if (( ${#runtime_macos_files[@]} > 0 )); then
-            cp "${runtime_macos_files[0]}" "$dest/ExoMind-RT-${version}-macos-aarch64.tar.gz"
-          fi
-
-          runtime_linux_files=("$src"/**/exomind-rt-linux-x64.tar.gz)
-          if (( ${#runtime_linux_files[@]} > 0 )); then
-            cp "${runtime_linux_files[0]}" "$dest/ExoMind-RT-${version}-linux-x64.tar.gz"
-          fi
-
-          echo "=== Files prepared for R2 upload ==="
-          ls -la "$dest/"
-
-      - name: Upload assets to R2 (上传构建产物到 R2)
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-
-          channel="${{ steps.r2meta.outputs.channel }}"
-          version_dir="${{ steps.r2meta.outputs.version_dir }}"
-          bucket="exomind-releases"
-          src="r2-upload"
-
-          content_type_for() {
-            case "$1" in
-              *.exe)      echo "application/octet-stream" ;;
-              *.msi)      echo "application/octet-stream" ;;
-              *.apk)      echo "application/vnd.android.package-archive" ;;
-              *.dmg)      echo "application/x-apple-diskimage" ;;
-              *.AppImage) echo "application/octet-stream" ;;
-              *.deb)      echo "application/vnd.debian.binary-package" ;;
-              *.tar.gz)   echo "application/gzip" ;;
-              *.json)     echo "application/json" ;;
-              *)          echo "application/octet-stream" ;;
-            esac
-          }
-
-          for file in "$src"/*; do
-            [ -f "$file" ] || continue
-            filename="$(basename "$file")"
-            r2_key="${channel}/${version_dir}/${filename}"
-            ct="$(content_type_for "$filename")"
-            echo "Uploading $filename → $r2_key (Content-Type: $ct)"
-            npx wrangler r2 object put "${bucket}/${r2_key}" \
-              --file "$file" \
-              --content-type "$ct" \
-              --remote
-          done
-
-      - name: Generate and upload latest.json (生成并上传 latest.json)
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-
-          channel="${{ steps.r2meta.outputs.channel }}"
-          version="${{ steps.r2meta.outputs.version }}"
-          version_dir="${{ steps.r2meta.outputs.version_dir }}"
-          tag_name="${{ steps.r2meta.outputs.tag_name }}"
-          bucket="exomind-releases"
-          src="r2-upload"
-          published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-          # Build assets JSON object
-          assets_json="{}"
-
-          add_asset() {
-            local key="$1" file="$2" url="$3"
-            if [ -f "$file" ]; then
-              local size sha256
-              size="$(stat --format=%s "$file")"
-              sha256="$(sha256sum "$file" | awk '{print $1}')"
-              assets_json="$(echo "$assets_json" | jq \
-                --arg k "$key" \
-                --arg url "$url" \
-                --argjson size "$size" \
-                --arg sha256 "$sha256" \
-                '. + {($k): {"url": $url, "size": $size, "sha256": $sha256}}')"
-            fi
-          }
-
-          add_asset "windows-x64-setup" \
-            "$src/ExoMind-${version}-windows-x64-setup.exe" \
-            "${channel}/${version_dir}/ExoMind-${version}-windows-x64-setup.exe"
-
-          add_asset "windows-x64-installer" \
-            "$src/ExoMind-${version}-windows-x64-installer.msi" \
-            "${channel}/${version_dir}/ExoMind-${version}-windows-x64-installer.msi"
-
-          add_asset "android-arm64" \
-            "$src/ExoMind-${version}-android-arm64.apk" \
-            "${channel}/${version_dir}/ExoMind-${version}-android-arm64.apk"
-
-          add_asset "android-x86" \
-            "$src/ExoMind-${version}-android-x86.apk" \
-            "${channel}/${version_dir}/ExoMind-${version}-android-x86.apk"
-
-          add_asset "macos-aarch64" \
-            "$src/ExoMind-${version}-macos-aarch64.dmg" \
-            "${channel}/${version_dir}/ExoMind-${version}-macos-aarch64.dmg"
-
-          add_asset "macos-x64" \
-            "$src/ExoMind-${version}-macos-x64.dmg" \
-            "${channel}/${version_dir}/ExoMind-${version}-macos-x64.dmg"
-
-          add_asset "linux-x64-appimage" \
-            "$src/ExoMind-${version}-linux-x64.AppImage" \
-            "${channel}/${version_dir}/ExoMind-${version}-linux-x64.AppImage"
-
-          add_asset "linux-x64-deb" \
-            "$src/ExoMind-${version}-linux-x64.deb" \
-            "${channel}/${version_dir}/ExoMind-${version}-linux-x64.deb"
-
-          add_asset "runtime-windows-x64" \
-            "$src/ExoMind-RT-${version}-windows-x64.exe" \
-            "${channel}/${version_dir}/ExoMind-RT-${version}-windows-x64.exe"
-
-          add_asset "runtime-macos-aarch64" \
-            "$src/ExoMind-RT-${version}-macos-aarch64.tar.gz" \
-            "${channel}/${version_dir}/ExoMind-RT-${version}-macos-aarch64.tar.gz"
-
-          add_asset "runtime-linux-x64" \
-            "$src/ExoMind-RT-${version}-linux-x64.tar.gz" \
-            "${channel}/${version_dir}/ExoMind-RT-${version}-linux-x64.tar.gz"
-
-          # Compose latest.json
-          latest_json="$(jq -n \
-            --arg version "$version" \
-            --arg tag "$tag_name" \
-            --arg published_at "$published_at" \
-            --argjson assets "$assets_json" \
-            '{version: $version, tag: $tag, published_at: $published_at, assets: $assets}')"
-
-          echo "$latest_json" > latest.json
-          echo "=== latest.json ==="
-          cat latest.json
-
-          npx wrangler r2 object put "${bucket}/${channel}/latest.json" \
-            --file latest.json \
-            --content-type "application/json" \
-            --remote
-
-      - name: Update versions.json and cleanup old previews (更新版本列表 + 清理旧版本)
-        if: steps.r2meta.outputs.channel == 'preview'
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-
-          channel="${{ steps.r2meta.outputs.channel }}"
-          version="${{ steps.r2meta.outputs.version }}"
-          version_dir="${{ steps.r2meta.outputs.version_dir }}"
-          tag_name="${{ steps.r2meta.outputs.tag_name }}"
-          bucket="exomind-releases"
-          published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          max_versions=15
-
-          # Try to fetch existing versions.json
-          existing_versions="[]"
-          if npx wrangler r2 object get "${bucket}/${channel}/versions.json" \
-               --file existing-versions.json --remote 2>/dev/null; then
-            existing_payload="$(cat existing-versions.json)"
-            if echo "$existing_payload" | jq -e 'type == "array"' >/dev/null 2>&1; then
-              # backward-compat: old format was a raw array
-              existing_versions="$existing_payload"
-            else
-              existing_versions="$(echo "$existing_payload" | jq '.versions // []')"
-              configured_retention="$(echo "$existing_payload" | jq -r '.retention // empty')"
-              if [[ "$configured_retention" =~ ^[0-9]+$ ]] && (( configured_retention > 0 )); then
-                max_versions="$configured_retention"
-              fi
-            fi
-          fi
-
-          # Prepend new version entry
-          new_entry="$(jq -n \
-            --arg version "$version" \
-            --arg tag "$tag_name" \
-            --arg published_at "$published_at" \
-            --arg version_dir "$version_dir" \
-            '{version: $version, tag: $tag, published_at: $published_at, version_dir: $version_dir}')"
-
-          updated_versions="$(echo "$existing_versions" | jq \
-            --argjson entry "$new_entry" \
-            '[$entry] + . | unique_by(.version)')"
-
-          # Identify versions to delete (beyond max_versions)
-          total="$(echo "$updated_versions" | jq 'length')"
-          if (( total > max_versions )); then
-            # Extract old version dirs to delete
-            old_versions="$(echo "$updated_versions" | jq -r ".[$max_versions:][].version_dir")"
-
-            # Trim the list
-            updated_versions="$(echo "$updated_versions" | jq ".[:$max_versions]")"
-
-            # Delete old version directories from R2
-            for old_dir in $old_versions; do
-              echo "Cleaning up old preview: ${channel}/${old_dir}/"
-              # List and delete all objects under this prefix
-              # wrangler r2 object delete requires exact keys, so we list first
-              list_output="$(npx wrangler r2 object list "${bucket}" \
-                --prefix "${channel}/${old_dir}/" --remote 2>&1)" || true
-              objects="$(echo "$list_output" | jq -r '.[].key' 2>/dev/null)" || objects=""
-              count=$(echo "$objects" | grep -c . || true)
-              echo "  Found $count object(s) to delete"
-              deleted=0
-              for obj in $objects; do
-                if npx wrangler r2 object delete "${bucket}/${obj}" --remote 2>/dev/null; then
-                  deleted=$((deleted + 1))
-                else
-                  echo "  WARNING: Failed to delete $obj"
-                fi
-              done
-              echo "  Cleanup complete: $deleted/$count deleted"
-            done
-          fi
-
-          kept_total="$(echo "$updated_versions" | jq 'length')"
-          updated_json="$(jq -n \
-            --argjson versions "$updated_versions" \
-            --argjson retention "$max_versions" \
-            '{versions: $versions, retention: $retention}')"
-
-          # Upload updated versions.json
-          echo "$updated_json" | jq '.' > versions.json
-          echo "=== versions.json (input=${total}, kept=${kept_total}, retention=${max_versions}) ==="
-          cat versions.json
-
-          npx wrangler r2 object put "${bucket}/${channel}/versions.json" \
-            --file versions.json \
-            --content-type "application/json" \
-            --remote
+            const { owner, repo } = context.repo;
+            const release = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+            await github.rest.repos.updateRelease({
+              owner,
+              repo,
+              release_id: release.data.id,
+              tag_name: tag,
+              draft: false,
+              prerelease: false,
+              make_latest: 'true',
+              name: `Release ${tag}`,
+            });

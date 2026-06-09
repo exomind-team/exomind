@@ -8,7 +8,13 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { EventStorage } from '@/lib/storage/event-storage';
+import {
+  EventStorage,
+  clearAllStorageInstances,
+  getCurrentUserId,
+  getEventStorage,
+} from '@/lib/storage/event-storage';
+import { createLocalProfile, setProfileSession } from '@/lib/profile/profile-storage';
 
 describe('EventStorage', () => {
   let storage: EventStorage;
@@ -27,6 +33,9 @@ describe('EventStorage', () => {
         await storage.deleteEvent(event.id);
       }
     }
+
+    clearAllStorageInstances();
+    localStorage.clear();
   });
 
   describe('addEvent', () => {
@@ -71,6 +80,83 @@ describe('EventStorage', () => {
 
       const events = await storage.getEvents();
       expect(events[0].createdAt).toBe(timestamp);
+    });
+
+    it('应该为本地事件分配单调 replicationSeq（复制序号）', async () => {
+      await storage.addEvent({
+        id: 'rep-seq-1',
+        content: 'first',
+        createdAt: '2026-03-07T00:00:00.000Z',
+      });
+
+      await storage.addEvent({
+        id: 'rep-seq-2',
+        content: 'second',
+        createdAt: '2026-03-07T00:00:01.000Z',
+      });
+
+      const events = await storage.getEvents();
+      const first = events.find((event) => event.id === 'rep-seq-1');
+      const second = events.find((event) => event.id === 'rep-seq-2');
+
+      expect(first?.replicationSeq).toBe(1);
+      expect(second?.replicationSeq).toBe(2);
+    });
+
+    it('应该忽略相同 event.id 且 payload 完全一致的复制事件', async () => {
+      const event = {
+        id: 'dup-same',
+        content: '同一条复制事件',
+        createdAt: '2026-03-07T10:00:00.000Z',
+        type: 'note',
+        metadata: {
+          source: 'peer-a',
+        },
+        replicationSeq: 101,
+      };
+
+      await storage.addEvent(event);
+      await expect(
+        storage.addEvent(
+          {
+            ...event,
+          },
+          { origin: 'replicated' }
+        )
+      ).resolves.toBeUndefined();
+
+      const events = await storage.getEvents();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject(event);
+    });
+
+    it('应该拒绝相同 event.id 但 payload 不同的复制事件', async () => {
+      await storage.addEvent({
+        id: 'dup-conflict',
+        content: '原始内容',
+        createdAt: '2026-03-07T10:00:00.000Z',
+        type: 'note',
+        metadata: {
+          source: 'peer-a',
+        },
+        replicationSeq: 102,
+      });
+
+      await expect(
+        storage.addEvent(
+          {
+            id: 'dup-conflict',
+            content: '冲突内容',
+            createdAt: '2026-03-07T10:00:00.000Z',
+            type: 'note',
+            metadata: {
+              source: 'peer-b',
+            },
+            replicationSeq: 102,
+          },
+          { origin: 'replicated' }
+        )
+      ).rejects.toThrow(/protocol/i);
     });
   });
 
@@ -195,6 +281,53 @@ describe('EventStorage', () => {
     });
   });
 
+  describe('projectReplicatedEvent', () => {
+    it('应该对完全相同的远端事件幂等去重', async () => {
+      await expect(
+        storage.projectReplicatedEvent({
+          id: 'rep-dup-1',
+          content: 'same payload',
+          createdAt: '2026-03-07T00:00:00.000Z',
+          type: 'note',
+          replicationSeq: 10,
+        })
+      ).resolves.toBe('inserted');
+
+      await expect(
+        storage.projectReplicatedEvent({
+          id: 'rep-dup-1',
+          content: 'same payload',
+          createdAt: '2026-03-07T00:00:00.000Z',
+          type: 'note',
+          replicationSeq: 10,
+        })
+      ).resolves.toBe('duplicate');
+
+      const events = await storage.getEvents();
+      expect(events.filter((event) => event.id === 'rep-dup-1')).toHaveLength(1);
+    });
+
+    it('应该拒绝相同 event.id 但不同 payload 的协议冲突', async () => {
+      await storage.projectReplicatedEvent({
+        id: 'rep-conflict-1',
+        content: 'original payload',
+        createdAt: '2026-03-07T00:00:00.000Z',
+        type: 'note',
+        replicationSeq: 12,
+      });
+
+      await expect(
+        storage.projectReplicatedEvent({
+          id: 'rep-conflict-1',
+          content: 'mutated payload',
+          createdAt: '2026-03-07T00:00:00.000Z',
+          type: 'note',
+          replicationSeq: 12,
+        })
+      ).rejects.toThrow(/protocol conflict/i);
+    });
+  });
+
   describe('getEventsPage', () => {
     it('应该按分页返回最近事件并提供下一页游标', async () => {
       const base = new Date('2024-01-01T10:00:00.000Z').getTime();
@@ -242,6 +375,53 @@ describe('EventStorage', () => {
       expect(thirdPage.events.map((event) => event.id)).toEqual(['cursor-1']);
       expect(thirdPage.hasMore).toBe(false);
       expect(thirdPage.nextCursor).toBeNull();
+    });
+  });
+
+  describe('storage partition key（存储分区键）', () => {
+    it('应该优先使用 active profileId 作为默认存储键', () => {
+      const profile = createLocalProfile({
+        slug: 'exomind',
+        displayName: 'Hailay',
+      });
+      setProfileSession({
+        version: 1,
+        activeProfileId: profile.profileId,
+        unlockedProfileIds: [profile.profileId],
+      });
+      localStorage.setItem('exomind:sync-store', JSON.stringify({
+        state: { currentUser: 'legacy-user' },
+      }));
+
+      expect(getCurrentUserId()).toBe(profile.profileId);
+      expect(getEventStorage()).toBe(getEventStorage(profile.profileId));
+    });
+
+    it('没有 active profile 时应该回退 legacy currentUser', () => {
+      localStorage.setItem('exomind:sync-store', JSON.stringify({
+        state: { currentUser: 'legacy-user' },
+      }));
+
+      expect(getCurrentUserId()).toBe('legacy-user');
+      expect(getEventStorage()).toBe(getEventStorage('legacy-user'));
+    });
+
+    it('显式传入 userId 时应该优先于默认 profile key', () => {
+      const profile = createLocalProfile({
+        slug: 'exomind',
+        displayName: 'Hailay',
+      });
+      setProfileSession({
+        version: 1,
+        activeProfileId: profile.profileId,
+        unlockedProfileIds: [profile.profileId],
+      });
+      localStorage.setItem('exomind:sync-store', JSON.stringify({
+        state: { currentUser: 'legacy-user' },
+      }));
+
+      expect(getEventStorage('override-user')).toBe(getEventStorage('override-user'));
+      expect(getEventStorage('override-user')).not.toBe(getEventStorage());
     });
   });
 });

@@ -4,12 +4,76 @@
 
 export { EventLogServiceImpl, getEventLogService } from './eventlog.service';
 export type { EventLogService } from './eventlog.service';
+export {
+  EventLogBackupServiceImpl,
+  getEventLogBackupService,
+  resetEventLogBackupServiceForTests,
+} from './eventlog-backup.service';
+export type {
+  EventLogBackendStatus,
+  EventLogExportJsonResult,
+  EventLogExportSqliteResult,
+  EventLogImportResult,
+  EventLogImportStrategy,
+  EventLogScopeGrantReconcileResult,
+} from './eventlog-backup.service';
 
 export { TimeBlockServiceImpl, getTimeBlockService } from './timeblock.service';
 export type { TimeBlockService } from './timeblock.service';
+export { TodayPlannerServiceImpl, getTodayPlannerService } from './today-planner.service';
+export type { TodayPlannerService } from './today-planner.service';
+export {
+  TimeBlockBackupServiceImpl,
+  getTimeBlockBackupService,
+  resetTimeBlockBackupServiceForTests,
+} from './timeblock-backup.service';
+export type {
+  TimeBlockBackendStatus,
+  TimeBlockExportJsonResult,
+  TimeBlockExportSqliteResult,
+  TimeBlockImportResult,
+  TimeBlockImportStrategy,
+  TimeBlockScopeGrantReconcileResult,
+} from './timeblock-backup.service';
 
 export { TaskServiceImpl, getTaskService } from './task.service';
 export type { TaskService } from './task.service';
+export {
+  TaskBackupServiceImpl,
+  getTaskBackupService,
+  resetTaskBackupServiceForTests,
+} from './task-backup.service';
+export type {
+  TaskBackendStatus,
+  TaskExportJsonResult,
+  TaskExportSqliteResult,
+  TaskImportResult,
+  TaskImportStrategy,
+  TaskReplicationPullCursor,
+  TaskReplicationPullResult,
+  TaskReplicationSummary,
+  TaskScopeGrantReconcileResult,
+} from './task-backup.service';
+export {
+  TaskReconciliationService,
+  getTaskReconciliationService,
+  resetTaskReconciliationServiceForTests,
+} from './task-reconciliation.service';
+export type {
+  TaskPeerReconciliationResult,
+  TaskReconciliationServiceOptions,
+} from './task-reconciliation.service';
+
+export { TaskTimerServiceImpl, getTaskTimerService } from './task-timer.service';
+export type { TaskTimerService } from './task-timer.service';
+
+export { ReminderServiceImpl, getReminderService } from './reminder.service';
+export type { ReminderService } from './reminder.service';
+export {
+  ReminderSchedulerServiceImpl,
+  getReminderSchedulerService,
+} from './reminder-scheduler.service';
+export type { ReminderSchedulerService } from './reminder-scheduler.service';
 
 export { MeServiceImpl, getMeService } from './me.service';
 export type { MeService } from './me.service';
@@ -23,11 +87,36 @@ export { CommandPaletteServiceImpl, getCommandPaletteService } from './command-p
 export type { CommandPaletteService, CommandPaletteState } from './command-palette.service';
 export { RuntimeAggregatorServiceImpl, getRuntimeAggregatorService } from './runtime-aggregator.service';
 export type { RuntimeAggregatorService, RuntimeAgentInfo, AggregatedRuntimeData } from './runtime-aggregator.service';
+export {
+  RuntimeMeshHostSyncService,
+  getRuntimeMeshHostSyncService,
+  resetRuntimeMeshHostSyncServiceForTests,
+} from './runtime-mesh-host-sync.service';
+export type { RuntimeMeshHostSyncServiceOptions } from './runtime-mesh-host-sync.service';
 
 export { SignalStreamService, getSignalStreamService } from './signal-stream.service';
 export type { SignalStreamServiceOptions, SignalCallback } from './signal-stream.service';
+export { RuntimeLinkProofService, createRuntimeLinkProofService } from './runtime-link-proof.service';
+export type {
+  RuntimeLinkProofServiceOptions,
+  RuntimeLinkProofRunOptions,
+  RuntimeLinkProofResult,
+  RuntimeLinkProofVerifiedResult,
+  RuntimeLinkProofFailedResult,
+} from './runtime-link-proof.service';
+export { HttpSseSignalTransport, buildSignalBaseUrl, buildSignalStreamUrl } from './signal-http-sse-transport';
+export type { SignalTransport, SignalStreamOpenRequest } from './signal-http-sse-transport';
 export { SignalRouteService, getSignalRouteService } from './signal-route.service';
 export type { SignalRouteServiceOptions } from './signal-route.service';
+export {
+  RtDomainBackfillService,
+  getRtDomainBackfillService,
+  resetRtDomainBackfillServiceForTests,
+} from './rt-domain-backfill.service';
+export type {
+  RtDomainBackfillServiceOptions,
+  RtDomainBackfillSummary,
+} from './rt-domain-backfill.service';
 
 // 重新导出类型（这些类型在 types/event 中定义）
 export type { TimerMode, TimerConfig } from '../types/event';

@@ -10,6 +10,7 @@ lerna-debug.log*
 # Dependencies
 node_modules
 /bun.lock
+/package-lock.json
 
 # Build outputs
 dist
@@ -40,6 +41,7 @@ src-tauri/gen/android/local.properties
 src-tauri/gen/android/*.iml
 src-tauri/gen/android/.idea/
 src-tauri/gen/android/gradle-app.setting*
+crates/exomind-android-keepalive/android/.tauri/
 *.jks
 *.keystore
 
@@ -67,10 +69,39 @@ Thumbs.db
 coverage/
 *.lcov
 *.html
+# Allow concept-viz and academic analysis HTML reports
+!docs/architecture/pinned-unpinned-visualization.html
+!docs/architecture/pinned-unpinned-academic-analysis.html
 htmlcov/
 
 # === Vite Entry (required) ===
 !index.html
+!voice-overlay.html
+!now-workbench-overlay.html
+
+# === Agent & skill assets ===
+!skills/**/assets/*.html
+!agents/**/assets/*.html
+
+# === Obsidian editor config ===
+.obsidian/
+
+# === Website build artifacts ===
+website/preview/
+.astro/
+website/.astro/
+
+# === Agent output (local cache) ===
+agent-output/
+skills/*-workspace/
+
+# === Build artifacts (local cache) ===
+artifacts/
+public/dev-assets/
+
+# === Jujutsu metadata ===
+/.jj/
+website/package-lock.json
 
 # === Temporary ===
 *.tmp
@@ -80,6 +111,8 @@ htmlcov/
 .tmp/pouchdb-active-block/
 .turbo/
 pnpm-store/
+temp/
+tmp/
 
 # === Secrets (must be committed) ===
 # IMPORTANT: Never commit actual API keys or tokens!
@@ -94,6 +127,7 @@ server/log.txt
 log.txt
 test-results/.last-run.json
 test-results/*
+.tmp-issue747-trace/
 tests/e2e/report/
 packages/mcp/.data/
 packages/mcp/events_*/
@@ -101,14 +135,21 @@ events_*/
 
 # 配置文件不同步
 pencil/.claude/settings.local.json
+.claude/settings.local.json
 
 # Agent 本地状态
 agent.test.local.state.json
+runtime-data/
+.worktrees/
 .claude/worktrees/
+.claude/scheduled_tasks.lock
+.exomind/
 
 # 临时截图和备份
 dark-mode-*.png
 *-backup.md
+.trace747_invalid*/
+issue-*-plan-review-*.md
 
 # 测试输出
 vitest-output.txt
@@ -117,3 +158,6 @@ vitest-output.txt
 artifacts/
 docs/pr/
 .wrangler/*
+
+# Cygwin/MSYS2 crash dumps
+*.stackdump

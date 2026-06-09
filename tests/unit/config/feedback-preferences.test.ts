@@ -5,12 +5,17 @@ import {
   setFeedbackPreferences,
   subscribeFeedbackPreferencesChanges,
 } from '@/config/feedback-preferences';
+import {
+  __primeRuntimeConfigForTests,
+  __resetRuntimeConfigCacheForTests,
+} from '@/config/runtime-config-cache';
 
 describe('feedback preferences（反馈内容开关）', () => {
   let storage: Record<string, string>;
 
   beforeEach(() => {
     storage = {};
+    __resetRuntimeConfigCacheForTests();
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
       value: {
@@ -59,6 +64,27 @@ describe('feedback preferences（反馈内容开关）', () => {
     unsubscribe();
   });
 
+  it('reads runtime-backed preferences before localStorage（优先读取 Runtime 中的反馈偏好）', () => {
+    storage['exomind:feedbackPreferences'] = JSON.stringify({
+      timingInfoEnabled: false,
+      statisticsEnabled: false,
+      quickFeedbackEnabled: true,
+    });
+    __primeRuntimeConfigForTests({
+      'exomind:feedbackPreferences': JSON.stringify({
+        timingInfoEnabled: true,
+        statisticsEnabled: true,
+        quickFeedbackEnabled: false,
+      }),
+    });
+
+    expect(getFeedbackPreferences()).toEqual({
+      timingInfoEnabled: true,
+      statisticsEnabled: true,
+      quickFeedbackEnabled: false,
+    });
+  });
+
   it('handles storage event updates（支持 storage 事件同步）', () => {
     const listener = vi.fn();
     const unsubscribe = subscribeFeedbackPreferencesChanges(listener);
@@ -73,7 +99,7 @@ describe('feedback preferences（反馈内容开关）', () => {
     }));
 
     expect(listener).toHaveBeenCalledWith({
-      timingInfoEnabled: false,
+      timingInfoEnabled: true,
       statisticsEnabled: false,
       quickFeedbackEnabled: true,
     });

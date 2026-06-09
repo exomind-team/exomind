@@ -1,16 +1,34 @@
-import { setTasksDefaultTab } from '@/config/tasks-default-tab';
 import type { CommandDefinition } from '@/lib/types/command-palette';
 
-export type CoreNavigationPath = '/eventlog' | '/tasks' | '/settings' | '/me' | '/agents';
+export type CoreNavigationPath = '/' | '/eventlog' | '/tasks' | '/reminders' | '/settings' | '/me' | '/agents';
 
 interface CreateCoreNavigationCommandsOptions {
   navigate: (path: CoreNavigationPath) => Promise<void> | void;
+  openReminderComposer?: () => void;
+  featureFlags?: {
+    mePageEnabled?: boolean;
+  };
 }
 
 export function createCoreNavigationCommands(
   options: CreateCoreNavigationCommandsOptions,
 ): CommandDefinition[] {
+  const mePageEnabled = options.featureFlags?.mePageEnabled ?? true;
+
   return [
+    {
+      id: 'navigate:home',
+      title: '打开首页',
+      description: '跳转到仪式首页',
+      category: 'navigation',
+      permissionTier: 'safe',
+      aliases: ['首页', 'home', 'ritual'],
+      keywords: ['开机', '收工', '主页'],
+      async execute() {
+        await options.navigate('/');
+        return { ok: true };
+      },
+    },
     {
       id: 'navigate:now',
       title: '打开当下',
@@ -63,7 +81,7 @@ export function createCoreNavigationCommands(
         return { ok: true };
       },
     },
-    {
+    ...(mePageEnabled ? [{
       id: 'navigate:me',
       title: '打开 Me',
       description: '跳转到用户页面',
@@ -75,22 +93,49 @@ export function createCoreNavigationCommands(
         await options.navigate('/me');
         return { ok: true };
       },
+    } satisfies CommandDefinition] : []),
+    {
+      id: 'navigate:reminders',
+      title: '打开提醒',
+      description: '跳转到提醒页面',
+      category: 'navigation',
+      permissionTier: 'safe',
+      aliases: ['提醒', 'reminder', 'reminders'],
+      keywords: ['定时提醒', '通知', '日程'],
+      async execute() {
+        await options.navigate('/reminders');
+        return { ok: true };
+      },
+    },
+    {
+      id: 'action:create-reminder',
+      title: '新建提醒',
+      description: '在提醒页打开新建提醒表单',
+      category: 'action',
+      permissionTier: 'safe',
+      aliases: ['创建提醒', '添加提醒', 'new reminder'],
+      keywords: ['提醒', '创建', 'deadline'],
+      async execute() {
+        options.openReminderComposer?.();
+        await options.navigate('/reminders');
+        return { ok: true };
+      },
     },
     {
       id: 'navigate:agents',
-      title: '打开 Agent',
-      description: '跳转到 Agent Hub 页面',
+      title: '打开网络',
+      description: '跳转到网络页面',
       category: 'navigation',
       permissionTier: 'safe',
-      aliases: ['agent', 'agents', '智能体'],
-      keywords: ['hub', '代理'],
+      aliases: ['网络', 'network', 'agent', 'agents', '智能体'],
+      keywords: ['信号网络', 'hub', '代理'],
       isAvailable(context) {
         if (context.featureFlags.agentPageEnabled) {
           return true;
         }
         return {
           available: false,
-          reason: '请先在设置-开发者中启用 Agent 页面',
+          reason: '请先在设置-开发者中启用网络页面',
         };
       },
       async execute() {
@@ -101,13 +146,12 @@ export function createCoreNavigationCommands(
     {
       id: 'navigate:goals-legacy',
       title: '打开目标（长期任务）',
-      description: '跳转到任务页中的长期目标视图',
+      description: '已移至任务页，跳转到当下视图',
       category: 'navigation',
       permissionTier: 'safe',
       aliases: ['目标', 'goals', '长期'],
       keywords: ['长期任务', 'strategy'],
       async execute() {
-        setTasksDefaultTab('goals');
         await options.navigate('/tasks');
         return { ok: true };
       },

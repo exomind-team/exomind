@@ -17,10 +17,19 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { IASRPort, IASRConfig } from '@/lib/ports/asr-port';
+import { toast } from '@/components/ui/toast-hook';
+import {
+  getInputSendMode,
+  subscribeInputSendModeChanges,
+  type InputSendMode,
+} from '@/config/input-send-mode';
+import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
+import { log } from '@/lib/logger';
+import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
 
 export interface VoiceMessageInputProps {
   /** 发送消息回调 */
-  onSend: (content: string) => void;
+  onSend: (content: string) => void | Promise<void>;
   /** 语音识别结果回调（可选，用于自定义处理） */
   onVoiceResult?: (text: string) => void;
   /** 占位符 */
@@ -45,11 +54,14 @@ export interface VoiceMessageInputProps {
   maxRows?: number;
   /** UI 变体（UI Variant） */
   variant?: 'default' | 'new-mobile';
+  /** 覆盖发送快捷模式（override send mode，覆盖发送模式） */
+  inputSendModeOverride?: InputSendMode;
 }
 
 export interface VoiceMessageInputHandle {
   focusText: () => void;
   startVoiceRecording: () => void;
+  appendText: (text: string) => void;
 }
 
 export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessageInputProps>(function VoiceMessageInput({
@@ -66,10 +78,14 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
   minRows = 2,
   maxRows = 6,
   variant = 'default',
+  inputSendModeOverride,
 }: VoiceMessageInputProps, ref) {
   const [value, setValue] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [inputSendMode, setInputSendMode] = useState<InputSendMode>(() => getInputSendMode());
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const voiceButtonRef = useRef<VoiceInputButtonHandle | null>(null);
+  const submittingRef = useRef(false);
 
   const resizeTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
     const el = target ?? textareaRef.current;
@@ -95,12 +111,45 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     resizeTextarea();
   }, [value, resizeTextarea]);
 
+  useEffect(() => subscribeInputSendModeChanges(setInputSendMode), []);
+
+  const appendDraftText = useCallback((text: string) => {
+    const normalized = normalizeRecognitionText(text);
+    if (!normalized) return;
+
+    setValue((prev) => (prev.trim() ? `${prev} ${normalized}` : normalized));
+    requestAnimationFrame(() => {
+      resizeTextarea();
+      textareaRef.current?.focus();
+      const nextValue = textareaRef.current?.value ?? '';
+      const end = nextValue.length;
+      if (textareaRef.current) {
+        textareaRef.current.selectionStart = end;
+        textareaRef.current.selectionEnd = end;
+      }
+    });
+  }, [resizeTextarea]);
+
   // 发送消息
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
+    if (submittingRef.current) return;
+
     const trimmed = value.trim();
     if (trimmed) {
-      onSend(trimmed);
+      submittingRef.current = true;
+      setIsSubmitting(true);
+      const saved = value;
       setValue('');
+      try {
+        await onSend(trimmed);
+      } catch (error) {
+        setValue(saved);
+        log.error(`[VoiceMessageInput] send failed: ${error instanceof Error ? error.message : String(error)}`);
+        toast({ title: '发送失败', description: '请检查网络连接后重试', variant: 'destructive' });
+      } finally {
+        submittingRef.current = false;
+        setIsSubmitting(false);
+      }
     }
   }, [value, onSend]);
 
@@ -112,13 +161,20 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     }
 
     if (e.key !== 'Enter') return;
-    if (!(e.ctrlKey || e.metaKey)) return;
-    if (e.altKey || e.shiftKey) return;
+    if (e.altKey) return;
+
+    const effectiveInputSendMode = inputSendModeOverride ?? inputSendMode;
+    const shouldSend = effectiveInputSendMode === 'enter-send'
+      ? !e.shiftKey && !e.ctrlKey && !e.metaKey
+      : !e.shiftKey && (e.ctrlKey || e.metaKey);
+    if (!shouldSend) {
+      return;
+    }
 
     e.preventDefault();
     if (value.trim()) {
       handleSend();
-    } else {
+    } else if (effectiveInputSendMode === 'ctrl-enter-send') {
       textareaRef.current?.blur();
       voiceButtonRef.current?.start();
     }
@@ -126,11 +182,18 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
 
   // 语音识别结果
   const handleVoiceResult = useCallback((text: string) => {
-    // 追加到输入框
-    setValue(prev => (prev.trim() ? `${prev} ${text}` : text));
+    const normalized = normalizeRecognitionText(text);
+    if (!normalized) return;
+
+    appendDraftText(normalized);
     // 触发回调（如果有）
-    onVoiceResult?.(text);
-  }, [onVoiceResult]);
+    onVoiceResult?.(normalized);
+    void publishVoiceTranscriptSignal({ text: normalized }, {
+      source: 'frontend:voice-message-input',
+    }).catch((publishError) => {
+      log.warn(`[VoiceMessageInput] 发布语音信号失败（voice signal publish failed）: ${publishError instanceof Error ? publishError.message : String(publishError)}`);
+    });
+  }, [appendDraftText, onVoiceResult]);
 
   // 语音状态变化
   const handleStateChange = useCallback(() => {
@@ -144,7 +207,10 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     startVoiceRecording: () => {
       voiceButtonRef.current?.start();
     },
-  }), []);
+    appendText: (text: string) => {
+      appendDraftText(text);
+    },
+  }), [appendDraftText]);
 
   const isNewMobile = variant === 'new-mobile';
   const wrapperClassName = isNewMobile ? 'safe-area-pb bg-transparent shrink-0' : 'safe-area-pb bg-card shrink-0';
@@ -200,7 +266,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
         {/* 发送按钮 */}
         <Button
           onClick={handleSend}
-          disabled={!value.trim()}
+          disabled={isSubmitting || !value.trim()}
           size="icon"
           className={sendButtonClassName}
           type="button"

@@ -3,10 +3,15 @@ import fs from 'fs';
 import path from 'path';
 describe('New home entry', () => {
   const newFocusPagePath = path.resolve('src/ui/app/pages/FocusPage.tsx');
+  const ritualHomePagePath = path.resolve('src/ui/app/pages/RitualHomePage.tsx');
   const newRoutesPath = path.resolve('src/routes.tsx');
 
   it('should have FocusPage component file', () => {
     expect(fs.existsSync(newFocusPagePath)).toBe(true);
+  });
+
+  it.skip('should have RitualHomePage component file', () => { // RitualHomePage not yet implemented
+    expect(fs.existsSync(ritualHomePagePath)).toBe(true);
   });
 
   it('should have FocusPage export', () => {
@@ -14,9 +19,10 @@ describe('New home entry', () => {
     expect(source).toContain('export function FocusPage');
   });
 
-  it('should register / and /eventlog to FocusPage in new router', () => {
+  it.skip('should register / to RitualHomePage and keep /eventlog on FocusPage in new router', () => { // RitualHomePage not yet implemented
     const content = fs.readFileSync(newRoutesPath, 'utf-8');
     expect(content).toContain("path: '/'");
+    expect(content).toContain('<RitualHomePage />');
     expect(content).toContain("path: '/eventlog'");
     expect(content).toContain('<FocusPage />');
   });

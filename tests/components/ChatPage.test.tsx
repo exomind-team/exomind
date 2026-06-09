@@ -199,9 +199,41 @@ describe('ChatPage 架构边界', () => {
     const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
 
     expect(source).toContain('getEventLogService');
+    expect(source.includes('loadEvents(') || source.includes('loadEventsDetailed(')).toBe(true);
     expect(source).not.toContain('storageRef.current.addEvent(');
     expect(source).not.toContain('storageRef.current.getEvents(');
     expect(source).not.toContain('storage.getEvents(');
+  });
+
+  it('RT SQLite 模式下不应再把 ChatPage 展示读源绑到 getEventStorage', () => {
+    const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
+
+    expect(source).not.toContain('getEventStorage(');
+    expect(source).not.toContain('onRemoteChange(');
+  });
+
+  it('ECS 模式下不应再直连 syncToRemote / 6984（不再依赖旧同步服务器）', () => {
+    const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
+
+    expect(source).not.toContain('syncToRemote(');
+    expect(source).not.toContain('buildRemoteDbUrl(');
+    expect(source).not.toContain('resolveSyncServerUrl(');
+    expect(source).not.toContain('6984');
+  });
+
+  it('不应把 currentUser 显示名直接作为 EventStorage 分区键', () => {
+    const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
+
+    expect(source).not.toContain('getEventStorage(currentUser || undefined)');
+    expect(source).toContain('activeProfileId');
+  });
+
+  it('记录 Tab 复用时可显式关闭内置专注计时器（showTimerWidget）', () => {
+    const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
+
+    expect(source).toContain('showTimerWidget?: boolean');
+    expect(source).toContain('showTimerWidget = true');
+    expect(source).toContain("variant === 'new-mobile' && showTimerWidget ? (");
   });
 });
 

@@ -1,0 +1,991 @@
+import { act, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PtyTerminal } from "./PtyTerminal";
+import {
+  __resetPtyInputTransportPoolForTests,
+  retryPtyInputTransport,
+} from "./pty-input";
+
+const hoisted = vi.hoisted(() => {
+  const defaultReadyMessage = () => ({
+    type: "ready" as const,
+    protocol_version: 3,
+    capabilities: {
+      input_ack: true,
+      resize: true,
+      resize_ack: true,
+      output_stream: true,
+      output_cursor: true,
+    },
+  });
+  let readyMessageFactory:
+    | ((url: string) => ReturnType<typeof defaultReadyMessage>)
+    | null = null;
+
+  class MockTerminal {
+    rows = 24;
+    cols = 80;
+    writes: Array<string | Uint8Array> = [];
+    options: Record<string, unknown> = {};
+    private onDataHandler: ((data: string) => void) | null = null;
+    private onResizeHandler:
+      | ((size: { rows: number; cols: number }) => void)
+      | null = null;
+
+    loadAddon = vi.fn();
+    open = vi.fn();
+    focus = vi.fn();
+    refresh = vi.fn();
+    dispose = vi.fn();
+    clear = vi.fn();
+    reset = vi.fn();
+    getSelection = vi.fn(() => "");
+    attachCustomKeyEventHandler = vi.fn(() => true);
+    write = vi.fn((data: string | Uint8Array) => {
+      this.writes.push(data);
+    });
+
+    onData(handler: (data: string) => void) {
+      this.onDataHandler = handler;
+      return { dispose: vi.fn() };
+    }
+
+    onResize(handler: (size: { rows: number; cols: number }) => void) {
+      this.onResizeHandler = handler;
+      return { dispose: vi.fn() };
+    }
+
+    emitData(data: string) {
+      this.onDataHandler?.(data);
+    }
+
+    emitResize(rows: number, cols: number) {
+      this.rows = rows;
+      this.cols = cols;
+      this.onResizeHandler?.({ rows, cols });
+    }
+  }
+
+  class MockResizeObserver {
+    observe = vi.fn();
+    disconnect = vi.fn();
+    readonly callback: ResizeObserverCallback;
+
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+    }
+
+    trigger(target?: Element) {
+      this.callback([], (target ?? this) as unknown as ResizeObserver);
+    }
+  }
+
+  class MockWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+
+    readyState = MockWebSocket.CONNECTING;
+    sent: string[] = [];
+    onopen: ((event: Event) => void) | null = null;
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    onclose: ((event: CloseEvent) => void) | null = null;
+
+    constructor(public readonly url: string) {
+      websocketInstances.push(this);
+      setTimeout(() => {
+        if (this.readyState !== MockWebSocket.CONNECTING) {
+          return;
+        }
+        this.readyState = MockWebSocket.OPEN;
+        this.onopen?.(new Event("open"));
+        this.emitMessage(readyMessageFactory?.(this.url) ?? readyMessage);
+      }, 0);
+    }
+
+    send = vi.fn((payload: string) => {
+      this.sent.push(payload);
+      const parsed = JSON.parse(payload) as {
+        type?: string;
+        input_seq?: number;
+        resize_seq?: number;
+      };
+      if (
+        autoAckInput &&
+        parsed.type === "input" &&
+        typeof parsed.input_seq === "number"
+      ) {
+        setTimeout(() => {
+          this.emitMessage({
+            type: "ack",
+            input_seq: parsed.input_seq,
+          });
+        }, 0);
+      }
+      if (
+        autoAckResize &&
+        parsed.type === "resize" &&
+        typeof parsed.resize_seq === "number"
+      ) {
+        setTimeout(() => {
+          this.emitMessage({
+            type: "resize_ack",
+            resize_seq: parsed.resize_seq,
+          });
+        }, resizeAckDelayMs);
+      }
+    });
+
+    close = vi.fn(() => {
+      if (this.readyState === MockWebSocket.CLOSED) {
+        return;
+      }
+      this.readyState = MockWebSocket.CLOSED;
+      this.onclose?.({ code: 1000, reason: "", wasClean: true } as CloseEvent);
+    });
+
+    emitMessage(payload: unknown) {
+      this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent);
+    }
+
+    emitClose(code = 1006) {
+      this.readyState = MockWebSocket.CLOSED;
+      this.onclose?.({ code, reason: "", wasClean: false } as CloseEvent);
+    }
+  }
+
+  const terminalInstances: MockTerminal[] = [];
+  const resizeObserverInstances: MockResizeObserver[] = [];
+  const websocketInstances: MockWebSocket[] = [];
+  let readyMessage = defaultReadyMessage();
+  let autoAckInput = true;
+  let autoAckResize = true;
+  let resizeAckDelayMs = 0;
+
+  class MockTerminalConstructor extends MockTerminal {
+    constructor() {
+      super();
+      terminalInstances.push(this);
+    }
+  }
+
+  class MockFitAddon {
+    fit = vi.fn();
+  }
+
+  class MockWebLinksAddon {}
+
+  class MockResizeObserverConstructor extends MockResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+      super(callback);
+      resizeObserverInstances.push(this);
+    }
+  }
+
+  return {
+    terminalInstances,
+    resizeObserverInstances,
+    websocketInstances,
+    defaultReadyMessage,
+    get readyMessage() {
+      return readyMessage;
+    },
+    set readyMessage(next: ReturnType<typeof defaultReadyMessage>) {
+      readyMessage = next;
+    },
+    get readyMessageFactory() {
+      return readyMessageFactory;
+    },
+    set readyMessageFactory(
+      next: ((url: string) => ReturnType<typeof defaultReadyMessage>) | null,
+    ) {
+      readyMessageFactory = next;
+    },
+    get autoAckInput() {
+      return autoAckInput;
+    },
+    set autoAckInput(next: boolean) {
+      autoAckInput = next;
+    },
+    get autoAckResize() {
+      return autoAckResize;
+    },
+    set autoAckResize(next: boolean) {
+      autoAckResize = next;
+    },
+    get resizeAckDelayMs() {
+      return resizeAckDelayMs;
+    },
+    set resizeAckDelayMs(next: number) {
+      resizeAckDelayMs = next;
+    },
+    TerminalCtor: MockTerminalConstructor,
+    FitAddonCtor: MockFitAddon,
+    WebLinksAddonCtor: MockWebLinksAddon,
+    ResizeObserverCtor: MockResizeObserverConstructor,
+    WebSocketCtor: MockWebSocket,
+  };
+});
+
+vi.mock("@xterm/xterm", () => ({
+  Terminal: hoisted.TerminalCtor,
+}));
+
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: hoisted.FitAddonCtor,
+}));
+
+vi.mock("@xterm/addon-web-links", () => ({
+  WebLinksAddon: hoisted.WebLinksAddonCtor,
+}));
+
+function withElementClientSize(width: number, height: number) {
+  const widthDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "clientWidth",
+  );
+  const heightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "clientHeight",
+  );
+
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get() {
+      return width;
+    },
+  });
+
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get() {
+      return height;
+    },
+  });
+
+  return () => {
+    if (widthDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "clientWidth",
+        widthDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+    }
+
+    if (heightDescriptor) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "clientHeight",
+        heightDescriptor,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+    }
+  };
+}
+
+async function flushUi(ms = 0): Promise<void> {
+  await act(async () => {
+    if (ms > 0) {
+      await vi.advanceTimersByTimeAsync(ms);
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+async function settleInteractiveStartup(): Promise<void> {
+  const observer =
+    hoisted.resizeObserverInstances[hoisted.resizeObserverInstances.length - 1];
+  expect(observer).toBeTruthy();
+
+  act(() => {
+    observer!.trigger();
+  });
+
+  await flushUi(20);
+  await flushUi(20);
+  await flushUi(80);
+  expect(screen.queryByTestId("pty-terminal-loading")).not.toBeInTheDocument();
+}
+
+describe("PtyTerminal", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    __resetPtyInputTransportPoolForTests();
+    hoisted.terminalInstances.length = 0;
+    hoisted.resizeObserverInstances.length = 0;
+    hoisted.websocketInstances.length = 0;
+    hoisted.readyMessage = hoisted.defaultReadyMessage();
+    hoisted.readyMessageFactory = null;
+    hoisted.autoAckInput = true;
+    hoisted.autoAckResize = true;
+    hoisted.resizeAckDelayMs = 0;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.reject(new Error("unexpected fetch during PTY WS test")),
+      ),
+    );
+    vi.stubGlobal("requestAnimationFrame", ((callback: FrameRequestCallback) =>
+      setTimeout(
+        () => callback(16),
+        16,
+      )) as unknown as typeof requestAnimationFrame);
+    vi.stubGlobal("cancelAnimationFrame", ((id: number) =>
+      clearTimeout(id)) as typeof cancelAnimationFrame);
+    vi.stubGlobal(
+      "ResizeObserver",
+      hoisted.ResizeObserverCtor as unknown as typeof ResizeObserver,
+    );
+    vi.stubGlobal(
+      "WebSocket",
+      hoisted.WebSocketCtor as unknown as typeof WebSocket,
+    );
+  });
+
+  afterEach(() => {
+    __resetPtyInputTransportPoolForTests();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("batches rapid terminal input into a single WS frame（快速输入应合并成一次 WS 输入）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    const view = render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-fast-input"
+        interactive
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal =
+      hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    const inputSocket = hoisted.websocketInstances[0];
+    const outputSocket = hoisted.websocketInstances[1];
+    expect(terminal).toBeTruthy();
+    expect(inputSocket).toBeTruthy();
+    expect(outputSocket).toBeTruthy();
+    expect(inputSocket!.url).toContain("mode=input");
+    expect(outputSocket!.url).toContain("mode=output");
+
+    act(() => {
+      terminal!.emitData("h");
+      terminal!.emitData("i");
+    });
+    await flushUi();
+
+    const framesBeforeFlush = inputSocket!.sent
+      .map((frame) => JSON.parse(frame) as { type?: string })
+      .filter((frame) => frame.type === "input");
+    expect(framesBeforeFlush).toEqual([]);
+
+    await flushUi(20);
+
+    const inputFrames = inputSocket!.sent
+      .map((frame) => JSON.parse(frame) as { type?: string; data?: string })
+      .filter((frame) => frame.type === "input");
+    expect(inputFrames).toHaveLength(1);
+    expect(atob(inputFrames[0]!.data ?? "")).toBe("hi");
+
+    act(() => {
+      view.unmount();
+    });
+    restoreClientSize();
+  });
+
+  it("splits a large pasted input into multiple WS frames（超大粘贴应拆成多段输入帧，避免单帧毒化输入通道）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-large-paste"
+        interactive
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal =
+      hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    const inputSocket = hoisted.websocketInstances[0];
+    expect(terminal).toBeTruthy();
+    expect(inputSocket).toBeTruthy();
+
+    const largePaste = "x".repeat(4_096);
+    act(() => {
+      terminal!.emitData(largePaste);
+    });
+
+    await flushUi(80);
+
+    const inputFrames = inputSocket!.sent
+      .map(
+        (frame) =>
+          JSON.parse(frame) as {
+            type?: string;
+            data?: string;
+          },
+      )
+      .filter((frame) => frame.type === "input");
+    expect(inputFrames.length).toBeGreaterThan(1);
+    expect(
+      inputFrames.map((frame) => atob(frame.data ?? "")).join(""),
+    ).toBe(largePaste);
+
+    restoreClientSize();
+  });
+
+  it("batches rapid PTY output writes before touching xterm（快速输出应先合批再写入 xterm）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    const view = render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-fast-output"
+        interactive
+      />,
+    );
+
+    const terminal =
+      hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    expect(terminal).toBeTruthy();
+    await settleInteractiveStartup();
+    const outputSocket = hoisted.websocketInstances[1];
+    expect(outputSocket).toBeTruthy();
+
+    act(() => {
+      outputSocket!.emitMessage({
+        type: "output_reset",
+        offset: 0,
+        truncated: false,
+      });
+      outputSocket!.emitMessage({
+        type: "output",
+        offset: 0,
+        data: btoa("hello"),
+      });
+      outputSocket!.emitMessage({
+        type: "output",
+        offset: 5,
+        data: btoa(" world"),
+      });
+    });
+    await flushUi();
+
+    expect(terminal!.writes).toHaveLength(0);
+
+    await flushUi(20);
+
+    expect(terminal!.writes).toHaveLength(1);
+    const merged = terminal!.writes[0];
+    const text =
+      typeof merged === "string" ? merged : new TextDecoder().decode(merged);
+    expect(text).toBe("hello world");
+
+    act(() => {
+      view.unmount();
+    });
+    restoreClientSize();
+  });
+
+  it("reports input-readonly presentation state and supports external retry（输入 WS 失败后应外抛只读展示态并支持外部重试）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    const onTransportPresentationChange = vi.fn();
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-input-error"
+        interactive
+        onTransportPresentationChange={onTransportPresentationChange}
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const firstSocket = hoisted.websocketInstances[0];
+    expect(firstSocket).toBeTruthy();
+
+    act(() => {
+      firstSocket!.emitClose();
+    });
+    await flushUi();
+
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith({
+      kind: "input-readonly",
+      message: "输入只读，可重连",
+      actionLabel: "重连输入",
+    });
+    expect(screen.queryByTestId("pty-terminal-input-error")).not.toBeInTheDocument();
+
+    act(() => {
+      retryPtyInputTransport({
+        rtBaseUrl: "http://127.0.0.1:4317",
+        ptyId: "pty-input-error",
+      });
+    });
+    await flushUi(20);
+
+    expect(hoisted.websocketInstances).toHaveLength(3);
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith(null);
+    restoreClientSize();
+  });
+
+  it("blocks the input transport when the runtime reports an incompatible WS protocol（协议不兼容时进入显式错误态）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    hoisted.readyMessage = {
+      type: "ready",
+      protocol_version: 1,
+      capabilities: {
+        input_ack: true,
+        resize: true,
+        resize_ack: true,
+        output_stream: true,
+        output_cursor: true,
+      },
+    };
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-protocol-mismatch"
+        interactive
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    expect(screen.getByTestId("pty-terminal-error")).toHaveTextContent(
+      "协议版本不兼容",
+    );
+    restoreClientSize();
+  });
+
+  it("promotes fatal server-side input errors into the input-readonly presentation state（服务端写入失败会进入只读展示态）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    hoisted.autoAckInput = false;
+    const onTransportPresentationChange = vi.fn();
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-input-fatal-error"
+        interactive
+        onTransportPresentationChange={onTransportPresentationChange}
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal =
+      hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    const inputSocket = hoisted.websocketInstances[0];
+    expect(terminal).toBeTruthy();
+    expect(inputSocket).toBeTruthy();
+
+    act(() => {
+      terminal!.emitData("x");
+    });
+    await flushUi(20);
+
+    act(() => {
+      inputSocket!.emitMessage({
+        type: "error",
+        code: "transport_error",
+        message: "write failed",
+        input_seq: 1,
+      });
+    });
+    await flushUi();
+
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith({
+      kind: "input-readonly",
+      message: "输入只读，可重连",
+      actionLabel: "重连输入",
+    });
+    expect(screen.queryByTestId("pty-terminal-input-error")).not.toBeInTheDocument();
+    restoreClientSize();
+  });
+
+  it("keeps the input transport usable after a resize ack timeout（resize 超时不应毒化输入 WS）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-resize-timeout"
+        interactive
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal =
+      hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    const inputSocket = hoisted.websocketInstances[0];
+    expect(terminal).toBeTruthy();
+    expect(inputSocket).toBeTruthy();
+
+    const resizeFramesBefore = inputSocket!.sent
+      .map((frame) => JSON.parse(frame) as { type?: string })
+      .filter((frame) => frame.type === "resize").length;
+
+    hoisted.autoAckResize = false;
+    act(() => {
+      terminal!.emitResize(41, 132);
+    });
+    await flushUi(20);
+    await flushUi(520);
+
+    const resizeFramesAfter = inputSocket!.sent
+      .map((frame) => JSON.parse(frame) as { type?: string })
+      .filter((frame) => frame.type === "resize").length;
+
+    expect(resizeFramesAfter).toBe(resizeFramesBefore + 1);
+    expect(inputSocket!.close).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("pty-terminal-input-error")).not.toBeInTheDocument();
+    expect(terminal!.options.disableStdin).toBe(false);
+
+    act(() => {
+      terminal!.emitData("x");
+    });
+    await flushUi(20);
+
+    const inputFrames = inputSocket!.sent
+      .map((frame) => JSON.parse(frame) as { type?: string })
+      .filter((frame) => frame.type === "input");
+    expect(inputFrames).toHaveLength(1);
+    expect(
+      screen.queryByTestId("pty-terminal-input-error"),
+    ).not.toBeInTheDocument();
+
+    restoreClientSize();
+  });
+
+  it("notifies callers when a ready input transport reports PTY not_found（输入 WS 在 ready 后报告 PTY 不存在时应上抛）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    const onPtyUnavailable = vi.fn();
+    hoisted.autoAckInput = false;
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-input-not-found"
+        interactive
+        onPtyUnavailable={onPtyUnavailable}
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal =
+      hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    const inputSocket = hoisted.websocketInstances[0];
+    expect(terminal).toBeTruthy();
+    expect(inputSocket).toBeTruthy();
+
+    act(() => {
+      terminal!.emitData("x");
+    });
+    await flushUi(20);
+
+    act(() => {
+      inputSocket!.emitMessage({
+        type: "error",
+        code: "not_found",
+        message: "PTY instance not found",
+        input_seq: 1,
+      });
+    });
+    await flushUi();
+
+    expect(onPtyUnavailable).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("pty-terminal-input-error")).not.toBeInTheDocument();
+    restoreClientSize();
+  });
+
+  it("reports output reconnecting presentation state after a post-ready server error（ready 后收到错误会外抛输出重连展示态）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    const onTransportPresentationChange = vi.fn();
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-output-error-reconnect"
+        interactive
+        onTransportPresentationChange={onTransportPresentationChange}
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal =
+      hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    const firstOutputSocket = hoisted.websocketInstances[1];
+    expect(terminal).toBeTruthy();
+    expect(firstOutputSocket).toBeTruthy();
+
+    act(() => {
+      firstOutputSocket!.emitMessage({
+        type: "error",
+        message: "live output stream stalled",
+      });
+    });
+    await flushUi();
+
+    expect(firstOutputSocket!.close).toHaveBeenCalledTimes(1);
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith({
+      kind: "output-reconnecting",
+      message: "输出重连中，输入暂停",
+    });
+    expect(terminal!.options.disableStdin).toBe(true);
+
+    await flushUi(600);
+    expect(hoisted.websocketInstances).toHaveLength(3);
+    expect(hoisted.websocketInstances[2]!.url).toContain("mode=output");
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith(null);
+
+    restoreClientSize();
+  });
+
+  it("auto-retries a stale read-only input transport after output recovery（输出恢复后应自动重试卡死的输入通道）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    const onTransportPresentationChange = vi.fn();
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-output-recovers-input"
+        interactive
+        onTransportPresentationChange={onTransportPresentationChange}
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const firstInputSocket = hoisted.websocketInstances[0];
+    const firstOutputSocket = hoisted.websocketInstances[1];
+    const terminal =
+      hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    expect(firstInputSocket).toBeTruthy();
+    expect(firstOutputSocket).toBeTruthy();
+    expect(terminal).toBeTruthy();
+
+    act(() => {
+      firstInputSocket!.emitClose();
+    });
+    await flushUi();
+
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith({
+      kind: "input-readonly",
+      message: "输入只读，可重连",
+      actionLabel: "重连输入",
+    });
+
+    act(() => {
+      firstOutputSocket!.emitMessage({
+        type: "error",
+        message: "live output stream stalled",
+      });
+    });
+    await flushUi();
+
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith({
+      kind: "output-reconnecting",
+      message: "输出重连中，输入暂停",
+    });
+
+    await flushUi(600);
+
+    expect(hoisted.websocketInstances).toHaveLength(4);
+    expect(hoisted.websocketInstances[2]!.url).toContain("mode=output");
+    expect(hoisted.websocketInstances[3]!.url).toContain("mode=input");
+    expect(onTransportPresentationChange).toHaveBeenLastCalledWith(null);
+    expect(terminal!.options.disableStdin).toBe(false);
+
+    restoreClientSize();
+  });
+
+  it("blocks further input after a fatal output error（输出致命错误后不再允许继续输入）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-output-fatal-error"
+        interactive
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal =
+      hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    const inputSocket = hoisted.websocketInstances[0];
+    const outputSocket = hoisted.websocketInstances[1];
+    expect(terminal).toBeTruthy();
+    expect(inputSocket).toBeTruthy();
+    expect(outputSocket).toBeTruthy();
+
+    const inputFramesBefore = inputSocket!.sent
+      .map((frame) => JSON.parse(frame) as { type?: string })
+      .filter((frame) => frame.type === "input").length;
+
+    act(() => {
+      outputSocket!.emitMessage({
+        type: "error",
+        code: "forbidden",
+        message: "write blocked",
+      });
+    });
+    await flushUi();
+
+    expect(screen.getByTestId("pty-terminal-error")).toHaveTextContent(
+      "RT 鉴权失败",
+    );
+    expect(terminal!.options.disableStdin).toBe(true);
+
+    act(() => {
+      terminal!.emitData("blocked");
+    });
+    await flushUi(20);
+
+    const inputFramesAfter = inputSocket!.sent
+      .map((frame) => JSON.parse(frame) as { type?: string })
+      .filter((frame) => frame.type === "input").length;
+    expect(inputFramesAfter).toBe(inputFramesBefore);
+
+    restoreClientSize();
+  });
+
+  it("notifies callers when a ready output transport reports PTY not_found（输出 WS 在 ready 后报告 PTY 不存在时应上抛）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    const onPtyUnavailable = vi.fn();
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-output-not-found"
+        interactive
+        onPtyUnavailable={onPtyUnavailable}
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const outputSocket = hoisted.websocketInstances[1];
+    expect(outputSocket).toBeTruthy();
+
+    act(() => {
+      outputSocket!.emitMessage({
+        type: "error",
+        code: "not_found",
+        message: "PTY instance not found",
+      });
+    });
+    await flushUi();
+
+    expect(onPtyUnavailable).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("pty-terminal-error")).toHaveTextContent(
+      "当前 PTY 不存在",
+    );
+    restoreClientSize();
+  });
+
+  it("treats read-only output ready as PTY unavailable for interactive terminals（交互终端收到只读输出 ready 时应进入断开恢复链路）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    const onPtyUnavailable = vi.fn();
+    hoisted.readyMessageFactory = (url) =>
+      url.includes("mode=output")
+        ? {
+            ...hoisted.defaultReadyMessage(),
+            read_only: true,
+          }
+        : hoisted.defaultReadyMessage();
+
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-output-read-only"
+        interactive
+        onPtyUnavailable={onPtyUnavailable}
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal =
+      hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    expect(terminal).toBeTruthy();
+
+    expect(onPtyUnavailable).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByTestId("pty-terminal-error"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("pty-terminal-output-reconnecting"),
+    ).not.toBeInTheDocument();
+    expect(terminal!.options.disableStdin).toBe(true);
+
+    restoreClientSize();
+  });
+
+  it("disables stdin after EOF so ended terminals are no longer writable（EOF 后终端进入不可输入态）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-eof-readonly"
+        interactive
+      />,
+    );
+
+    await settleInteractiveStartup();
+
+    const terminal =
+      hoisted.terminalInstances[hoisted.terminalInstances.length - 1];
+    const outputSocket = hoisted.websocketInstances[1];
+    expect(terminal).toBeTruthy();
+    expect(outputSocket).toBeTruthy();
+
+    act(() => {
+      outputSocket!.emitMessage({ type: "eof", offset: 0, code: 0 });
+    });
+    await flushUi();
+
+    expect(terminal!.options.disableStdin).toBe(true);
+
+    restoreClientSize();
+  });
+
+  it("keeps read-only terminals off the PTY input websocket（只读终端不建立输入 WS）", async () => {
+    const restoreClientSize = withElementClientSize(960, 640);
+    render(
+      <PtyTerminal
+        rtBaseUrl="http://127.0.0.1:4317"
+        ptyId="pty-read-only"
+        interactive={false}
+      />,
+    );
+
+    const observer =
+      hoisted.resizeObserverInstances[
+        hoisted.resizeObserverInstances.length - 1
+      ];
+    act(() => {
+      observer!.trigger();
+    });
+    await flushUi(80);
+
+    expect(hoisted.websocketInstances).toHaveLength(1);
+    expect(
+      screen.queryByTestId("pty-terminal-input-error"),
+    ).not.toBeInTheDocument();
+    restoreClientSize();
+  });
+});

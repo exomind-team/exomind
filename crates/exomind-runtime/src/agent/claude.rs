@@ -156,6 +156,7 @@ impl SessionSnapshot {
             last_active: format_utc_iso8601(self.last_active_wall),
             message_count: self.message_count,
             uptime_secs: self.created_at.elapsed().as_secs(),
+            ..Default::default()
         }
     }
 }
@@ -165,6 +166,9 @@ type SharedClaudeSession = Arc<AsyncMutex<ClaudeSession>>;
 /// Built-in Claude agent (内置 Claude Agent，通过 Claude CLI 输出流式文本).
 #[derive(Debug, Clone)]
 pub struct ClaudeAgent {
+    id: String,
+    name: String,
+    description: String,
     command: String,
     persistent_args: Vec<String>,
     sessions: Arc<StdMutex<HashMap<String, SharedClaudeSession>>>,
@@ -173,12 +177,62 @@ pub struct ClaudeAgent {
 
 impl ClaudeAgent {
     pub fn new() -> Self {
-        Self::with_command_and_args("claude", build_claude_persistent_args())
+        Self::with_metadata_and_command(
+            "claude".to_string(),
+            None,
+            None,
+            resolve_claude_command(),
+            build_claude_persistent_args(),
+        )
+    }
+
+    pub fn managed(
+        id: impl Into<String>,
+        name: Option<String>,
+        description: Option<String>,
+    ) -> Self {
+        Self::with_metadata_and_command(
+            id.into(),
+            name,
+            description,
+            resolve_claude_command(),
+            build_claude_persistent_args(),
+        )
     }
 
     pub fn with_command_and_args(command: impl Into<String>, persistent_args: Vec<String>) -> Self {
+        Self::with_metadata_and_command(
+            "claude".to_string(),
+            None,
+            None,
+            command.into(),
+            persistent_args,
+        )
+    }
+
+    fn with_metadata_and_command(
+        id: String,
+        name: Option<String>,
+        description: Option<String>,
+        command: String,
+        persistent_args: Vec<String>,
+    ) -> Self {
+        let default_name = if id == "claude" {
+            "Claude Agent".to_string()
+        } else {
+            format!("Claude Agent ({id})")
+        };
+        let default_description = if id == "claude" {
+            "通过 Claude Code CLI 提供流式对话".to_string()
+        } else {
+            format!("通过 Claude Code CLI 提供流式对话（{id}）")
+        };
+
         Self {
-            command: command.into(),
+            id,
+            name: name.unwrap_or(default_name),
+            description: description.unwrap_or(default_description),
+            command,
             persistent_args,
             sessions: Arc::new(StdMutex::new(HashMap::new())),
             session_snapshots: Arc::new(StdMutex::new(HashMap::new())),
@@ -284,7 +338,6 @@ impl ClaudeAgent {
 
         #[cfg(target_os = "windows")]
         {
-            use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
             command.creation_flags(CREATE_NO_WINDOW);
         }
@@ -411,11 +464,16 @@ impl ClaudeAgent {
 
         let input_line = build_stream_json_user_input(&message);
         if let Err(error) = write_user_input_line(&mut session.stdin, &input_line).await {
+            let error_message = if error.kind() == std::io::ErrorKind::BrokenPipe {
+                build_session_ended_error_message(&mut session)
+            } else {
+                format!("Claude 输入写入失败: {error}")
+            };
             session.status = SessionStatus::Crashed;
             self.upsert_snapshot_from_session(&session);
             drop(session);
             self.cleanup_session(&session_id).await;
-            emit_error_chunk(&sender, format!("Claude 输入写入失败: {error}")).await;
+            emit_error_chunk(&sender, error_message).await;
             return;
         }
 
@@ -543,16 +601,16 @@ impl Default for ClaudeAgent {
 }
 
 impl Agent for ClaudeAgent {
-    fn id(&self) -> &'static str {
-        "claude"
+    fn id(&self) -> &str {
+        &self.id
     }
 
-    fn name(&self) -> &'static str {
-        "Claude Agent"
+    fn name(&self) -> &str {
+        &self.name
     }
 
-    fn description(&self) -> &'static str {
-        "通过 Claude Code CLI 提供流式对话"
+    fn description(&self) -> &str {
+        &self.description
     }
 
     fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, ChatChunk> {
@@ -684,6 +742,14 @@ async fn read_next_stream_event(
 
 async fn emit_error_chunk(sender: &mpsc::Sender<ChatChunk>, message: String) {
     let _ = sender.send(ChatChunk::content_only(message)).await;
+}
+
+fn resolve_claude_command() -> String {
+    std::env::var("EXOMIND_CLAUDE_COMMAND")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "claude".to_string())
 }
 
 fn build_claude_persistent_args() -> Vec<String> {

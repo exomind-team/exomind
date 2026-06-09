@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import { AGENT_HUB_MOCK_FIXTURE } from '@/lib/adapters/mock/fixtures/agent-hub';
 import type { SignalRoute } from '@/lib/types/signal-pool';
+import { AGENTS_VIEW_PERSISTENCE_STORAGE_KEY } from '@/ui/app/pages/agents/agents-view-persistence';
 
 const serviceMocks = vi.hoisted(() => ({
   getTopology: vi.fn(),
@@ -135,6 +136,8 @@ vi.mock('@/lib/services', async (importOriginal) => {
 
 vi.mock('@/services/runtime-manager', () => ({
   getRuntimeManager: () => runtimeManagerMocks,
+  findPreferredRuntimeHostForAgent: vi.fn(() => null),
+  shouldAutoPollRuntimeHost: vi.fn(() => true),
 }));
 
 vi.mock('@/lib/services/runtime-control.service', () => ({
@@ -143,6 +146,7 @@ vi.mock('@/lib/services/runtime-control.service', () => ({
 
 describe('agents page issue-204（主页面三视图与添加节点）', () => {
   beforeEach(() => {
+    window.localStorage.removeItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY);
     serviceMocks.getTopology.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.topology);
     serviceMocks.getDeviceView.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.deviceGroups);
     runtimeControlMocks.getStatus.mockResolvedValue({
@@ -205,12 +209,12 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
       expect(screen.getByText('user.input.text → classifier')).toBeInTheDocument();
       expect(screen.getByText('session.end → reviewer')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByTestId('agent-view-toggle-list'));
-    expect(screen.getByTestId('agent-list-view')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-list-filter-all')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-signal-route-section')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: '节点' }));
+    expect(screen.getByText('全部')).toBeInTheDocument();
     expect(screen.getByText('Echo Agent')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('agent-view-toggle-device'));
+
+    fireEvent.click(screen.getByRole('tab', { name: '设备' }));
     expect(screen.getByTestId('agent-device-view')).toBeInTheDocument();
     expect(screen.getByTestId('agent-device-overview-card')).toBeInTheDocument();
   });
@@ -223,11 +227,40 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     });
 
     fireEvent.click(screen.getByTestId('agent-add-node-button'));
-    expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('agent-add-node-option-device'));
+    expect(screen.getByTestId('agent-host-manager-sheet')).toBeInTheDocument();
     expect(screen.getByText('添加设备')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('agent-add-node-close'));
-    expect(screen.queryByTestId('agent-add-node-sheet')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('agent-host-manager-close'));
+    expect(screen.queryByTestId('agent-host-manager-sheet')).not.toBeInTheDocument();
+  });
+
+  it('persists the selected agent hub view across remounts（共享头部导航切换后仍持久化当前视图）', async () => {
+    const firstRender = render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sessions-empty-state')).toBeInTheDocument();
+    });
+
+    expect(window.localStorage.getItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY)).toBe('sessions');
+
+    firstRender.unmount();
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sessions-empty-state')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('agent-topology-view')).not.toBeInTheDocument();
   });
 
   it('keeps dark-mode classes on key surfaces（关键区域包含暗色样式类）', async () => {
@@ -241,14 +274,14 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     expect(screen.getByTestId('agent-topology-canvas').className).toContain('dark:bg-[#1C1917]');
   });
 
-  it('uses task-page sized title（标题字号与任务页一致）', async () => {
+  it('uses signal-network page title with task-page sizing（标题改为信号网络且字号与任务页一致）', async () => {
     render(<AgentsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Agent 网络' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: '信号网络' })).toBeInTheDocument();
     });
 
-    const heading = screen.getByRole('heading', { name: 'Agent 网络' });
+    const heading = screen.getByRole('heading', { name: '信号网络' });
     expect(heading.className).toContain('text-lg');
     expect(heading.className).toContain('font-semibold');
     expect(heading.className).not.toContain('text-[30px]');

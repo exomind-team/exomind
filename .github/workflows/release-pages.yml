@@ -1,0 +1,98 @@
+name: Sync Release Pages
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_run:
+    workflows:
+      - Build & Release
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: "1.3.8"
+
+jobs:
+  sync-pages:
+    # GitHub Pages is configured with source.branch=dev.
+    # Pages deploys triggered from tag refs are skipped by GitHub, so deployment
+    # must run from dev or a workflow_run based workflow on the source branch.
+    if: |
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository source branch (检出 Pages 源分支)
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: Setup Bun (安装 Bun)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Sync GitHub Pages release metadata (同步 GitHub Pages release metadata)
+        run: bun scripts/dev/sync-release-pages.ts --repo ${{ github.repository }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install website dependencies (安装 website 依赖)
+        run: bun run website:install
+
+      - name: Build website for GitHub Pages (构建 GitHub Pages 静态站点)
+        run: bun run website:build
+        env:
+          EXOMIND_WEBSITE_BASE_PATH: /
+          PUBLIC_EXOMIND_WEBSITE_BASE_PATH: /
+
+      - name: Configure GitHub Pages (配置 GitHub Pages)
+        uses: actions/configure-pages@v6
+
+      - name: Package GitHub Pages artifact (打包 GitHub Pages 产物)
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar \
+            --dereference \
+            --hard-dereference \
+            --directory website/dist \
+            --create \
+            --file artifact.tar \
+            --exclude=.git \
+            --exclude=.github \
+            .
+
+      - name: Upload GitHub Pages artifact (上传 GitHub Pages 产物)
+        uses: actions/upload-artifact@v7
+        with:
+          name: github-pages
+          path: artifact.tar
+          retention-days: 1
+
+  deploy-pages:
+    needs: sync-pages
+    if: needs.sync-pages.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages (部署 GitHub Pages)
+        id: deployment
+        uses: actions/deploy-pages@v5

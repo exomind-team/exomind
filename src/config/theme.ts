@@ -1,3 +1,8 @@
+import {
+  getRuntimeConfigValueSync,
+  setRuntimeConfigValue,
+} from './runtime-config-cache';
+
 export const THEME_PREFERENCE_STORAGE_KEY = 'exomind:themePreference';
 export const THEME_PREFERENCE_CHANGED_EVENT = 'exomind:theme-preference-changed';
 
@@ -17,7 +22,7 @@ export function getThemePreference(): ThemePreference {
   }
 
   try {
-    const stored = window.localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY);
+    const stored = getRuntimeConfigValueSync(THEME_PREFERENCE_STORAGE_KEY);
     if (!stored) {
       return 'system';
     }
@@ -34,7 +39,10 @@ export function setThemePreference(preference: ThemePreference): void {
   }
 
   try {
-    window.localStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, preference);
+    setRuntimeConfigValue(THEME_PREFERENCE_STORAGE_KEY, preference, {
+      source: THEME_PREFERENCE_CHANGED_EVENT,
+      sourceOrigin: window.location?.origin,
+    });
     window.dispatchEvent(
       new CustomEvent(THEME_PREFERENCE_CHANGED_EVENT, {
         detail: { value: preference },
@@ -88,8 +96,23 @@ export function subscribeThemePreferenceChanges(
     }
   };
 
+  const storageHandler = (event: StorageEvent) => {
+    if (event.key !== THEME_PREFERENCE_STORAGE_KEY) {
+      return;
+    }
+    if (isThemePreference(event.newValue)) {
+      listener(event.newValue);
+      return;
+    }
+    listener(getThemePreference());
+  };
+
   window.addEventListener(THEME_PREFERENCE_CHANGED_EVENT, handler);
-  return () => window.removeEventListener(THEME_PREFERENCE_CHANGED_EVENT, handler);
+  window.addEventListener('storage', storageHandler);
+  return () => {
+    window.removeEventListener(THEME_PREFERENCE_CHANGED_EVENT, handler);
+    window.removeEventListener('storage', storageHandler);
+  };
 }
 
 export function subscribeSystemThemeChanges(listener: (theme: ResolvedTheme) => void): () => void {
@@ -114,4 +137,3 @@ export function subscribeSystemThemeChanges(listener: (theme: ResolvedTheme) => 
   mql.addListener(handler);
   return () => mql.removeListener(handler);
 }
-

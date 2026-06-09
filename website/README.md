@@ -1,5 +1,17 @@
 # ExoMind Website
 
+## Brand Language / 品牌文案
+
+- `ExoMind` = singular brand（单数品牌）: one person's exomind, one person's cognitive infrastructure（一个人的外心 / 认知基础设施）
+- `exominds` = plural vision（复数愿景）: many exominds gradually linked into a collaborative network（更多人的外心逐步连接成协作网络）
+- Current domain（当前域名）: `exo-mind.ai`
+
+Recommended copy / 推荐文案:
+
+- `Build your exomind.` / `先建立一个人的外心。`
+- `Connect exominds.` / `再把更多人的外心连接起来。`
+- `ExoMind is infrastructure for exominds.` / `ExoMind 是通向 exominds 的基础设施。`
+
 ## Theme / 主题模式
 
 - The website now supports a built-in dark mode toggle (`theme-toggle`) in the header.
@@ -12,22 +24,23 @@
 bun run --cwd website dev
 ```
 
-## Build for Cloudflare / Cloudflare 构建
+## Static Build / 静态构建（GitHub Pages）
 
 ```bash
 bun run website:build
 ```
 
-## Local Cloudflare Preview / 本地 Cloudflare 预览
+## Local Preview / 本地预览
 
 ```bash
-bun run website:cf:dev
+bun run website:preview
 ```
 
-## Dry-run Deploy / 部署演练（不真正发布）
+## Release Metadata Sync / 发布元数据同步
 
 ```bash
-bun run website:cf:dry-run
+# 从 GitHub Releases 拉取 metadata，写入 website/public/releases
+bun run release:pages:sync -- --repo exomind-team/exomind
 ```
 
 ## Automated Test / 自动化测试

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-schedule-end-alert"
+description = "Enables the schedule_end_alert command without any pre-configured scope."
+commands.allow = ["schedule_end_alert"]
+
+[[permission]]
+identifier = "deny-schedule-end-alert"
+description = "Denies the schedule_end_alert command without any pre-configured scope."
+commands.deny = ["schedule_end_alert"]

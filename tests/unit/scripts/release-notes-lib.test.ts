@@ -1,0 +1,168 @@
+import { describe, expect, it } from "vitest";
+import type { ReleaseManifest } from "../../../scripts/dev/release-pages-metadata-lib.ts";
+import {
+  classifyChange,
+  findPreviousCanonicalTag,
+  normalizeChangeTitle,
+  renderReleaseNotesMarkdown,
+} from "../../../scripts/dev/release-notes-lib.ts";
+
+function makeManifest(version: string): ReleaseManifest {
+  return {
+    version,
+    tag: `v${version}`,
+    commit: "abcdef1234567890",
+    generated_at: "2026-04-08T08:00:00Z",
+    assets: {
+      "windows-x64-setup": {
+        name: `ExoMind-${version}-windows-x64-setup.exe`,
+        size: 15_223_808,
+        sha256: "a".repeat(64),
+      },
+      "android-arm64": {
+        name: `ExoMind-${version}-android-arm64.apk`,
+        size: 19_797_335,
+        sha256: "b".repeat(64),
+      },
+      "runtime-windows-x64": {
+        name: `ExoMind-RT-${version}-windows-x64.exe`,
+        size: 6_369_792,
+        sha256: "c".repeat(64),
+      },
+    },
+  };
+}
+
+describe("release-notes-lib", () => {
+  it("finds the previous canonical tag using semantic version order（应按语义化版本找到上一个 canonical tag）", () => {
+    const result = findPreviousCanonicalTag("v0.4.3", [
+      "release/v0.3.5",
+      "v0.4.1",
+      "v0.4.3",
+      "v0.4.2",
+      "build/v0.3.3-build.29",
+    ]);
+
+    expect(result).toBe("v0.4.2");
+  });
+
+  it("normalizes conventional commit titles and classifies highlights（应去掉 conventional 前缀并归类功能变化）", () => {
+    expect(normalizeChangeTitle("fix(release): prepare v0.4.3 pipeline")).toBe(
+      "prepare v0.4.3 pipeline",
+    );
+    expect(classifyChange("feat(agent-hub): improve signal routing")).toBe(
+      "added",
+    );
+    expect(classifyChange("fix(ci): unblock release pipeline")).toBe("fixed");
+    expect(classifyChange("chore(release): refresh notes")).toBe("maintenance");
+  });
+
+  it("renders markdown with highlights PRs direct commits and artifacts（应输出完整 release notes 结构）", () => {
+    const markdown = renderReleaseNotesMarkdown({
+      releaseName: "Preview v0.4.3",
+      currentTag: "v0.4.3",
+      currentVersion: "0.4.3",
+      previousTag: "v0.4.2",
+      compareUrl:
+        "https://github.com/exomind-team/exomind/compare/v0.4.2...v0.4.3",
+      manifest: makeManifest("0.4.3"),
+      pullRequests: [
+        {
+          number: 900,
+          title: "feat(agent-hub): add release note panel",
+          url: "https://github.com/exomind-team/exomind/pull/900",
+          authorLogin: "HailayLin",
+        },
+      ],
+      directCommits: [
+        {
+          sha: "d99ede9c9008dd3d390b87254df58fccb8721fb3",
+          shortSha: "d99ede9c",
+          title: "fix(release): prepare v0.4.3 pipeline",
+          url: "https://github.com/exomind-team/exomind/commit/d99ede9c",
+          authorName: "星林",
+          authorLogin: "HailayLin",
+          files: [".github/workflows/release.yml", "package.json"],
+        },
+      ],
+    });
+
+    expect(markdown).toContain("## Release Scope / 发布范围");
+    expect(markdown).toContain(
+      "Compare: [`v0.4.2...v0.4.3`](https://github.com/exomind-team/exomind/compare/v0.4.2...v0.4.3)",
+    );
+    expect(markdown).toContain("## What Changed / 本次变化");
+    expect(markdown).toContain("### Added / 新增");
+    expect(markdown).toContain(
+      "add release note panel ([PR #900](https://github.com/exomind-team/exomind/pull/900) by @HailayLin)",
+    );
+    expect(markdown).toContain("### Fixed / 修复");
+    expect(markdown).toContain(
+      "prepare v0.4.3 pipeline ([`d99ede9c`](https://github.com/exomind-team/exomind/commit/d99ede9c) by @HailayLin)",
+    );
+    expect(markdown).toContain("## Change Sources / 变更来源");
+    expect(markdown).toContain("### Direct Commits / 直接提交");
+    expect(markdown).toContain(
+      "Files: .github/workflows/release.yml, package.json",
+    );
+    expect(markdown).toContain("## Downloads / 下载产物");
+    expect(markdown).toContain("### App / 主应用");
+    expect(markdown).toContain(
+      "Windows Setup: `ExoMind-0.4.3-windows-x64-setup.exe`",
+    );
+    expect(markdown).toContain("### Runtime / 运行时");
+    expect(markdown).toContain(
+      "Runtime Windows: `ExoMind-RT-0.4.3-windows-x64.exe`",
+    );
+  });
+
+  it("prefers merged PRs over covered commits and filters merge noise（应优先保留 PR 并过滤被覆盖的 commit 与 merge 噪声）", () => {
+    const markdown = renderReleaseNotesMarkdown({
+      releaseName: "Preview v0.4.6",
+      currentTag: "v0.4.6",
+      currentVersion: "0.4.6",
+      previousTag: "v0.4.5",
+      compareUrl:
+        "https://github.com/exomind-team/exomind/compare/v0.4.5...v0.4.6",
+      manifest: makeManifest("0.4.6"),
+      pullRequests: [
+        {
+          number: 891,
+          title: "feat(agent-hub): add API Agent tab test console on network page",
+          url: "https://github.com/exomind-team/exomind/pull/891",
+          authorLogin: "HailayLin",
+        },
+      ],
+      directCommits: [
+        {
+          sha: "4548a64bc079cb0076220110c1d8e28d21b8e3e3",
+          shortSha: "4548a64b",
+          title: "feat: add api agent tab test console",
+          url: "https://github.com/exomind-team/exomind/commit/4548a64b",
+          authorName: "星林",
+          authorLogin: "HailayLin",
+          files: ["src/ui/app/pages/network.tsx"],
+        },
+        {
+          sha: "fa00453eda07e8f4ac24e70c83fa84795374d528",
+          shortSha: "fa00453e",
+          title: "Merge branch 'dev' of https://github.com/exomind-team/exomind into dev",
+          url: "https://github.com/exomind-team/exomind/commit/fa00453e",
+          authorName: "星林",
+          authorLogin: "HailayLin",
+        },
+      ],
+    });
+
+    expect(markdown).toContain("Merged PRs: 1");
+    expect(markdown).toContain("Direct Commits: 0");
+    expect(markdown).toContain(
+      "add API Agent tab test console on network page ([PR #891](https://github.com/exomind-team/exomind/pull/891) by @HailayLin)",
+    );
+    expect(markdown).not.toContain("[`4548a64b`]");
+    expect(markdown).not.toContain("Merge branch 'dev'");
+    expect(markdown).toContain(
+      "- None. All detected changes are covered by merged PRs.",
+    );
+  });
+});

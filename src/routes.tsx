@@ -1,16 +1,46 @@
-﻿import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
+import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, Brain, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, FlaskConical, Mic, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
+import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
+import { getGoalsPageEnabled, subscribeGoalsPageEnabledChanges } from '@/config/goals-page-enabled';
+import { getWorkbenchLegacyShimEnabled } from '@/config/workbench-legacy-shim-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
+import {
+  getVoiceRuntimeLabNavEnabled,
+  subscribeVoiceRuntimeLabNavEnabledChanges,
+} from '@/config/voice-runtime-settings';
+import {
+  getDesktopSidebarCollapsed as getPersistedDesktopSidebarCollapsed,
+  setDesktopSidebarCollapsed as setPersistedDesktopSidebarCollapsed,
+} from '@/config/desktop-sidebar-preferences';
 import { getCommandRegistryService } from '@/lib/services/command-registry.service';
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
+import { useTauriFullscreenShortcut } from '@/ui/app/hooks/useTauriFullscreenShortcut';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
+import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
+import { ProposalNotificationBadge } from '@/ui/app/components/ProposalNotificationBadge';
+import { ProposalNotificationCoordinator } from '@/ui/app/components/ProposalNotificationCoordinator';
+import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
+import { TimeblockEndAlertCoordinator } from '@/ui/app/components/TimeblockEndAlertCoordinator';
+import { UpdateToast } from '@/ui/components/UpdateToast';
+import { requestReminderCompose } from '@/ui/stores/reminder-ui-store';
 import type { CommandContext } from '@/lib/types/command-palette';
+import {
+  TASKS_LAST_PATH_KEY,
+  resolveTasksRestorePath,
+  shouldForceTasksMain,
+} from '@/ui/app/pages/task-route-memory';
+import {
+  getEventlogPathForTab,
+  resolveEventlogRestoreTab,
+  resolveLegacyEventlogTabSearch,
+} from '@/ui/app/pages/eventlog-route-memory';
 
 const FocusPage = lazy(async () => {
   const module = await import('@/ui/app/pages/FocusPage');
@@ -32,9 +62,39 @@ const TasksPage = lazy(async () => {
   return { default: module.TasksPage };
 });
 
+const TaskDagPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TaskDagPage');
+  return { default: module.TaskDagPage };
+});
+
+const TaskTimeblocksPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TaskTimeblocksPage');
+  return { default: module.TaskTimeblocksPage };
+});
+
+const TaskTimelinePage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TaskTimelinePage');
+  return { default: module.TaskTimelinePage };
+});
+
+const RemindersPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/RemindersPage');
+  return { default: module.RemindersPage };
+});
+
+const ProposalInboxPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/proposals/ProposalInboxPage');
+  return { default: module.ProposalInboxPage };
+});
+
 const TaskDetailPage = lazy(async () => {
   const module = await import('@/ui/app/pages/TaskDetailPage');
   return { default: module.TaskDetailPage };
+});
+
+const TimeBlockDetailPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TimeBlockDetailPage');
+  return { default: module.TimeBlockDetailPage };
 });
 
 const MePage = lazy(async () => {
@@ -57,9 +117,29 @@ const MOSSASRTestPage = lazy(async () => {
   return { default: module.MOSSASRTestPage };
 });
 
+const VolcanoASRTestPage = lazy(async () => {
+  const module = await import('@/pages/VolcanoASRTestPage');
+  return { default: module.VolcanoASRTestPage };
+});
+
 const AgentsPage = lazy(async () => {
   const module = await import('@/ui/app/pages/AgentsPage');
   return { default: module.AgentsPage };
+});
+
+const WorkbenchPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/workbench/WorkbenchPage');
+  return { default: module.WorkbenchPage };
+});
+
+const VoiceRuntimeLabPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/voice-runtime/VoiceRuntimeLabPage');
+  return { default: module.VoiceRuntimeLabPage };
+});
+
+const GoalsPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/goals/GoalsPage');
+  return { default: module.GoalsPage };
 });
 
 const UpdatePage = lazy(async () => {
@@ -77,6 +157,11 @@ const ActorDetailPage = lazy(async () => {
   return { default: module.ActorDetailPage };
 });
 
+const SignalDetailPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/agents/SignalDetailPage');
+  return { default: module.SignalDetailPage };
+});
+
 const AgentConversationPage = lazy(async () => {
   const module = await import('@/ui/app/pages/agents/AgentConversationPage');
   return { default: module.AgentConversationPage };
@@ -85,6 +170,11 @@ const AgentConversationPage = lazy(async () => {
 const AgentMarketPage = lazy(async () => {
   const module = await import('@/ui/app/pages/agents/AgentMarketPage');
   return { default: module.AgentMarketPage };
+});
+
+const PtyTerminalPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/agents/PtyTerminalPage');
+  return { default: module.PtyTerminalPage };
 });
 
 function PageFallback() {
@@ -99,32 +189,39 @@ function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
 }
 
-function useIsDesktop(minWidth = 768): boolean {
-  const [isDesktop, setIsDesktop] = useState(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      return false;
-    }
-    return window.matchMedia(`(min-width: ${minWidth}px)`).matches;
-  });
+function LegacyWorkbenchShim({
+  enabled,
+  search,
+  children,
+}: {
+  enabled: boolean;
+  search: Record<string, string>;
+  children: React.ReactNode;
+}) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const bypassWorkbenchShim = useMemo(
+    () => new URLSearchParams(location.searchStr ?? '').get('workbenchBypass') === 'true',
+    [location.searchStr],
+  );
 
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    if (!enabled || bypassWorkbenchShim) {
       return;
     }
 
-    const mediaQueryList = window.matchMedia(`(min-width: ${minWidth}px)`);
-    const onChange = (event: MediaQueryListEvent) => {
-      setIsDesktop(event.matches);
-    };
+    void navigate({
+      to: '/workbench',
+      search,
+      replace: true,
+    });
+  }, [bypassWorkbenchShim, enabled, navigate, search]);
 
-    setIsDesktop(mediaQueryList.matches);
-    mediaQueryList.addEventListener('change', onChange);
-    return () => {
-      mediaQueryList.removeEventListener('change', onChange);
-    };
-  }, [minWidth]);
+  if (enabled && !bypassWorkbenchShim) {
+    return null;
+  }
 
-  return isDesktop;
+  return <>{children}</>;
 }
 
 function resolveRuntimePlatform(): 'web' | 'tauri' | 'unknown' {
@@ -137,6 +234,13 @@ type ShellNavItem = {
   path: string;
   icon: LucideIcon;
 };
+
+function isMobileFullscreenRoute(pathname: string): boolean {
+  return pathname.startsWith('/agents/chat/')
+    || pathname.startsWith('/agents/agent/')
+    || pathname.startsWith('/agents/actor/')
+    || pathname.startsWith('/agents/pty/');
+}
 
 function MobileShell({
   locationPath,
@@ -151,15 +255,29 @@ function MobileShell({
   commandPaletteActive?: boolean;
   commandContext?: CommandContext;
 }) {
+  const previewFrame = desktopFrame && resolveRuntimePlatform() !== 'tauri';
+  const fullscreenRoute = isMobileFullscreenRoute(locationPath);
+
   return (
-    <div className={cn('min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09]', desktopFrame && 'p-6')}>
+    <div className={cn('min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09]', previewFrame && 'p-6')}>
       <div
         className={cn(
-          'relative mx-auto h-[100dvh] w-full max-w-[393px] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]',
-          desktopFrame && 'h-[852px] rounded-[40px] border border-[#E6DFD8] dark:border-[#292524] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]'
+          'relative h-[100dvh] w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]',
+          previewFrame && 'mx-auto max-w-[393px] h-[852px] rounded-[40px] border border-[#E6DFD8] dark:border-[#292524] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]'
         )}
       >
-        <main className={cn("absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] overflow-y-auto", desktopFrame ? "top-0" : "top-[env(safe-area-inset-top,0px)]")}>
+        <main
+          className={cn(
+            'absolute inset-x-0 overflow-y-auto',
+            fullscreenRoute && 'scrollbar-none',
+            fullscreenRoute
+              ? (previewFrame ? 'top-0 bottom-0' : 'top-[env(safe-area-inset-top,0px)] bottom-0')
+              : cn(
+                'bottom-[calc(env(safe-area-inset-bottom,0px)+60px)]',
+                previewFrame ? 'top-0' : 'top-[env(safe-area-inset-top,0px)]',
+              ),
+          )}
+        >
           <Outlet />
         </main>
 
@@ -167,63 +285,153 @@ function MobileShell({
           <CommandPalette context={commandContext} />
         ) : null}
 
-        <nav
-          data-testid="mobile-bottom-tab"
-          className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] dark:border-[#292524] bg-[#FAF7F5]/95 dark:bg-[#0C0A09]/95 backdrop-blur"
-        >
-          <div className="flex items-center px-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const active = locationPath === item.path
-                || (item.path === '/eventlog' && locationPath === '/')
-                || (item.path === '/tasks' && locationPath.startsWith('/tasks'))
-                || (item.path === '/me' && locationPath.startsWith('/me'))
-                || (item.path === '/settings' && locationPath.startsWith('/settings'));
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className={cn(
-                    'flex flex-1 min-w-0 flex-col items-center gap-1 rounded-xl py-1 text-[11px] transition-colors',
-                    active ? 'text-[#C75B3A] dark:text-[#E8734E] font-semibold' : 'text-stone-400 dark:text-[#57534E]'
-                  )}
-                >
-                  <Icon size={20} />
-                  <span>{item.title}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </nav>
+        {!fullscreenRoute ? <ProposalNotificationBadge placement="mobile-floating" /> : null}
+
+        {!fullscreenRoute ? (
+          <nav
+            data-testid="mobile-bottom-tab"
+            className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] dark:border-[#292524] bg-[#FAF7F5]/95 dark:bg-[#0C0A09]/95 backdrop-blur"
+          >
+            <div className="flex items-center px-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const active = locationPath === item.path
+                  || (item.path === '/eventlog' && locationPath.startsWith('/eventlog'))
+                  || (item.path === '/tasks' && (locationPath.startsWith('/tasks') || locationPath === '/proposals' || locationPath.startsWith('/proposals/')))
+                  || (item.path === '/me' && locationPath.startsWith('/me'))
+                  || (item.path === '/goals' && locationPath.startsWith('/goals'))
+                  || (item.path === '/agents' && locationPath.startsWith('/agents'))
+                  || (item.path === '/workbench' && locationPath.startsWith('/workbench'))
+                  || (item.path === '/settings' && locationPath.startsWith('/settings'));
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={cn(
+                      'flex flex-1 min-w-0 flex-col items-center gap-1 rounded-xl py-1 text-[11px] transition-colors',
+                      active ? 'text-[#C75B3A] dark:text-[#E8734E] font-semibold' : 'text-stone-400 dark:text-[#57534E]'
+                    )}
+                  >
+                    <Icon size={20} />
+                    <span>{item.title}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function DesktopSidebar({ activePath }: { activePath: string }) {
+function DesktopSidebar({
+  activePath,
+  agentPageEnabled,
+  mePageEnabled,
+  goalsPageEnabled,
+  developerModeEnabled,
+  voiceRuntimeLabNavEnabled,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  activePath: string;
+  agentPageEnabled: boolean;
+  mePageEnabled: boolean;
+  goalsPageEnabled: boolean;
+  developerModeEnabled: boolean;
+  voiceRuntimeLabNavEnabled: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
   const desktopNavItems = [
-    { key: 'dashboard', title: '总览', path: '/dashboard', icon: LayoutDashboard, match: (path: string) => path === '/dashboard' },
-    { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
-    { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
-    { key: 'agents', title: 'Agent', path: '/agents', icon: Bot, match: (path: string) => path === '/agents' || path.startsWith('/agents/') },
+    { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/' || path.startsWith('/eventlog') },
+    { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') || path === '/proposals' || path.startsWith('/proposals/') },
+    ...(goalsPageEnabled ? [{
+      key: 'goals',
+      title: '目标',
+      path: '/goals',
+      icon: Orbit,
+      match: (path: string) => path === '/goals' || path.startsWith('/goals/'),
+    }] : []),
+    ...(mePageEnabled ? [{
+      key: 'me',
+      title: 'Me',
+      path: '/me',
+      icon: UserRound,
+      match: (path: string) => path === '/me' || path.startsWith('/me/'),
+    }] : []),
+    ...(agentPageEnabled ? [{
+      key: 'agents',
+      title: '网络',
+      path: '/agents',
+      icon: Waypoints,
+      match: (path: string) => path === '/agents' || path.startsWith('/agents/'),
+    }] : []),
+    {
+      key: 'workbench-test',
+      title: '工作台测试',
+      path: '/workbench',
+      icon: FlaskConical,
+      match: (path: string) => path === '/workbench' || path.startsWith('/workbench/'),
+    },
+    ...(developerModeEnabled && voiceRuntimeLabNavEnabled ? [{
+      key: 'voice-runtime-lab',
+      title: '语音实验',
+      path: '/voice-runtime',
+      icon: Mic,
+      match: (path: string) => path === '/voice-runtime' || path.startsWith('/voice-runtime/'),
+    }] : []),
     { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
 
   return (
     <aside
       data-testid="desktop-sidebar"
-      className="flex h-full w-64 shrink-0 flex-col border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))]"
+      data-state={collapsed ? 'collapsed' : 'expanded'}
+      className={cn(
+        'flex h-full shrink-0 flex-col border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] transition-[width] duration-200 ease-out',
+        collapsed ? 'w-16' : 'w-64',
+      )}
     >
-      <div className="border-b border-[hsl(var(--sidebar-border))] p-3">
-        <div className="flex items-center gap-3 rounded-md px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
-            <Brain size={16} />
+      <div className={cn('border-b border-[hsl(var(--sidebar-border))]', collapsed ? 'p-2' : 'p-3')}>
+        {collapsed ? (
+          <div className="flex flex-col items-center gap-2 rounded-md py-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
+              <Brain size={16} />
+            </div>
+            <button
+              type="button"
+              data-testid="desktop-sidebar-toggle"
+              aria-label="展开侧边栏"
+              aria-expanded="false"
+              onClick={onToggleCollapsed}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[hsl(var(--sidebar-border))] text-[hsl(var(--sidebar-muted))] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-accent-foreground))]"
+            >
+              <PanelLeftOpen size={16} />
+            </button>
           </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">ExoMind</p>
-            <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">外心</p>
+        ) : (
+          <div className="flex items-center gap-3 rounded-md px-2 py-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
+              <Brain size={16} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">ExoMind</p>
+              <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">外心</p>
+            </div>
+            <button
+              type="button"
+              data-testid="desktop-sidebar-toggle"
+              aria-label="收起侧边栏"
+              aria-expanded="true"
+              onClick={onToggleCollapsed}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--sidebar-border))] text-[hsl(var(--sidebar-muted))] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-accent-foreground))]"
+            >
+              <PanelLeftClose size={16} />
+            </button>
           </div>
-        </div>
+        )}
       </div>
 
       <nav className="flex-1 space-y-1 p-2">
@@ -231,7 +439,8 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
           const Icon = item.icon;
           const active = item.match(activePath);
           const itemClassName = cn(
-            'flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+            'relative flex w-full items-center rounded-md text-sm transition-colors',
+            collapsed ? 'justify-center px-0 py-3' : 'gap-2 px-3 py-2',
             active
               ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] font-medium'
               : 'text-[hsl(var(--sidebar-foreground))]'
@@ -241,35 +450,59 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
               key={item.path}
               to={item.path}
               data-testid={`desktop-sidebar-item-${item.key}`}
+              aria-label={item.title}
+              title={item.title}
               className={itemClassName}
             >
               <Icon size={16} />
-              <span>{item.title}</span>
+              {collapsed ? <span className="sr-only">{item.title}</span> : <span>{item.title}</span>}
+              {item.key === 'tasks' ? (
+                <ProposalNotificationBadge placement={collapsed ? 'desktop-compact' : 'desktop'} />
+              ) : null}
             </Link>
           );
         })}
       </nav>
 
-      <div className="border-t border-[hsl(var(--sidebar-border))] p-3">
-        <div className="flex items-center gap-3 rounded-md px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--sidebar-accent))] text-xs font-semibold text-[hsl(var(--sidebar-accent-foreground))]">
-            S
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">Starlin</p>
-            <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">starlin@exomind.ai</p>
-          </div>
-        </div>
+      <div className={cn('border-t border-[hsl(var(--sidebar-border))]', collapsed ? 'p-2' : 'p-3')}>
+        <DesktopSidebarAccountEntry collapsed={collapsed} />
       </div>
     </aside>
   );
 }
 
-function DesktopLayout({ activePath }: { activePath: string }) {
+function DesktopLayout({
+  activePath,
+  agentPageEnabled,
+  mePageEnabled,
+  goalsPageEnabled,
+  developerModeEnabled,
+  voiceRuntimeLabNavEnabled,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  activePath: string;
+  agentPageEnabled: boolean;
+  mePageEnabled: boolean;
+  goalsPageEnabled: boolean;
+  developerModeEnabled: boolean;
+  voiceRuntimeLabNavEnabled: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
   return (
-    <div className="min-h-[100dvh] bg-[#ECE6E1] p-6 dark:bg-[#0C0A09]">
-      <div className="mx-auto flex h-[calc(100dvh-48px)] max-w-[1400px] overflow-hidden rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[#FAF7F5] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)] dark:bg-[#0C0A09]">
-        <DesktopSidebar activePath={activePath} />
+    <div className="h-[100dvh] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
+      <div className="flex h-full w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
+        <DesktopSidebar
+          activePath={activePath}
+          agentPageEnabled={agentPageEnabled}
+          mePageEnabled={mePageEnabled}
+          goalsPageEnabled={goalsPageEnabled}
+          developerModeEnabled={developerModeEnabled}
+          voiceRuntimeLabNavEnabled={voiceRuntimeLabNavEnabled}
+          collapsed={collapsed}
+          onToggleCollapsed={onToggleCollapsed}
+        />
         <main data-testid="desktop-settings-content" className="min-w-0 flex-1 overflow-y-auto bg-[#FAF7F5] dark:bg-[#0C0A09]">
           <Outlet />
         </main>
@@ -278,21 +511,82 @@ function DesktopLayout({ activePath }: { activePath: string }) {
   );
 }
 
+function MeRouteGate() {
+  const navigate = useNavigate();
+  const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
+
+  useEffect(() => {
+    return subscribeMePageEnabledChanges(setMePageEnabled);
+  }, []);
+
+  useEffect(() => {
+    if (!mePageEnabled) {
+      void navigate({ to: '/settings', replace: true });
+    }
+  }, [mePageEnabled, navigate]);
+
+  if (!mePageEnabled) {
+    return <PageFallback />;
+  }
+
+  return (
+    <LazyPage>
+      <MePage />
+    </LazyPage>
+  );
+}
+
+function GoalsRouteGate() {
+  const navigate = useNavigate();
+  const [goalsPageEnabled, setGoalsPageEnabled] = useState(() => getGoalsPageEnabled());
+
+  useEffect(() => {
+    return subscribeGoalsPageEnabledChanges(setGoalsPageEnabled);
+  }, []);
+
+  useEffect(() => {
+    if (!goalsPageEnabled) {
+      void navigate({ to: '/settings', replace: true });
+    }
+  }, [goalsPageEnabled, navigate]);
+
+  if (!goalsPageEnabled) {
+    return <PageFallback />;
+  }
+
+  return (
+    <LazyPage>
+      <GoalsPage />
+    </LazyPage>
+  );
+}
+
 function NewLayout() {
   const location = useLocation();
+  useTauriFullscreenShortcut();
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
 
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
+  const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
+  const [goalsPageEnabled, setGoalsPageEnabled] = useState(() => getGoalsPageEnabled());
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => getPersistedDesktopSidebarCollapsed());
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
   const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
+  const [voiceRuntimeLabNavEnabled, setVoiceRuntimeLabNavEnabled] = useState(() => getVoiceRuntimeLabNavEnabled());
   const commandPaletteActive = developerModeEnabled && commandPaletteEnabled;
   const registryService = useMemo(() => getCommandRegistryService(), []);
   const paletteService = useMemo(() => getCommandPaletteService(), []);
 
   useEffect(() => {
     return subscribeAgentPageEnabledChanges(setAgentPageEnabled);
+  }, []);
+  useEffect(() => {
+    return subscribeMePageEnabledChanges(setMePageEnabled);
+  }, []);
+  useEffect(() => {
+    return subscribeGoalsPageEnabledChanges(setGoalsPageEnabled);
   }, []);
   useEffect(() => {
     return subscribeDesktopAdaptiveChanges(setDesktopAdaptiveEnabledState);
@@ -303,6 +597,12 @@ function NewLayout() {
   useEffect(() => {
     return subscribeCommandPaletteEnabledChanges(setCommandPaletteEnabled);
   }, []);
+  useEffect(() => {
+    return subscribeVoiceRuntimeLabNavEnabledChanges(setVoiceRuntimeLabNavEnabled);
+  }, []);
+  useEffect(() => {
+    setPersistedDesktopSidebarCollapsed(desktopSidebarCollapsed);
+  }, [desktopSidebarCollapsed]);
 
   useEffect(() => {
     const navigateTo = async (path: CoreNavigationPath) => {
@@ -311,12 +611,16 @@ function NewLayout() {
 
     registryService.setCommands('core-navigation', createCoreNavigationCommands({
       navigate: navigateTo,
+      openReminderComposer: requestReminderCompose,
+      featureFlags: {
+        mePageEnabled,
+      },
     }));
 
     return () => {
       registryService.removeScope('core-navigation');
     };
-  }, [navigate, registryService]);
+  }, [mePageEnabled, navigate, registryService]);
 
   useEffect(() => {
     if (!commandPaletteActive) {
@@ -346,37 +650,59 @@ function NewLayout() {
     developerModeEnabled,
     commandPaletteEnabled: commandPaletteActive,
     featureFlags: {
+      mePageEnabled,
       agentPageEnabled,
       goalsV2Enabled: false,
     },
-  }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname]);
+  }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname, mePageEnabled]);
 
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
     { title: '任务', path: '/tasks', icon: SquareCheckBig },
-    { title: 'Me', path: '/me', icon: UserRound },
-    ...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : []),
+    ...(goalsPageEnabled ? [{ title: '目标', path: '/goals', icon: Orbit }] : []),
+    ...(mePageEnabled ? [{ title: 'Me', path: '/me', icon: UserRound }] : []),
+    ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
+    { title: '工作台测试', path: '/workbench', icon: FlaskConical },
     { title: '设置', path: '/settings', icon: Settings },
   ];
-  const isDesktopSettingsRoute = location.pathname === '/settings' || location.pathname.startsWith('/settings/');
+  const selectedShell = isDesktop && desktopAdaptiveEnabled ? 'desktop' : 'mobile';
 
-  if (isDesktop && desktopAdaptiveEnabled && isDesktopSettingsRoute) {
+  if (selectedShell === 'desktop') {
     return (
       <>
-        <DesktopLayout activePath={location.pathname} />
+        <DesktopLayout
+          activePath={location.pathname}
+          agentPageEnabled={agentPageEnabled}
+          mePageEnabled={mePageEnabled}
+          goalsPageEnabled={goalsPageEnabled}
+          developerModeEnabled={developerModeEnabled}
+          voiceRuntimeLabNavEnabled={voiceRuntimeLabNavEnabled}
+          collapsed={desktopSidebarCollapsed}
+          onToggleCollapsed={() => setDesktopSidebarCollapsed((current) => !current)}
+        />
         {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
+        <TimeblockEndAlertCoordinator />
+        <ProposalNotificationCoordinator />
+        <ReminderNotifier />
+        <UpdateToast />
       </>
     );
   }
 
   return (
-    <MobileShell
-      locationPath={location.pathname}
-      navItems={navItems}
-      desktopFrame={isDesktop}
-      commandPaletteActive={commandPaletteActive}
-      commandContext={commandContext}
-    />
+    <>
+      <MobileShell
+        locationPath={location.pathname}
+        navItems={navItems}
+        desktopFrame={isDesktop}
+        commandPaletteActive={commandPaletteActive}
+        commandContext={commandContext}
+      />
+      <TimeblockEndAlertCoordinator />
+      <ProposalNotificationCoordinator />
+      <ReminderNotifier />
+      <UpdateToast />
+    </>
   );
 }
 
@@ -425,11 +751,11 @@ const newHomeRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/',
   component: function NewHome() {
-    return (
-      <LazyPage>
-        <FocusPage />
-      </LazyPage>
-    );
+    const navigate = useNavigate();
+    useEffect(() => {
+      navigate({ to: '/eventlog', replace: true });
+    }, [navigate]);
+    return null;
   },
 });
 
@@ -449,9 +775,69 @@ const newEventlogRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/eventlog',
   component: function NewEventlog() {
+    const navigate = useNavigate();
+
+    useEffect(() => {
+      const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
+      const legacyTab = resolveLegacyEventlogTabSearch(currentSearch);
+      if (legacyTab && legacyTab !== 'focus') {
+        void navigate({
+          to: getEventlogPathForTab(legacyTab),
+          replace: true,
+        });
+        return;
+      }
+
+      const restoreTab = resolveEventlogRestoreTab(currentSearch);
+      if (!restoreTab) {
+        return;
+      }
+
+      void navigate({
+        to: getEventlogPathForTab(restoreTab),
+        replace: true,
+      });
+    }, [navigate]);
+
     return (
       <LazyPage>
         <FocusPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newEventlogRecordRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/eventlog/record',
+  component: function NewEventlogRecord() {
+    return (
+      <LazyPage>
+        <FocusPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newEventlogTodayRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/eventlog/today',
+  component: function NewEventlogToday() {
+    return (
+      <LazyPage>
+        <FocusPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newEventlogTimeblockDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/eventlog/timeblocks/$blockId',
+  component: function NewEventlogTimeblockDetail() {
+    return (
+      <LazyPage>
+        <TimeBlockDetailPage />
       </LazyPage>
     );
   },
@@ -461,9 +847,96 @@ const newTasksRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/tasks',
   component: function NewTasks() {
+    const navigate = useNavigate();
+    const location = useLocation();
+
+    // Redirect to the last visited tasks sub-path (e.g. /tasks/dag, /tasks/:id)
+    useEffect(() => {
+      const currentSearch = location.searchStr ?? '';
+      const saved = sessionStorage.getItem(TASKS_LAST_PATH_KEY);
+
+      if (shouldForceTasksMain(currentSearch)) {
+        sessionStorage.removeItem(TASKS_LAST_PATH_KEY);
+        void navigate({ to: '/tasks', replace: true });
+        return;
+      }
+
+      const restorePath = resolveTasksRestorePath(saved, currentSearch);
+      if (restorePath) {
+        void navigate({ to: restorePath, replace: true });
+        return;
+      }
+    }, [location.searchStr, navigate]);
+
     return (
       <LazyPage>
         <TasksPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newProposalsRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/proposals',
+  component: function NewProposals() {
+    return (
+      <LazyPage>
+        <ProposalInboxPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newRemindersRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/reminders',
+  component: function NewReminders() {
+    return (
+      <LazyPage>
+        <RemindersPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newTaskDagRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/dag',
+  component: function NewTaskDag() {
+    return (
+      <LazyPage>
+        <TaskDagPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newTaskTimeblocksRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/timeblocks',
+  component: function NewTaskTimeblocks() {
+    const navigate = useNavigate();
+
+    useEffect(() => {
+      void navigate({ to: '/tasks/timeline', replace: true });
+    }, [navigate]);
+
+    return (
+      <LazyPage>
+        <TaskTimeblocksPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newTaskTimelineRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/timeline',
+  component: function NewTaskTimeline() {
+    return (
+      <LazyPage>
+        <TaskTimelinePage />
       </LazyPage>
     );
   },
@@ -481,15 +954,31 @@ const newTaskDetailRoute = createRoute({
   },
 });
 
+const newTimeblockDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/block/$blockId',
+  component: function NewTimeblockDetail() {
+    return (
+      <LazyPage>
+        <TimeBlockDetailPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newMeRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/me',
   component: function NewMe() {
-    return (
-      <LazyPage>
-        <MePage />
-      </LazyPage>
-    );
+    return <MeRouteGate />;
+  },
+});
+
+const newGoalsRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/goals',
+  component: function NewGoals() {
+    return <GoalsRouteGate />;
   },
 });
 
@@ -541,6 +1030,18 @@ const newMossTestRoute = createRoute({
   },
 });
 
+const newVolcanoAsrTestRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/volcano-asr-test',
+  component: function NewVolcanoAsrTest() {
+    return (
+      <LazyPage>
+        <VolcanoASRTestPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newSyncTestRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/sync-test',
@@ -558,8 +1059,37 @@ const newAgentsRoute = createRoute({
   path: '/agents',
   component: function NewAgents() {
     return (
+      <LegacyWorkbenchShim
+        enabled={getWorkbenchLegacyShimEnabled()}
+        search={{ legacySource: 'agents-hub' }}
+      >
+        <LazyPage>
+          <AgentsPage />
+        </LazyPage>
+      </LegacyWorkbenchShim>
+    );
+  },
+});
+
+const newWorkbenchRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/workbench',
+  component: function NewWorkbench() {
+    return (
       <LazyPage>
-        <AgentsPage />
+        <WorkbenchPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newVoiceRuntimeLabRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/voice-runtime',
+  component: function NewVoiceRuntimeLab() {
+    return (
+      <LazyPage>
+        <VoiceRuntimeLabPage />
       </LazyPage>
     );
   },
@@ -603,14 +1133,48 @@ const newActorDetailRoute = createRoute({
   },
 });
 
+const newSignalDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/signal/$signalId',
+  component: function NewSignalDetail() {
+    return (
+      <LazyPage>
+        <SignalDetailPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newAgentConversationRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/agents/chat/$agentId',
   component: function NewAgentConversation() {
     const { agentId } = useParams({ strict: false }) as { agentId?: string };
+    const legacyShimEnabled = getWorkbenchLegacyShimEnabled();
+    return (
+      <LegacyWorkbenchShim
+        enabled={legacyShimEnabled && Boolean(agentId)}
+        search={{
+          legacySource: 'agent-chat',
+          agentId: agentId ?? '',
+        }}
+      >
+        <LazyPage>
+          <AgentConversationPage agentId={agentId} />
+        </LazyPage>
+      </LegacyWorkbenchShim>
+    );
+  },
+});
+
+const newPtyTerminalRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/pty/$ptyId',
+  component: function NewPtyTerminal() {
+    const { ptyId } = useParams({ strict: false }) as { ptyId?: string };
     return (
       <LazyPage>
-        <AgentConversationPage agentId={agentId} />
+        <PtyTerminalPage ptyId={ptyId} />
       </LazyPage>
     );
   },
@@ -632,24 +1196,37 @@ const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
   newDashboardRoute,
   newEventlogRoute,
+  newEventlogRecordRoute,
+  newEventlogTodayRoute,
+  newEventlogTimeblockDetailRoute,
   newTasksRoute,
+  newProposalsRoute,
+  newTaskDagRoute,
+  newTaskTimeblocksRoute,
+  newTaskTimelineRoute,
+  newRemindersRoute,
+  newTimeblockDetailRoute,
   newTaskDetailRoute,
   newMeRoute,
+  newGoalsRoute,
   newSettingsRoute,
   newLegalSupportRoute,
   newUserManageRoute,
   newMossTestRoute,
+  newVolcanoAsrTestRoute,
   newSyncTestRoute,
   newAgentsRoute,
+  newWorkbenchRoute,
+  newVoiceRuntimeLabRoute,
   newUpdateRoute,
   newAgentDetailRoute,
   newActorDetailRoute,
+  newSignalDetailRoute,
   newAgentConversationRoute,
+  newPtyTerminalRoute,
   newAgentMarketRoute,
 ]);
 
 const appRouter = createRouter({ routeTree: newRouteTree });
 
 export { appRouter };
-
-

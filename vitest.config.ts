@@ -12,13 +12,14 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@tauri-apps/plugin-log': path.resolve(__dirname, './tests/__mocks__/@tauri-apps/plugin-log.ts'),
     },
   },
   test: {
     environment: 'happy-dom',
     maxWorkers: isTermuxRuntime ? 1 : undefined,
     minWorkers: isTermuxRuntime ? 1 : undefined,
-    include: ['tests/**/*.{test,spec}.{ts,tsx}'],
+    include: ['tests/**/*.{test,spec}.{ts,tsx}', 'src/**/*.{test,spec}.{ts,tsx}'],
     exclude: [...configDefaults.exclude, 'tests/e2e/**'],
     setupFiles: ['tests/setup.ts'],
     globals: true,

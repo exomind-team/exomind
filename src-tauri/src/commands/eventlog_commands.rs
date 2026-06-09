@@ -1,14 +1,24 @@
 //! EventLog 命令
 //! 提供 Tauri 端最小闭环：append/list/get/clear + markdown mirror
 
+use crate::dev_instance_paths::resolve_instance_app_data_dir;
 use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const EVENTLOG_DIR_NAME: &str = "eventlog";
 const MIRROR_HEADER: &str = "# EventLog Mirror\n\n";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventRef {
+    pub kind: String,
+    pub event_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +27,22 @@ pub struct EventRecord {
     pub timestamp: i64,
     pub content: String,
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<EventRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventAppendInput {
+    pub id: String,
+    pub content: String,
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<EventRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -60,11 +86,7 @@ fn sanitize_user_id(user_id: Option<&str>) -> String {
 }
 
 fn resolve_eventlog_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
-
+    let data_dir = resolve_instance_app_data_dir(app)?;
     let eventlog_dir = data_dir.join(EVENTLOG_DIR_NAME);
     if !eventlog_dir.exists() {
         fs::create_dir_all(&eventlog_dir)
@@ -198,6 +220,26 @@ fn sync_markdown_mirror(paths: &EventLogPaths, events: &[EventRecord]) -> Result
     rebuild_markdown(paths, events)
 }
 
+fn upsert_event(
+    app: &AppHandle,
+    user_id: Option<String>,
+    event: EventRecord,
+) -> Result<EventRecord, String> {
+    let paths = resolve_eventlog_paths(app, user_id.as_deref())?;
+    let mut events = read_events(&paths.events)?;
+
+    if let Some(existing) = events.iter_mut().find(|item| item.id == event.id) {
+        *existing = event.clone();
+    } else {
+        events.push(event.clone());
+    }
+
+    sort_events_desc(&mut events);
+    write_events(&paths.events, &events)?;
+    sync_markdown_mirror(&paths, &events)?;
+    Ok(event)
+}
+
 fn count_mirrored_events(path: &Path) -> Result<usize, String> {
     if !path.exists() {
         return Ok(0);
@@ -223,20 +265,27 @@ pub fn eventlog_list(app: AppHandle, user_id: Option<String>) -> Result<Vec<Even
 pub fn eventlog_append(
     app: AppHandle,
     user_id: Option<String>,
+    event: EventAppendInput,
+) -> Result<EventRecord, String> {
+    let persisted = EventRecord {
+        id: event.id,
+        timestamp: Utc::now().timestamp_millis().max(1),
+        content: event.content,
+        tags: event.tags,
+        refs: event.refs,
+        metadata: event.metadata,
+    };
+
+    upsert_event(&app, user_id, persisted)
+}
+
+#[tauri::command]
+pub fn eventlog_append_raw(
+    app: AppHandle,
+    user_id: Option<String>,
     event: EventRecord,
-) -> Result<(), String> {
-    let paths = resolve_eventlog_paths(&app, user_id.as_deref())?;
-    let mut events = read_events(&paths.events)?;
-
-    if let Some(existing) = events.iter_mut().find(|item| item.id == event.id) {
-        *existing = event;
-    } else {
-        events.push(event);
-    }
-
-    sort_events_desc(&mut events);
-    write_events(&paths.events, &events)?;
-    sync_markdown_mirror(&paths, &events)
+) -> Result<EventRecord, String> {
+    upsert_event(&app, user_id, event)
 }
 
 #[tauri::command]

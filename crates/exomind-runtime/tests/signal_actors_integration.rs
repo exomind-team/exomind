@@ -12,9 +12,10 @@
 //!   session.end              -> { events: [...] }
 //!   review.completed         -> { effective: string, stuck: string, improve: string, avoid: string }
 
-use exomind_runtime::signal::types::{SignalEvent, SignalRoute, TargetType};
 use exomind_runtime::signal::SignalPool;
+use exomind_runtime::signal::types::{SignalEvent, SignalRoute, TargetType};
 use serde_json::json;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Helper: construct a test SignalEvent with the given topic and payload.
@@ -38,15 +39,22 @@ fn make_event(topic: &str, payload: serde_json::Value) -> SignalEvent {
 /// Helper: add a route to the pool's route table.
 fn add_route(pool: &SignalPool, id: &str, topic: &str, target_type: TargetType, target_ref: &str) {
     let now = chrono::Utc::now().to_rfc3339();
-    pool.routes().add(SignalRoute {
-        id: id.to_string(),
-        enabled: true,
-        topic: topic.to_string(),
-        target_type,
-        target_ref: target_ref.to_string(),
-        created_at: now.clone(),
-        updated_at: now,
-    });
+    pool.routes()
+        .add(SignalRoute {
+            id: id.to_string(),
+            enabled: true,
+            topic: topic.to_string(),
+            target_type,
+            target_ref: target_ref.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        })
+        .unwrap();
+}
+
+async fn yield_for_actor() {
+    tokio::task::yield_now().await;
+    tokio::task::yield_now().await;
 }
 
 // ─── Task Actor Tests ───────────────────────────────────────────
@@ -62,7 +70,13 @@ fn add_route(pool: &SignalPool, id: &str, topic: &str, target_type: TargetType, 
 async fn task_actor_transforms_classified_task_to_auto_created() {
     // 1. Create SignalPool with route for task actor
     let pool = SignalPool::new(None);
-    add_route(&pool, "r-task", "input.classified", TargetType::Actor, "task_actor");
+    add_route(
+        &pool,
+        "r-task",
+        "input.classified",
+        TargetType::Actor,
+        "task_actor",
+    );
 
     // 2. Subscribe to pool to capture output signals
     let mut rx = pool.subscribe();
@@ -86,13 +100,12 @@ async fn task_actor_transforms_classified_task_to_auto_created() {
     // 4. Verify: when task_actor is implemented, it should produce
     //    a task.auto-created signal. For now, verify the input signal
     //    is received by the subscriber (actor not yet wired).
-    let received = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
 
-    assert!(received.is_ok(), "subscriber should receive the published event");
+    assert!(
+        received.is_ok(),
+        "subscriber should receive the published event"
+    );
     let received_event = received.unwrap().unwrap();
     assert_eq!(received_event.topic, "input.classified");
 
@@ -108,7 +121,13 @@ async fn task_actor_transforms_classified_task_to_auto_created() {
 #[tokio::test]
 async fn task_actor_ignores_non_task_classification() {
     let pool = SignalPool::new(None);
-    add_route(&pool, "r-task", "input.classified", TargetType::Actor, "task_actor");
+    add_route(
+        &pool,
+        "r-task",
+        "input.classified",
+        TargetType::Actor,
+        "task_actor",
+    );
 
     let mut rx = pool.subscribe();
 
@@ -128,11 +147,7 @@ async fn task_actor_ignores_non_task_classification() {
     pool.publish(event);
 
     // The input.classified event itself is broadcast
-    let received = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
     assert!(received.is_ok());
     assert_eq!(received.unwrap().unwrap().topic, "input.classified");
 
@@ -176,11 +191,7 @@ async fn eventlog_actor_transforms_user_input_to_appended() {
     pool.publish(event);
 
     // Verify input event is received
-    let received = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
     assert!(received.is_ok());
     let received_event = received.unwrap().unwrap();
     assert_eq!(received_event.topic, "user.input.text");
@@ -221,11 +232,7 @@ async fn eventlog_actor_ignores_other_topics() {
     // TODO(Phase 2): When eventlog_actor is wired:
     //   - Verify no eventlog.appended signal is produced
     //   - Only the original input.classified should be in the stream
-    let received = tokio::time::timeout(
-        std::time::Duration::from_millis(200),
-        rx.recv(),
-    )
-    .await;
+    let received = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
 
     // If received, it should be the original event, not an eventlog.appended
     if let Ok(Ok(evt)) = received {
@@ -274,11 +281,7 @@ async fn full_chain_input_to_task_and_eventlog() {
     );
     pool.publish(input_event);
 
-    let received1 = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received1 = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
     assert!(received1.is_ok(), "should receive user.input.text event");
     assert_eq!(received1.unwrap().unwrap().topic, "user.input.text");
 
@@ -295,11 +298,7 @@ async fn full_chain_input_to_task_and_eventlog() {
     );
     pool.publish(classified_event);
 
-    let received2 = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received2 = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
     assert!(received2.is_ok(), "should receive input.classified event");
     assert_eq!(received2.unwrap().unwrap().topic, "input.classified");
 
@@ -307,6 +306,110 @@ async fn full_chain_input_to_task_and_eventlog() {
     //   - eventlog.appended follows user.input.text
     //   - task.auto-created follows input.classified
     //   - No cross-contamination between actors
+}
+
+#[tokio::test]
+async fn voice_transcript_is_normalized_before_eventlog_append() {
+    let pool = Arc::new(SignalPool::new(None));
+    let _ingest = exomind_runtime::signal::actors::input_ingest_actor::spawn_input_ingest_actor(
+        Arc::clone(&pool),
+    );
+    let _eventlog =
+        exomind_runtime::signal::actors::eventlog_actor::spawn_eventlog_actor(Arc::clone(&pool));
+    yield_for_actor().await;
+
+    let mut rx = pool.subscribe();
+    pool.publish(make_event(
+        "voice.input.transcript",
+        json!({
+            "text": "今天继续推进 issue 511",
+            "transcript": "今天继续推进 issue 511",
+            "inputMode": "voice",
+            "captureSource": "global-shortcut",
+            "targetScope": "agent-chat",
+        }),
+    ));
+
+    let mut topics = Vec::new();
+    for _ in 0..3 {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timeout waiting for voice ingest chain")
+            .expect("should receive signal");
+        topics.push(event.topic.clone());
+        if event.topic == "user.input.normalized" {
+            assert_eq!(event.payload["text"], "今天继续推进 issue 511");
+            assert_eq!(event.payload["inputMode"], "voice");
+            assert_eq!(event.payload["captureSource"], "global-shortcut");
+        }
+        if event.topic == "eventlog.appended" {
+            assert_eq!(event.payload["text"], "今天继续推进 issue 511");
+            assert_eq!(event.payload["inputMode"], "voice");
+            assert_eq!(event.payload["captureSource"], "global-shortcut");
+        }
+    }
+
+    assert!(topics.iter().any(|topic| topic == "voice.input.transcript"));
+    assert!(topics.iter().any(|topic| topic == "user.input.normalized"));
+    assert!(topics.iter().any(|topic| topic == "eventlog.appended"));
+}
+
+#[tokio::test]
+async fn external_input_is_normalized_before_eventlog_append() {
+    let pool = Arc::new(SignalPool::new(None));
+    let _external_input =
+        exomind_runtime::signal::actors::external_input_actor::spawn_external_input_actor(
+            Arc::clone(&pool),
+        );
+    let _eventlog =
+        exomind_runtime::signal::actors::eventlog_actor::spawn_eventlog_actor(Arc::clone(&pool));
+    yield_for_actor().await;
+
+    let mut rx = pool.subscribe();
+    pool.publish(make_event(
+        "external.input.received",
+        json!({
+            "source_type": "wechat",
+            "sender": "wxid-test",
+            "text": "外部输入进入 EventLog",
+            "media_type": "text",
+            "original_timestamp": 1773809500000_u64,
+            "chatroom_id": "room-external",
+            "dedup_key": "room-external:1:1"
+        }),
+    ));
+
+    let mut topics = Vec::new();
+    for _ in 0..4 {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timeout waiting for external ingest chain")
+            .expect("should receive signal");
+        topics.push(event.topic.clone());
+        if event.topic == "user.input.normalized" {
+            assert_eq!(event.payload["text"], "外部输入进入 EventLog");
+            assert_eq!(event.payload["inputMode"], "external");
+            assert_eq!(event.payload["captureSource"], "wechat:room-external");
+        }
+        if event.topic == "eventlog.appended" {
+            assert_eq!(event.payload["text"], "外部输入进入 EventLog");
+            assert_eq!(event.payload["inputMode"], "external");
+            assert_eq!(event.payload["captureSource"], "wechat:room-external");
+        }
+    }
+
+    assert!(
+        topics
+            .iter()
+            .any(|topic| topic == "external.input.received")
+    );
+    assert!(topics.iter().any(|topic| topic == "user.input.normalized"));
+    assert!(
+        topics
+            .iter()
+            .any(|topic| topic == "external.input.ingested")
+    );
+    assert!(topics.iter().any(|topic| topic == "eventlog.appended"));
 }
 
 /// Verify the session.end -> review.completed chain.
@@ -336,11 +439,7 @@ async fn session_end_routes_to_reviewer() {
     );
     pool.publish(event);
 
-    let received = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        rx.recv(),
-    )
-    .await;
+    let received = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
     assert!(received.is_ok());
     let evt = received.unwrap().unwrap();
     assert_eq!(evt.topic, "session.end");

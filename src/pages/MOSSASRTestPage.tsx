@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { getMossApiKey, MOSS_API_KEY_STORAGE_KEY } from '@/config/moss-api-key';
 
 // 录音状态
 type RecordingState = 'idle' | 'recording';
@@ -34,8 +35,6 @@ interface LogEntry {
   duration?: number;
   text?: string;
 }
-
-const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
 
 function normalizeMossApiKey(value?: string): string {
   if (!value) return '';
@@ -70,18 +69,11 @@ export function MOSSASRTestPage() {
   const startTimeRef = useRef<number>(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const storageGetItem = useCallback((key: string): string | null => {
-    if (typeof localStorage?.getItem !== 'function') {
-      return null;
-    }
-    return localStorage.getItem(key);
-  }, []);
-
   const getConfiguredApiKey = useCallback((): string => {
-    const storageValue = normalizeMossApiKey(storageGetItem(MOSS_API_KEY_STORAGE_KEY) || '');
+    const storageValue = normalizeMossApiKey(getMossApiKey());
     const envValue = normalizeMossApiKey(import.meta.env?.VITE_MOSS_API_KEY || '');
     return storageValue || envValue;
-  }, [storageGetItem]);
+  }, []);
 
   // 初始化适配器
   const getAdapter = useCallback(() => {
@@ -664,7 +656,7 @@ export function MOSSASRTestPage() {
             <CardTitle className="text-sm text-success">识别结果</CardTitle>
           </CardHeader>
           <CardContent className="pt-0 space-y-2">
-            <p className="text-lg font-medium">{result.text || '（无识别结果）'}</p>
+            <p className="exomind-selectable text-lg font-medium">{result.text || '（无识别结果）'}</p>
             <div className="text-xs text-muted-foreground">
               {result.confidence && `置信度: ${(result.confidence * 100).toFixed(1)}%`}
               {result.duration && ` | 时长: ${(result.duration / 1000).toFixed(2)}秒`}
@@ -688,7 +680,7 @@ export function MOSSASRTestPage() {
             清空
           </Button>
         </CardHeader>
-        <CardContent className="pt-0 font-mono text-xs space-y-2">
+        <CardContent className="exomind-selectable pt-0 font-mono text-xs space-y-2">
           {logs.map((log, i) => (
             <div key={i} className="leading-relaxed">
               <span className="text-muted-foreground">[{log.time}]</span>{' '}

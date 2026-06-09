@@ -2,7 +2,7 @@
  * Reviewer Agent
  *
  * Listens for `session.end` signals from the RT, collects the day's events,
- * calls Claude CLI for a structured review, and publishes `review.completed`.
+ * calls LLM API for a structured review, and publishes `review.completed`.
  *
  * Usage:
  *   bun run packages/ts-agent-cli/agents/reviewer/index.ts
@@ -10,17 +10,25 @@
  * Environment variables:
  *   EXOMIND_RT_URL      - RT address (default http://localhost:1949)
  *   REVIEWER_AGENT_ID   - Agent ID (default reviewer)
+ *   EXOMIND_LLM_BASE_URL - OpenAI-compatible API base URL
+ *   EXOMIND_LLM_API_KEY   - API key
+ *   EXOMIND_LLM_MODEL     - Model name
  */
 
-import { execFileSync } from "node:child_process";
 import { SignalClient } from "../../src/sse/signal-client.js";
 import type { SignalEvent } from "../../src/sse/signal-types.js";
+import { chatCompletion } from "../../src/llm/openai-chat.js";
 import {
   REVIEWER_SYSTEM_PROMPT,
   REVIEWER_USER_PROMPT,
   TIMEBLOCK_REVIEWER_SYSTEM_PROMPT,
   TIMEBLOCK_REVIEWER_USER_PROMPT,
 } from "./prompt.js";
+import {
+  sanitizeReviewResult,
+  sanitizeTimeblockReviewResult,
+} from "./review-output.js";
+import { decideTimeblockReview } from "./timeblock-review-guard.js";
 
 const RT_URL = process.env["EXOMIND_RT_URL"] ?? "http://localhost:1949";
 const AGENT_ID = process.env["REVIEWER_AGENT_ID"] ?? "reviewer";
@@ -32,6 +40,8 @@ const client = new SignalClient({
   agentId: AGENT_ID,
   source: "agent:reviewer",
 });
+const AGENT_STARTED_AT = Date.now();
+const processedTimeblockReviewKeys = new Set<string>();
 
 export interface ReviewResult {
   effective: string;
@@ -62,40 +72,24 @@ export interface TimeblockPayload {
   recentEvents: EventEntry[];
 }
 
-/** Build a clean env that allows nested Claude CLI invocations. */
-function cleanEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  // Remove markers that prevent nested Claude sessions
-  delete env.CLAUDECODE;
-  return env;
-}
-
 /**
- * Call Claude CLI to produce a structured review from the event log.
+ * Call LLM API to produce a structured review from the event log.
  */
-function reviewWithClaude(events: EventEntry[]): ReviewResult | null {
+async function reviewWithLLM(events: EventEntry[]): Promise<ReviewResult | null> {
   const eventsText = JSON.stringify(events, null, 2);
   const userPrompt = REVIEWER_USER_PROMPT(eventsText);
 
   try {
-    const result = execFileSync(
-      "claude",
-      ["--print", "--system-prompt", REVIEWER_SYSTEM_PROMPT, userPrompt],
-      {
-        encoding: "utf-8",
-        timeout: 120_000,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: cleanEnv(),
-        windowsHide: true,
-      },
-    );
+    const result = await chatCompletion({
+      systemPrompt: REVIEWER_SYSTEM_PROMPT,
+      userPrompt,
+    });
 
-    // Extract JSON from the response
     const trimmed = result.trim();
     const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.error(
-        `[Reviewer] no JSON found in Claude response: ${trimmed.slice(0, 200)}`,
+        `[Reviewer] no JSON found in LLM response: ${trimmed.slice(0, 200)}`,
       );
       return null;
     }
@@ -113,18 +107,18 @@ function reviewWithClaude(events: EventEntry[]): ReviewResult | null {
       return null;
     }
 
-    return parsed as ReviewResult;
+    return sanitizeReviewResult(parsed as ReviewResult);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error(`[Reviewer] Claude CLI call failed: ${msg}`);
+    console.error(`[Reviewer] LLM API call failed: ${msg}`);
     return null;
   }
 }
 
 /**
- * Call Claude CLI to produce timeblock-specific feedback.
+ * Call LLM API to produce timeblock-specific feedback.
  */
-function reviewTimeblock(payload: TimeblockPayload): TimeblockReviewResult | null {
+async function reviewTimeblock(payload: TimeblockPayload): Promise<TimeblockReviewResult | null> {
   const eventsText = JSON.stringify(payload.recentEvents, null, 2);
   const userPrompt = TIMEBLOCK_REVIEWER_USER_PROMPT(
     payload.block.name,
@@ -133,17 +127,10 @@ function reviewTimeblock(payload: TimeblockPayload): TimeblockReviewResult | nul
   );
 
   try {
-    const result = execFileSync(
-      "claude",
-      ["--print", "--system-prompt", TIMEBLOCK_REVIEWER_SYSTEM_PROMPT, userPrompt],
-      {
-        encoding: "utf-8",
-        timeout: 120_000,
-        stdio: ["pipe", "pipe", "pipe"],
-        env: cleanEnv(),
-        windowsHide: true,
-      },
-    );
+    const result = await chatCompletion({
+      systemPrompt: TIMEBLOCK_REVIEWER_SYSTEM_PROMPT,
+      userPrompt,
+    });
 
     const trimmed = result.trim();
     const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
@@ -166,10 +153,10 @@ function reviewTimeblock(payload: TimeblockPayload): TimeblockReviewResult | nul
       return null;
     }
 
-    return parsed as TimeblockReviewResult;
+    return sanitizeTimeblockReviewResult(parsed as TimeblockReviewResult);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error(`[Reviewer] Claude CLI call failed (timeblock): ${msg}`);
+    console.error(`[Reviewer] LLM API call failed (timeblock): ${msg}`);
     return null;
   }
 }
@@ -185,9 +172,22 @@ async function handleSignal(event: SignalEvent): Promise<void> {
       return;
     }
 
+    const reviewDecision = decideTimeblockReview({
+      event,
+      payload,
+      processedKeys: processedTimeblockReviewKeys,
+      agentStartedAt: AGENT_STARTED_AT,
+    });
+    if (reviewDecision.skip) {
+      console.log(
+        `[Reviewer] skipped timeblock.completed: reason=${reviewDecision.reason} key=${reviewDecision.key}`,
+      );
+      return;
+    }
+
     console.log(`[Reviewer] reviewing timeblock "${payload.block.name}"...`);
 
-    const review = reviewTimeblock(payload);
+    const review = await reviewTimeblock(payload);
     if (!review) {
       console.error(`[Reviewer] timeblock review generation failed for event ${event.id}`);
       return;
@@ -210,6 +210,7 @@ async function handleSignal(event: SignalEvent): Promise<void> {
       console.log(
         `[Reviewer] published review.completed (timeblock): event_id=${response.event_id}`,
       );
+      processedTimeblockReviewKeys.add(reviewDecision.key);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`[Reviewer] publish failed (timeblock): ${msg}`);
@@ -242,7 +243,7 @@ async function handleSignal(event: SignalEvent): Promise<void> {
 
   console.log(`[Reviewer] reviewing ${events.length} events...`);
 
-  const review = reviewWithClaude(events);
+  const review = await reviewWithLLM(events);
   if (!review) {
     console.error(`[Reviewer] review generation failed for event ${event.id}`);
     return;

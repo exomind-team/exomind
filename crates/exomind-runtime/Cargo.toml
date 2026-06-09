@@ -1,6 +1,6 @@
 [package]
 name = "exomind-runtime"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 default-run = "exomind-rt"
 
@@ -12,8 +12,13 @@ path = "src/main.rs"
 name = "fake-claude-cli"
 path = "tests/bin/fake-claude-cli.rs"
 
+[[bin]]
+name = "fake-codex-cli"
+path = "tests/bin/fake-codex-cli.rs"
+
 [dependencies]
-axum = "0.7"
+anyhow = "1"
+axum = { version = "0.7", features = ["ws"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
@@ -22,11 +27,27 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-uti
 thiserror = "1"
 sysinfo = { version = "0.30", default-features = false }
 tower-http = { version = "0.6", features = ["cors"] }
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+mdns-sd = "0.11"
+if-addrs = "0.13"
+sha2 = "0.10"
+percent-encoding = "2"
+rand = "0.8"
+base64 = "0.22"
+async-stream = "0.3"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"
+
+# PTY support: not available on Android (portable-pty → termios → no android impl)
+[target.'cfg(not(target_os = "android"))'.dependencies]
+portable-pty = "0.8"
+dirs = "5"
 
 [dev-dependencies]
 http-body-util = "0.1"
+tokio-tungstenite = "0.24"
 tower = { version = "0.5", features = ["util"] }
-
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
