@@ -4,7 +4,7 @@
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 当前分支：`codex/ens-reticulum-adapter`
 > 基线：当前 `origin/dev`，不是旧 `feat/ret-mesh-prototype`
-> 状态：in-progress，fake control/data-plane、signed queue EventLog、dynamic UDP EventLog、JSONL/file EventLog、dynamic TCP server/client 四域同步、mDNS `ret_port` bootstrap、Reticulum debug snapshot 与 runtime startup config 纵切已完成
+> 状态：in-progress，fake control/data-plane、signed queue EventLog、dynamic UDP EventLog、JSONL/file EventLog、dynamic TCP server/client 四域同步、mDNS `ret_port` bootstrap、Reticulum debug snapshot、runtime startup config 与 endpoint 发布保护纵切已完成
 
 ## 目的
 
@@ -415,6 +415,35 @@ cargo test -j 1 -p exomind-runtime --test runtime_startup start_with_options_pro
 - local registry 仍只是 Reticulum 下方的 local-dev/bootstrap physical layer；它可以产生 discovered endpoint，但不能成为 Mesh peer truth。
 - 多端真实同步仍必须通过 `EnsDataFrame::SignalEvent`、Reticulum provider 验签和 Mesh 授权路径。
 - 下一阶段应以多端 Reticulum 同步跑通为目标，组合验收 mDNS bootstrap、UDP/TCP、JSONL/File 与 local registry，而不是恢复旧分支的独立同步系统。
+
+### 2026-06-09：mDNS / local registry endpoint 发布保护 checkpoint
+
+本阶段收紧“把本机 Reticulum endpoint 发布给别人”这条边界，避免 bootstrap 层把启动配置、legacy runtime 端口或半初始化状态误当成可拨号 Reticulum 地址：
+
+- `start_with_options` 启动 mDNS 前会轮询 `EnsTransportService` 的 backend snapshot，等待 provider 投影出真实可拨号 UDP endpoint 后才附加 Reticulum TXT。
+- mDNS Reticulum TXT 不再从 runtime HTTP 监听端口、启动参数中的 `127.0.0.1:0` 或缺失动态端口的本机 endpoint 推导 `ret_port`。
+- 缺少 `reticulum_destination`、缺少 `udp://host:port`、端口为 `0`、或 medium 不是 UDP 的 endpoint 都不会生成 mDNS Reticulum advertisement。
+- `ReticulumEnsProvider::publish_local_registry` 改为 fail closed：必须同时具备非空 Reticulum identity、非空 Reticulum destination、非空 `via_interface`、受支持的 `via_medium` 和可拨号 `interface_address`。
+- local registry 不再写入“只有 identity/destination、没有 physical/interface layer”的 provider；`apply_config(publish_local_registry=true)` 在本机 endpoint 不可发布时直接返回 typed error，且不创建半成品 registry 文件。
+
+验证：
+
+```powershell
+$env:CARGO_TARGET_DIR='G:/exomind-cargo-target'
+cargo test -j 1 -p exomind-runtime wait_for_reticulum_mdns_advertisement_polls_until_dynamic_udp_port_projected --lib -- --nocapture
+cargo test -j 1 -p exomind-runtime --test ens_reticulum_provider -- --nocapture --test-threads=1
+cargo test -j 1 -p exomind-runtime --test runtime_startup -- --nocapture --test-threads=1
+cargo fmt --package exomind-runtime -- --check
+git diff --check
+cargo check --lib -j 1 -p exomind-runtime
+node .\node_modules\typescript\bin\tsc --noEmit
+```
+
+当前边界：
+
+- mDNS / local registry 仍只是 Reticulum physical/bootstrap layer；它们只能发布和发现可拨号 Reticulum endpoint，不能授权 Mesh peer。
+- 如果 provider 还没有把 dynamic UDP/TCP server 的真实 bound port 投影出来，正确行为是“不发布 Reticulum bootstrap”，不是用 runtime HTTP 端口或 `:0` 补位。
+- 这不是新增对外 API；它是 debug/runtime 启动路径的事实一致性保护，服务于后续真实多端同步验收。
 
 ## 目标重心修正
 
@@ -1055,7 +1084,7 @@ rg -n "tokio::time::sleep|Duration::from_secs\\(5\\)|PairingOffer|PairingCancel|
 | Task 6 前端服务层收敛 | 7 | 7 | 5 | 中高；后端状态稳定后更稳 |
 | Task 7 data-plane sync | 10 | 7 | 5 | 提前；先 fake 用户功能纵切，真实 Reticulum provider 后接 |
 
-结论：Task 1/2/control-plane、Task 7 fake data-plane 最低功能集、Task 5 queue-backed/dynamic UDP/dynamic TCP/JSONL/file 真实 provider 收包路径、dynamic TCP 四域同步回归、fail-closed 安全闸门、mDNS `ret_port` bootstrap projection，以及 runtime startup config / local registry 发布保护已完成。下一步进入真实多端 Reticulum 同步与 mDNS 真实局域网双进程验收，不应一次性恢复旧分支巨型后台循环。
+结论：Task 1/2/control-plane、Task 7 fake data-plane 最低功能集、Task 5 queue-backed/dynamic UDP/dynamic TCP/JSONL/file 真实 provider 收包路径、dynamic TCP 四域同步回归、fail-closed 安全闸门、mDNS `ret_port` bootstrap projection、runtime startup config，以及 mDNS/local registry endpoint 发布保护已完成。下一步进入真实多端 Reticulum 同步与 mDNS 真实局域网双进程验收，不应一次性恢复旧分支巨型后台循环。
 
 ## 第一批建议 patch 边界
 
@@ -1105,7 +1134,8 @@ rg -n "tokio::time::sleep|Duration::from_secs\\(5\\)|PairingOffer|PairingCancel|
 
 1. 以 dynamic TCP server/client 四域同步测试作为真实 provider data-plane 主回归，后续新增 physical medium 不得绕过 Reticulum gateway / `EnsDataFrame::SignalEvent`。
 2. runtime startup config 已接入；后续以多端同步跑通为主线，组合验收 local registry、mDNS bootstrap、UDP/TCP、JSONL/File physical medium，route/UI 仍只消费 typed snapshot。
-3. 若 ExoNet-Reticulum 暴露 observed link sender/source metadata，补 verified signer 与 observed sender 的一致性校验。
+3. bootstrap 发布必须继续以 provider snapshot 中的可拨号 Reticulum endpoint 为事实来源；禁止用 runtime HTTP 端口、startup bind input 或 `:0` 代替真实 interface endpoint。
+4. 若 ExoNet-Reticulum 暴露 observed link sender/source metadata，补 verified signer 与 observed sender 的一致性校验。
 
 ## 阶段验收
 

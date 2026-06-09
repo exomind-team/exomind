@@ -583,8 +583,8 @@ impl ReticulumEnsProvider {
     }
 
     pub fn publish_local_registry(&self, path: &Path) -> Result<(), EnsProviderError> {
+        let local = self.require_publishable_local_endpoint()?;
         let mut registry = read_local_registry(path)?;
-        let local = self.local_endpoint();
         registry
             .entries
             .retain(|entry| entry.endpoint.identity_hex != local.identity_hex);
@@ -893,19 +893,49 @@ impl ReticulumEnsProvider {
         }
     }
 
-    async fn wait_for_publishable_local_endpoint(&self) -> Result<(), EnsProviderError> {
+    async fn wait_for_publishable_local_endpoint(
+        &self,
+    ) -> Result<EnsEndpointAdvertisement, EnsProviderError> {
+        let mut last_error = None;
         for _ in 0..LOCAL_ENDPOINT_READY_ATTEMPTS {
+            match self.require_publishable_local_endpoint() {
+                Ok(endpoint) => return Ok(endpoint),
+                Err(error) => last_error = Some(error),
+            }
             let endpoint = self.local_endpoint();
             if !self.endpoint_tracks_pending_dynamic_interface(&endpoint) {
-                return Ok(());
+                return Err(last_error.unwrap_or_else(|| {
+                    EnsProviderError::Unavailable(
+                        "Reticulum ENS local registry publication requires a dialable Reticulum ENS local endpoint".to_string(),
+                    )
+                }));
             }
             tokio::time::sleep(LOCAL_ENDPOINT_READY_POLL_INTERVAL).await;
         }
 
         let endpoint = self.local_endpoint();
+        Err(last_error.unwrap_or_else(|| {
+            EnsProviderError::Unavailable(format!(
+                "Reticulum ENS local endpoint was not ready for local registry publication: {:?}",
+                endpoint.via_interface
+            ))
+        }))
+    }
+
+    fn require_publishable_local_endpoint(
+        &self,
+    ) -> Result<EnsEndpointAdvertisement, EnsProviderError> {
+        let endpoint = self.local_endpoint();
+        if is_publishable_local_endpoint(&endpoint) {
+            return Ok(endpoint);
+        }
         Err(EnsProviderError::Unavailable(format!(
-            "Reticulum ENS local endpoint was not ready for local registry publication: {:?}",
-            endpoint.via_interface
+            "Reticulum ENS local registry publication requires a dialable Reticulum ENS local endpoint: identity={}, destination={:?}, interface={:?}, medium={:?}, address={:?}",
+            endpoint.identity_hex,
+            endpoint.reticulum_destination,
+            endpoint.via_interface,
+            endpoint.via_medium,
+            endpoint.interface_address
         )))
     }
 
@@ -1220,6 +1250,66 @@ fn from_reticulum_topology(topology: ReticulumInterfaceTopology) -> EnsInterface
         ReticulumInterfaceTopology::Passive => EnsInterfaceTopology::Passive,
         ReticulumInterfaceTopology::Active => EnsInterfaceTopology::Active,
     }
+}
+
+fn is_publishable_local_endpoint(endpoint: &EnsEndpointAdvertisement) -> bool {
+    !endpoint.identity_hex.trim().is_empty()
+        && endpoint
+            .reticulum_destination
+            .as_deref()
+            .is_some_and(|destination| !destination.trim().is_empty())
+        && endpoint
+            .via_interface
+            .as_deref()
+            .is_some_and(|interface| !interface.trim().is_empty())
+        && endpoint
+            .interface_address
+            .as_deref()
+            .zip(endpoint.via_medium)
+            .is_some_and(|(address, medium)| {
+                is_dialable_reticulum_interface_address(medium, address)
+            })
+}
+
+fn is_dialable_reticulum_interface_address(medium: EnsInterfaceMedium, address: &str) -> bool {
+    match medium {
+        EnsInterfaceMedium::Udp | EnsInterfaceMedium::Mdns => {
+            parse_endpoint_host_port(address, &["udp://"]).is_some()
+        }
+        EnsInterfaceMedium::Tcp => {
+            parse_endpoint_host_port(address, &["tcp://", "tcp-listen://"]).is_some()
+        }
+        EnsInterfaceMedium::Queue => has_non_empty_scheme_payload(address, "queue://"),
+        EnsInterfaceMedium::Jsonl => has_non_empty_scheme_payload(address, "jsonl://"),
+        EnsInterfaceMedium::File => has_non_empty_scheme_payload(address, "file://"),
+        EnsInterfaceMedium::Bluetooth
+        | EnsInterfaceMedium::LocalDev
+        | EnsInterfaceMedium::Unknown => false,
+    }
+}
+
+fn parse_endpoint_host_port<'a>(address: &'a str, schemes: &[&str]) -> Option<(&'a str, u16)> {
+    for scheme in schemes {
+        let Some(rest) = address.strip_prefix(scheme) else {
+            continue;
+        };
+        let (host, port) = rest.rsplit_once(':')?;
+        if host.trim().is_empty() {
+            return None;
+        }
+        let port = port.parse::<u16>().ok()?;
+        if port == 0 {
+            return None;
+        }
+        return Some((host, port));
+    }
+    None
+}
+
+fn has_non_empty_scheme_payload(address: &str, scheme: &str) -> bool {
+    address
+        .strip_prefix(scheme)
+        .is_some_and(|payload| !payload.trim().is_empty())
 }
 
 fn udp_endpoint_address(bind_addr: &str, bound_port: u16) -> Option<String> {

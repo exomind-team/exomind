@@ -1428,11 +1428,77 @@ async fn queue_interface_and_local_registry_project_reticulum_endpoint_state() {
 }
 
 #[tokio::test]
+async fn publish_local_registry_refuses_endpoint_without_physical_interface() {
+    let provider = ReticulumEnsProvider::new_with_identity(
+        "ens-ret-no-interface",
+        Some("rt-no-interface".to_string()),
+        PrivateIdentity::new_from_name("ens-reticulum-no-interface"),
+    )
+    .await
+    .expect("reticulum provider should initialize");
+    let tempdir = tempfile::tempdir().expect("registry tempdir");
+    let registry_path = tempdir.path().join("reticulum-local-registry.json");
+
+    let error = provider
+        .publish_local_registry(&registry_path)
+        .expect_err("registry publication must fail without a dialable physical interface");
+
+    assert!(matches!(
+        error,
+        EnsProviderError::Unavailable(message)
+            if message.contains("dialable Reticulum ENS local endpoint")
+    ));
+    assert!(
+        !registry_path.exists(),
+        "fail-closed registry publication must not create a partial registry file"
+    );
+}
+
+#[tokio::test]
+async fn apply_config_refuses_registry_publish_without_physical_interface() {
+    let provider = ReticulumEnsProvider::new_with_identity(
+        "ens-ret-config-no-interface",
+        Some("rt-config-no-interface".to_string()),
+        PrivateIdentity::new_from_name("ens-reticulum-config-no-interface"),
+    )
+    .await
+    .expect("reticulum provider should initialize");
+    let tempdir = tempfile::tempdir().expect("registry tempdir");
+    let registry_path = tempdir.path().join("reticulum-local-registry.json");
+
+    let error = provider
+        .apply_config(&ReticulumEnsProviderConfig {
+            local_registry_path: Some(registry_path.clone()),
+            interfaces: Vec::new(),
+            load_local_registry: false,
+            publish_local_registry: true,
+        })
+        .await
+        .expect_err("config must not publish a registry entry without a physical interface");
+
+    assert!(matches!(
+        error,
+        EnsProviderError::Unavailable(message)
+            if message.contains("dialable Reticulum ENS local endpoint")
+    ));
+    assert!(
+        !registry_path.exists(),
+        "failed config application must not create a partial registry file"
+    );
+}
+
+#[tokio::test]
 async fn apply_config_adds_interfaces_and_projects_registry_without_authorizing_peer() {
     let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-config-a").await;
     let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-config-b").await;
     let tempdir = tempfile::tempdir().expect("registry tempdir");
     let registry_path = tempdir.path().join("reticulum-local-registry.json");
+    node_b
+        .provider
+        .add_udp_interface("127.0.0.1:0", None, EnsInterfaceTopology::Active)
+        .await
+        .expect("peer provider should expose a dialable UDP endpoint");
+    let _peer_endpoint_address = wait_for_local_udp_endpoint(&node_b.provider).await;
     node_b
         .provider
         .publish_local_registry(&registry_path)

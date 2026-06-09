@@ -47,6 +47,9 @@ pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const BUILD_GIT_HASH: &str = env!("BUILD_GIT_HASH");
 pub const BUILD_TIME: &str = env!("BUILD_TIME");
 pub const DEFAULT_RT_PORT: u16 = 1949;
+const RETICULUM_MDNS_ADVERTISEMENT_READY_ATTEMPTS: usize = 100;
+const RETICULUM_MDNS_ADVERTISEMENT_READY_POLL_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(10);
 const RUNTIME_HOST_ID_CONFIG_KEY: &str = "exomind:runtimeHostId";
 const RUNTIME_DEVICE_ID_CONFIG_KEY: &str = "exomind:deviceId";
 
@@ -730,9 +733,17 @@ pub async fn start_with_options(
 
     // mDNS discovery setup.
     let mdns = if options.enable_mdns {
-        let reticulum_advertisement = reticulum_mdns_advertisement_from_endpoint(
-            state.ens_transport.snapshot().local_endpoint.as_ref(),
-        );
+        let reticulum_advertisement = if options.reticulum_ens.is_some() {
+            let advertisement = wait_for_reticulum_mdns_advertisement(&state.ens_transport).await;
+            if advertisement.is_none() {
+                tracing::warn!(
+                    "Reticulum ENS was configured but no dialable UDP endpoint was ready for mDNS Reticulum bootstrap; registering legacy mDNS without Reticulum TXT"
+                );
+            }
+            advertisement
+        } else {
+            None
+        };
         let ens_transport = Arc::clone(&state.ens_transport);
         let reticulum_bootstrap_sink: discovery::MdnsReticulumBootstrapSink =
             Arc::new(move |bootstrap| {
@@ -1208,6 +1219,50 @@ fn default_ens_transport(
     ]);
 
     Arc::new(service)
+}
+
+async fn wait_for_reticulum_mdns_advertisement(
+    ens_transport: &ens::EnsTransportService,
+) -> Option<discovery::ReticulumMdnsAdvertisement> {
+    wait_for_reticulum_mdns_advertisement_from(|| ens_transport.snapshot().local_endpoint).await
+}
+
+async fn wait_for_reticulum_mdns_advertisement_from<F>(
+    mut local_endpoint: F,
+) -> Option<discovery::ReticulumMdnsAdvertisement>
+where
+    F: FnMut() -> Option<ens::EnsEndpointAdvertisement>,
+{
+    for _ in 0..RETICULUM_MDNS_ADVERTISEMENT_READY_ATTEMPTS {
+        let endpoint = local_endpoint();
+        if let Some(advertisement) = reticulum_mdns_advertisement_from_endpoint(endpoint.as_ref()) {
+            return Some(advertisement);
+        }
+        if !reticulum_mdns_advertisement_may_become_ready(endpoint.as_ref()) {
+            return None;
+        }
+        tokio::time::sleep(RETICULUM_MDNS_ADVERTISEMENT_READY_POLL_INTERVAL).await;
+    }
+
+    None
+}
+
+fn reticulum_mdns_advertisement_may_become_ready(
+    endpoint: Option<&ens::EnsEndpointAdvertisement>,
+) -> bool {
+    let Some(endpoint) = endpoint else {
+        return false;
+    };
+    endpoint
+        .reticulum_destination
+        .as_deref()
+        .is_some_and(|destination| !destination.trim().is_empty())
+        && endpoint
+            .via_interface
+            .as_deref()
+            .is_some_and(|name| !name.trim().is_empty())
+        && endpoint.via_medium == Some(ens::EnsInterfaceMedium::Udp)
+        && endpoint.interface_address.is_none()
 }
 
 fn reticulum_mdns_advertisement_from_endpoint(
@@ -1696,6 +1751,72 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn reticulum_test_endpoint(interface_address: Option<&str>) -> ens::EnsEndpointAdvertisement {
+        ens::EnsEndpointAdvertisement {
+            identity_hex: "identity-mdns-test".to_string(),
+            host_id: Some("rt-mdns-test".to_string()),
+            gateway: ens::EnsGatewayKind::Reticulum,
+            via_interface: Some("127.0.0.1:4242".to_string()),
+            via_medium: Some(ens::EnsInterfaceMedium::Udp),
+            runtime_base_url: None,
+            reticulum_destination: Some("destination-mdns-test".to_string()),
+            interface_address: interface_address.map(str::to_string),
+            discovery_source: "unit-test".to_string(),
+            capabilities: vec!["ens-control".to_string(), "ens-data".to_string()],
+        }
+    }
+
+    #[test]
+    fn reticulum_mdns_advertisement_requires_real_udp_interface_address() {
+        assert!(reticulum_mdns_advertisement_from_endpoint(None).is_none());
+
+        let mut endpoint = reticulum_test_endpoint(Some("udp://127.0.0.1:4242"));
+        endpoint.reticulum_destination = None;
+        assert!(reticulum_mdns_advertisement_from_endpoint(Some(&endpoint)).is_none());
+
+        let endpoint = reticulum_test_endpoint(None);
+        assert!(reticulum_mdns_advertisement_from_endpoint(Some(&endpoint)).is_none());
+
+        let endpoint = reticulum_test_endpoint(Some("udp://127.0.0.1:0"));
+        assert!(reticulum_mdns_advertisement_from_endpoint(Some(&endpoint)).is_none());
+
+        let endpoint = reticulum_test_endpoint(Some("tcp-listen://127.0.0.1:4242"));
+        assert!(reticulum_mdns_advertisement_from_endpoint(Some(&endpoint)).is_none());
+
+        let endpoint = reticulum_test_endpoint(Some("udp://127.0.0.1:4242"));
+        let advertisement = reticulum_mdns_advertisement_from_endpoint(Some(&endpoint))
+            .expect("real UDP endpoint should produce Reticulum mDNS advertisement");
+        assert_eq!(advertisement.identity_hex, "identity-mdns-test");
+        assert_eq!(advertisement.ret_port, 4242);
+        assert_eq!(
+            advertisement.reticulum_destination.as_deref(),
+            Some("destination-mdns-test")
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_for_reticulum_mdns_advertisement_polls_until_dynamic_udp_port_projected() {
+        let endpoint = Arc::new(StdMutex::new(Some(reticulum_test_endpoint(None))));
+        let setter_endpoint = Arc::clone(&endpoint);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            *setter_endpoint.lock().expect("endpoint mutex") =
+                Some(reticulum_test_endpoint(Some("udp://127.0.0.1:5252")));
+        });
+
+        let advertisement = wait_for_reticulum_mdns_advertisement_from(|| {
+            endpoint.lock().expect("endpoint mutex").clone()
+        })
+        .await
+        .expect("waiter should observe projected dynamic UDP endpoint");
+
+        assert_eq!(advertisement.ret_port, 5252);
+        assert_eq!(
+            advertisement.reticulum_destination.as_deref(),
+            Some("destination-mdns-test")
+        );
     }
 
     fn app_state_with_registry(

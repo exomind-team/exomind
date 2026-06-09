@@ -4,7 +4,7 @@
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 分支：`codex/ens-reticulum-adapter`
 > 目标读者：没有本轮会话上下文、但需要继续推进 Reticulum 同步的 Agent
-> 最新 checkpoint：2026-06-09，signed queue、dynamic UDP、JSONL/file EventLog、dynamic TCP server/client 四域同步纵切、mDNS `ret_port` bootstrap projection 与 runtime startup config 已完成
+> 最新 checkpoint：2026-06-09，signed queue、dynamic UDP、JSONL/file EventLog、dynamic TCP server/client 四域同步纵切、mDNS `ret_port` bootstrap projection、runtime startup config 与 endpoint 发布保护已完成
 
 ## 当前目标
 
@@ -43,6 +43,8 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 - runtime startup 已支持 `RuntimeStartOptions.reticulum_ens`，并可通过环境变量启用真实 `ReticulumEnsProvider`。
 - `/mesh/ens/snapshot` 在 runtime 启动后可观测真实 Reticulum provider、本机 endpoint、实际动态 UDP 端口与 Reticulum destination。
 - local registry load/publish 已接入 `apply_config`：load 只投影未授权 discovered endpoint；publish 会等待动态 UDP/TCP server endpoint 具备真实 `interface_address`，不会写入 `:0` 或缺失动态端口的本机 endpoint。
+- mDNS Reticulum TXT 发布已改为等待 provider snapshot 中真实可拨号 UDP endpoint；缺 `reticulum_destination`、缺 `udp://host:port`、端口为 `0` 或 medium 非 UDP 时，不发布 Reticulum bootstrap 字段。
+- local registry publish 已改为 fail closed：必须具备非空 identity/destination/interface、可接受 physical medium 和可拨号 `interface_address`；否则返回 typed error 且不创建半成品 registry 文件。
 
 当前故意没有完成的能力：
 
@@ -78,6 +80,7 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - 新增 `add_jsonl_interface` 与 `add_file_interface`，将 JSONL stream directory 和 shared file path 作为 Reticulum local-dev/file physical medium 接入，并投影 `jsonl://...` / `file://...` endpoint address。
   - 新增 `ReticulumEnsProviderConfig` / `ReticulumEnsInterfaceConfig` 和 `apply_config`，统一配置 UDP、TCP server、TCP client、JSONL、File 与 local registry load/publish。
   - local registry publish 前等待动态 UDP/TCP server endpoint 投影为真实 `interface_address`，防止 registry 写入 `:0`。
+  - `publish_local_registry` 现在调用 publishable endpoint guard；没有 physical/interface layer 的 provider 不会被写入 registry。
 - `crates/exomind-runtime/src/ens/service.rs`
   - 新增 `handle_received_data_frame`。
   - 新增 sender binding 校验：缺 observed transport peer 返回 `MissingDataFrameTransportPeer`；observed peer 与 frame 内 `from_peer` 不一致返回 `DataFrameTransportPeerMismatch`。
@@ -89,6 +92,7 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - `MdnsDiscovery` 浏览到 Reticulum bootstrap 后通过 `MdnsReticulumBootstrapSink` 投给 ENS transport；缺 identity 的 legacy mDNS service 保持兼容，zero/invalid `ret_port` fail closed。
 - `crates/exomind-runtime/src/lib.rs`
   - 默认 mDNS 启动路径会从 backend snapshot 的 local Reticulum endpoint 生成 mDNS advertisement，并把 discovered bootstrap 投影回 ENS transport。
+  - mDNS Reticulum advertisement 会等待 provider 投影出的真实 UDP endpoint；等待失败时只注册 legacy mDNS，不发布 Reticulum TXT。
   - `RuntimeStartOptions` 增加 `reticulum_ens`，`start_with_options` 会创建真实 `ReticulumEnsProvider` 并替换默认 ENS transport provider。
   - `RuntimeStartOptions::default()` 可从 `EXOMIND_RT_ENS_RETICULUM`、local registry、UDP/TCP/JSONL/File 相关环境变量生成 Reticulum ENS 启动配置。
 - `crates/exomind-runtime/src/ens/mod.rs`
@@ -116,6 +120,7 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
   - TCP server/client 双 provider 四域测试确认 Task、TimeBlock active、TimeBlock completed 与 Proposal replication `SignalEvent` 都经同一 Reticulum data-plane 进入 `EnsTransportService` / `MeshState` / `SignalPool` / `replication_actor`，并写入对应远端业务 store。
   - JSONL 与 file 双 provider 测试确认共享 JSONL 目录或 shared file 可以作为 Reticulum physical medium 传递 signed EventLog `SignalEvent`，并验证 endpoint/snapshot 中的 `via_medium` 与 `interface_address` 投影。
   - 覆盖 `apply_config` 同时添加 interface、加载 peer registry、发布本机 registry entry；peer 只作为未授权 discovered endpoint，发布出的本机 endpoint 使用实际动态 UDP 端口。
+  - 覆盖无 physical/interface layer 时 `publish_local_registry` 与 `apply_config(publish_local_registry=true)` fail closed，且不创建 registry 文件。
   - 覆盖 legacy unsigned frame fail closed、bad signature fail closed、wrong recipient fail closed、non-local signing refused。
   - 覆盖签名有效但 Mesh 未授权 signer 时由 service 返回 `UnauthorizedDataFramePeer`，B 端 store 保持为空。
 - `crates/exomind-runtime/tests/mesh_routes_integration.rs`
@@ -149,7 +154,8 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 2. 用 runtime startup config 启动两个真实 runtime，做多端 Reticulum 同步验收：至少先确认 EventLog，再扩展 Task、TimeBlock、Proposal。
 3. 组合验收 local registry、mDNS bootstrap、UDP/TCP、JSONL/File physical medium；这些渠道只能产生 Reticulum endpoint/bootstrap，不得自动授权 Mesh peer。
 4. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 bootstrap/discovered endpoint，不把 mDNS 升级成授权来源。
-5. 如果 ExoNet-Reticulum 暴露 link/source metadata，补 verified signer 与 observed sender 的一致性测试。
+5. mDNS/local registry 的发布事实必须继续来自 provider snapshot 的可拨号 Reticulum endpoint；禁止用 runtime HTTP port、startup bind input 或 `:0` 替代真实 interface endpoint。
+6. 如果 ExoNet-Reticulum 暴露 link/source metadata，补 verified signer 与 observed sender 的一致性测试。
 
 ## 推荐验证命令
 
@@ -171,26 +177,14 @@ node ./node_modules/typescript/bin/tsc --noEmit
 
 ## 当前可提交边界
 
-截至 2026-06-09，本轮工作区脏文件集中在 Reticulum/ENS startup config、local registry 发布保护、runtime startup 测试和计划文档。提交前仍必须以 `git status --short` 为准；如果出现下列范围之外的文件，不要顺手 stage、revert 或格式化。
+截至 2026-06-09，本轮工作区脏文件集中在 Reticulum/ENS mDNS advertisement 等待、local registry fail-closed 发布保护、provider 测试和计划文档。提交前仍必须以 `git status --short` 为准；如果出现下列范围之外的文件，不要顺手 stage、revert 或格式化。
 
 可以 stage 的 Reticulum/ENS 相关文件包括：
 
-- `Cargo.lock`
-- `crates/exomind-runtime/Cargo.toml`
-- `crates/exomind-runtime/src/ens/dto.rs`
-- `crates/exomind-runtime/src/ens/mod.rs`
-- `crates/exomind-runtime/src/ens/provider.rs`
 - `crates/exomind-runtime/src/ens/reticulum_provider.rs`
-- `crates/exomind-runtime/src/ens/service.rs`
 - `crates/exomind-runtime/src/lib.rs`
-- `crates/exomind-runtime/tests/ens_routes_debug.rs`
 - `crates/exomind-runtime/tests/ens_reticulum_provider.rs`
-- `crates/exomind-runtime/tests/runtime_startup.rs`
-- `src/lib/services/runtime-ens.service.ts`
-- `src/ui/app/pages/agents/DeviceView.tsx`
-- `tests/unit/ui/agent-hub/device-view.reticulum-debug.test.tsx`
 - `docs/plans/2026-06-08-ens-reticulum-fresh-dev-implementation-plan.md`
-- `docs/plans/2026-06-08-reticulum-signal-event-data-plane-and-interface-migration-plan.md`
 - `docs/plans/2026-06-08-reticulum-next-agent-handoff.md`
 
 ## 参考文档
