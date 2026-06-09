@@ -376,6 +376,59 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  it('uses current RT active block as first replication baseline before accepting a stale running snapshot', async () => {
+    const currentActiveBlock: ActiveBlockData = {
+      startId: 'current-block-2',
+      name: 'Fresh block',
+      mode: 'countup',
+      elapsed: 0,
+      paused: false,
+      startTime: 1_700_000_120_000,
+      blockType: 'active',
+      phase: 'running',
+      version: 2,
+      lastTransitionAt: 1_700_000_120_000,
+      lastResumedAt: 1_700_000_120_000,
+      taskIds: [],
+      taskAssociationLog: [],
+      transitions: [
+        { type: 'start', at: 1_700_000_120_000, actorId: 'local' },
+      ],
+    };
+    const staleRunningSnapshot: ActiveBlockData = {
+      startId: 'old-block-1',
+      name: 'Old countdown',
+      mode: 'countdown',
+      targetMinutes: 25,
+      elapsed: 1_500_000,
+      paused: false,
+      startTime: 1_700_000_000_000,
+      blockType: 'active',
+      phase: 'running',
+      version: 1,
+      lastTransitionAt: 1_700_000_000_000,
+      lastResumedAt: 1_700_000_000_000,
+      taskIds: [],
+      taskAssociationLog: [],
+      transitions: [
+        { type: 'start', at: 1_700_000_000_000, actorId: 'remote' },
+      ],
+    };
+    const env = createMemoryEnv();
+    const rtAdapter = createRtAdapter({ activeBlock: currentActiveBlock });
+    const service = new TimeBlockServiceImpl(env as never, {
+      backendMode: 'rt-sqlite',
+      rtAdapter,
+    });
+    const listener = vi.fn();
+    service.onBlockChange(listener);
+
+    await service.applyReplicatedActiveBlock(staleRunningSnapshot);
+
+    expect(rtAdapter.getActiveBlock).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it('allows starting a new block when current RT active block is transition-completed', async () => {
     const env = createMemoryEnv();
     const rtAdapter = createRtAdapter({

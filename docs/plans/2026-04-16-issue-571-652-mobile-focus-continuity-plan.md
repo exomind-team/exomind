@@ -187,6 +187,16 @@ Track C: Optional Auto Foreground
 - Receiver 触发后先读取当前 active block；若 block 已进入 feedback / completed 或已经不是同一 `startId`，直接 no-op。
 - 前台 UI 在归零时继续走 `markEnding()`，但必须在状态迁移后同步 cancel native alarm。
 
+#### 已落地的旧提醒抑制不变量
+
+2026-06-10 复查手机版“旧时间块倒计时结束”持续通知问题后，后台提醒链路还需要同时满足以下不变量：
+
+- Android receiver 是一次性触发者；到点后会清除已触发调度，后续重复通知通常来自 Web 侧把同一个已超时 block 再次调度，而不是 receiver 自己循环。
+- 已超时 block 的 `dueAt` 必须稳定为预期结束时间 `expectedEndAt`，不能使用移动的 `Date.now()`。否则同一个旧 block 每轮同步都会生成不同 payload，绕过 runtime 的调度签名去重。
+- Web coordinator 需要记住已 armed 的 `startId`；同一 `startId` 的 overdue request 已经 armed 后，后续同步只能跳过，不能再次 schedule。
+- 原生通知点击或自动回开 intent 必须通过 `timeblockEndAlertIntent` 唤醒 Web coordinator 消费 pending handoff；只有当前 active block 仍匹配该 `startId` 时，才允许进入 `markEnding()`。
+- `rt-sqlite` 接收 replicated active block 前，首次基线必须优先读取当前 RT active block；这样旧设备或旧快照里的 running countdown 不会在本机没有 `lastAcceptedBlock` 时复活成当前块。
+
 ### Track C：可选自动拉起并回到 `当下 / 专注`
 
 #### 设计原则

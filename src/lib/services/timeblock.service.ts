@@ -1102,8 +1102,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   async applyReplicatedActiveBlock(block: ActiveBlockData): Promise<void> {
     const normalized = this.normalizeActiveBlock(block);
     if (this.backendMode === "rt-sqlite") {
+      const baseline = await this.resolveRtSqliteReplicationBaseline();
       const decision = this.decidePreferredBlock(
-        this.lastAcceptedBlock,
+        baseline,
         normalized,
       );
       const preferred = decision.preferred;
@@ -1995,6 +1996,21 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (this.shouldPersistCanonicalization(raw, normalized)) {
       await this.saveActiveBlock(normalized);
     }
+    this.rememberAcceptedBlock(normalized);
+    return normalized;
+  }
+
+  private async resolveRtSqliteReplicationBaseline(): Promise<ActiveBlockData | null> {
+    if (this.lastAcceptedBlock || this.backendMode !== "rt-sqlite") {
+      return this.lastAcceptedBlock;
+    }
+
+    const raw = (await this.rtAdapter?.getActiveBlock()) ?? null;
+    if (!raw) {
+      return null;
+    }
+
+    const normalized = this.normalizeActiveBlock(raw);
     this.rememberAcceptedBlock(normalized);
     return normalized;
   }

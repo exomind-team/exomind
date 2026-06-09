@@ -86,22 +86,30 @@ describe('resolveTimeblockEndAlertRequest', () => {
     })).toBeNull();
   });
 
-  it('schedules an immediate native alert when the block is already overdue outside the focus owner', () => {
-    const now = Date.UTC(2026, 3, 16, 2, 26, 0);
-    const request = resolveTimeblockEndAlertRequest({
-      block: buildRunningCountdownBlock(),
+  it('uses the stable expected end timestamp when the block is already overdue', () => {
+    const block = buildRunningCountdownBlock();
+    const first = resolveTimeblockEndAlertRequest({
+      block,
       frontendOwnsCountdownEnd: false,
       soundEnabled: true,
       autoOpenFocus: true,
-      now,
+      now: Date.UTC(2026, 3, 16, 2, 26, 0),
+    });
+    const later = resolveTimeblockEndAlertRequest({
+      block,
+      frontendOwnsCountdownEnd: false,
+      soundEnabled: true,
+      autoOpenFocus: true,
+      now: Date.UTC(2026, 3, 16, 2, 31, 0),
     });
 
-    expect(request).toEqual({
+    expect(first).toEqual({
       startId: 'timeblock-end-alert-running',
       title: 'Deep Work',
-      dueAt: now,
+      dueAt: Date.UTC(2026, 3, 16, 2, 25, 0),
       soundEnabled: true,
       autoOpenFocus: true,
     });
+    expect(later?.dueAt).toBe(first?.dueAt);
   });
 });

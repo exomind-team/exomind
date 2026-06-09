@@ -2,6 +2,8 @@ package app.tauri.exomindtimeblockendalert
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
+import android.webkit.WebView
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.Permission
@@ -29,6 +31,28 @@ class ScheduleEndAlertArgs {
 class TimeblockEndAlertPlugin(private val activity: Activity) : Plugin(activity) {
   private val appContext: android.content.Context
     get() = activity.applicationContext
+
+  override fun load(webView: WebView) {
+    super.load(webView)
+    handleIntent(activity.intent)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    handleIntent(intent)
+  }
+
+  private fun handleIntent(intent: Intent?) {
+    if (!TimeblockEndAlertState.recordPendingHandoffFromIntent(appContext, intent)) {
+      return
+    }
+
+    trigger(
+      "timeblockEndAlertIntent",
+      JSObject()
+        .put("kind", "timeblock-end-alert"),
+    )
+  }
 
   private fun currentNotificationPermissionState(): String {
     val pluginState = getPermissionState("notifications")

@@ -45,7 +45,7 @@ export function resolveTimeblockEndAlertRequest(
     startId: block.startId,
     title: block.name.trim() || '未命名时间块',
     dueAt: timing.remainingMs <= 0
-      ? timing.effectiveNow
+      ? timing.effectiveNow - timing.overrunMs
       : timing.effectiveNow + timing.remainingMs,
     soundEnabled,
     autoOpenFocus,

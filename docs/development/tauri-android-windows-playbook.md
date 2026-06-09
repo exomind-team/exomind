@@ -246,6 +246,24 @@ $adb='...\\platform-tools\\adb.exe'
 - `dumpsys package`：核对 APK 版本真值
 - `logcat`：核对 Android 插件命令是否真的被调用
 
+#### 时间块结束旧通知重复排查
+
+若用户报告已经停止、结束，甚至已经启动新时间块后，手机仍持续收到旧的“时间块倒计时结束”通知，优先按四层拆开判断：
+
+1. WebView 调度真值：
+   - 检查 `TimeblockEndAlertCoordinator` 是否仍在为同一旧 `startId` 反复调用 schedule。
+   - 已超时 request 的 `dueAt` 应保持为预期结束时间，而不是当前 `Date.now()`。
+   - 同一 `startId` 已 armed 且 request 已 overdue 时，coordinator 应跳过重新调度。
+2. Runtime / Android 调度真值：
+   - 用 `dumpsys alarm` 确认是否存在同一旧 `startId` 的新 alarm 被反复写入。
+   - Android receiver 到点后会清除 fired schedule；如果通知持续出现，不要只盯 receiver，要回头检查 Web 同步循环。
+3. Handoff 真值：
+   - 用 `logcat` 或 Tauri MCP 确认 `timeblockEndAlertIntent` 事件是否触发。
+   - Web coordinator 收到 handoff 后，只应在当前 active block 仍是同一 `startId` 时调用 `markEnding()`。
+4. RT active block 真值：
+   - 回读 RT `/timeblocks/active` 或等价 adapter 状态，确认当前块是否被旧 replicated running snapshot 覆盖。
+   - `rt-sqlite` 首次处理 replicated active block 时，应先以当前 RT active block 作为基线，再决定是否接受远端快照。
+
 ### 3. 系统策略真值
 
 这一层用于判断“产品链路已执行，但 OS 是否允许最终行为发生”。
