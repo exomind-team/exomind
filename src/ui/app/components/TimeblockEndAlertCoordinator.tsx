@@ -10,6 +10,7 @@ import {
   subscribeTimerPreferencesChanges,
 } from '@/config/timer-preferences';
 import { log } from '@/lib/logger';
+import { resolveHandoffAction } from '@/lib/timeblock/handoff-policy';
 import { getTimeBlockService } from '@/lib/services';
 import {
   resolveTimeblockEndAlertRequest,
@@ -163,13 +164,17 @@ export function TimeblockEndAlertCoordinator(): null {
 
       if (pending.startId) {
         try {
-          const currentBlock = activeBlockRef.current;
-          if (currentBlock?.startId === pending.startId) {
-            armedAlertStartIdsRef.current.add(pending.startId);
-            const phase = resolveTimeBlockPhase(currentBlock);
-            if (phase === 'running' || phase === 'paused') {
-              await timeBlockServiceRef.current.markEnding();
-            }
+          const decision = resolveHandoffAction({
+            pendingStartId: pending.startId,
+            currentBlock: activeBlockRef.current,
+            countdownEndMode: timerPreferences.countdownEndMode,
+          });
+          if (decision.kind === 'markEnding') {
+            await timeBlockServiceRef.current.markEnding();
+          } else {
+            log.info(
+              `[TimeblockEndAlert] handoff skipped markEnding (${decision.reason})`,
+            );
           }
         } catch (error) {
           log.warn(`[TimeblockEndAlert] markEnding from handoff failed ${error instanceof Error ? error.message : String(error)}`);
@@ -183,7 +188,7 @@ export function TimeblockEndAlertCoordinator(): null {
     } catch (error) {
       log.warn(`[TimeblockEndAlert] consume handoff failed ${error instanceof Error ? error.message : String(error)}`);
     }
-  }, [blockStateReady, navigate]);
+  }, [blockStateReady, navigate, timerPreferences.countdownEndMode]);
 
   useEffect(() => {
     let cancelled = false;
