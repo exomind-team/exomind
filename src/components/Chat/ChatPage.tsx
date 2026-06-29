@@ -30,7 +30,7 @@ import { log } from '@/lib/logger';
 import { PerfTrace, logPerfInfo, perfNow, waitForNextPaint } from '@/lib/utils/perf-trace';
 import { registerMainWindowFocusTarget } from '@/services/main-window-focus-targets';
 import { MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT } from '@/services/main-window-shortcut.service';
-import { mergeLatestEventsAscending } from './chat-event-pagination';
+import { mergeLatestEventsAscending, prependOlderEventsAscending } from './chat-event-pagination';
 import {
   extractEventPermalinksFromContent,
   normalizeEventRefs,
@@ -44,6 +44,13 @@ import {
 } from '@/ui/app/pages/eventlog-route-memory';
 
 const PAGE_SIZE = 50;
+// 初次加载只拉最近 N 条（而非全量），其余更早历史按需向后端分页拉取。
+// 避免账号事件量达数万条时一次性拉取 + 解析 + 排序造成十几秒的首屏卡顿。
+const INITIAL_LOAD_LIMIT = 200;
+// 向上滚动越过内存头部时，单次向后端拉取的更早历史页大小。
+const OLDER_PAGE_SIZE = 50;
+// permalink 定位到很旧的事件时，向后端回溯分页的最大页数（防止失控循环）。
+const MAX_LOCATE_OLDER_PAGES = 40;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
 const EVENT_HIGHLIGHT_DURATION_MS = 2_000;
@@ -255,6 +262,11 @@ export function ChatPage({
   const refreshQueuedTriggerRef = useRef<RefreshTrigger>('poll');
   const lastFullRefreshAtRef = useRef(0);
   const lastAppliedSnapshotRevisionRef = useRef<string | null | undefined>(undefined);
+  // 后端是否仍有比内存中最早事件更旧的历史。初次/分页加载后据返回量更新，
+  // 用于让 hasMore 同时反映「内存里还有未展开」与「后端还有更早页」。
+  const hasMoreOlderFromBackendRef = useRef(true);
+  // 后端更早页拉取的并发护栏（滚动触发与 permalink 定位可能同时调用）。
+  const olderBackendFetchInFlightRef = useRef(false);
   const eventRowRefs = useRef(new Map<string, HTMLDivElement>());
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventLogService = useRef(getEventLogService());
@@ -380,7 +392,8 @@ export function ChatPage({
     visibleCountRef.current = safeVisibleCount;
     nextStartIndexRef.current = nextStartIndex;
     setEvents(eventsAsc.slice(nextStartIndex));
-    setHasMore(nextStartIndex > 0);
+    // 还有更早可展开 = 内存里有未进入窗口的更早事件，或后端仍有更旧历史可拉。
+    setHasMore(nextStartIndex > 0 || hasMoreOlderFromBackendRef.current);
     persistKeepAliveState(eventsAsc, safeVisibleCount);
   }, [persistKeepAliveState]);
 
@@ -400,6 +413,9 @@ export function ChatPage({
     shouldStickToBottomRef.current = true;
     lastAppliedSnapshotRevisionRef.current = initialKeepAliveState.snapshotRevision ?? null;
     lastFullRefreshAtRef.current = initialKeepAliveState.lastFullRefreshAt;
+    // 从缓存恢复时无法确知后端是否还有更旧历史，乐观置 true；
+    // 首次向后端回溯若返回不足一页会自我纠正为 false。
+    hasMoreOlderFromBackendRef.current = true;
     applyVisibleWindow(initialKeepAliveState.eventsAsc, initialKeepAliveState.visibleCount);
     trace.step('apply-visible-window', {
       visibleCount: Math.min(initialKeepAliveState.eventsAsc.length, Math.max(PAGE_SIZE, initialKeepAliveState.visibleCount)),
@@ -426,8 +442,13 @@ export function ChatPage({
     });
     setIsInitialLoading(true);
     try {
-      const initialResult = await eventLogService.current.loadEventsDetailed();
+      // 只拉最近 INITIAL_LOAD_LIMIT 条；更早历史在向上滚动时按需向后端分页。
+      const initialResult = await eventLogService.current.loadEventsDetailed({
+        limit: INITIAL_LOAD_LIMIT,
+      });
       const loadedEvents = sortEventsAscending(initialResult.events);
+      // 拉满一页说明后端大概率还有更旧历史；不足一页说明已到最早。
+      hasMoreOlderFromBackendRef.current = loadedEvents.length >= INITIAL_LOAD_LIMIT;
       trace.step('load-events-detailed', {
         fetched: loadedEvents.length,
         semantics: initialResult.semantics,
@@ -469,6 +490,9 @@ export function ChatPage({
       behavior,
     });
     try {
+      // 全量 reconcile 也只覆盖「已加载的最近范围」(至少 INITIAL_LOAD_LIMIT)，
+      // 既保住用户已向上翻出的更早历史不被丢弃，又不会退回一次性全量拉数万条。
+      const reconcileLimit = Math.max(INITIAL_LOAD_LIMIT, allEventsRef.current.length);
       const latestCursor = getLatestEventCursor(allEventsRef.current);
       const shouldForceFullReconcile = trigger === 'external-refresh'
         || (
@@ -486,7 +510,7 @@ export function ChatPage({
               sinceId: latestCursor!.id,
               sinceTimestamp: latestCursor!.timestamp,
             }
-          : undefined,
+          : { limit: reconcileLimit },
       );
       let mode: 'full' | 'incremental' = requestedMode === 'incremental'
         && loadedResult.semantics === 'incremental_batch'
@@ -511,7 +535,7 @@ export function ChatPage({
       if (shouldFallbackToFull) {
         requestedMode = 'full';
         mode = 'full';
-        loadedResult = await eventLogService.current.loadEventsDetailed();
+        loadedResult = await eventLogService.current.loadEventsDetailed({ limit: reconcileLimit });
         loadedEvents = sortEventsAscending(loadedResult.events);
         trace.step('fallback-full-refresh', {
           fetched: loadedEvents.length,
@@ -522,6 +546,8 @@ export function ChatPage({
       if (mode === 'full') {
         lastFullRefreshAtRef.current = Date.now();
         lastAppliedSnapshotRevisionRef.current = loadedResult.snapshotRevision ?? null;
+        // reconcile 拉满一页说明还有更旧历史；不足一页说明已覆盖到最早。
+        hasMoreOlderFromBackendRef.current = loadedEvents.length >= reconcileLimit;
         applyVisibleWindow(loadedEvents);
         persistKeepAliveState(loadedEvents);
         trace.step('apply-full-window', { fetched: loadedEvents.length });
@@ -594,40 +620,112 @@ export function ChatPage({
     })();
   }, [refreshLatestEvents]);
 
-  const loadOlderEvents = useCallback(() => {
-    if (!hasMore || loadingOlderRef.current) {
+  // 向后端拉取一页更早历史并 prepend 进内存。返回新增条数（0 表示已到最早或正在拉取）。
+  const fetchOlderPageFromBackend = useCallback(async (): Promise<number> => {
+    if (olderBackendFetchInFlightRef.current || !hasMoreOlderFromBackendRef.current) {
+      return 0;
+    }
+    const current = allEventsRef.current;
+    const oldest = current[0];
+    if (!oldest) {
+      hasMoreOlderFromBackendRef.current = false;
+      return 0;
+    }
+
+    olderBackendFetchInFlightRef.current = true;
+    try {
+      // until_timestamp 为闭区间，会带回与最早事件同毫秒的边界事件，
+      // 交由 prependOlderEventsAscending 按 id 去重，避免漏掉同毫秒下 id 更小的更早事件。
+      const olderResult = await eventLogService.current.loadEventsDetailed({
+        untilTimestamp: oldest.timestamp,
+        limit: OLDER_PAGE_SIZE,
+      });
+      const olderAsc = sortEventsAscending(olderResult.events);
+      const merged = prependOlderEventsAscending(current, olderAsc);
+      const added = merged.length - current.length;
+
+      // 返回不足一页，或合并后没有任何新增，都视为后端已到最早历史。
+      if (olderAsc.length < OLDER_PAGE_SIZE || added === 0) {
+        hasMoreOlderFromBackendRef.current = false;
+      }
+
+      if (added > 0) {
+        const container = listContainerRef.current;
+        const previousScrollHeight = container?.scrollHeight ?? 0;
+        // 把刚拉到的更早事件纳入可视窗口（visibleCount 增加 added 条）。
+        applyVisibleWindow(merged, visibleCountRef.current + added);
+        requestAnimationFrame(() => {
+          const currentContainer = listContainerRef.current;
+          if (!currentContainer) return;
+          // prepend 更早内容会增高顶部，保持原视口位置不跳动。
+          currentContainer.scrollTop = Math.max(0, currentContainer.scrollHeight - previousScrollHeight);
+        });
+      } else {
+        // 已无更早历史：刷新 hasMore 以撤掉顶部「加载更多」提示。
+        setHasMore(nextStartIndexRef.current > 0);
+      }
+
+      return added;
+    } finally {
+      olderBackendFetchInFlightRef.current = false;
+    }
+  }, [applyVisibleWindow]);
+
+  const loadOlderEvents = useCallback(async () => {
+    if (loadingOlderRef.current) {
+      return;
+    }
+    const hasInMemoryOlder = nextStartIndexRef.current > 0;
+    if (!hasInMemoryOlder && !hasMoreOlderFromBackendRef.current) {
       return;
     }
 
-    const container = listContainerRef.current;
-    const previousScrollHeight = container?.scrollHeight ?? 0;
-
     loadingOlderRef.current = true;
     setLoadingOlder(true);
-
     try {
-      const nextVisibleCount = visibleCountRef.current + PAGE_SIZE;
-      applyVisibleWindow(allEventsRef.current, nextVisibleCount);
-
-      requestAnimationFrame(() => {
-        const currentContainer = listContainerRef.current;
-        if (!currentContainer) return;
-
-        const nextScrollHeight = currentContainer.scrollHeight;
-        currentContainer.scrollTop = Math.max(0, nextScrollHeight - previousScrollHeight);
-      });
+      if (hasInMemoryOlder) {
+        // 快路径：内存里还有未进入窗口的更早事件，直接扩大可视窗口。
+        const container = listContainerRef.current;
+        const previousScrollHeight = container?.scrollHeight ?? 0;
+        applyVisibleWindow(allEventsRef.current, visibleCountRef.current + PAGE_SIZE);
+        requestAnimationFrame(() => {
+          const currentContainer = listContainerRef.current;
+          if (!currentContainer) return;
+          currentContainer.scrollTop = Math.max(0, currentContainer.scrollHeight - previousScrollHeight);
+        });
+      } else {
+        // 已到内存头部：向后端拉取下一页更早历史。
+        await fetchOlderPageFromBackend();
+      }
     } finally {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [applyVisibleWindow, hasMore]);
+  }, [applyVisibleWindow, fetchOlderPageFromBackend]);
+
+  // permalink 定位到不在内存中的旧事件时，向后端回溯分页直至加载到该事件或到达最早。
+  const ensureEventInMemory = useCallback(async (eventId: string) => {
+    let pages = 0;
+    while (
+      allEventsRef.current.findIndex((event) => event.id === eventId) < 0
+      && hasMoreOlderFromBackendRef.current
+      && pages < MAX_LOCATE_OLDER_PAGES
+    ) {
+      const added = await fetchOlderPageFromBackend();
+      pages += 1;
+      if (added === 0) {
+        // 0 可能是并发拉取被护栏挡下：交由 events 变更后重跑本流程续拉。
+        break;
+      }
+    }
+  }, [fetchOlderPageFromBackend]);
 
   const handleListScroll = useCallback(() => {
     const container = listContainerRef.current;
     if (!container) return;
 
     if (container.scrollTop <= TOP_LOAD_THRESHOLD) {
-      loadOlderEvents();
+      void loadOlderEvents();
     }
   }, [loadOlderEvents]);
 
@@ -645,6 +743,8 @@ export function ChatPage({
     if (!events.some((event) => event.id === pendingLocateEventId)) {
       const targetIndex = allEventsRef.current.findIndex((event) => event.id === pendingLocateEventId);
       if (targetIndex < 0) {
+        // 目标事件比已加载范围更旧：向后端回溯分页拉取，加载到后本 effect 会随 events 变更重跑。
+        void ensureEventInMemory(pendingLocateEventId);
         return;
       }
 
@@ -670,7 +770,7 @@ export function ChatPage({
       highlightTimerRef.current = null;
     }, EVENT_HIGHLIGHT_DURATION_MS);
     setPendingLocateEventId(null);
-  }, [applyVisibleWindow, events, pendingLocateEventId]);
+  }, [applyVisibleWindow, ensureEventInMemory, events, pendingLocateEventId]);
 
   // 初始化 RT EventLog 读源，并用轮询补齐跨链路写入后的 UI 刷新。
   useEffect(() => {

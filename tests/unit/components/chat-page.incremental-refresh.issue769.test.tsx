@@ -7,6 +7,10 @@ import { getEventLogService } from '@/lib/services/eventlog.service';
 import { log } from '@/lib/logger';
 import { setPerfLoggingEnabled } from '@/config/perf-logging-enabled';
 
+// 镜像 ChatPage 的 INITIAL_LOAD_LIMIT：初次加载与全量对账(reconcile)都改为有界拉取，
+// 不再一次性全量拉取数万条事件。测试中内存事件量远小于该上限，故 reconcileLimit 恒为此值。
+const INITIAL_LOAD_LIMIT = 200;
+
 const navigateMock = vi.fn();
 
 vi.mock('@tanstack/react-router', async (importOriginal) => {
@@ -222,7 +226,7 @@ describe('ChatPage incremental refresh issue 769', () => {
 
     expect(loadEventsDetailed).toHaveBeenCalledTimes(1);
     expect(screen.getByText('初始事件')).toBeInTheDocument();
-    expect(loadEventsDetailed.mock.calls[0]).toEqual([]);
+    expect(loadEventsDetailed.mock.calls[0]).toEqual([{ limit: INITIAL_LOAD_LIMIT }]);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
@@ -371,7 +375,7 @@ describe('ChatPage incremental refresh issue 769', () => {
     });
 
     expect(loadEventsDetailed).toHaveBeenCalledTimes(1);
-    expect(loadEventsDetailed).toHaveBeenNthCalledWith(1);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(1, { limit: INITIAL_LOAD_LIMIT });
     expect(secondRender.queryByText('初始事件')).not.toBeInTheDocument();
     expect(secondRender.getByText('Bob 的新事件')).toBeInTheDocument();
     expect(keepAliveState?.profileId).toBe('profile-bob');
@@ -406,7 +410,7 @@ describe('ChatPage incremental refresh issue 769', () => {
     });
 
     expect(loadEventsDetailed).toHaveBeenCalledTimes(2);
-    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, undefined);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, { limit: INITIAL_LOAD_LIMIT });
     expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
     expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
     expect(mockedLog.info).toHaveBeenCalledWith(expect.stringContaining('"mode":"full"'));
@@ -446,7 +450,7 @@ describe('ChatPage incremental refresh issue 769', () => {
     });
 
     expect(loadEventsDetailed).toHaveBeenCalledTimes(2);
-    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, undefined);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(2, { limit: INITIAL_LOAD_LIMIT });
     expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
     expect(screen.getByText('初始事件')).toBeInTheDocument();
     expect(screen.getByText('外部同步带来的新尾事件')).toBeInTheDocument();
@@ -522,7 +526,7 @@ describe('ChatPage incremental refresh issue 769', () => {
       sinceId: 'evt-initial',
       sinceTimestamp: initialEvent.timestamp,
     });
-    expect(loadEventsDetailed).toHaveBeenNthCalledWith(3);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(3, { limit: INITIAL_LOAD_LIMIT });
     expect(screen.queryByText('初始事件')).not.toBeInTheDocument();
     expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
   });
@@ -570,7 +574,7 @@ describe('ChatPage incremental refresh issue 769', () => {
       sinceId: 'evt-initial',
       sinceTimestamp: initialEvent.timestamp,
     });
-    expect(loadEventsDetailed).toHaveBeenNthCalledWith(3);
+    expect(loadEventsDetailed).toHaveBeenNthCalledWith(3, { limit: INITIAL_LOAD_LIMIT });
     expect(screen.getByText('补导入的历史事件')).toBeInTheDocument();
     expect(screen.getByText('初始事件')).toBeInTheDocument();
     expect(screen.getByText('轮询先看到的新尾事件')).toBeInTheDocument();
