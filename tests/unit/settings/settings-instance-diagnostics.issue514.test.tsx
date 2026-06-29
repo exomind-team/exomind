@@ -234,14 +234,6 @@ vi.mock('@/ui/app/components/UserCard', () => ({
   UserCard: () => null,
 }));
 
-vi.mock('@/ui/app/components/MoreSection', () => ({
-  MoreSection: () => null,
-}));
-
-vi.mock('@/ui/app/components/AboutSection', () => ({
-  AboutSection: () => null,
-}));
-
 vi.mock('@/ui/app/config/settings/LogPanelDialog', () => ({
   LogPanelDialog: () => null,
 }));

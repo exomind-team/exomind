@@ -35,13 +35,8 @@ describe('ordinary pages phase 2 regression（普通页面阶段二回归）', (
     expect(source).toContain('headerBottom={<TaskDomainTabs active="proposals" />}');
   });
 
-  it('keeps MePage and RemindersPage on shared shell plus PageTabs（Me 与提醒页继续走共享壳层和 PageTabs）', () => {
-    const meSource = readSource('src/ui/app/pages/MePage.tsx');
+  it('keeps RemindersPage on shared shell plus PageTabs（提醒页继续走共享壳层和 PageTabs）', () => {
     const remindersSource = readSource('src/ui/app/pages/RemindersPage.tsx');
-
-    expect(meSource).toContain('<PageShell');
-    expect(meSource).toContain('title="Me"');
-    expect(meSource).toContain('<PageTabs');
 
     expect(remindersSource).toContain('<PageShell');
     expect(remindersSource).toContain('title="提醒"');

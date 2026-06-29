@@ -16,9 +16,8 @@ function getBaseCtx(): SettingsContext {
     isTauriWindow: false,
     developerMode: false,
     desktopAdaptiveEnabled: false,
-    voiceShortcutAsrProvider: 'moss',
-    voiceRuntimeProvider: 'doubao-o2-realtime',
-    voiceRuntimeMode: 'push-to-talk',
+    // ASR provider 已归一为火山-only。
+    voiceShortcutAsrProvider: 'volcano',
   };
 }
 
@@ -41,16 +40,17 @@ function flattenVisible(items: SettingsItem[], ctx: SettingsContext): SettingsIt
 }
 
 describe('settings registry coverage audit', () => {
-  it('exposes the new top-level voice groups and removes legacy voice groups（顶层语音分组替代旧入口）', () => {
+  it('exposes the single top-level voice input group and removes legacy voice groups（顶层只保留快捷语音输入分组，移除旧语音入口）', () => {
     const topLevelIds = SETTINGS_REGISTRY.map((item) => item.id);
 
     expect(topLevelIds).toContain('voice-input-settings');
-    expect(topLevelIds).toContain('voice-assistant-settings');
+    // 常驻语音助手 / 实时语音子系统已删除，对应顶层分组不应再出现。
+    expect(topLevelIds).not.toContain('voice-assistant-settings');
     expect(topLevelIds).not.toContain('voice-dialogue-settings');
     expect(topLevelIds).not.toContain('voice-diagnostics-settings');
   });
 
-  it('keeps critical voice child settings inside the two capability groups（关键语音子项收口到两大能力组）', () => {
+  it('keeps the critical voice input child settings and drops removed runtime/assistant rows（保留快捷语音输入关键子项，移除已删的助手/实时语音子项）', () => {
     const allIds = flattenAll(SETTINGS_REGISTRY).map((item) => item.id);
 
     [
@@ -60,14 +60,21 @@ describe('settings registry coverage audit', () => {
       'voice-shortcut-send-mode',
       'voice-auto-record',
       'voice-shortcut-hotkey',
+    ].forEach((id) => {
+      expect(allIds).toContain(id);
+    });
+
+    [
       'voice-assistant-provider-settings',
       'voice-runtime-cloud-session-policy',
       'voice-runtime-auto-speak-enabled',
       'voice-runtime-doubao-app-id',
       'voice-runtime-omni-compatible-model',
       'voice-runtime-omni-api-key',
+      'voice-omni-profile',
+      'voice-omni-prompts',
     ].forEach((id) => {
-      expect(allIds).toContain(id);
+      expect(allIds).not.toContain(id);
     });
   });
 
@@ -80,13 +87,10 @@ describe('settings registry coverage audit', () => {
       'sound-preset',
       'focus-bgm',
       'voice-input-provider-settings',
-      'voice-omni-profile',
-      'voice-omni-prompts',
       'volcano-engine-key',
       'volcano-usage-summary',
       'moss-voice-test',
       'volcano-asr-test',
-      'voice-assistant-provider-settings',
       'ai-registry',
       'data-transfer',
       'instance-diagnostics',
@@ -94,68 +98,30 @@ describe('settings registry coverage audit', () => {
     ]);
   });
 
-  it('keeps provider-specific rows visible only in matching contexts（provider 定向配置只在匹配上下文可见）', () => {
-    const mossIds = flattenVisible(getVisibleSettings(getBaseCtx()), getBaseCtx()).map((item) => item.id);
-    const volcanoCtx = { ...getBaseCtx(), voiceShortcutAsrProvider: 'volcano' };
-    const volcanoIds = flattenVisible(getVisibleSettings(volcanoCtx), volcanoCtx).map((item) => item.id);
-    const qwenCtx = { ...getBaseCtx(), voiceShortcutAsrProvider: 'qwen-omni' };
-    const qwenIds = flattenVisible(getVisibleSettings(qwenCtx), qwenCtx).map((item) => item.id);
-    const developerQwenCtx = { ...qwenCtx, developerMode: true };
-    const developerQwenIds = flattenVisible(getVisibleSettings(developerQwenCtx), developerQwenCtx).map((item) => item.id);
-
-    expect(mossIds).toContain('moss-api-token');
-    expect(mossIds).not.toContain('volcano-engine-key');
-    expect(volcanoIds).toContain('volcano-engine-key');
-    expect(volcanoIds).toContain('volcano-endpoint');
-    expect(volcanoIds).not.toContain('moss-api-token');
-    expect(qwenIds).not.toContain('voice-omni-profile');
-    expect(qwenIds).not.toContain('voice-omni-model');
-    expect(qwenIds).not.toContain('volcano-engine-key');
-    expect(developerQwenIds).toContain('voice-omni-profile');
-    expect(developerQwenIds).toContain('voice-omni-model');
-    expect(developerQwenIds).not.toContain('volcano-engine-key');
-  });
-
-  it('switches provider config by runtime provider and keeps diagnostics out of registry children（provider 配置可切换且诊断入口不再挂在 registry 子项）', () => {
+  it('gates provider-specific rows by volcano provider and developer mode（provider 定向配置受火山 provider 与开发者模式控制）', () => {
     const baseCtx = getBaseCtx();
-    const omniCompatibleCtx = { ...getBaseCtx(), voiceRuntimeProvider: 'qwen-omni-compatible' };
-    const omniRealtimeCtx = { ...getBaseCtx(), voiceRuntimeProvider: 'qwen-omni-realtime' };
-    const developerOmniCompatibleCtx = { ...omniCompatibleCtx, developerMode: true };
-    const developerOmniRealtimeCtx = { ...omniRealtimeCtx, developerMode: true };
-
     const baseIds = flattenVisible(getVisibleSettings(baseCtx), baseCtx).map((item) => item.id);
-    const omniCompatibleIds = flattenVisible(getVisibleSettings(omniCompatibleCtx), omniCompatibleCtx).map((item) => item.id);
-    const omniRealtimeIds = flattenVisible(getVisibleSettings(omniRealtimeCtx), omniRealtimeCtx).map((item) => item.id);
-    const developerOmniCompatibleIds = flattenVisible(
-      getVisibleSettings(developerOmniCompatibleCtx),
-      developerOmniCompatibleCtx,
-    ).map((item) => item.id);
-    const developerOmniRealtimeIds = flattenVisible(
-      getVisibleSettings(developerOmniRealtimeCtx),
-      developerOmniRealtimeCtx,
-    ).map((item) => item.id);
+    const developerCtx = { ...baseCtx, developerMode: true };
+    const developerIds = flattenVisible(getVisibleSettings(developerCtx), developerCtx).map((item) => item.id);
 
-    expect(baseIds).not.toContain('voice-runtime-lab-nav-enabled');
-    expect(baseIds).not.toContain('open-voice-runtime-lab');
-    expect(omniCompatibleIds).not.toContain('voice-runtime-lab-nav-enabled');
-    expect(omniRealtimeIds).not.toContain('open-voice-runtime-lab');
+    // 火山 provider 下，火山配置项常驻可见。
+    expect(baseIds).toContain('volcano-engine-key');
+    expect(baseIds).toContain('volcano-endpoint');
+    // MOSS（暂留）与诊断项收口到开发者模式。
+    expect(baseIds).not.toContain('moss-api-token');
+    expect(baseIds).not.toContain('moss-voice-test');
+    expect(baseIds).not.toContain('volcano-asr-test');
 
-    expect(baseIds).toContain('voice-runtime-doubao-app-id');
-    expect(omniCompatibleIds).not.toContain('voice-runtime-omni-compatible-model');
-    expect(omniCompatibleIds).not.toContain('voice-runtime-doubao-app-id');
-    expect(omniRealtimeIds).not.toContain('voice-runtime-omni-api-key');
-    expect(omniRealtimeIds).not.toContain('voice-runtime-omni-model');
-    expect(developerOmniCompatibleIds).toContain('voice-runtime-omni-compatible-model');
-    expect(developerOmniCompatibleIds).not.toContain('voice-runtime-doubao-app-id');
-    expect(developerOmniRealtimeIds).toContain('voice-runtime-omni-api-key');
-    expect(developerOmniRealtimeIds).toContain('voice-runtime-omni-model');
+    expect(developerIds).toContain('volcano-engine-key');
+    expect(developerIds).toContain('moss-api-token');
+    expect(developerIds).toContain('moss-voice-test');
+    expect(developerIds).toContain('volcano-asr-test');
   });
 
   it('keeps the inline developer toggle checklist in sync with its audited child settings（开发者分组内联开关清单与审计项保持一致）', async () => {
     const registryModule = await import('@/ui/app/config/settings/settings-registry');
 
     expect(registryModule.FEATURE_TOGGLE_SETTING_IDS).toEqual([
-      'me-page-enabled',
       'agent-page-enabled',
       'goals-page-enabled',
       'proposal-inbox-enabled',

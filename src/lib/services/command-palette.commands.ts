@@ -1,20 +1,15 @@
 import type { CommandDefinition } from '@/lib/types/command-palette';
 
-export type CoreNavigationPath = '/' | '/eventlog' | '/tasks' | '/reminders' | '/settings' | '/me' | '/agents';
+export type CoreNavigationPath = '/' | '/eventlog' | '/tasks' | '/reminders' | '/settings' | '/agents';
 
 interface CreateCoreNavigationCommandsOptions {
   navigate: (path: CoreNavigationPath) => Promise<void> | void;
   openReminderComposer?: () => void;
-  featureFlags?: {
-    mePageEnabled?: boolean;
-  };
 }
 
 export function createCoreNavigationCommands(
   options: CreateCoreNavigationCommandsOptions,
 ): CommandDefinition[] {
-  const mePageEnabled = options.featureFlags?.mePageEnabled ?? true;
-
   return [
     {
       id: 'navigate:home',
@@ -81,19 +76,6 @@ export function createCoreNavigationCommands(
         return { ok: true };
       },
     },
-    ...(mePageEnabled ? [{
-      id: 'navigate:me',
-      title: '打开 Me',
-      description: '跳转到用户页面',
-      category: 'navigation',
-      permissionTier: 'safe',
-      aliases: ['me', '我的', '个人'],
-      keywords: ['账户', 'profile'],
-      async execute() {
-        await options.navigate('/me');
-        return { ok: true };
-      },
-    } satisfies CommandDefinition] : []),
     {
       id: 'navigate:reminders',
       title: '打开提醒',

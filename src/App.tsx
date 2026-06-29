@@ -19,29 +19,20 @@ import {
   getVoiceShortcutService,
 } from "@/services/voice-shortcut.service";
 import {
-  destroyVoiceAssistantRuntimeService,
-  initVoiceAssistantRuntimeService,
-} from "@/services/voice-assistant-runtime.service";
-import {
   getMainWindowShortcutService,
   initMainWindowShortcutService,
 } from "@/services/main-window-shortcut.service";
-import { getNowWorkbenchOverlayService } from "@/services/now-workbench-overlay.service";
 import "./App.css";
 
 function App() {
   useEffect(() => {
     initUpdateChecker();
     initVoiceShortcutService();
-    void initVoiceAssistantRuntimeService();
     initMainWindowShortcutService();
-    void getNowWorkbenchOverlayService().init();
     return () => {
       destroyUpdateChecker();
       getVoiceShortcutService().destroy();
-      void destroyVoiceAssistantRuntimeService();
       getMainWindowShortcutService().destroy();
-      getNowWorkbenchOverlayService().destroy();
     };
   }, []);
 

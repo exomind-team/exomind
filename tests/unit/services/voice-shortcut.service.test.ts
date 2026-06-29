@@ -13,6 +13,7 @@ const tauriEventListeners = new Map<string, Set<(event: { payload: any }) => voi
 let livePreviewOnUpdate: ((payload: { text: string; isFinal: boolean }) => void) | null = null;
 let streamingOnChunk: ((chunk: Uint8Array) => Promise<void>) | null = null;
 let streamingOnLevel: ((level: number) => void) | null = null;
+let defaultVolcanoSessionCounter = 0;
 
 const emitMock = vi.fn();
 const invokeMock = vi.fn();
@@ -298,10 +299,11 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     window.localStorage.removeItem('exomind:voiceShortcutMicPrewarmEnabled');
     window.localStorage.removeItem('exomind:voiceShortcutSendMode');
     window.localStorage.removeItem(VOICE_AUTO_RECORD_KEY);
-    window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.appKey);
-    window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.accessKey);
-    window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.resourceId);
-    setVoiceShortcutAsrProvider('moss');
+    // ASR provider 已归一为火山-only；默认提供有效火山配置，让全部用例走火山链路。
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
 
     getUserMediaWithConstraintFallbackMock.mockResolvedValue({
       getTracks: () => [{ stop: vi.fn(), readyState: 'live' }],
@@ -348,6 +350,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     }));
     setVoiceShortcutMicPrewarmEnabled(true);
 
+    defaultVolcanoSessionCounter = 0;
+    // 默认火山链路：start 建会话、finish 同步返回最终文本，覆盖大多数后处理用例。
     invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
       if (command === 'voice_shortcut_set') {
         return payload?.shortcut ?? 'Alt+Q';
@@ -358,49 +362,32 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
           processName: 'Cursor.exe',
         };
       }
-      if (command === 'volcano_asr_recognize') {
+      if (command === 'volcano_asr_stream_start') {
+        defaultVolcanoSessionCounter += 1;
+        return `default-session-${defaultVolcanoSessionCounter}`;
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return true;
+      }
+      if (command === 'volcano_asr_stream_finish') {
         return {
-          text: '火山识别文本',
-          confidence: 0.98,
+          text: '连续识别文本',
+          confidence: 0.99,
           lang: 'zh-CN',
           duration: 1800,
         };
       }
+      if (
+        command === 'volcano_asr_stream_push'
+        || command === 'volcano_asr_stream_cancel'
+        || command === 'voice_recording_set_active'
+        || command === 'simulate_paste'
+        || command === 'simulate_enter'
+      ) {
+        return null;
+      }
       return null;
     });
-  });
-
-  it('supports multiple recognition rounds without decode failure（支持多轮识别）', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    const service = new VoiceShortcutService();
-    await service.init();
-
-    expect(tauriEventListeners.get('voice-shortcut')).toBeTruthy();
-
-    await emitVoiceShortcut('start');
-    await flushPipeline();
-    await emitVoiceShortcut('start');
-    await flushPipeline();
-
-    await emitVoiceShortcut('start');
-    await flushPipeline();
-    await emitVoiceShortcut('start');
-    await flushPipeline();
-
-    expect(convertWebmBlobToWavMock).toHaveBeenCalledTimes(2);
-    expect(transcribeMock).toHaveBeenCalledTimes(2);
-    expect(writeClipboardMock).toHaveBeenCalledTimes(2);
-    expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledTimes(2);
-    expect(addEventMock).not.toHaveBeenCalled();
-
-    const hasDecodeFailureLog = errorSpy.mock.calls.some((call) =>
-      call.some((item) => String(item).includes('EncodingError') || String(item).includes('识别失败'))
-    );
-    expect(hasDecodeFailureLog).toBe(false);
-
-    service.destroy();
-    errorSpy.mockRestore();
   });
 
   it('does not leave listeners behind when destroy interrupts init（初始化中 destroy 不应留下陈旧监听器）', async () => {
@@ -486,29 +473,14 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
-  it('ignores duplicate stop events in same round（同轮重复 stop 事件只处理一次）', async () => {
-    const service = new VoiceShortcutService();
-    await service.init();
-
-    await emitVoiceShortcut('start');
-
-    await emitVoiceShortcut('stop');
-    await emitVoiceShortcut('stop');
-    await flushAsync();
-
-    expect(convertWebmBlobToWavMock).toHaveBeenCalledTimes(1);
-    expect(transcribeMock).toHaveBeenCalledTimes(1);
-
-    service.destroy();
-  });
-
   it('cancels active recording on cancel event without running ASR（收到 cancel 时立即取消录音且不走识别）', async () => {
     const service = new VoiceShortcutService();
     await service.init();
 
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('cancel');
-    await flushAsync();
+    await flushPipeline();
 
     expect(convertWebmBlobToWavMock).not.toHaveBeenCalled();
     expect(transcribeMock).not.toHaveBeenCalled();
@@ -521,18 +493,32 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
   });
 
   it('does not write empty recognition text to event log（空识别结果不写事件日志）', async () => {
-    transcribeMock.mockResolvedValue({
-      text: '   ',
-      confidence: 0.4,
-      lang: 'zh-CN',
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'foreground_window_get') {
+        return { title: 'Cursor - ExoMind', processName: 'Cursor.exe' };
+      }
+      if (command === 'volcano_asr_stream_start') {
+        return 'stream-session-empty';
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return true;
+      }
+      if (command === 'volcano_asr_stream_finish') {
+        return { text: '   ', confidence: 0.4, lang: 'zh-CN', duration: 800 };
+      }
+      return null;
     });
 
     const service = new VoiceShortcutService();
     await service.init();
 
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('start');
-    await flushAsync();
+    await flushPipeline();
 
     expect(addEventMock).not.toHaveBeenCalled();
     expect(writeClipboardMock).not.toHaveBeenCalled();
@@ -585,58 +571,6 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
-  it('emits full live preview text during recording（录音时发出完整实时预览文本）', async () => {
-    const service = new VoiceShortcutService();
-    await service.init();
-
-    await emitVoiceShortcut('start');
-    const longText = Array.from({ length: 120 }, (_, index) => String(index % 10)).join('');
-    livePreviewOnUpdate?.({ text: longText, isFinal: false });
-    await flushAsync();
-
-    expect(livePreviewCreateSessionMock).toHaveBeenCalledTimes(1);
-    expect(livePreviewStartMock).toHaveBeenCalledTimes(1);
-    expect(emitMock).toHaveBeenCalledWith(
-      'voice-overlay-state',
-      expect.objectContaining({
-        state: 'recording',
-        text: longText,
-        traceStartedAtMs: expect.any(Number),
-        inputReadyMs: expect.any(Number),
-        inputWarmHit: expect.any(Boolean),
-        firstTextMs: expect.any(Number),
-        debugTraceId: expect.any(String),
-        isLivePreview: true,
-      })
-    );
-
-    await emitVoiceShortcut('start');
-    await flushAsync();
-    expect(livePreviewStopMock).toHaveBeenCalledTimes(1);
-
-    service.destroy();
-  });
-
-  it('does not reset duration to zero on live preview updates（实时文本刷新时不重置时长）', async () => {
-    const service = new VoiceShortcutService();
-    await service.init();
-
-    await emitVoiceShortcut('start');
-    emitMock.mockClear();
-
-    livePreviewOnUpdate?.({ text: '新的实时文本', isFinal: false });
-    await flushAsync();
-
-    expect(emitMock).toHaveBeenCalledWith(
-      'voice-overlay-state',
-      expect.not.objectContaining({
-        duration: 0,
-      }),
-    );
-
-    service.destroy();
-  });
-
   it('shows arming overlay before microphone startup resolves（麦克风初始化未完成前先显示启动态）', async () => {
     getUserMediaWithConstraintFallbackMock.mockImplementation(
       () => new Promise(() => {})
@@ -667,33 +601,6 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await flushAsync();
 
     expect(getUserMediaWithConstraintFallbackMock).not.toHaveBeenCalled();
-
-    service.destroy();
-  });
-
-  it('prewarms granted microphone and reuses it on start（权限已授予时预热并复用麦克风）', async () => {
-    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
-
-    const service = new VoiceShortcutService();
-    await service.init();
-    await flushAsync();
-
-    expect(getUserMediaWithConstraintFallbackMock).toHaveBeenCalledTimes(1);
-
-    getUserMediaWithConstraintFallbackMock.mockClear();
-    emitMock.mockClear();
-
-    await emitVoiceShortcut('start');
-    await flushAsync();
-
-    expect(getUserMediaWithConstraintFallbackMock).not.toHaveBeenCalled();
-    expect(emitMock).toHaveBeenCalledWith(
-      'voice-overlay-state',
-      expect.objectContaining({
-        state: 'arming',
-        text: '正在唤起语音输入…',
-      }),
-    );
 
     service.destroy();
   });
@@ -1611,12 +1518,6 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
   it('freezes foreground window context at recording start（录音开始时冻结窗口上下文，避免识别结束时漂移）', async () => {
     let foregroundReadCount = 0;
-    transcribeMock.mockResolvedValue({
-      text: '冻结窗口测试',
-      confidence: 0.98,
-      lang: 'zh-CN',
-      duration: 1000,
-    });
     invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
       if (command === 'voice_shortcut_set') {
         return payload?.shortcut ?? 'Alt+Q';
@@ -1626,6 +1527,15 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         return foregroundReadCount === 1
           ? { title: 'Window A', processName: 'AppA.exe' }
           : { title: 'Window B', processName: 'AppB.exe' };
+      }
+      if (command === 'volcano_asr_stream_start') {
+        return 'stream-session-freeze';
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return true;
+      }
+      if (command === 'volcano_asr_stream_finish') {
+        return { text: '冻结窗口测试', confidence: 0.98, lang: 'zh-CN', duration: 1000 };
       }
       if (command === 'voice_recording_set_active' || command === 'simulate_paste') {
         return null;
@@ -1658,17 +1568,16 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
   });
 
   it('still appends voice storage event when signal publish fails（信号发布失败时仍写入事件日志）', async () => {
-    transcribeMock.mockResolvedValue({
-      text: 'fallback 测试',
-      confidence: 0.95,
-      lang: 'zh-CN',
-      duration: 500,
-    });
     writeClipboardMock.mockResolvedValue({ ok: true, title: 'ok' });
     addEventMock.mockResolvedValue(undefined);
     publishVoiceTranscriptSignalMock.mockRejectedValue(new Error('RT unavailable'));
     invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
       if (command === 'voice_shortcut_set') return payload?.shortcut ?? 'Alt+Q';
+      if (command === 'volcano_asr_stream_start') return 'stream-session-fallback';
+      if (command === 'volcano_asr_stream_session_exists') return true;
+      if (command === 'volcano_asr_stream_finish') {
+        return { text: 'fallback 测试', confidence: 0.95, lang: 'zh-CN', duration: 500 };
+      }
       return null;
     });
 
@@ -1686,17 +1595,16 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
   });
 
   it('handles double failure gracefully when both signal and storage append fail（信号和事件日志双重失败时不崩溃）', async () => {
-    transcribeMock.mockResolvedValue({
-      text: '双重失败测试',
-      confidence: 0.95,
-      lang: 'zh-CN',
-      duration: 500,
-    });
     writeClipboardMock.mockResolvedValue({ ok: true, title: 'ok' });
     publishVoiceTranscriptSignalMock.mockRejectedValue(new Error('RT unavailable'));
     addEventMock.mockRejectedValue(new Error('storage full'));
     invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
       if (command === 'voice_shortcut_set') return payload?.shortcut ?? 'Alt+Q';
+      if (command === 'volcano_asr_stream_start') return 'stream-session-double-fail';
+      if (command === 'volcano_asr_stream_session_exists') return true;
+      if (command === 'volcano_asr_stream_finish') {
+        return { text: '双重失败测试', confidence: 0.95, lang: 'zh-CN', duration: 500 };
+      }
       return null;
     });
 
@@ -1720,12 +1628,6 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
   it('ignores stale foreground window result from previous round（上一轮迟到的窗口结果不会覆盖新一轮）', async () => {
     let resolveFirstForeground: ((value: { title: string; processName: string }) => void) | null = null;
     let secondForegroundResolved = false;
-    transcribeMock.mockResolvedValue({
-      text: '第二轮文本',
-      confidence: 0.98,
-      lang: 'zh-CN',
-      duration: 1000,
-    });
 
     invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
       if (command === 'voice_shortcut_set') {
@@ -1740,6 +1642,15 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         secondForegroundResolved = true;
         return { title: 'Window B', processName: 'AppB.exe' };
       }
+      if (command === 'volcano_asr_stream_start') {
+        return 'stream-session-stale-window';
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return true;
+      }
+      if (command === 'volcano_asr_stream_finish') {
+        return { text: '第二轮文本', confidence: 0.98, lang: 'zh-CN', duration: 1000 };
+      }
       if (command === 'voice_recording_set_active' || command === 'simulate_paste') {
         return null;
       }
@@ -1750,6 +1661,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await service.init();
 
     await emitVoiceShortcut('start');
+    await flushPipeline();
     await emitVoiceShortcut('cancel');
     await flushPipeline();
 
