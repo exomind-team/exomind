@@ -646,13 +646,13 @@ async fn default_signal_routes_include_voice_input_ingest_and_normalized_routes(
 
     let normalized_route = route_list.iter().find(|route| {
         route["topic"] == "user.input.normalized"
-            && route["target_type"] == "agent"
-            && route["target_ref"] == "classifier"
+            && route["target_type"] == "actor"
+            && route["target_ref"] == "eventlog"
             && route["enabled"] == true
     });
 
     assert!(
         normalized_route.is_some(),
-        "default routes should include user.input.normalized -> classifier"
+        "default routes should include user.input.normalized -> eventlog"
     );
 }

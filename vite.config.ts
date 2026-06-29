@@ -74,7 +74,6 @@ export default defineConfig(({ mode }) => {
     "**/test-results/**",
     "**/playwright-report/**",
     "**/website/**",
-    "**/packages/ts-agent-cli/**",
   ];
   const runtimePort = parsePort(readEnvValue(envMap, 'EXOMIND_RT_PORT'), 9124);
   const runtimeProxyTarget = `http://127.0.0.1:${runtimePort}`;
