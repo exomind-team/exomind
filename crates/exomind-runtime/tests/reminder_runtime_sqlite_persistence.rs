@@ -11,7 +11,6 @@ async fn reminder_routes_persist_in_sqlite_runtime() {
         port: 0,
         host_id: "reminder-rt-test".to_string(),
         spawn_builtin_actors: false,
-        spawn_ts_agents: false,
         data_dir: Some(temp_dir.path().join("runtime-data")),
         ..Default::default()
     })
