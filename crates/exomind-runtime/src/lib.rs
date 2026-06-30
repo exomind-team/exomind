@@ -34,6 +34,7 @@ pub mod routes;
 pub mod session;
 pub mod signal;
 mod sqlite_json_bridge;
+pub mod sqlite_util;
 pub mod task;
 pub mod tick;
 pub mod timeblock;
