@@ -21,18 +21,9 @@ vi.mock('@/config/agent-page-enabled', () => ({
   subscribeAgentPageEnabledChanges: subscribeNoop,
 }));
 
-vi.mock('@/config/me-page-enabled', () => ({
-  getMePageEnabled: () => false,
-  subscribeMePageEnabledChanges: subscribeNoop,
-}));
-
 vi.mock('@/config/goals-page-enabled', () => ({
   getGoalsPageEnabled: () => false,
   subscribeGoalsPageEnabledChanges: subscribeNoop,
-}));
-
-vi.mock('@/config/workbench-legacy-shim-enabled', () => ({
-  getWorkbenchLegacyShimEnabled: () => false,
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({

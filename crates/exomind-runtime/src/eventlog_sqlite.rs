@@ -21,6 +21,10 @@ impl SqliteEventLogStore {
 
         let connection =
             Connection::open(path).map_err(|error| format!("failed to open sqlite: {error}"))?;
+        // 注意:此库暂不启用 WAL。`snapshot_bytes()` 直接 `fs::read` 主库文件做 mesh
+        // 复制快照,WAL 模式下新写入滞留在 -wal sidecar 会导致快照不完整。要给
+        // eventlog 开 WAL 必须先让 snapshot_bytes 做 wal_checkpoint(TRUNCATE),
+        // 属于独立改动,见 issue #959 的后续项。
         let store = Self {
             path: path.to_path_buf(),
             connection: Mutex::new(connection),

@@ -135,7 +135,6 @@ describe('command palette scroll sync issue-243（高亮项滚动同步）', () 
     developerModeEnabled: true,
     commandPaletteEnabled: true,
     featureFlags: {
-      mePageEnabled: false,
       agentPageEnabled: true,
       goalsV2Enabled: false,
     },

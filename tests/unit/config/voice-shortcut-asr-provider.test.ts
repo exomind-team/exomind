@@ -10,12 +10,15 @@ describe('voice-shortcut-asr-provider', () => {
     window.localStorage.removeItem('exomind:voiceShortcutAsrProvider');
   });
 
-  it('defaults to moss and persists qwen-omni when selected', () => {
-    expect(VOICE_SHORTCUT_ASR_PROVIDER_VALUES).toEqual(['moss', 'volcano', 'qwen-omni']);
-    expect(getVoiceShortcutAsrProvider()).toBe('moss');
+  it('only supports volcano and always normalizes to volcano', () => {
+    expect(VOICE_SHORTCUT_ASR_PROVIDER_VALUES).toEqual(['volcano']);
+    expect(getVoiceShortcutAsrProvider()).toBe('volcano');
 
-    setVoiceShortcutAsrProvider('qwen-omni');
+    // Legacy persisted values must normalize back to volcano.
+    window.localStorage.setItem('exomind:voiceShortcutAsrProvider', 'moss');
+    expect(getVoiceShortcutAsrProvider()).toBe('volcano');
 
-    expect(getVoiceShortcutAsrProvider()).toBe('qwen-omni');
+    setVoiceShortcutAsrProvider('volcano');
+    expect(getVoiceShortcutAsrProvider()).toBe('volcano');
   });
 });

@@ -146,7 +146,6 @@ export default defineConfig(({ mode }) => {
         input: {
           main: path.resolve(__dirname, "index.html"),
           "voice-overlay": path.resolve(__dirname, "voice-overlay.html"),
-          "now-workbench-overlay": path.resolve(__dirname, "now-workbench-overlay.html"),
         },
       },
     },
