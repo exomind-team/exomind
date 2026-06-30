@@ -634,17 +634,19 @@ export function ChatPage({
 
     olderBackendFetchInFlightRef.current = true;
     try {
-      // until_timestamp 为闭区间，会带回与最早事件同毫秒的边界事件，
-      // 交由 prependOlderEventsAscending 按 id 去重，避免漏掉同毫秒下 id 更小的更早事件。
+      // 按 (timestamp, id) 复合游标向更早分页：拉取严格早于当前最旧事件的一页。
+      // 必须带 untilId，否则只比 timestamp 的游标翻不过「同时间戳大簇」
+      // （本库存在单时间戳逾两千条的批量导入），会在簇边界反复返回同一页而卡死。
       const olderResult = await eventLogService.current.loadEventsDetailed({
         untilTimestamp: oldest.timestamp,
+        untilId: oldest.id,
         limit: OLDER_PAGE_SIZE,
       });
       const olderAsc = sortEventsAscending(olderResult.events);
       const merged = prependOlderEventsAscending(current, olderAsc);
       const added = merged.length - current.length;
 
-      // 返回不足一页，或合并后没有任何新增，都视为后端已到最早历史。
+      // 复合游标返回的都是严格更早事件；不足一页即视为已到最早历史。
       if (olderAsc.length < OLDER_PAGE_SIZE || added === 0) {
         hasMoreOlderFromBackendRef.current = false;
       }

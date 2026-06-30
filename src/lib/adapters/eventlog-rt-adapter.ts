@@ -217,6 +217,9 @@ export class EventLogRtAdapter implements IEventLogPort {
     if (typeof options?.untilTimestamp === "number") {
       url.searchParams.set("until_timestamp", String(options.untilTimestamp));
     }
+    if (typeof options?.untilId === "string" && options.untilId.length > 0) {
+      url.searchParams.set("until_id", options.untilId);
+    }
     if (typeof options?.limit === "number") {
       url.searchParams.set("limit", String(options.limit));
     }

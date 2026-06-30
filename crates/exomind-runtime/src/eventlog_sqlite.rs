@@ -151,6 +151,62 @@ impl SqliteEventLogStore {
             .map_err(|error| format!("failed to collect cursor event list: {error}"))
     }
 
+    /// List events strictly OLDER than the `(timestamp, id)` cursor, newest-first.
+    ///
+    /// Symmetric to `list_events_after_cursor_filtered`. Uses the full
+    /// `(timestamp, id)` keyset so it can paginate past large clusters of events
+    /// that share a single timestamp — a `until_timestamp`-only cursor cannot,
+    /// because it keeps returning the same boundary-timestamp page.
+    pub fn list_events_before_cursor_filtered(
+        &self,
+        user_key: &str,
+        cursor_timestamp: i64,
+        cursor_id: &str,
+        filter: &EventListFilter,
+        limit: Option<usize>,
+    ) -> Result<Vec<EventRecord>, String> {
+        let connection = self.connection();
+        let mut sql = String::from(
+            "SELECT id, timestamp, content, tags_json, refs_json, metadata_json
+             FROM eventlog_events
+             WHERE user_key = ?
+               AND (timestamp < ? OR (timestamp = ? AND id < ?))",
+        );
+        let mut query_params = vec![
+            SqlValue::Text(user_key.to_string()),
+            SqlValue::Integer(cursor_timestamp),
+            SqlValue::Integer(cursor_timestamp),
+            SqlValue::Text(cursor_id.to_string()),
+        ];
+
+        if let Some(since_timestamp) = filter.since_timestamp {
+            sql.push_str(" AND timestamp >= ?");
+            query_params.push(SqlValue::Integer(since_timestamp));
+        }
+
+        for tag in &filter.tags {
+            sql.push_str(" AND tags_json LIKE ? ESCAPE '\\'");
+            query_params.push(SqlValue::Text(build_tag_like_pattern(tag)?));
+        }
+
+        sql.push_str(" ORDER BY timestamp DESC, id DESC");
+        if let Some(limit) = limit {
+            sql.push_str(" LIMIT ?");
+            query_params.push(SqlValue::Integer(limit as i64));
+        }
+
+        let mut statement = connection
+            .prepare(&sql)
+            .map_err(|error| format!("failed to prepare before-cursor event list: {error}"))?;
+
+        let rows = statement
+            .query_map(params_from_iter(query_params.iter()), map_event_row)
+            .map_err(|error| format!("failed to query before-cursor event list: {error}"))?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("failed to collect before-cursor event list: {error}"))
+    }
+
     pub fn append_event(&self, user_key: &str, event: &EventRecord) -> Result<(), String> {
         let connection = self.connection();
         connection
@@ -453,5 +509,54 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].id, "event-4");
         assert_eq!(events[1].id, "event-3");
+    }
+
+    #[test]
+    fn list_events_before_cursor_filtered_paginates_through_same_timestamp_cluster() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog.sqlite");
+        let store = SqliteEventLogStore::open(&sqlite_path).unwrap();
+
+        // A cluster of 10 events sharing one timestamp, plus 3 strictly older events.
+        // A timestamp-only cursor cannot page past such a cluster; the (timestamp, id)
+        // keyset must.
+        for index in 0..10 {
+            let id = format!("cluster-{index:02}");
+            store.append_event("u", &make_event(id.as_str(), 1000)).unwrap();
+        }
+        for index in 0..3 {
+            let id = format!("older-{index}");
+            store.append_event("u", &make_event(id.as_str(), 500)).unwrap();
+        }
+
+        // First page: strictly older than (1000, "cluster-05"), newest-first by (ts, id).
+        let page1 = store
+            .list_events_before_cursor_filtered("u", 1000, "cluster-05", &EventListFilter::default(), Some(4))
+            .unwrap();
+        let page1_ids: Vec<_> = page1.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(
+            page1_ids,
+            vec!["cluster-04", "cluster-03", "cluster-02", "cluster-01"],
+            "must walk down the same-timestamp cluster by id, not skip it"
+        );
+
+        // Continue from the page-1 tail across the cluster boundary into older timestamps.
+        let tail = page1.last().unwrap();
+        let page2 = store
+            .list_events_before_cursor_filtered("u", tail.timestamp, &tail.id, &EventListFilter::default(), Some(4))
+            .unwrap();
+        let page2_ids: Vec<_> = page2.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(
+            page2_ids,
+            vec!["cluster-00", "older-2", "older-1", "older-0"],
+            "must finish the cluster then cross into strictly older timestamps"
+        );
+
+        // Past the oldest event there is nothing more.
+        let oldest = page2.last().unwrap();
+        let page3 = store
+            .list_events_before_cursor_filtered("u", oldest.timestamp, &oldest.id, &EventListFilter::default(), Some(4))
+            .unwrap();
+        assert!(page3.is_empty(), "no events older than the earliest");
     }
 }
