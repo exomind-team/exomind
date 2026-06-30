@@ -89,7 +89,6 @@ describe('settings registry coverage audit', () => {
       'voice-input-provider-settings',
       'volcano-engine-key',
       'volcano-usage-summary',
-      'moss-voice-test',
       'volcano-asr-test',
       'ai-registry',
       'data-transfer',
@@ -107,14 +106,10 @@ describe('settings registry coverage audit', () => {
     // 火山 provider 下，火山配置项常驻可见。
     expect(baseIds).toContain('volcano-engine-key');
     expect(baseIds).toContain('volcano-endpoint');
-    // MOSS（暂留）与诊断项收口到开发者模式。
-    expect(baseIds).not.toContain('moss-api-token');
-    expect(baseIds).not.toContain('moss-voice-test');
+    // 诊断项收口到开发者模式。
     expect(baseIds).not.toContain('volcano-asr-test');
 
     expect(developerIds).toContain('volcano-engine-key');
-    expect(developerIds).toContain('moss-api-token');
-    expect(developerIds).toContain('moss-voice-test');
     expect(developerIds).toContain('volcano-asr-test');
   });
 

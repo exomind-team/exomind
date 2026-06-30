@@ -103,12 +103,6 @@ vi.mock('@/config/developer-mode', () => ({
   subscribeDeveloperModeChanges: () => () => {},
 }));
 
-vi.mock('@/lib/adapters/asr/moss-asr', () => ({
-  MOSSASRAdapter: class {
-    transcribe = (...args: unknown[]) => transcribeMock(...args);
-  },
-}));
-
 vi.mock('@/lib/media/wav-audio', () => ({
   convertWebmBlobToWav: (...args: unknown[]) => convertWebmBlobToWavMock(...args),
 }));

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { Bell, Bot, Check, ChevronRight, Code, Download, Eye, EyeOff, Key, Mic, Music4, Play, Timer, Upload, Wifi, X } from 'lucide-react';
+import { Bell, Check, ChevronRight, Code, Download, Eye, EyeOff, Key, Mic, Music4, Play, Timer, Upload, Wifi, X } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
@@ -932,7 +932,7 @@ function VoiceTestActionRow({
   blockedMessage = '请先开启开发者模式后使用语音测试',
 }: {
   label: string;
-  target: '/moss-test' | '/volcano-asr-test';
+  target: '/volcano-asr-test';
   icon: ReactNode;
   requiresDeveloperMode?: boolean;
   blockedLabel?: string;
@@ -965,10 +965,6 @@ function VoiceTestActionRow({
       <NoticeBlock message={error} tone="error" />
     </div>
   );
-}
-
-export function MossVoiceTestSetting(_props: { ctx: SettingsContext }) {
-  return <VoiceTestActionRow label="MOSS 语音测试" target="/moss-test" icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />} />;
 }
 
 export function VolcanoVoiceTestSetting(_props: { ctx: SettingsContext }) {

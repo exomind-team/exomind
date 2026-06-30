@@ -227,10 +227,6 @@ import {
   subscribeVoiceOverlayTranscriptLinesChanges,
 } from '@/config/voice-overlay-preferences';
 import {
-  getMossApiKey,
-  setMossApiKey,
-} from '@/config/moss-api-key';
-import {
   DEFAULT_VOLCANO_RESOURCE_ID,
   VOLCANO_ENDPOINT_OPTIONS,
   VOLCANO_LANGUAGE_OPTIONS,
@@ -288,7 +284,6 @@ import {
   DevicePairingSetting,
   FocusBgmSetting,
   SoundPresetSetting,
-  MossVoiceTestSetting,
   VolcanoEngineKeySetting,
   VolcanoUsageSummarySetting,
   VolcanoVoiceTestSetting,
@@ -330,35 +325,6 @@ import {
  * Do not read settings elsewhere by importing this registry and scanning it.
  * Product/runtime code should import the owning config/service module directly.
  */
-
-function normalizeMossApiKey(value: string): string {
-  if (!value) {
-    return '';
-  }
-  let normalized = value.trim();
-  normalized = normalized.replace(/^['"]|['"]$/g, '');
-  normalized = normalized.replace(/^Bearer\s+/i, '');
-  return normalized.trim();
-}
-
-function readStoredMossApiKey(): string {
-  return normalizeMossApiKey(getMossApiKey());
-}
-
-function writeStoredMossApiKey(value: string): void {
-  const normalized = normalizeMossApiKey(value);
-  setMossApiKey(normalized);
-}
-
-function maskStoredSecret(value: string): string {
-  if (!value) {
-    return '未配置';
-  }
-  if (value.length <= 6) {
-    return `${value.slice(0, 2)}***`;
-  }
-  return `${value.slice(0, 4)}***${value.slice(-2)}`;
-}
 
 function getFeedbackContentSelection(): string[] {
   const preferences = getFeedbackPreferences();
@@ -797,46 +763,6 @@ const VOICE_SHORTCUT_SETTINGS_GROUP: SettingsItem = {
       get: getVolcanoLanguageSetting,
       set: setVolcanoLanguageSetting,
       subscribe: subscribeVolcanoLanguageChanges,
-    },
-    {
-      id: 'moss-api-token',
-      label: 'MOSS API Token',
-      icon: Key,
-      category: 'voice',
-      rowTestId: 'new-settings-voice-token-row',
-      type: 'string',
-      visible: devOnly,
-      stringStyle: 'dialog',
-      sensitive: true,
-      dialogFieldKind: 'secret',
-      dialogFooterStart: {
-        type: 'secret-toggle',
-        showLabel: '显示 Token',
-        hideLabel: '隐藏 Token',
-      },
-      dialogFooterEnd: '用于新 UI 语音输入转写',
-      allowClear: true,
-      placeholder: '输入 MOSS API Token',
-      dialogTitle: '语音输入设置',
-      dialogDescription: '配置 MOSS API Token（仅保存在当前设备）',
-      emptyValueLabel: '未配置',
-      get: readStoredMossApiKey,
-      set: (value: string) => {
-        const normalized = normalizeMossApiKey(value);
-        writeStoredMossApiKey(normalized);
-        return normalized;
-      },
-      mask: (value: string) => `已配置 (${maskStoredSecret(value)})`,
-      successMessage: 'MOSS API Token 已保存',
-      clearSuccessMessage: 'MOSS API Token 已清除',
-    },
-    {
-      id: 'moss-voice-test',
-      label: 'MOSS 语音测试',
-      category: 'voice',
-      type: 'custom',
-      visible: devOnly,
-      component: MossVoiceTestSetting,
     },
     {
       id: 'volcano-asr-test',
