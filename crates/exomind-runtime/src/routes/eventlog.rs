@@ -34,6 +34,9 @@ struct EventLogQuery {
     since_id: Option<String>,
     since_timestamp: Option<i64>,
     until_timestamp: Option<i64>,
+    /// When paired with `until_timestamp`, pages strictly OLDER than the
+    /// `(until_timestamp, until_id)` keyset cursor (scroll-up pagination).
+    until_id: Option<String>,
     tags: Option<String>,
 }
 
@@ -212,6 +215,43 @@ async fn list_events(
     State(state): State<AppState>,
     Query(query): Query<EventLogQuery>,
 ) -> Result<(HeaderMap, Json<Vec<EventRecord>>), (StatusCode, Json<ErrorResponse>)> {
+    // Scroll-up pagination: list events strictly older than the
+    // `(until_timestamp, until_id)` keyset. Required so the chat timeline can
+    // page past clusters of events sharing a single timestamp — a
+    // `until_timestamp`-only cursor keeps returning the same boundary page.
+    if let (Some(until_id), Some(until_timestamp)) =
+        (query.until_id.as_deref(), query.until_timestamp)
+    {
+        let filter =
+            build_event_list_filter(query.since_timestamp, None, query.tags.as_deref(), None);
+        let events = state
+            .eventlog_store
+            .list_events_before_cursor_filtered(
+                query.user_id.as_deref(),
+                until_timestamp,
+                until_id,
+                &filter,
+                query.limit,
+            )
+            .map_err(internal_error)?;
+        let mut headers = HeaderMap::new();
+        if let Some(revision) = state
+            .eventlog_store
+            .current_revision(query.user_id.as_deref())
+            .map_err(internal_error)?
+        {
+            let header_value = HeaderValue::from_str(&revision.to_string()).map_err(|error| {
+                internal_error(format!("invalid eventlog revision header: {error}"))
+            })?;
+            headers.insert(EVENTLOG_REVISION_HEADER, header_value);
+        }
+        headers.insert(
+            EVENTLOG_LIST_SEMANTICS_HEADER,
+            HeaderValue::from_static("incremental_batch"),
+        );
+        return Ok((headers, Json(events)));
+    }
+
     let (events, cursor_found) = load_events_for_query(
         &state,
         query.user_id.as_deref(),

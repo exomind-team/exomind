@@ -206,6 +206,41 @@ impl EventLogStore {
         }
     }
 
+    /// List events strictly OLDER than the `(cursor_timestamp, cursor_id)` keyset,
+    /// newest-first. Backs the chat timeline's scroll-up pagination so it can walk
+    /// past large clusters of events sharing one timestamp.
+    pub fn list_events_before_cursor_filtered(
+        &self,
+        user_id: Option<&str>,
+        cursor_timestamp: i64,
+        cursor_id: &str,
+        filter: &EventListFilter,
+        limit: Option<usize>,
+    ) -> Result<Vec<EventRecord>, String> {
+        let normalized_user = sanitize_user_id(user_id);
+        match &self.backend {
+            EventLogBackend::JsonFiles => {
+                let mut events = self.list_events_filtered(user_id, filter)?;
+                events.retain(|event| {
+                    event.timestamp < cursor_timestamp
+                        || (event.timestamp == cursor_timestamp
+                            && event.id.as_str() < cursor_id)
+                });
+                if let Some(limit) = limit {
+                    events.truncate(limit);
+                }
+                Ok(events)
+            }
+            EventLogBackend::Sqlite(store) => store.list_events_before_cursor_filtered(
+                &normalized_user,
+                cursor_timestamp,
+                cursor_id,
+                filter,
+                limit,
+            ),
+        }
+    }
+
     fn list_cursor_fallback_snapshot(
         &self,
         user_id: Option<&str>,
