@@ -1,7 +1,5 @@
 import { listen, emit } from '@tauri-apps/api/event';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
-import { QwenOmniASRAdapter } from '@/lib/adapters/asr/qwen-omni-asr';
 import { getClipboardService } from '../lib/services/clipboard.service';
 import { appendEventWithEcsReplication } from '@/lib/services/ecs-eventlog-replication.service';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
@@ -39,12 +37,6 @@ import {
   type VoiceShortcutAsrProvider,
 } from '@/config/voice-shortcut-asr-provider';
 import {
-  getVoiceOmniModelId,
-  getVoiceOmniOptimizeEnabled,
-  getVoiceOmniProfileId,
-} from '@/config/voice-omni-settings';
-import { getVoiceOmniPromptDocs } from '@/config/voice-omni-prompts';
-import {
   DEFAULT_VOLCANO_RESOURCE_ID,
   VOLCANO_ENDPOINT_OPTIONS,
   VOLCANO_RESOURCE_PRESETS,
@@ -62,12 +54,7 @@ import {
   createVolcanoStreamingCapture,
   type VolcanoStreamingCapture,
 } from '@/lib/asr/volcano-streaming-capture';
-import { resolveProviderProfile } from '@/lib/agent-provider/provider-profile-storage';
 import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
-import {
-  buildQwenOmniOptimizePrompt,
-  buildQwenOmniTranscribePrompt,
-} from '@/lib/voice/qwen-omni-prompts';
 import {
   getVoiceOverlayBottomOffset,
   getVoiceOverlayShowDiagnostics,
@@ -100,15 +87,6 @@ type WarmVolcanoSessionSnapshot = {
   sessionId: string | null;
   createdAtMs: number | null;
   warmKey: string | null;
-};
-
-type VoiceOmniRuntimeConfig = {
-  profileId: string;
-  profileName: string;
-  apiKey: string;
-  baseUrl: string;
-  modelId: string;
-  optimizeEnabled: boolean;
 };
 
 type OverlayEventPayload = {
@@ -178,7 +156,6 @@ export class VoiceShortcutService {
   private mediaRecorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
   private mimeType: string | null = null;
-  private adapter: MOSSASRAdapter;
   private unlisten: (() => void) | null = null;
   private unlistenVolcanoStream: (() => void) | null = null;
   private unlistenHotkey: (() => void) | null = null;
@@ -225,7 +202,6 @@ export class VoiceShortcutService {
   private destroyed = false;
 
   constructor(livePreviewSource: VoiceLivePreviewSource = createDefaultVoiceLivePreviewSource()) {
-    this.adapter = new MOSSASRAdapter();
     this.livePreviewSource = livePreviewSource;
   }
 
@@ -1320,55 +1296,27 @@ export class VoiceShortcutService {
     };
   }
 
-  private isQwenOmniProvider(): boolean {
-    return String(this.asrProvider) === 'qwen-omni';
-  }
-
   private async transcribeWithSelectedProvider(wavData: Uint8Array): Promise<ASRResult> {
-    if (this.asrProvider === 'volcano') {
-      const config = this.getVolcanoRuntimeConfigOrThrow();
-      const pcmAudio = wavData.slice(44);
-      try {
-        return await invoke<ASRResult>('volcano_asr_recognize', {
-          audioData: Array.from(pcmAudio),
-          config,
-        });
-      } catch (error) {
-        const fallback = this.resolveVolcanoQuotaFallback(error, config);
-        if (!fallback) {
-          throw error;
-        }
-        if (!fallback.switched || !fallback.config) {
-          throw new Error(fallback.message);
-        }
-        return await invoke<ASRResult>('volcano_asr_recognize', {
-          audioData: Array.from(pcmAudio),
-          config: fallback.config,
-        });
+    const config = this.getVolcanoRuntimeConfigOrThrow();
+    const pcmAudio = wavData.slice(44);
+    try {
+      return await invoke<ASRResult>('volcano_asr_recognize', {
+        audioData: Array.from(pcmAudio),
+        config,
+      });
+    } catch (error) {
+      const fallback = this.resolveVolcanoQuotaFallback(error, config);
+      if (!fallback) {
+        throw error;
       }
-    }
-
-    if (this.isQwenOmniProvider()) {
-      const config = this.getVoiceOmniRuntimeConfigOrThrow();
-      const adapter = new QwenOmniASRAdapter({
-        profileName: config.profileName,
-        apiKey: config.apiKey,
-        baseUrl: config.baseUrl,
-        model: config.modelId,
-        optimizeEnabled: config.optimizeEnabled,
-        transcribePrompt: buildQwenOmniTranscribePrompt(getVoiceOmniPromptDocs()),
-        optimizePrompt: buildQwenOmniOptimizePrompt(getVoiceOmniPromptDocs()),
-      });
-      return await adapter.transcribe({
-        lang: 'zh-CN',
-        preRecordedAudio: wavData,
+      if (!fallback.switched || !fallback.config) {
+        throw new Error(fallback.message);
+      }
+      return await invoke<ASRResult>('volcano_asr_recognize', {
+        audioData: Array.from(pcmAudio),
+        config: fallback.config,
       });
     }
-
-    return await this.adapter.transcribe({
-      lang: 'zh-CN',
-      preRecordedAudio: wavData,
-    });
   }
 
   private releaseResources(): void {
@@ -1699,44 +1647,7 @@ export class VoiceShortcutService {
     return config;
   }
 
-  private getVoiceOmniRuntimeConfigOrThrow(): VoiceOmniRuntimeConfig {
-    const profileId = getVoiceOmniProfileId();
-    if (!profileId) {
-      throw new Error('Qwen Omni 未配置语音供应商档案，请先到设置中选择 provider profile');
-    }
-
-    const profile = resolveProviderProfile(profileId);
-    if (!profile?.apiKey || !profile.baseUrl) {
-      throw new Error('Qwen Omni 供应商档案不完整，请先在 AI Registry 中填写 Base URL 与 API Key');
-    }
-
-    const modelId = getVoiceOmniModelId();
-    if (!modelId) {
-      throw new Error('Qwen Omni 模型 ID 为空，请先到设置中填写模型 ID');
-    }
-
-    return {
-      profileId,
-      profileName: profile.name,
-      apiKey: profile.apiKey,
-      baseUrl: profile.baseUrl,
-      modelId,
-      optimizeEnabled: getVoiceOmniOptimizeEnabled(),
-    };
-  }
-
   private getActiveProviderLabel(): string {
-    if (this.asrProvider === 'moss') {
-      return 'MOSS · 云端识别';
-    }
-    if (this.isQwenOmniProvider()) {
-      try {
-        const config = this.getVoiceOmniRuntimeConfigOrThrow();
-        return `${config.modelId} · ${config.profileName}`;
-      } catch {
-        return 'Qwen Omni · 未配置';
-      }
-    }
     const config = getStoredVolcanoRuntimeConfig(import.meta.env as Record<string, string | undefined>);
     const resourceLabel = VOLCANO_RESOURCE_PRESETS.find(
       (item) => item.value === findVolcanoResourcePreset(config.resourceId || DEFAULT_VOLCANO_RESOURCE_ID),

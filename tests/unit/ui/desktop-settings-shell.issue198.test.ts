@@ -29,18 +29,13 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(desktopNavBlock).toContain("title: '目标'");
     expect(desktopNavBlock).toContain("path: '/goals'");
     expect(desktopNavBlock).toContain('icon: Orbit');
-    expect(desktopNavBlock).toContain('...(mePageEnabled ? [{');
-    expect(desktopNavBlock).toContain("title: 'Me'");
-    expect(desktopNavBlock).toContain("path: '/me'");
-    expect(desktopNavBlock).toContain("icon: UserRound");
     expect(desktopNavBlock).toContain("key: 'agents'");
     expect(desktopNavBlock).toContain("title: '网络'");
     expect(desktopNavBlock).toContain("path: '/agents'");
     expect(desktopNavBlock).toContain('icon: Waypoints');
-    expect(desktopNavBlock).toContain("key: 'workbench-test'");
-    expect(desktopNavBlock).toContain("title: '工作台测试'");
-    expect(desktopNavBlock).toContain("path: '/workbench'");
-    expect(desktopNavBlock).toContain('icon: FlaskConical');
+    expect(desktopNavBlock).not.toContain("key: 'workbench-test'");
+    expect(desktopNavBlock).not.toContain("title: '工作台测试'");
+    expect(desktopNavBlock).not.toContain("path: '/workbench'");
     expect(desktopNavBlock).toContain("title: '设置', path: '/settings'");
     expect(desktopNavBlock).not.toContain("title: '总览', path: '/dashboard'");
     expect(desktopNavBlock).not.toContain('事件日志');
@@ -68,9 +63,6 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(source).toContain("path: '/dashboard'");
   });
 
-  it('registers legal-support route（注册法律与支持二级路由）', () => {
-    expect(source).toContain("path: '/settings/legal-support'");
-  });
 
   it('supports desktop adaptive toggle guard（支持桌面适配开关守卫）', () => {
     expect(source).toContain('getDesktopAdaptiveEnabled');

@@ -1,18 +1,16 @@
 import { createConfigModule } from './config-factory';
 
-export const VOICE_SHORTCUT_ASR_PROVIDER_VALUES = ['moss', 'volcano', 'qwen-omni'] as const;
+export const VOICE_SHORTCUT_ASR_PROVIDER_VALUES = ['volcano'] as const;
 export type VoiceShortcutAsrProvider = (typeof VOICE_SHORTCUT_ASR_PROVIDER_VALUES)[number];
 
-function normalizeProvider(rawValue: string | null | undefined): VoiceShortcutAsrProvider {
-  if (rawValue === 'volcano') return 'volcano';
-  if (rawValue === 'qwen-omni') return 'qwen-omni';
-  return 'moss';
+function normalizeProvider(_rawValue: string | null | undefined): VoiceShortcutAsrProvider {
+  return 'volcano';
 }
 
 const _module = createConfigModule<VoiceShortcutAsrProvider>({
   storageKey: 'exomind:voiceShortcutAsrProvider',
   eventName: 'exomind:voice-shortcut-asr-provider-changed',
-  defaultValue: 'moss',
+  defaultValue: 'volcano',
   normalize: normalizeProvider,
   persistMode: 'runtime-preferred',
 });
@@ -31,8 +29,6 @@ export function subscribeVoiceShortcutAsrProviderChanges(
   return _module.subscribe(listener);
 }
 
-export function getVoiceShortcutAsrProviderLabel(provider: VoiceShortcutAsrProvider): string {
-  if (provider === 'volcano') return '火山';
-  if (provider === 'qwen-omni') return 'Qwen Omni';
-  return 'MOSS';
+export function getVoiceShortcutAsrProviderLabel(_provider: VoiceShortcutAsrProvider): string {
+  return '火山';
 }
