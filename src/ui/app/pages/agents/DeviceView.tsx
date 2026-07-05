@@ -1,6 +1,7 @@
-import { ChevronRight, Link2, Monitor, RadioTower, ShieldCheck, Wifi } from 'lucide-react';
+import { ChevronRight, Copy, Link2, Monitor, RadioTower, ShieldCheck, Wifi } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Switch } from '@/components/ui/switch';
+import { toast } from '@/components/ui/toast-hook';
 import type { AgentDeviceGroup, RuntimeServiceStatus } from '@/lib/types/agent-hub';
 import {
   resolveTopologyDevice,
@@ -24,6 +25,7 @@ import {
   type EnsPeerSnapshot,
   type EnsTransportSnapshot,
 } from '@/lib/services/runtime-ens.service';
+import { getClipboardService } from '@/lib/services/clipboard.service';
 import {
   formatHostMemory,
   formatHostUptime,
@@ -192,6 +194,17 @@ function ensDeliveryStatusClass(status: EnsDeliverySnapshot['status'] | null): s
 
 function ensDebugTestIdSegment(value: string): string {
   return value.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function formatReticulumIdentityPreview(identityHex: string): string {
+  const normalized = identityHex.trim();
+  if (!normalized || normalized === '--') {
+    return '--';
+  }
+  if (normalized.length <= 24) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 12)}...${normalized.slice(-8)}`;
 }
 
 function formatEnsPeerName(peer: EnsPeerSnapshot): string {
@@ -365,7 +378,9 @@ function ReticulumDebugPanel({
   const deliveries = Array.isArray(snapshot?.deliveries) ? snapshot.deliveries : [];
   const healthStatus = isEnsHealthStatus(snapshot?.health?.status) ? snapshot.health.status : null;
   const globalTopology = isEnsTopology(snapshot?.global_topology) ? snapshot.global_topology : null;
-  const localEndpointAddress = snapshot?.local_endpoint?.interface_address ?? '--';
+  const localIdentityHex = snapshot?.local_identity?.identity_hex ?? snapshot?.local_endpoint?.identity_hex ?? '--';
+  const localIdentityPreview = formatReticulumIdentityPreview(localIdentityHex);
+  const canCopyLocalIdentity = localIdentityPreview !== '--';
   const authorizedPeers = peers.filter((peer) => getEnsPeerPairingFacts(peer)?.authorized === true);
   const pairingPeers = peers.filter((peer) => {
     const facts = getEnsPeerPairingFacts(peer);
@@ -378,6 +393,24 @@ function ReticulumDebugPanel({
   const unknownPairingPeers = peers.filter((peer) => !getEnsPeerPairingFacts(peer));
   const lastConfirmedAt = snapshot?.updated_at ?? null;
   const isStale = Boolean(error && snapshot);
+
+  const handleCopyLocalIdentity = useCallback(async () => {
+    if (!canCopyLocalIdentity) {
+      return;
+    }
+
+    const result = await getClipboardService().writeText(localIdentityHex);
+    if (result.ok) {
+      toast({ title: '已复制本机身份' });
+      return;
+    }
+
+    toast({
+      title: result.title,
+      description: result.description,
+      variant: 'destructive',
+    });
+  }, [canCopyLocalIdentity, localIdentityHex]);
 
   return (
     <article
@@ -426,11 +459,31 @@ function ReticulumDebugPanel({
                 {formatEnsHealthLabel(healthStatus)}
               </p>
             </div>
-            <div data-testid="reticulum-local-endpoint" className="rounded-xl bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]">
-              <p className="text-[10px] text-[#A8A29E]">本机 endpoint</p>
-              <p data-testid="reticulum-local-endpoint-address" className="truncate text-[12px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
-                {localEndpointAddress}
-              </p>
+            <div
+              data-testid="reticulum-local-identity"
+              title={canCopyLocalIdentity ? localIdentityHex : undefined}
+              className="rounded-xl bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]"
+            >
+              <p className="text-[10px] text-[#A8A29E]">本机身份</p>
+              <button
+                type="button"
+                data-testid="reticulum-local-identity-copy"
+                title={canCopyLocalIdentity ? localIdentityHex : undefined}
+                aria-label={canCopyLocalIdentity ? '复制本机 Reticulum 身份 ID' : '本机 Reticulum 身份 ID 未就绪'}
+                onClick={() => {
+                  void handleCopyLocalIdentity();
+                }}
+                disabled={!canCopyLocalIdentity}
+                className="mt-1 flex w-full min-w-0 items-center gap-1 rounded-md text-left disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span
+                  data-testid="reticulum-local-identity-id"
+                  className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]"
+                >
+                  {localIdentityPreview}
+                </span>
+                {canCopyLocalIdentity && <Copy size={12} className="shrink-0 text-[#A8A29E]" aria-hidden="true" />}
+              </button>
             </div>
             <div className="rounded-xl bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]">
               <p className="text-[10px] text-[#A8A29E]">节点</p>
@@ -529,6 +582,14 @@ function ReticulumDebugPanel({
                         <p className="text-[10px] text-[#A8A29E]">
                           {item.type} · {item.online ? 'online' : 'offline'} · {item.outgoing ? 'outgoing' : 'incoming'}
                         </p>
+                        {item.interface_address && (
+                          <p
+                            data-testid={`reticulum-interface-${interfaceTestId}-endpoint`}
+                            className="truncate text-[10px] text-[#78716C] dark:text-[#A8A29E]"
+                          >
+                            endpoint {item.interface_address}
+                          </p>
+                        )}
                         <p className="text-[10px] text-[#78716C] dark:text-[#A8A29E]">
                           配置
                           <span data-testid={`reticulum-interface-${interfaceTestId}-configured`} className="mx-1 font-semibold">

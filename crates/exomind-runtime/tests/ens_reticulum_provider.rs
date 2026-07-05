@@ -1834,6 +1834,7 @@ async fn udp_dynamic_port_projects_actual_bound_endpoint_state() {
         .find(|interface| interface.name == public_name)
         .expect("dynamic UDP interface should be visible in provider snapshot");
     assert_eq!(udp.interface_type, "udp_interface");
+    assert_eq!(udp.interface_address.as_deref(), Some(projected.as_str()));
     assert_eq!(udp.topology, EnsInterfaceTopology::Active);
     assert_eq!(udp.effective_topology, EnsInterfaceTopology::Active);
     let snapshot_payload =
@@ -1901,6 +1902,7 @@ async fn tcp_server_dynamic_port_projects_actual_bound_endpoint_state() {
         .find(|interface| interface.name == public_name)
         .expect("dynamic TCP server interface should be visible in provider snapshot");
     assert_eq!(tcp.interface_type, "tcp_server");
+    assert_eq!(tcp.interface_address.as_deref(), Some(projected.as_str()));
     assert_eq!(tcp.topology, EnsInterfaceTopology::Active);
     assert_eq!(tcp.effective_topology, EnsInterfaceTopology::Active);
     let snapshot_payload =

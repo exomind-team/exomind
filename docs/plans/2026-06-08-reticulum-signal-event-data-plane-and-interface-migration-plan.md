@@ -268,8 +268,24 @@ pub struct EnsInterfaceSnapshot {
     pub interface_type: String,
     pub online: bool,
     pub outgoing: bool,
+    pub interface_address: Option<String>,
     pub topology: EnsInterfaceTopologyDto,
     pub effective_topology: EnsInterfaceTopologyDto,
+}
+
+pub struct EnsPeerIdentity {
+    pub identity_hex: String,
+    pub host_id: Option<String>,
+    pub display_name: Option<String>,
+}
+
+pub struct EnsTransportSnapshot {
+    pub enabled: bool,
+    pub provider_id: String,
+    pub local_identity: Option<EnsPeerIdentity>,
+    pub local_endpoint: Option<EnsEndpointAdvertisement>,
+    pub global_topology: EnsInterfaceTopologyDto,
+    pub interfaces: Vec<EnsInterfaceSnapshot>,
 }
 
 pub enum EnsLocalLinkKind {
@@ -289,7 +305,10 @@ DTO 可以复用当前 `ens/dto.rs` 中已有类型；若已有类型不足，�
 UI 一致性约束：
 
 - UI 必须展示全局配置状态。
+- UI 面板全局的“本机身份”必须来自 `EnsTransportSnapshot.local_identity.identity_hex`；为了兼容旧 snapshot，最多只能回退到 `local_endpoint.identity_hex`，不能把 `udp://...`、`tcp://...`、`file://...` 等物理 endpoint 当成本机身份。
+- 本机身份可以在面板内短显以保护布局，但 hover/title 必须暴露完整 `identity_hex`；左键点击复制必须写入完整身份 ID，toast 只反馈复制动作，不代表 runtime 状态发生变化。
 - UI 必须在每个接口行展示“配置 topology”和“生效 topology”。
+- UI 只能在对应接口行展示 `interfaces[*].interface_address`。UDP/TCP/File/JSONL/Queue 等 endpoint 都属于物理联通层，不得在面板顶层展示成“本机 endpoint”。
 - 全局控制按钮不得写成“全部 Off / 全部 Passive / 全部 Active”。
 - 全局控制只修改 `global_topology`，不能批量改写接口配置。
 - 单接口控制只修改该接口 `topology`，不能绕过全局上限。
@@ -297,7 +316,8 @@ UI 一致性约束：
 
 后端事实优先原则：
 
-- Reticulum/ENS UI 的显示事实源只能是 `EnsTransportSnapshot` 或后续等价 SSE 事件；`provider_id`、`health`、`local_endpoint`、`global_topology`、`interfaces[*].topology`、`interfaces[*].effective_topology`、`peers[*].authorized`、`peers[*].pairing_pending`、delivery/error 状态都不能由前端按用户点击目标值本地推导。
+- Reticulum/ENS UI 的显示事实源只能是 `EnsTransportSnapshot` 或后续等价 SSE 事件；`provider_id`、`health`、`local_identity`、`global_topology`、`interfaces[*].interface_address`、`interfaces[*].topology`、`interfaces[*].effective_topology`、`peers[*].authorized`、`peers[*].pairing_pending`、delivery/error 状态都不能由前端按用户点击目标值本地推导。
+- `local_endpoint` 保留给 discovery/pairing/兼容 payload，不是面板全局身份字段。UI 顶层不展示 `local_endpoint.interface_address`，避免把当前某个 UDP/TCP/File 入口误读成 Reticulum 身份。
 - 点击 topology、pairing、delivery 等命令后，前端只允许进入 pending/disabled/loading 状态；展示值必须继续来自最后一次已确认的 backend snapshot/SSE。
 - 命令返回成功只表示后端接受了请求，不表示 UI 可以自行宣布运行时已切换成功。UI 必须重新读取 backend snapshot，或等待后端 SSE 推送确认后，才能显示新的 provider/interface/peer/delivery 状态。
 - 命令失败、refresh 失败或 SSE 断开时，UI 应保留上一份已确认 snapshot，显示错误或 stale/需要刷新状态；不得把目标值显示成“已经成功”。
@@ -331,7 +351,7 @@ UI 一致性约束：
 - 当前真实 provider 纵切已把 `from_peer` 与 signed frame 做第一版密码学绑定；默认启动集成前仍不应把 signed frame 误称为 link-layer sender proof。
 - UDP `127.0.0.1:0` / `udp://127.0.0.1:0` 现在只允许作为 provider bind input；provider snapshot、local endpoint、route payload 与 UI debug payload 都必须投影为 OS 实际 bound port，不能泄漏 `:0`。
 - 多个 dynamic UDP interface 会使用唯一内部 manager identity，并在 snapshot/debug 中投影为各自的实际 `host:port` public name；设置单接口 topology 时必须按 public name 回到对应 manager identity，不能串线。
-- UI debug panel 已展示 backend snapshot 中的本机 endpoint，并通过测试覆盖多个 dynamic UDP interface 的单接口 topology 更新。
+- UI debug panel 已展示 backend snapshot 中的本机 Reticulum identity；顶层身份短显但 hover/title 暴露完整 ID，左键点击复制完整 ID 并显示复制 toast。物理 endpoint 只在对应 interface 行展示，并通过测试覆盖多个 dynamic UDP interface 的单接口 topology 更新。
 - dynamic TCP server 支持 `127.0.0.1:0` 作为 bind input；provider local endpoint 与 interface snapshot 会投影为 OS 实际 bound port，且 `set_interface_topology(public_name, topology)` 会解析回内部 manager identity。
 - TCP server/client 双 provider 已证明 A 端 TCP client 可使用 B 端 dynamic TCP server 广告出的实际端口，把 EventLog `SignalEvent` 经 Reticulum provider 写入 B 端 `EventLogStore`，不经 HTTP/SSE。
 - TCP server/client 双 provider 进一步证明 Task、TimeBlock active、TimeBlock completed 与 Proposal 四类 domain replication `SignalEvent` 可经同一条真实 Reticulum TCP provider data-plane 写入远端 `TaskStore`、`TimeBlockStore` 与 `ProposalStore`。
@@ -341,7 +361,7 @@ UI 一致性约束：
 - `crates/exomind-runtime/tests/ens_reticulum_provider.rs` 已证明 JSONL 与 file provider 能经真实 Reticulum interface 传递 signed EventLog `SignalEvent` 到 B 端 `EventLogStore`；这只是 EventLog 级 physical medium 纵切，不代表这两个 medium 已完成四域同步验收。
 - `bun.lock` 已纳入版本控制，`bun install --frozen-lockfile` 不再因为缺少 lockfile 阻断 debug 构建。
 - 当前阶段的可人验构建基线是从 `codex/ens-reticulum-adapter` 构建 `G:\exomind-cargo-target\debug\exomind.exe`；这个文件名仍是产品可执行文件名，不能单靠窗口标题或文件名判断是否为 Reticulum 版本。
-- debug 运行态必须用 `/mesh/ens/snapshot` 判断是否进入 Reticulum/ENS 路径：`enabled=true`、`provider_id=runtime-reticulum-ens`、`local_endpoint.gateway=reticulum`、`global_topology` 有后端事实值，并且 `interfaces[*].effective_topology` 来自后端 snapshot。
+- debug 运行态必须用 `/mesh/ens/snapshot` 判断是否进入 Reticulum/ENS 路径：`enabled=true`、`provider_id=runtime-reticulum-ens`、`local_identity.identity_hex` 存在、`local_endpoint.gateway=reticulum` 可作为 discovery/pairing payload 存在、`interfaces[*].interface_address` 投影真实物理 endpoint、`global_topology` 有后端事实值，并且 `interfaces[*].effective_topology` 来自后端 snapshot。
 - 截至 2026-07-05，React `ReticulumDebugPanel` 的显示值来自 `RuntimeEnsService.getSnapshot()` 读取的 `/mesh/ens/snapshot`；全局 topology、单接口 topology 和 discovered peer 配对按钮只设置 pending 状态、调用后端命令并随后 refresh，不把点击目标值直接写入 `snapshot`。因此它基本符合“后端事实优先、禁止乐观成功”的调试 UI 要求，但仍是初次加载/手动 refresh 语义，不是毫秒级实时状态订阅。
 - 2026-07-05 后续切片已把 backend snapshot 中已有的 `operations[*]` 与 `peers[*].last_error` 显示到 `ReticulumDebugPanel`：配对 operation 的 kind/status/session/error/updated_at 和 discovered peer 最近错误都来自 `/mesh/ens/snapshot`，前端仍不本地伪造成功或失败事实。
 - `tests/unit/ui/agent-hub/device-view.reticulum-debug.test.tsx` 已覆盖 UI 展示 snapshot 中的失败 pairing operation 与 peer last_error；`crates/exomind-runtime/tests/ens_routes_debug.rs` 已覆盖 provider 发送 pairing frame 失败后，POST route 返回 `502 Bad Gateway`，随后 GET `/mesh/ens/snapshot` 暴露 failed operation error 与 peer last_error。
@@ -368,7 +388,7 @@ UI 一致性约束：
 
 - 能从干净工作区编译出 debug `exomind.exe`。
 - 能打开 debug `exomind.exe`，且不影响已安装版外心实例。
-- 能通过 runtime route 看到 Reticulum/ENS provider、local endpoint、global topology 和 interface snapshot。
+- 能通过 runtime route 看到 Reticulum/ENS provider、本机 Reticulum identity、global topology、interface snapshot，以及只属于对应 interface 行的物理 endpoint。
 - 能用后端 snapshot 证明 UI/route 看到的是真实 provider/interface/operation/delivery 状态，而不是乐观呈现；在没有 SSE 的阶段，UI 允许滞后，但必须显式依赖 refresh 后的后端事实。
 - 能在 UI/debug route 中看见 data-plane delivery 的 `sent`/`failed`/`skipped`、错误原因和 stale/refresh 状态；`sent` 当前只按“已记录”呈现，不能被解释成远端业务层 ack。
 - 构建修复已提交并推送，工作区保持干净。

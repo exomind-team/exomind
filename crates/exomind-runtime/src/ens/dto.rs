@@ -97,6 +97,8 @@ pub struct EnsInterfaceSnapshot {
     pub interface_type: String,
     pub online: bool,
     pub outgoing: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface_address: Option<String>,
     pub topology: EnsInterfaceTopology,
     pub effective_topology: EnsInterfaceTopology,
 }
@@ -215,6 +217,8 @@ pub struct EnsPairingOfferTicket {
 pub struct EnsTransportSnapshot {
     pub enabled: bool,
     pub provider_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_identity: Option<EnsPeerIdentity>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_endpoint: Option<EnsEndpointAdvertisement>,
     pub global_topology: EnsInterfaceTopology,

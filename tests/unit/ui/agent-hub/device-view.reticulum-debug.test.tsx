@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DeviceView } from '@/ui/app/pages/agents/DeviceView';
 import type { EnsInterfaceTopology, EnsTransportSnapshot } from '@/lib/services/runtime-ens.service';
@@ -10,6 +10,11 @@ const runtimeEnsMocks = vi.hoisted(() => ({
   initiatePairingWithDiscoveredPeer: vi.fn(),
 }));
 
+const uiActionMocks = vi.hoisted(() => ({
+  writeClipboard: vi.fn(),
+  toast: vi.fn(),
+}));
+
 vi.mock('@/lib/services/runtime-ens.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/services/runtime-ens.service')>();
   return {
@@ -17,6 +22,16 @@ vi.mock('@/lib/services/runtime-ens.service', async (importOriginal) => {
     getRuntimeEnsService: () => runtimeEnsMocks,
   };
 });
+
+vi.mock('@/lib/services/clipboard.service', () => ({
+  getClipboardService: () => ({
+    writeText: uiActionMocks.writeClipboard,
+  }),
+}));
+
+vi.mock('@/components/ui/toast-hook', () => ({
+  toast: uiActionMocks.toast,
+}));
 
 function renderDeviceView(runtimeRunning = true) {
   return render(
@@ -73,6 +88,10 @@ function snapshotWithTopology(
   return {
     enabled: true,
     provider_id: 'fake-ens',
+    local_identity: {
+      identity_hex: 'identity-a',
+      host_id: 'rt-a',
+    },
     local_endpoint: {
       identity_hex: 'identity-a',
       host_id: 'rt-a',
@@ -92,6 +111,7 @@ function snapshotWithTopology(
       type: 'udp',
       online: true,
       outgoing: true,
+      interface_address: 'udp://127.0.0.1:4242',
       topology,
       effective_topology: effectiveTopology,
     }],
@@ -189,6 +209,16 @@ function snapshotWithInterfaces(
 }
 
 describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）', () => {
+  beforeEach(() => {
+    runtimeEnsMocks.getSnapshot.mockReset();
+    runtimeEnsMocks.setInterfaceTopology.mockReset();
+    runtimeEnsMocks.setGlobalTopology.mockReset();
+    runtimeEnsMocks.initiatePairingWithDiscoveredPeer.mockReset();
+    uiActionMocks.writeClipboard.mockReset();
+    uiActionMocks.writeClipboard.mockResolvedValue({ ok: true });
+    uiActionMocks.toast.mockReset();
+  });
+
   it('shows ENS snapshot and updates interface topology（展示 ENS 快照并调整接口 topology）', async () => {
     let currentSnapshot = snapshotWithTopology('active');
     runtimeEnsMocks.getSnapshot.mockImplementation(async () => currentSnapshot);
@@ -204,7 +234,10 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
     const panel = await screen.findByTestId('reticulum-debug-panel');
     expect(within(panel).getByTestId('reticulum-provider-id')).toHaveTextContent('fake-ens');
     expect(within(panel).getByTestId('reticulum-health-status')).toHaveTextContent('健康');
-    expect(within(panel).getByTestId('reticulum-local-endpoint-address')).toHaveTextContent('udp://127.0.0.1:4242');
+    expect(within(panel).getByTestId('reticulum-local-identity-id')).toHaveTextContent('identity-a');
+    expect(within(panel).getByTestId('reticulum-local-identity-copy')).toHaveAttribute('title', 'identity-a');
+    expect(within(panel).queryByTestId('reticulum-local-endpoint-address')).not.toBeInTheDocument();
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-endpoint')).toHaveTextContent('udp://127.0.0.1:4242');
     expect(within(panel).queryByText('udp://127.0.0.1:0')).not.toBeInTheDocument();
     expect(within(panel).queryByText('127.0.0.1:0')).not.toBeInTheDocument();
     expect(within(panel).getByTestId('reticulum-global-topology-status')).toHaveTextContent('Active');
@@ -228,6 +261,39 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
       expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-passive')).toHaveAttribute('aria-pressed', 'true');
       expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-configured')).toHaveTextContent('Passive');
       expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-effective')).toHaveTextContent('Passive');
+    });
+  });
+
+  it('shows a short local identity preview but copies the complete backend identity（短显本机身份但复制后端完整身份）', async () => {
+    const completeIdentity = '0123456789abcdef0123456789abcdef0123456789abcdef';
+    const snapshot = snapshotWithTopology('active');
+    runtimeEnsMocks.getSnapshot.mockResolvedValue({
+      ...snapshot,
+      local_identity: {
+        ...snapshot.local_identity!,
+        identity_hex: completeIdentity,
+      },
+      local_endpoint: {
+        ...snapshot.local_endpoint!,
+        identity_hex: completeIdentity,
+      },
+    });
+
+    renderDeviceView();
+
+    const panel = await screen.findByTestId('reticulum-debug-panel');
+    const copyButton = within(panel).getByTestId('reticulum-local-identity-copy');
+    expect(copyButton).toHaveAttribute('title', completeIdentity);
+    expect(within(panel).getByTestId('reticulum-local-identity-id')).toHaveTextContent(
+      '0123456789ab...89abcdef',
+    );
+    expect(within(panel).getByTestId('reticulum-local-identity-id')).not.toHaveTextContent(completeIdentity);
+
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(uiActionMocks.writeClipboard).toHaveBeenCalledWith(completeIdentity);
+      expect(uiActionMocks.toast).toHaveBeenCalledWith({ title: '已复制本机身份' });
     });
   });
 
@@ -317,6 +383,7 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
       type: 'udp' as const,
       online: true,
       outgoing: true,
+      interface_address: 'udp://127.0.0.1:4242',
       topology: 'active' as const,
       effective_topology: 'active' as const,
     };
@@ -325,6 +392,7 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
       type: 'udp' as const,
       online: true,
       outgoing: true,
+      interface_address: 'udp://127.0.0.1:4343',
       topology: 'active' as const,
       effective_topology: 'active' as const,
     };

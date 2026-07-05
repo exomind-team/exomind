@@ -248,10 +248,11 @@ git diff --check
 - provider 为每个 dynamic UDP interface 创建唯一内部 manager identity，避免多个 `127.0.0.1:0` interface 在 Reticulum interface manager 中串线。
 - provider snapshot 与 local endpoint 会把动态端口投影为实际 `host:port` public name 和 `udp://host:port` endpoint address。
 - `127.0.0.1:0` / `udp://127.0.0.1:0` 只允许作为 bind input；endpoint、snapshot、route payload、UI payload 不得泄漏 `:0`。
-- `EnsTransportSnapshot` 增加 `local_endpoint`，用于 debug/SSE/UI 观察 provider 当前投影出的本机 endpoint。
+- `EnsTransportSnapshot` 增加 `local_identity` 作为 debug UI 顶层“本机身份”的事实源；`local_endpoint` 保留给 discovery/pairing/兼容 payload，不作为 UI 顶层 endpoint 展示。
+- `EnsInterfaceSnapshot.interface_address` 用于 debug/SSE/UI 在对应 interface 行观察 provider 投影出的物理 endpoint。
 - `EnsTransportService` 优先读取 provider 动态 local endpoint，避免启动时静态 endpoint 与实际 interface 状态脱节。
 - `set_interface_topology(public_name, topology)` 会解析回 dynamic UDP 内部 manager identity，并返回 public snapshot name。
-- DeviceView Reticulum debug panel 已展示 backend snapshot 中的本机 endpoint，并对 `host:port` interface test id 做安全 segment 化。
+- DeviceView Reticulum debug panel 顶层已展示 backend snapshot 中的本机 Reticulum identity，短显但 hover/title 暴露完整 ID，点击复制完整 ID；物理 endpoint 只在对应 interface 行展示，并对 `host:port` interface test id 做安全 segment 化。
 - UI 测试覆盖 dynamic UDP 多接口场景：更新第二个接口的 topology 不会影响第一个接口。
 
 验证：
@@ -396,7 +397,7 @@ git diff --check
   - `EXOMIND_RT_RETICULUM_JSONL_NODE`
   - `EXOMIND_RT_RETICULUM_FILE_PATH`
   - `EXOMIND_RT_RETICULUM_FILE_NAME`
-- `/mesh/ens/snapshot` 已能在 runtime 启动后观测真实 Reticulum provider、本机 endpoint、实际动态 UDP 端口和 Reticulum destination。
+- `/mesh/ens/snapshot` 已能在 runtime 启动后观测真实 Reticulum provider、本机 Reticulum identity、用于 discovery/pairing payload 的 local endpoint、实际动态 UDP 端口和 Reticulum destination。
 - `apply_config` 加载 local registry 时只投影未授权 discovered endpoint，不写 `MeshState`，不自动授权 Mesh peer。
 - `apply_config` 发布 local registry 前会等待动态 UDP/TCP server endpoint 具备真实 `interface_address`；若超时则 fail fast，不把 `:0` 或缺失动态端口写入 registry。
 

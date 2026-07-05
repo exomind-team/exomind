@@ -4,7 +4,7 @@
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 分支：`codex/ens-reticulum-adapter`
 > 目标读者：没有本轮会话上下文、但需要继续推进 Reticulum 同步的 Agent
-> 最新 checkpoint：2026-06-09，signed queue、dynamic UDP、JSONL/file EventLog、dynamic TCP server/client 四域同步纵切、mDNS `ret_port` bootstrap projection、runtime startup config 与 endpoint 发布保护已完成
+> 最新 checkpoint：2026-07-05，debug 构建基线、本机 Reticulum identity 展示/复制、interface endpoint 分层、snapshot truth UI、signed queue、dynamic UDP、JSONL/file EventLog、dynamic TCP server/client 四域同步纵切、mDNS `ret_port` bootstrap projection、runtime startup config 与 endpoint 发布保护已完成
 
 ## 当前目标
 
@@ -36,12 +36,12 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 - 多个 dynamic UDP interface 已有唯一内部 manager identity；snapshot 调试展示名使用实际 `host:port` public name，按第二个 public name 改 topology 不会影响第一个接口。
 - dynamic TCP server provider 纵切已完成：`127.0.0.1:0` 只允许作为 bind input；provider local endpoint 与 interface snapshot 会投影为 OS 实际 bound port，`tcp-listen://127.0.0.1:0` 不得出现在 endpoint/snapshot payload。
 - TCP server/client 真实 provider 闭环已完成：B 端 dynamic TCP server 暴露实际 bound port，A 端 TCP client 使用该端口连接，EventLog、Task、TimeBlock active、TimeBlock completed 与 Proposal 的 replication `SignalEvent` 都可通过 Reticulum provider 写入 B 端 store。
-- UI debug panel 已显示 backend snapshot 给出的本机 endpoint，并覆盖 dynamic UDP 多接口防串线测试。
+- UI debug panel 顶层已显示 backend snapshot 给出的本机 Reticulum identity，支持短显、hover/title 完整 ID、点击复制完整 ID；物理 endpoint 只在 interface 行显示，并覆盖 dynamic UDP 多接口防串线测试。
 - mDNS `ret_port` bootstrap 已完成 provider/service/route 级投影闭环：mDNS TXT 保留 legacy `host_id`，新增 `ret_identity_hex`、`ret_port`、`ret_destination`、`ret_interface`、`ret_capabilities`，并把发现结果投影为 `gateway=reticulum`、`via_medium=mdns`、`runtime_base_url=None` 的未授权 `EnsEndpointAdvertisement`。
 - mDNS bootstrap 不写 `MeshState`，不授权 data frame，不能完成 legacy HTTP mesh pairing；invalid / zero `ret_port` fail closed。
 - JSONL 与 file provider 入口已完成 EventLog 级 physical medium 纵切：两端通过共享 JSONL 目录或 shared file 传递 signed EventLog `SignalEvent`，B 端经 `EnsTransportService` 写入 `EventLogStore`。
 - runtime startup 已支持 `RuntimeStartOptions.reticulum_ens`，并可通过环境变量启用真实 `ReticulumEnsProvider`。
-- `/mesh/ens/snapshot` 在 runtime 启动后可观测真实 Reticulum provider、本机 endpoint、实际动态 UDP 端口与 Reticulum destination。
+- `/mesh/ens/snapshot` 在 runtime 启动后可观测真实 Reticulum provider、本机 Reticulum identity、用于 discovery/pairing payload 的 local endpoint、实际动态 UDP 端口与 Reticulum destination。
 - local registry load/publish 已接入 `apply_config`：load 只投影未授权 discovered endpoint；publish 会等待动态 UDP/TCP server endpoint 具备真实 `interface_address`，不会写入 `:0` 或缺失动态端口的本机 endpoint。
 - mDNS Reticulum TXT 发布已改为等待 provider snapshot 中真实可拨号 UDP endpoint；缺 `reticulum_destination`、缺 `udp://host:port`、端口为 `0` 或 medium 非 UDP 时，不发布 Reticulum bootstrap 字段。
 - local registry publish 已改为 fail closed：必须具备非空 identity/destination/interface、可接受 physical medium 和可拨号 `interface_address`；否则返回 typed error 且不创建半成品 registry 文件。
@@ -98,11 +98,13 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 - `crates/exomind-runtime/src/ens/mod.rs`
   - 重新导出 `ReticulumEnsProviderConfig` 与 `ReticulumEnsInterfaceConfig`，供 runtime startup 和测试使用。
 - `crates/exomind-runtime/src/ens/dto.rs`
-  - `EnsTransportSnapshot` 增加内部调试状态 `local_endpoint`，用于 UI/debug/SSE 观察 provider 当前投影出的 endpoint。
+  - `EnsTransportSnapshot` 增加 `local_identity`，作为 debug UI 顶层“本机身份”的事实源。
+  - `EnsTransportSnapshot.local_endpoint` 保留为 discovery/pairing/兼容 payload，不再作为 debug UI 顶层身份字段。
 - `src/lib/services/runtime-ens.service.ts`
-  - TypeScript snapshot 类型增加 `local_endpoint`。
+  - TypeScript snapshot 类型增加 `local_identity`、`local_endpoint` 与 `interfaces[*].interface_address`。
 - `src/ui/app/pages/agents/DeviceView.tsx`
-  - Reticulum debug panel 展示 backend snapshot 中的本机 endpoint。
+  - Reticulum debug panel 顶层展示 backend snapshot 中的本机 Reticulum identity，短显但 hover/title 暴露完整 ID，点击复制完整 ID 并用 toast 反馈复制动作。
+  - 物理 endpoint 只在对应 interface 行展示。
   - interface debug `data-testid` 对 `host:port` 做安全 segment 化。
 - `crates/exomind-runtime/src/routes/mesh.rs`
   - `/mesh/events` 读取 peer token 注入的 `AuthenticatedPeerIdentity`；若 token 身份与 body `from_peer_id` 不一致，返回 `403`。
@@ -126,10 +128,10 @@ UDP、TCP、mDNS、local JSON、JSONL、file、queue、Bluetooth 等都只能作
 - `crates/exomind-runtime/tests/mesh_routes_integration.rs`
   - 新增 peer A token 冒充 peer B 的 `403` 回归测试，以及匹配身份的 happy path。
 - `tests/unit/ui/agent-hub/device-view.reticulum-debug.test.tsx`
-  - 覆盖本机 endpoint 展示、不泄漏 `:0`，以及 dynamic UDP 多接口 topology 更新不串线。
+  - 覆盖本机 Reticulum identity 展示/复制、顶层不展示 endpoint、不泄漏 `:0`，以及 dynamic UDP 多接口 topology 更新不串线。
 - `crates/exomind-runtime/tests/runtime_startup.rs`
   - 覆盖环境变量到 `ReticulumEnsProviderConfig` 的映射。
-  - 覆盖 `start_with_options` 启动真实 Reticulum ENS provider 后，`/mesh/ens/snapshot` 可见 provider id、本机 endpoint、Reticulum destination 与实际动态 UDP 端口。
+  - 覆盖 `start_with_options` 启动真实 Reticulum ENS provider 后，`/mesh/ens/snapshot` 可见 provider id、本机 Reticulum identity、Reticulum destination 与实际动态 UDP 端口。
 
 ## 安全与产品原则
 
@@ -177,15 +179,33 @@ node ./node_modules/typescript/bin/tsc --noEmit
 
 ## 当前可提交边界
 
-截至 2026-06-09，本轮工作区脏文件集中在 Reticulum/ENS mDNS advertisement 等待、local registry fail-closed 发布保护、provider 测试和计划文档。提交前仍必须以 `git status --short` 为准；如果出现下列范围之外的文件，不要顺手 stage、revert 或格式化。
+截至 2026-07-05，本轮可提交边界是 Reticulum/ENS snapshot contract、debug UI 和对应测试/计划文档的阶段收口。提交前仍必须以 `git status --short` 为准；如果出现下列范围之外的文件，不要顺手 stage、revert 或格式化。
+
+本阶段验收语义：
+
+- 顶层“本机身份”来自 `EnsTransportSnapshot.local_identity.identity_hex`；兼容旧 snapshot 时最多回退到 `local_endpoint.identity_hex`。
+- `local_endpoint` 保留给 discovery/pairing/兼容 payload，不作为 UI 顶层 endpoint 展示。
+- UDP/TCP/File/JSONL/Queue 等物理 endpoint 只允许通过 `interfaces[*].interface_address` 在对应 interface 行展示。
+- 点击复制只复制完整 identity 并显示 toast；不代表 runtime 状态切换成功。
+- UI 显示事实必须来自 `/mesh/ens/snapshot` 或后续等价 SSE；命令成功后必须 refresh/等待后端事实，不能乐观成功。
 
 可以 stage 的 Reticulum/ENS 相关文件包括：
 
+- `crates/exomind-runtime/src/ens/dto.rs`
 - `crates/exomind-runtime/src/ens/reticulum_provider.rs`
+- `crates/exomind-runtime/src/ens/service.rs`
 - `crates/exomind-runtime/src/lib.rs`
+- `crates/exomind-runtime/tests/ens_control_plane_prototype.rs`
 - `crates/exomind-runtime/tests/ens_reticulum_provider.rs`
+- `crates/exomind-runtime/tests/ens_routes_debug.rs`
+- `crates/exomind-runtime/tests/runtime_startup.rs`
+- `src/lib/services/runtime-ens.service.ts`
+- `src/ui/app/pages/agents/DeviceView.tsx`
+- `tests/unit/services/runtime-ens.service.test.ts`
+- `tests/unit/ui/agent-hub/device-view.reticulum-debug.test.tsx`
 - `docs/plans/2026-06-08-ens-reticulum-fresh-dev-implementation-plan.md`
 - `docs/plans/2026-06-08-reticulum-next-agent-handoff.md`
+- `docs/plans/2026-06-08-reticulum-signal-event-data-plane-and-interface-migration-plan.md`
 
 ## 参考文档
 

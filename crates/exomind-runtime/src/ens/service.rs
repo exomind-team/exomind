@@ -204,6 +204,12 @@ impl EnsTransportService {
             })
             .collect();
         let local_endpoint = self.current_local_endpoint();
+        let local_identity = Some(
+            local_endpoint
+                .as_ref()
+                .map(EnsEndpointAdvertisement::identity)
+                .unwrap_or_else(|| self.local_identity()),
+        );
         let deliveries = self
             .mesh
             .as_ref()
@@ -216,6 +222,7 @@ impl EnsTransportService {
         EnsTransportSnapshot {
             enabled: state.enabled && !state.shutdown,
             provider_id: provider_snapshot.provider_id,
+            local_identity,
             local_endpoint,
             global_topology,
             health: if state.enabled {

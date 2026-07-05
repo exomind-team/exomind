@@ -233,13 +233,14 @@ async fn wait_for_reticulum_udp_snapshot(port: u16) -> EnsTransportSnapshot {
             .await
             .expect("ENS snapshot payload should decode");
 
-        let projected_udp = snapshot
-            .local_endpoint
-            .as_ref()
-            .and_then(|endpoint| endpoint.interface_address.as_deref())
-            .is_some_and(|address| {
-                address.starts_with("udp://127.0.0.1:") && !address.ends_with(":0")
-            });
+        let projected_udp = snapshot.interfaces.iter().any(|interface| {
+            interface
+                .interface_address
+                .as_deref()
+                .is_some_and(|address| {
+                    address.starts_with("udp://127.0.0.1:") && !address.ends_with(":0")
+                })
+        });
         if snapshot.provider_id == "runtime-reticulum-ens" && projected_udp {
             return snapshot;
         }
@@ -286,6 +287,14 @@ async fn start_with_options_projects_reticulum_ens_snapshot() {
 
     assert_eq!(snapshot.provider_id, "runtime-reticulum-ens");
     assert_eq!(snapshot.global_topology, EnsInterfaceTopology::Active);
+    let local_identity = snapshot
+        .local_identity
+        .as_ref()
+        .expect("Reticulum provider should expose local identity");
+    assert_eq!(
+        local_identity.host_id.as_deref(),
+        Some("rt-start-reticulum")
+    );
     let endpoint = snapshot
         .local_endpoint
         .as_ref()
@@ -312,6 +321,12 @@ async fn start_with_options_projects_reticulum_ens_snapshot() {
         udp_interface.effective_topology,
         EnsInterfaceTopology::Active
     );
+    let udp_interface_address = udp_interface
+        .interface_address
+        .as_deref()
+        .expect("UDP interface should expose physical interface address");
+    assert!(udp_interface_address.starts_with("udp://127.0.0.1:"));
+    assert!(!udp_interface_address.ends_with(":0"));
 }
 
 #[tokio::test]

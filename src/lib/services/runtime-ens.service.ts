@@ -37,6 +37,7 @@ export interface EnsInterfaceSnapshot {
   type: string;
   online: boolean;
   outgoing: boolean;
+  interface_address?: string;
   topology: EnsInterfaceTopology;
   effective_topology: EnsInterfaceTopology;
 }
@@ -86,6 +87,7 @@ export interface EnsPairingOfferTicket {
 export interface EnsTransportSnapshot {
   enabled: boolean;
   provider_id: string;
+  local_identity?: EnsPeerIdentity;
   local_endpoint?: EnsEndpointAdvertisement;
   global_topology: EnsInterfaceTopology;
   health: EnsTransportHealth;

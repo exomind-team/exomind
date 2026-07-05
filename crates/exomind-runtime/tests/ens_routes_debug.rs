@@ -33,6 +33,7 @@ fn interface_snapshot(name: &str, topology: EnsInterfaceTopology) -> EnsInterfac
         interface_type: "udp".to_string(),
         online: true,
         outgoing: true,
+        interface_address: Some("udp://192.168.1.20:4242".to_string()),
         topology,
         effective_topology: topology,
     }
@@ -76,12 +77,17 @@ async fn ens_snapshot_route_exposes_provider_interfaces() {
     assert_eq!(response.status(), StatusCode::OK);
     let payload = response_json(response).await;
     assert_eq!(payload["provider_id"], "fake-ens");
+    assert_eq!(payload["local_identity"]["identity_hex"], "identity-a");
     assert_eq!(
         payload["local_endpoint"]["interface_address"],
         "udp://192.168.1.20:4242"
     );
     assert_eq!(payload["global_topology"], "active");
     assert_eq!(payload["interfaces"][0]["name"], "lan-udp");
+    assert_eq!(
+        payload["interfaces"][0]["interface_address"],
+        "udp://192.168.1.20:4242"
+    );
     assert_eq!(payload["interfaces"][0]["topology"], "active");
     assert_eq!(payload["interfaces"][0]["effective_topology"], "active");
 }

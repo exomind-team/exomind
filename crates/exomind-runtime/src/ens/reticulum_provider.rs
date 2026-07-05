@@ -225,6 +225,11 @@ impl ReticulumTcpServerDynamicBinding {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReticulumInterfaceSource {
+    address: Option<String>,
+}
+
 pub struct ReticulumEnsProvider {
     provider_id: String,
     identity: PrivateIdentity,
@@ -234,6 +239,7 @@ pub struct ReticulumEnsProvider {
     health: RwLock<EnsTransportHealth>,
     peers: RwLock<HashMap<String, EnsPeerSnapshot>>,
     interfaces: RwLock<Vec<EnsInterfaceSnapshot>>,
+    interface_sources: RwLock<HashMap<String, ReticulumInterfaceSource>>,
     received_data_frames: Mutex<VecDeque<EnsReceivedDataFrame>>,
     received_pairing_frames: Mutex<VecDeque<EnsPairingFrame>>,
     udp_dynamic_bindings: Mutex<Vec<ReticulumUdpDynamicBinding>>,
@@ -292,6 +298,7 @@ impl ReticulumEnsProvider {
             health: RwLock::new(EnsTransportHealth::healthy()),
             peers: RwLock::new(HashMap::new()),
             interfaces: RwLock::new(Vec::new()),
+            interface_sources: RwLock::new(HashMap::new()),
             received_data_frames: Mutex::new(VecDeque::new()),
             received_pairing_frames: Mutex::new(VecDeque::new()),
             udp_dynamic_bindings: Mutex::new(Vec::new()),
@@ -773,6 +780,19 @@ impl ReticulumEnsProvider {
         medium: EnsInterfaceMedium,
         address: Option<String>,
     ) {
+        {
+            let mut sources = match self.interface_sources.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            sources.insert(
+                interface_name.to_string(),
+                ReticulumInterfaceSource {
+                    address: address.clone(),
+                },
+            );
+        }
+
         let mut endpoint = match self.local_endpoint.write() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -1045,6 +1065,55 @@ impl ReticulumEnsProvider {
             .unwrap_or_else(|| manager_name.to_string())
     }
 
+    fn project_dynamic_udp_interface_address(
+        &self,
+        name: &str,
+        public_name: &str,
+        bindings: &[ReticulumUdpDynamicBinding],
+    ) -> Option<String> {
+        bindings.iter().find_map(|binding| {
+            if binding.manager_name == name
+                || binding.pending_public_name == name
+                || binding.pending_public_name == public_name
+                || binding.public_interface_name().as_deref() == Some(public_name)
+            {
+                binding.public_endpoint_address()
+            } else {
+                None
+            }
+        })
+    }
+
+    fn project_dynamic_tcp_server_interface_address(
+        &self,
+        name: &str,
+        public_name: &str,
+        bindings: &[ReticulumTcpServerDynamicBinding],
+    ) -> Option<String> {
+        bindings.iter().find_map(|binding| {
+            if binding.manager_name == name
+                || binding.pending_public_name == name
+                || binding.pending_public_name == public_name
+                || binding.public_interface_name().as_deref() == Some(public_name)
+            {
+                binding.public_endpoint_address()
+            } else {
+                None
+            }
+        })
+    }
+
+    fn interface_source_address(&self, manager_name: &str, public_name: &str) -> Option<String> {
+        let sources = match self.interface_sources.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        sources
+            .get(public_name)
+            .or_else(|| sources.get(manager_name))
+            .and_then(|source| source.address.clone())
+    }
+
     fn refresh_interfaces(&self) {
         let manager = self.transport.interface_manager();
         let Ok(guard) = manager.try_lock() else {
@@ -1056,20 +1125,32 @@ impl ReticulumEnsProvider {
             .list_interfaces()
             .into_iter()
             .map(|info| {
+                let manager_name = info.name;
                 let name = self
-                    .project_dynamic_udp_interface_name(&info.name, &udp_bindings)
+                    .project_dynamic_udp_interface_name(&manager_name, &udp_bindings)
                     .or_else(|| {
                         self.project_dynamic_tcp_server_interface_name(
-                            &info.name,
+                            &manager_name,
                             &tcp_server_bindings,
                         )
                     })
-                    .unwrap_or(info.name);
+                    .unwrap_or_else(|| manager_name.clone());
+                let interface_address = self
+                    .project_dynamic_udp_interface_address(&manager_name, &name, &udp_bindings)
+                    .or_else(|| {
+                        self.project_dynamic_tcp_server_interface_address(
+                            &manager_name,
+                            &name,
+                            &tcp_server_bindings,
+                        )
+                    })
+                    .or_else(|| self.interface_source_address(&manager_name, &name));
                 EnsInterfaceSnapshot {
                     name,
                     interface_type: info.interface_type,
                     online: info.online,
                     outgoing: info.outgoing,
+                    interface_address,
                     topology: from_reticulum_topology(info.topology),
                     effective_topology: from_reticulum_topology(info.topology),
                 }

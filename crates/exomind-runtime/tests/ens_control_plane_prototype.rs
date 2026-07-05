@@ -137,6 +137,7 @@ fn interface_snapshot(
         interface_type: interface_type.to_string(),
         online: true,
         outgoing: true,
+        interface_address: Some(format!("{interface_type}://{name}")),
         topology,
         effective_topology: topology,
     }

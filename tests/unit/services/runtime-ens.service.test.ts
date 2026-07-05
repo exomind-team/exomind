@@ -6,10 +6,22 @@ describe('RuntimeEnsService', () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       enabled: true,
       provider_id: 'fake-ens',
+      local_identity: {
+        identity_hex: 'identity-a',
+        host_id: 'rt-a',
+      },
       global_topology: 'active',
       health: { status: 'healthy' },
       peers: [],
-      interfaces: [],
+      interfaces: [{
+        name: 'lan-udp',
+        type: 'udp',
+        online: true,
+        outgoing: true,
+        interface_address: 'udp://127.0.0.1:4242',
+        topology: 'active',
+        effective_topology: 'active',
+      }],
       operations: [],
       deliveries: [{
         event_id: 'signal-1',
@@ -26,6 +38,8 @@ describe('RuntimeEnsService', () => {
     const snapshot = await service.getSnapshot('http://127.0.0.1:9124', 'admin-token');
 
     expect(snapshot.provider_id).toBe('fake-ens');
+    expect(snapshot.local_identity?.identity_hex).toBe('identity-a');
+    expect(snapshot.interfaces[0]?.interface_address).toBe('udp://127.0.0.1:4242');
     expect(snapshot.deliveries[0]?.status).toBe('sent');
     expect(snapshot.deliveries[0]?.peer_identity_hex).toBe('identity-b');
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -45,6 +59,7 @@ describe('RuntimeEnsService', () => {
       type: 'udp',
       online: true,
       outgoing: true,
+      interface_address: 'udp://127.0.0.1:4242',
       topology: 'passive',
       effective_topology: 'passive',
     })));
@@ -71,6 +86,10 @@ describe('RuntimeEnsService', () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       enabled: true,
       provider_id: 'fake-ens',
+      local_identity: {
+        identity_hex: 'identity-a',
+        host_id: 'rt-a',
+      },
       global_topology: 'passive',
       health: { status: 'healthy' },
       peers: [],
@@ -79,6 +98,7 @@ describe('RuntimeEnsService', () => {
         type: 'udp',
         online: true,
         outgoing: true,
+        interface_address: 'udp://127.0.0.1:4242',
         topology: 'active',
         effective_topology: 'passive',
       }],
@@ -95,6 +115,8 @@ describe('RuntimeEnsService', () => {
     );
 
     expect(updated.global_topology).toBe('passive');
+    expect(updated.local_identity?.identity_hex).toBe('identity-a');
+    expect(updated.interfaces[0]?.interface_address).toBe('udp://127.0.0.1:4242');
     expect(updated.interfaces[0]?.topology).toBe('active');
     expect(updated.interfaces[0]?.effective_topology).toBe('passive');
     expect(fetchImpl).toHaveBeenCalledWith(
