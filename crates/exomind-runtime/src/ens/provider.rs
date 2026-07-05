@@ -50,6 +50,13 @@ pub trait EnsProvider: Send + Sync {
     fn drain_received_data_frames(&self) -> Vec<EnsReceivedDataFrame> {
         Vec::new()
     }
+    fn upsert_discovered_endpoint(
+        &self,
+        endpoint: EnsEndpointAdvertisement,
+    ) -> Result<(), EnsProviderError> {
+        let _ = endpoint;
+        Ok(())
+    }
     fn upsert_mdns_bootstrap(
         &self,
         bootstrap: ReticulumMdnsBootstrap,

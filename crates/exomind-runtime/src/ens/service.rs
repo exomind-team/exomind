@@ -355,6 +355,21 @@ impl EnsTransportService {
         Ok(())
     }
 
+    pub fn upsert_discovered_endpoint(
+        &self,
+        endpoint: EnsEndpointAdvertisement,
+    ) -> Result<(), EnsTransportError> {
+        self.ensure_ready()?;
+        if self
+            .current_local_endpoint()
+            .is_some_and(|local| local.identity_hex == endpoint.identity_hex)
+        {
+            return Ok(());
+        }
+        self.provider.upsert_discovered_endpoint(endpoint)?;
+        Ok(())
+    }
+
     pub fn send_signal_event_to_peer(
         &self,
         peer_identity_hex: &str,

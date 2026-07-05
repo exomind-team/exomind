@@ -1228,6 +1228,14 @@ impl EnsProvider for ReticulumEnsProvider {
         frames.drain(..).collect()
     }
 
+    fn upsert_discovered_endpoint(
+        &self,
+        endpoint: EnsEndpointAdvertisement,
+    ) -> Result<(), EnsProviderError> {
+        ReticulumEnsProvider::upsert_discovered_endpoint(self, endpoint);
+        Ok(())
+    }
+
     fn upsert_mdns_bootstrap(
         &self,
         bootstrap: ReticulumMdnsBootstrap,

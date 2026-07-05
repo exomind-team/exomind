@@ -472,6 +472,11 @@ pub struct RuntimeHandle {
     host_id: String,
     signal_pool: Arc<SignalPool>,
     mesh: Arc<MeshState>,
+    ens_transport: Arc<ens::EnsTransportService>,
+    eventlog_store: Arc<EventLogStore>,
+    task_store: Arc<task::TaskStore>,
+    timeblock_store: Arc<timeblock::TimeBlockStore>,
+    proposal_store: Arc<proposal::ProposalStore>,
     runtime_handle: tokio::runtime::Handle,
     mesh_relay: Option<Arc<MeshRelayManager>>,
     mdns: Option<Arc<discovery::MdnsDiscovery>>,
@@ -545,6 +550,41 @@ impl RuntimeHandle {
     /// Clone underlying MeshState Arc（克隆底层 MeshState 引用）.
     pub fn clone_mesh_state(&self) -> Arc<MeshState> {
         Arc::clone(&self.mesh)
+    }
+
+    /// Clone underlying ENS transport service（克隆底层 ENS 传输服务）.
+    pub fn clone_ens_transport(&self) -> Arc<ens::EnsTransportService> {
+        Arc::clone(&self.ens_transport)
+    }
+
+    /// Clone underlying EventLog store（克隆底层事件日志存储）.
+    pub fn clone_eventlog_store(&self) -> Arc<EventLogStore> {
+        Arc::clone(&self.eventlog_store)
+    }
+
+    /// Clone underlying task store（克隆底层任务存储）.
+    pub fn clone_task_store(&self) -> Arc<task::TaskStore> {
+        Arc::clone(&self.task_store)
+    }
+
+    /// Clone underlying timeblock store（克隆底层时间块存储）.
+    pub fn clone_timeblock_store(&self) -> Arc<timeblock::TimeBlockStore> {
+        Arc::clone(&self.timeblock_store)
+    }
+
+    /// Clone underlying proposal store（克隆底层提案存储）.
+    pub fn clone_proposal_store(&self) -> Arc<proposal::ProposalStore> {
+        Arc::clone(&self.proposal_store)
+    }
+
+    /// Build an EventLog appender bound to this runtime（构造绑定到当前 runtime 的事件日志写入器）.
+    pub fn eventlog_appender(&self) -> eventlog_appender::EventLogAppender {
+        eventlog_appender::EventLogAppender::new(
+            Arc::clone(&self.eventlog_store),
+            self.host_id.clone(),
+            Arc::clone(&self.signal_pool),
+            self.mesh_relay.clone(),
+        )
     }
 
     /// Publish via a provided SignalPool（在指定 SignalPool 上发布）.
@@ -780,10 +820,31 @@ pub async fn start_with_options(
 
     let signal_pool = Arc::clone(&state.signal_pool);
     let mesh = Arc::clone(&state.mesh);
+    let ens_transport = Arc::clone(&state.ens_transport);
+    let eventlog_store = Arc::clone(&state.eventlog_store);
+    let task_store = Arc::clone(&state.task_store);
+    let timeblock_store = Arc::clone(&state.timeblock_store);
+    let proposal_store = Arc::clone(&state.proposal_store);
     let runtime_handle = tokio::runtime::Handle::current();
     let mesh_relay = state.mesh_relay.clone();
 
     let mut actor_tasks = Vec::new();
+    if options.reticulum_ens.is_some() {
+        let pending_frame_transport = Arc::clone(&ens_transport);
+        actor_tasks.push(tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(20));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                interval.tick().await;
+                if let Err(error) = pending_frame_transport.handle_pending_data_frames().await {
+                    tracing::warn!(
+                        error = %error,
+                        "failed to handle pending Reticulum ENS data frames"
+                    );
+                }
+            }
+        }));
+    }
     if options.spawn_builtin_actors {
         actor_tasks.push(
             signal::actors::signal_dispatcher_actor::spawn_signal_dispatcher_actor(
@@ -979,6 +1040,11 @@ pub async fn start_with_options(
         host_id: options.host_id,
         signal_pool,
         mesh,
+        ens_transport,
+        eventlog_store,
+        task_store,
+        timeblock_store,
+        proposal_store,
         runtime_handle,
         mesh_relay,
         mdns,

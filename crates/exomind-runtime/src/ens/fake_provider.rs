@@ -2,8 +2,8 @@ use std::sync::{Mutex, RwLock};
 
 use super::data_protocol::{EnsDataFrame, EnsReceivedDataFrame};
 use super::dto::{
-    EnsInterfaceSnapshot, EnsInterfaceTopology, EnsPeerIdentity, EnsPeerSnapshot,
-    EnsTransportHealth, EnsTransportHealthStatus,
+    EnsEndpointAdvertisement, EnsInterfaceSnapshot, EnsInterfaceTopology, EnsPeerIdentity,
+    EnsPeerSnapshot, EnsTransportHealth, EnsTransportHealthStatus,
 };
 use super::pairing_protocol::EnsPairingFrame;
 use super::provider::{EnsProvider, EnsProviderError, EnsProviderSnapshot};
@@ -213,6 +213,33 @@ impl EnsProvider for FakeEnsProvider {
             Err(poisoned) => poisoned.into_inner(),
         };
         frames.drain(..).collect()
+    }
+
+    fn upsert_discovered_endpoint(
+        &self,
+        endpoint: EnsEndpointAdvertisement,
+    ) -> Result<(), EnsProviderError> {
+        let identity = endpoint.identity();
+        let mut peers = match self.peers.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let peer = EnsPeerSnapshot {
+            identity,
+            endpoint: Some(endpoint),
+            authorized: false,
+            pairing_pending: false,
+            last_error: None,
+        };
+        if let Some(existing) = peers
+            .iter_mut()
+            .find(|existing| existing.identity.identity_hex == peer.identity.identity_hex)
+        {
+            *existing = peer;
+        } else {
+            peers.push(peer);
+        }
+        Ok(())
     }
 
     fn upsert_mdns_bootstrap(
