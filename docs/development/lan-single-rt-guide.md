@@ -1,5 +1,7 @@
 # 局域网节点优先（node-first）与单 RT 兼容指南
 
+> **Legacy LAN/HTTP mesh 资料**：本文保留 node-first 与单 RT 兼容路径说明，不能作为 Reticulum/ENS 当前路线的授权或同步依据。Reticulum/ENS 下，mDNS/UDP/TCP 只是 Reticulum interface 或 bootstrap medium；跨 RT peer truth 以 Reticulum `identity_hex`、ENS authorization 与 backend snapshot 为准。
+>
 > 更新日期：2026-03-30
 > 关联 issue：[#773](https://github.com/exomind-team/exomind/issues/773)、[#682](https://github.com/exomind-team/exomind/issues/682)
 > 说明：文件路径仍保留 `lan-single-rt-guide.md`，用于兼容旧链接；正文已经切换到 node-first 产品叙事。

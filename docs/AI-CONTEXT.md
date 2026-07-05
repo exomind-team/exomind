@@ -26,6 +26,8 @@ Tauri 2.0 + React 18 + TypeScript + Rust | Zustand | Tailwind CSS + Radix UI | B
 
 -> [docs/architecture/overview.md](architecture/overview.md)
 
+注意：`architecture/overview.md` 是全局分层架构背景；Reticulum/ENS 当前网络路线以本文件“当前阶段”指向的 handoff、SignalEvent 迁移计划和双实例验收手册为准。
+
 快速参考：L1 Adapter -> L2 Environment -> L3 Service / Actor / Agent -> L4 UI
 
 | 层级 | 职责 | 接口归属 |
@@ -43,7 +45,7 @@ Tauri 2.0 + React 18 + TypeScript + Rust | Zustand | Tailwind CSS + Radix UI | B
 
 ## 当前阶段
 
-Phase 2 完成（SignalPool L3-L5），Phase 3 待启动（资源管控 + 可观测性）。#555 内置 `timeblock_summary` Agent Harness：Phase 1 MVP（2026-06-03）+ Phase 3 AI Registry 桥接 + 设置页开关（2026-06-04）已完成，端到端验证通过。
+本工作树的活跃主线是 Reticulum/ENS：让 Reticulum 成为 ExoMind RT 之间唯一的跨 RT 网络网关，并最终在已授权设备之间同步 EventLog、Task、TimeBlock 与 Proposal。无上下文 Agent 接手时先读 [Reticulum 下一阶段无上下文 Agent 交接](plans/2026-06-08-reticulum-next-agent-handoff.md)，再读 [Reticulum SignalEvent 数据面与 Interface/local-link 迁移计划](plans/2026-06-08-reticulum-signal-event-data-plane-and-interface-migration-plan.md)。
 
 ## 文档索引
 
@@ -65,7 +67,14 @@ Phase 2 完成（SignalPool L3-L5），Phase 3 待启动（资源管控 + 可观
 
 ## 活跃工作
 
--> `docs/plans/` 中的所有文件均为进行中的计划。
+Reticulum/ENS 是当前工作树的首要活跃工作：
+
+1. 接手入口：[docs/plans/2026-06-08-reticulum-next-agent-handoff.md](plans/2026-06-08-reticulum-next-agent-handoff.md)。
+2. 长期目标与契约：[docs/plans/2026-06-08-reticulum-signal-event-data-plane-and-interface-migration-plan.md](plans/2026-06-08-reticulum-signal-event-data-plane-and-interface-migration-plan.md)。
+3. 人工/自动验收：[docs/development/reticulum-dual-instance-verification.md](development/reticulum-dual-instance-verification.md)。
+4. 质量规则：[docs/plans/2026-06-08-reticulum-code-quality-audit-and-agent-rules.md](plans/2026-06-08-reticulum-code-quality-audit-and-agent-rules.md)。
+
+`docs/plans/2026-06-08-ens-reticulum-fresh-dev-implementation-plan.md` 只作为历史实施记录和纵切索引；不要把它当成当前权威计划。
 
 ## 源码结构
 
@@ -89,3 +98,4 @@ src-tauri/        # Rust 后端（Tauri 2.0）
 | Git / worktree / PR / 发布操作 | [docs/development/repo-agent-workflow.md](development/repo-agent-workflow.md) |
 | Git / worktree 权威规范 | [docs/development/git-spec.md](development/git-spec.md) |
 | 多 worktree 端口与联调 | [docs/development/port-env-configuration.md](development/port-env-configuration.md) |
+| Reticulum 双实例/双设备验收 | [docs/development/reticulum-dual-instance-verification.md](development/reticulum-dual-instance-verification.md) |

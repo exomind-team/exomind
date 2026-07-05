@@ -1,10 +1,16 @@
 # ENS / Reticulum 全新开发实施计划
 
+> 历史实施记录，不是当前权威计划。当前目标、契约与验收标准见 `2026-06-08-reticulum-signal-event-data-plane-and-interface-migration-plan.md`；无上下文接手入口见 `2026-06-08-reticulum-next-agent-handoff.md`；人工与自动验收路径见 `../development/reticulum-dual-instance-verification.md`。
+>
+> 本文件保留阶段 checkpoint、已完成纵切和旧分支迁移判断，供考古和回归定位使用；不要把其中的阶段状态当成最新待办清单。
+>
+> **执行禁令**：以下旧任务列表、旧 route 草案和旧 SSE 表述不得作为当前待办执行。当前下一步只以 `2026-06-08-reticulum-next-agent-handoff.md` 的“当前暴露面与阻塞缺口”和“下一步实施顺序”为准。
+
 > 日期：2026-06-08
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 当前分支：`codex/ens-reticulum-adapter`
 > 基线：当前 `origin/dev`，不是旧 `feat/ret-mesh-prototype`
-> 状态：in-progress，fake control/data-plane、signed queue EventLog、dynamic UDP EventLog、JSONL/file EventLog、dynamic TCP server/client 四域同步、mDNS `ret_port` bootstrap、Reticulum debug snapshot、runtime startup config 与 endpoint 发布保护纵切已完成
+> 记录状态：历史 in-progress 截面，fake control/data-plane、signed queue EventLog、dynamic UDP EventLog、JSONL/file EventLog、dynamic TCP server/client 四域同步、mDNS `ret_port` bootstrap、Reticulum debug snapshot、runtime startup config 与 endpoint 发布保护纵切已完成；不要把本行当成当前待办或完成状态。
 
 ## 目的
 
@@ -623,7 +629,7 @@ flowchart TD
    - HTTP/SSE 只作为本机 UI 调试、legacy route 或过渡兼容，不作为长期 RT-to-RT peer transport。
    - UDP/TCP/mDNS/File/Queue 是 Reticulum interface 的底层发现与互通途径，不是 ExoMind mesh 直接面对的 peer channel。
 
-6. SSE-driven UI truth
+6. 历史原拟 SSE UI truth；当前实际以 snapshot/refresh 为事实源，未来可接 SSE
    - command route 只报告命令接收、拒绝或 operation id。
    - backend snapshot 是 UI truth。
    - UI 不乐观编造 Reticulum state。
@@ -691,9 +697,9 @@ crates/exomind-runtime/src/routes/mesh.rs
 先保留 `/mesh/*` 主路径。必要时仅增加调试 / 状态子路径：
 
 ```text
-/mesh/transports/ens/status
-/mesh/transports/ens/interfaces
-/mesh/transports/ens/commands
+/mesh/transports/ens/status      # 历史候选；当前实际 route 以 handoff 为准
+/mesh/transports/ens/interfaces  # 历史候选；当前实际 route 以 handoff 为准
+/mesh/transports/ens/commands    # 历史候选；当前实际 route 以 handoff 为准
 ```
 
 前端：
@@ -888,7 +894,7 @@ cargo test -p exomind-runtime mesh -- --nocapture
 cargo test -p exomind-runtime auth -- --nocapture
 ```
 
-### Task 4：route 集成
+### Task 4：route 集成（历史任务段，不得直接当作当前待办）
 
 **目标**：让现有 `/mesh/*` 主路径能承接 ENS 状态，不创建新的 Reticulum-only 产品岛。
 
@@ -902,7 +908,7 @@ cargo test -p exomind-runtime auth -- --nocapture
 - [ ] `/mesh/discovered` 支持暴露 Reticulum gateway 投影出的 discovered peers；mDNS 只能作为 Reticulum interface / bootstrap 来源，不能作为与 Reticulum 平级的 mesh discovery channel。
 - [ ] `/mesh/pairing/initiate` 返回 local PIN/session，同时创建 ENS operation。
 - [ ] public `/mesh/pairing/respond` 支持 ENS operation status。
-- [ ] 新增 `/mesh/transports/ens/status` 只做调试和可观测状态。
+- [ ] 历史候选：新增 `/mesh/transports/ens/status` 只做调试和可观测状态；当前实际 route/client/UI 缺口以 handoff 为准。
 - [ ] route response 区分 accepted、completed、rejected、timeout。
 - [ ] route 负路径覆盖 channel closed、target missing、invalid state。
 
@@ -942,7 +948,7 @@ cargo check -p exomind-runtime
 cargo test -p exomind-runtime ens_ -- --nocapture
 ```
 
-### Task 6：前端服务层收敛
+### Task 6：前端服务层收敛（历史任务段，不得直接当作当前待办）
 
 **目标**：让前端通过 typed service / hook 消费 ENS 状态，降低 `PeerPairingDialog` 的协议负担。
 
@@ -1047,7 +1053,7 @@ rg -n "127\\.0\\.0\\.1|\\+ 5000|- 5000" crates src
 - [ ] status / snapshot 是 UI truth。
 - [ ] 全局 topology 和单接口 topology 分开建模；全局状态不得实现成批量改接口。
 - [ ] 每个接口 snapshot 同时暴露 configured topology 和 backend 计算出的 effective topology。
-- [ ] UI 禁止乐观显示 Reticulum/ENS 状态；command 成功后仍以 snapshot/SSE 为准。
+- [ ] UI 禁止乐观显示 Reticulum/ENS 状态；command 成功后仍以 snapshot/refresh 为准，未来接 SSE 时也必须保持后端事实优先。
 - [ ] peer token 不能调用 control-plane route；control-plane command 必须保持 admin auth。
 
 建议扫描：

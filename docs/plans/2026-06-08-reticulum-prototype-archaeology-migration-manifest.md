@@ -1,5 +1,7 @@
 # Reticulum 原型考古迁移清单
 
+> **历史考古资料，非当前权威计划。** 本文只用于追溯旧分支里的行为资产、约束经验与反模式；不得把旧分支的 path dependency、route 形状、HTTP/SSE pairing 方案或未完成任务列表当作当前下一步执行。当前 Reticulum/ENS 路线以 `2026-06-08-reticulum-next-agent-handoff.md`、`2026-06-08-reticulum-signal-event-data-plane-and-interface-migration-plan.md` 和 `docs/development/reticulum-dual-instance-verification.md` 为准。
+>
 > 日期：2026-06-08
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 分支：`feat/ret-mesh-prototype-review`

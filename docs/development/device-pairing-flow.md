@@ -1,5 +1,7 @@
 # 设备配对流程技术文档（Device Pairing Flow / Node-First Pairing）
 
+> **Legacy HTTP mesh 配对资料**：本文说明的是 node-first / `/mesh/pairing/*` / HTTP mesh pairing 旧路径，不能作为 Reticulum/ENS 授权闭环的当前依据。Reticulum/ENS 当前以 `identity_hex` 为 trust、discovery、pairing、delivery 主键；只用 `docs/plans/2026-06-08-reticulum-next-agent-handoff.md` 和 `docs/development/reticulum-dual-instance-verification.md` 判断下一步。
+>
 > 更新日期：2026-03-31  
 > 关联 issue / PR：[#773](https://github.com/exomind-team/exomind/issues/773)、[#774](https://github.com/exomind-team/exomind/pull/774)  
 > 目标读者：前端 / Runtime / QA / 联调同学

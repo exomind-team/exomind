@@ -7,10 +7,10 @@
 ## 架构与设计
 
 - [系统原则](architecture/principles.md) -- invariant / affordance、生命判据与命名语义
-- [架构总览](architecture/overview.md) -- 分层模型、Port/Service、Phase 路线（唯一权威）
+- [架构总览](architecture/overview.md) -- 全局分层模型与系统背景；Reticulum/ENS 当前网络路线以专项 handoff/plan 为准
 - [Agent Workbench 共享工作图谱](architecture/agent-workbench-shared-graph-spec.md) -- Agent Workbench 长期架构规格与实施阶段
 - [信号池架构](architecture/ARCH-signal-pool-agent-process.md) -- SignalPool 进程模型与信号流
-- [同步架构](architecture/ARCH-SYNC.md) -- 多设备同步模块架构分析
+- [同步架构](architecture/ARCH-SYNC.md) -- 历史 PouchDB/SyncServer 架构分析；Reticulum/ENS 当前路线不得以此为准
 - [ECS 通信栈](architecture/ECS-communication-stack.md) -- ExoMind Communication Stack 协议栈架构
 - [ECS MVP 规格](architecture/ECS-mvp-spec.md) -- ECS 最小可行产品规格
 - [ECS/EDS 讨论记录](architecture/ECS-EDS-discussion-2026-03-04.md) -- ECS/EDS 架构讨论草稿
@@ -36,7 +36,7 @@
 - [PR 锁机制](specs/SPEC-pr-lock-mechanism.md) -- PR Lock Mechanism 规格
 - [任务 MCP API](specs/SPEC-task-mcp-api.md) -- 任务系统 MCP API 设计
 - [认证模块](specs/auth.md) -- 用户认证模块规格（合并自 SPEC-302/304）
-- [同步模块](specs/sync.md) -- 多设备数据同步模块规格（合并自 SPEC-301/303）
+- [同步模块](specs/sync.md) -- RT-only 历史规格；Reticulum/ENS 当前跨 RT gateway 目标以专项 handoff/plan 为准
 - [规格模板](specs/TEMPLATE.md) -- 新功能规格文档模板
 
 ---
@@ -56,7 +56,7 @@
 - [快速上手](development/quickstart.md) -- 开发环境搭建指南
 - [前端设计规范](development/ui-spec.md) -- ExoMind 前端 UI 统一规范，含 token、页面分类、例外边界与评审清单
 - [UI 文本选中白名单](development/ui-text-selection-whitelist.md) -- 落地 #503 时必须显式恢复可选中的正文、日志、终端、JSON 与技术内容面，并定义 Tauri/Web 默认右键菜单分流
-- [设备配对流程](development/device-pairing-flow.md) -- node-first 配对、地址解析、Android 模拟器特殊规则
+- [设备配对流程](development/device-pairing-flow.md) -- legacy node-first/HTTP mesh 配对资料；不代表 Reticulum identity 授权闭环
 - [Tauri Android Windows Playbook](development/tauri-android-windows-playbook.md) -- Windows 宿主机下的 AVD / APK / adb / Tauri MCP / 系统层验收经验
 - [ExoMind CLI](development/exomind-cli.md) -- RT client shell（RT 客户端外壳）使用说明，含 connect-first 规则与命令样例
 - [RT curl / Agent 接入 Skill](../skills/exomind-rt-agent-access/SKILL.md) -- raw RT curl/HTTP 联调唯一真源
@@ -66,6 +66,7 @@
 - [Issue 追踪罗盘](development/issue-tracking-compass.md) -- Issue 去重/决策/新建/追加流程
 - [Playwright E2E](development/playwright-e2e-runtime.md) -- Playwright E2E 测试运行指南
 - [端口环境配置](development/port-env-configuration.md) -- 多 Worktree 端口配置指南
+- [Reticulum 双实例/双设备验收](development/reticulum-dual-instance-verification.md) -- Reticulum/ENS 自动测试、双 runtime、本机双窗口与 LAN/mDNS 人工验收路径
 - [PR 审核证据模板](development/pr-review-evidence-template.md) -- 每轮提交后 PR 评论模板
 - [信号池时间块反馈](development/signal-pool-timeblock-feedback.md) -- 时间块停止/结束 Agent 自动反馈
 - [团队协作规范](development/team-collaboration.md) -- 多角色团队协作流程
@@ -104,9 +105,26 @@
 
 ---
 
-## 活跃计划
+## 计划索引
 
-> 以下文件均为进行中的计划，已完成的计划已移至 [ARCHIVE-INDEX.md](ARCHIVE-INDEX.md)。
+> 本节同时索引当前权威入口、仍活跃计划与历史资料。只有明确标注为“当前权威入口”或“仍活跃”的文件可作为下一步计划；历史记录只能作为考古材料，不代表当前实现状态。已完成且不再参与接手的计划移至 [ARCHIVE-INDEX.md](ARCHIVE-INDEX.md)。
+
+### Reticulum/ENS 当前权威入口
+
+- [Reticulum 无上下文交接](plans/2026-06-08-reticulum-next-agent-handoff.md) -- 当前 Reticulum/ENS 接手入口、核心契约、代码锚点与下一步顺序
+- [Reticulum 双实例/双设备验收](development/reticulum-dual-instance-verification.md) -- 当前人工验收入口；冷启动 Agent 应只用 handoff + 本手册决定下一步，历史计划不得覆盖这两个入口
+
+### Reticulum/ENS 仍活跃计划与规则
+
+- [Reticulum SignalEvent 数据面迁移](plans/2026-06-08-reticulum-signal-event-data-plane-and-interface-migration-plan.md) -- Reticulum 作为跨 RT 唯一 gateway 的用户目标、分层契约与验收矩阵
+- [Reticulum 代码质量规则](plans/2026-06-08-reticulum-code-quality-audit-and-agent-rules.md) -- 旧分支质量审查与后续 Agent 必须遵守的实现规则
+- [Reticulum 原型考古迁移清单](plans/2026-06-08-reticulum-prototype-archaeology-migration-manifest.md) -- 旧分支可迁移行为资产与禁止迁移的代码形状
+
+### Reticulum/ENS 历史索引
+
+- [ENS/Reticulum 历史实施记录](plans/2026-06-08-ens-reticulum-fresh-dev-implementation-plan.md) -- 已完成纵切与历史 checkpoint 索引；不作为当前权威计划
+
+### 其他活跃计划
 
 - [产品规划](plans/product-plan.md) -- 外心产品规划与实施计划
 - [Agent Workbench Phase 1 平铺工作台](plans/2026-03-30-agent-workbench-phase1-flat-workbench-design.md) -- Agent Workbench 第一阶段设计
@@ -190,5 +208,5 @@
 
 ---
 
-> 最后更新: 2026-04-19
-> 导航版本: v4.5
+> 最后更新: 2026-07-06
+> 导航版本: v4.6

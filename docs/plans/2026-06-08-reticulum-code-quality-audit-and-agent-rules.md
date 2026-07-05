@@ -1,5 +1,9 @@
 # Reticulum 原型代码质量审查与 Agent 规则
 
+> 状态：历史原型审计与后续规则材料。本文描述的是旧 Reticulum 原型分支的质量问题、可迁移行为和禁止迁移的代码形状，不代表 `codex/ens-reticulum-adapter` 当前实现状态。
+>
+> 注意：下方“工作树 / 分支 / 来源分支”是被审计对象的历史信息，不是当前开发分支。
+>
 > 日期：2026-06-08
 > 工作树：`H:\A137442\Develop\AGI\exomind-reticulum`
 > 分支：`feat/ret-mesh-prototype-review`
@@ -392,7 +396,11 @@ rg -n "tokio::time::sleep|Duration::from_secs\\(5\\)|PairingOffer|PairingCancel|
 19. 当 service/unit test 能更好定位行为时，不要继续扩大型 smoke integration test。
 20. 不要把拟议设计写成当前实现。必须明确标记 current/prototype/proposed。
 
-## 推荐的下一步实现顺序
+## 历史推荐的下一步实现顺序（当前分支禁用）
+
+以下顺序是审查旧原型分支时给出的历史迁移建议，只用于理解为什么当前分支选择 fresh adapter 路径。`codex/ens-reticulum-adapter` 已经完成 fresh branch、ENS facade、typed snapshot、Reticulum provider、四域 data-plane 自动基线等纵切，不能再把本节当作当前行动计划执行。
+
+当前分支的权威下一步以 `docs/plans/2026-06-08-reticulum-next-agent-handoff.md` 和 `docs/development/reticulum-dual-instance-verification.md` 为准：先完成 discovery、pairing/authorization、UI snapshot truth 与双窗口人工验收闭环，再继续扩展物理联通层和四域同步体验。
 
 1. 从当前 `dev` 创建 fresh branch，而不是从 prototype branch 创建。
 2. 添加或选择一个能够针对当前 `ExoNet-Reticulum` 编译的 ENS/Reticulum facade boundary。

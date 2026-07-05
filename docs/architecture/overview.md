@@ -1,6 +1,12 @@
 # ExoMind 架构总览
 
-> 本文档是 ExoMind 系统架构的唯一权威描述。
+> 本文档是 ExoMind 全局分层架构与系统背景的权威描述。
+> Reticulum/ENS 当前工作树有专项网络路线覆盖：跨 RT 通信目标以
+> [Reticulum 下一阶段无上下文 Agent 交接](../plans/2026-06-08-reticulum-next-agent-handoff.md)
+> 和 [Reticulum SignalEvent 数据面与 Interface/local-link 迁移计划](../plans/2026-06-08-reticulum-signal-event-data-plane-and-interface-migration-plan.md)
+> 为准。本文中 ECS-3、HTTP/SSE、mDNS、iroh/QUIC 等 2026-03 网络路线表述只作为历史架构背景，
+> 不能覆盖当前 `codex/ens-reticulum-adapter` 的契约：Reticulum 是目标跨 RT 唯一 gateway；
+> HTTP/SSE 只用于本机 UI、debug route、legacy compatibility 和开发联调。
 > 更新日期：2026-03-14
 > 版本：v4.0（合并自 4 份历史架构文档）
 
@@ -210,14 +216,18 @@ ECS（通信栈）管实时信号，EDS（数据栈）管持久数据。RT（运
 
 ### 6.1 ECS 七层通信栈
 
+> Reticulum/ENS 现场说明：下表是 2026-03 ECS 分层基线。当前 Reticulum/ENS 工作树仍沿用
+> SignalEvent、SignalPool 和分层命名，但跨 RT 组网/传输路线已收敛为 Reticulum gateway。
+> 不要据此新增 HTTP/SSE、WebSocket 或 iroh 作为 RT-to-RT peer transport。
+
 | 层级 | 名称 | 职责 | 状态 |
 |------|------|------|------|
 | **ECS-7** | 应用语义层 | Agent 业务逻辑 | 部分已实现 |
 | **ECS-6** | 信号契约层 | SignalEvent schema + 序列化 | **已实现** |
 | **ECS-5** | 信号路由层 | SignalPool = Bus + RouteTable + Journal + Window | **已实现** |
 | **ECS-4** | 连接管理层 | SSE 连接生命周期 + 心跳 + 重放 | **已实现** |
-| **ECS-3** | 组网层 | RT 间自发现 + 信道建立 + 信号中继 | 进行中 |
-| **ECS-2** | 传输抽象层 | 统一 Transport trait | 部分 (仅 HTTP/SSE) |
+| **ECS-3** | 组网层 | RT 间自发现 + 信道建立 + 信号中继 | 历史基线；当前跨 RT 目标由 Reticulum/ENS 专项计划覆盖 |
+| **ECS-2** | 传输抽象层 | 统一 Transport trait | 历史基线；HTTP/SSE 只保留为本机 UI/debug/legacy/dev |
 | **ECS-1** | 物理链路层 | TCP/WiFi/BLE/NearLink/LoRa/USB/IPC | 已有 TCP |
 
 ### 6.2 核心数据契约
@@ -399,6 +409,10 @@ crates/
 
 ### 8.2 ECS 通信栈实施路线
 
+> 历史路线说明：本节记录 2026-03 的通信栈阶段设想。当前 `codex/ens-reticulum-adapter`
+> 工作树不按本节继续扩展 HTTP/SSE/WebSocket/iroh；跨 RT 发现、配对、授权和同步应走
+> Reticulum/ENS handoff 与 SignalEvent 数据面迁移计划。
+
 ```
 P0 (已完成)     P1 (已完成)     P2 (近期)         P3 (中期)
 ─────────────   ─────────────   ───────────────   ────────────────
@@ -412,11 +426,14 @@ RouteTable                      Agent 连接注册表
 
 ### 8.3 总体版本路线
 
+> 历史路线说明：下表是 2026-03 版本规划，不是 Reticulum/ENS 当前路线图。
+> 当前跨 RT 通信目标是 Reticulum 作为唯一 gateway；HTTP/SSE 只用于本机 UI/debug/legacy/dev。
+
 | 阶段 | 版本 | 核心能力 | 通信方案 |
 |------|------|----------|----------|
-| **现在** | v0.3.x | 单 RT 单机，中心化 broker | HTTP/SSE over TCP |
-| **Plan X (近期)** | v0.4-0.5 | 双通道 + 优先队列 | HTTP/SSE + WebSocket |
-| **Plan Z (中期)** | v0.5+ | QUIC 多流 + iroh 组网 | iroh (QUIC/NAT/relay) |
+| **2026-03 基线** | v0.3.x | 单 RT 单机，中心化 broker | HTTP/SSE over TCP（历史） |
+| **Plan X（历史）** | v0.4-0.5 | 双通道 + 优先队列 | HTTP/SSE + WebSocket（历史） |
+| **Plan Z（历史）** | v0.5+ | QUIC 多流 + iroh 组网 | iroh (QUIC/NAT/relay)（历史） |
 | **长期** | v1.0+ | 多人联邦 + E2EE | Federation Gateway |
 
 ### 8.4 核心模块状态
@@ -448,6 +465,9 @@ RouteTable                      Agent 连接注册表
 
 ### 架构决策记录（已冻结）
 
+> Reticulum/ENS 现场说明：这些决策冻结的是 2026-03 架构基线。涉及跨 RT transport、
+> LAN-only 安全边界或 peer discovery 的决策，不能覆盖当前 Reticulum/ENS 专项契约。
+
 | # | 决策 | 选择 | 日期 |
 |---|------|------|------|
 | D1 | 路由模式 | RT 主动推给 Agent（RouteTable 是路由引擎） | 2026-03-03 |
@@ -463,6 +483,9 @@ RouteTable                      Agent 连接注册表
 | D11 | Agent supervisor | 外部 bash 脚本循环 | 2026-03-03 |
 
 ### 技术选型原则
+
+> 历史路线说明：iroh 相关选型是 2026-03 中期设想。当前 Reticulum/ENS 工作树的跨 RT
+> 通信抓手是 Reticulum，不应把 iroh/libp2p/WebSocket 恢复成并行 peer transport。
 
 | 原则 | 内容 | 理由 |
 |------|------|------|
@@ -485,7 +508,7 @@ ExoMind 的架构经历了从 CLI 原型到双栈分布式系统的渐进演化�
 
 **v3.0 统一架构（2026-03）**：整合 8 个散落文档为统一架构。引入 ECS/EDS 双栈设计，将 SignalPool 发展为完整的 7 层通信栈（ECS-1 物理链路 → ECS-7 应用语义），加入认知生命科学理论基础和政治经济学视角。
 
-**v4.0 当前架构（2026-03）**：保留 v3.0 的 ECS/EDS 双栈设计，同时用 L1-L4 分层模型（Adapter → Environment → Service/Actor → UI）组织前端代码。RT 运行时侧 SignalPool 四件套已全部实现，Agent 业务层（分类、审核）已上线。ECS-3 组网层（mDNS 发现 + PIN 配对 + Bearer Token 认证）正在开发中。
+**v4.0 当前架构（2026-03 基线）**：保留 v3.0 的 ECS/EDS 双栈设计，同时用 L1-L4 分层模型（Adapter → Environment → Service/Actor → UI）组织前端代码。RT 运行时侧 SignalPool 四件套已全部实现，Agent 业务层（分类、审核）已上线。ECS-3 组网层（mDNS 发现 + PIN 配对 + Bearer Token 认证）在当时仍处于开发中；当前 Reticulum/ENS 工作树的跨 RT 路线以专项 handoff 和 SignalEvent 数据面迁移计划为准。
 
 ---
 

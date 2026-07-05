@@ -93,7 +93,7 @@ Reticulum 下方的 UDP/TCP/mDNS/File/JSONL/Queue/local JSON 等媒介只负责�
 
 debug route 与 UI 只投影后端事实：
 
-- `GET /mesh/ens/snapshot` 或等价 SSE 是 UI 显示事实源。
+- 当前事实源是 `GET /mesh/ens/snapshot` 加显式 refresh；未来可接等价 SSE，但 SSE 只能发布同一份后端 snapshot truth。
 - route 暴露 typed DTO，不暴露 ExoNet-Reticulum 内部类型。
 - UI 可发命令、进入 pending、刷新 snapshot；不能本地推导“已成功切换”。
 
@@ -205,12 +205,12 @@ pub struct EnsTransportSnapshot {
 
 UI 规则：
 
-- UI 只相信 backend snapshot/SSE；点击按钮后的 pending 状态不能把 displayed topology、authorized、pairing_pending、provider health 或 delivery status 改成目标值。
-- 命令返回成功只表示后端接受请求；UI 必须重新读取 snapshot 或等待 SSE 确认后，才能显示新状态。
+- UI 只相信 backend snapshot/refresh；未来接 SSE 时也必须保持同一份后端 snapshot truth。点击按钮后的 pending 状态不能把 displayed topology、authorized、pairing_pending、provider health 或 delivery status 改成目标值。
+- 命令返回成功只表示后端接受请求；UI 必须重新读取 snapshot 或等待未来 SSE 确认后，才能显示新状态。
 - 命令失败、refresh 失败或 SSE 断开时，UI 保留上一份已确认 snapshot，并显示 error/stale；不得清空事实或显示目标值成功。
 - backend snapshot 缺少关键字段或字段值不合法时，UI 显示“未知”或 malformed/stale，不能把缺失值回退成 Off/Disabled/待配对/配置即生效。
 - 顶层本机身份可短显保护布局，但 hover/title 必须暴露完整 `identity_hex`；点击复制必须复制完整身份 ID。复制 toast 只反馈剪贴板动作，不代表 runtime 状态变化。
-- `operations[*]` 只承载 pairing/control-plane 状态；data-plane delivery 必须放在独立 `deliveries[*]` 或等价 SSE 事件里。
+- `operations[*]` 只承载 pairing/control-plane 状态；data-plane delivery 必须放在独立 `deliveries[*]`，或未来由等价 SSE 事件投影同一后端事实。
 - `deliveries[*]` 只投影 ENS-owned outbound `ens:` data-plane route；legacy `mesh:`、actor/local/internal delivery record 不得混成 Reticulum 投递状态。
 - `DeliveryStatus::Sent` 在 UI 中只能表达为“已记录”或等价保守文案；没有 receipt/ack 前不得显示为“已送达”。
 
@@ -251,7 +251,7 @@ UI 规则：
 - authorized peer 才能进入 data-plane 的约束。
 - interface 三态连接语义。
 - local/dev connection adapter 经验，但必须放到 Reticulum interface 层下方。
-- typed snapshot 和 SSE/snapshot 驱动 UI 的边界经验。
+- typed snapshot/refresh 驱动 UI 的边界经验；未来可接 SSE，但不得改变后端事实优先契约。
 
 不应迁出：
 
@@ -269,7 +269,7 @@ UI 规则：
 3. 以 TCP server/client 四域真实 provider 作为多端 Reticulum data-plane 主基线；JSONL/file/local JSON 等 medium 只按“日用入口价值”扩展，并且必须仍在 Reticulum physical layer 下方。
 4. 做真实局域网 mDNS bootstrap 验收；mDNS 只负责 Reticulum endpoint bootstrap，不授权 data frame，也不恢复 HTTP mesh pairing。
 5. 在没有 receipt/ack 前，保持 delivery `sent = 已记录` 的保守语义；只有 source-binding、签名、授权和远端应用确认都能被验证后，才引入 end-to-end receipt。
-6. 默认启动集成、更大范围 AppState/UI 接入和用户侧同步 UX 依赖上述能力稳定；route/UI 仍只消费 typed snapshot/SSE，仍禁止乐观显示 topology、provider、pairing 或 delivery 状态。
+6. 默认启动集成、更大范围 AppState/UI 接入和用户侧同步 UX 依赖上述能力稳定；route/UI 仍只消费 typed snapshot/refresh，未来可接 SSE 但必须保持同一 snapshot truth，仍禁止乐观显示 topology、provider、pairing 或 delivery 状态。
 
 ## 质量门槛
 
@@ -286,10 +286,10 @@ UI 规则：
 - [ ] discovered peer endpoint 带有 `gateway`、`via_interface`、`via_medium`，且不是从 HTTP base URL、localhost 端口或 mDNS registry 拼出来的 peer truth。
 - [ ] global topology 与 interface topology 没有被混成“全部设置接口”。
 - [ ] effective topology 由后端 snapshot 计算并暴露，UI 不自行推导事实。
-- [ ] UI 不乐观显示 Reticulum 状态；命令后以 snapshot/SSE 结果为准。
+- [ ] UI 不乐观显示 Reticulum 状态；命令后以 snapshot/refresh 结果为准，未来接 SSE 时也必须保持同一后端事实源。
 - [ ] UI command handler 没有把点击目标值写入 displayed `snapshot`，也没有本地伪造 `authorized`、`pairing_pending`、delivery success 或 provider health。
 - [ ] backend snapshot 缺少关键字段或字段不合法时，UI 显示“未知”或 malformed/stale，不把缺失字段回退成 Off/Disabled/待配对/配置即生效。
-- [ ] pending 状态只用于禁用控件、显示等待或阻止重复提交；屏幕上的 provider/interface/peer/delivery 事实仍来自最后一次 backend snapshot/SSE。
+- [ ] pending 状态只用于禁用控件、显示等待或阻止重复提交；屏幕上的 provider/interface/peer/delivery 事实仍来自最后一次 backend snapshot/refresh 或未来等价 SSE。
 - [ ] 命令失败、refresh 失败或 SSE 断开时，UI 保留上一份已确认 snapshot，并显示错误或 stale 状态；不得显示目标值成功。
 - [ ] 没有实时 SSE 的 UI 必须提供手动 refresh 或明确 stale 语义；宁可滞后、等待或卡顿，也不能显示比后端实际运行态更成功的 Reticulum 状态。
 - [ ] `operations[*]` 只承载 pairing/control-plane 状态；data-plane delivery 必须放在独立的 `deliveries[*]` 或等价 SSE 事件里。

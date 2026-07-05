@@ -1,5 +1,7 @@
 # ARCH-SYNC: 多设备同步模块架构分析
 
+> **历史文档 / 非 Reticulum 权威入口**：本文分析的是 2026-02 的 PouchDB/SyncServer 同步形态，只能作为技术债和历史背景参考。当前 `exomind-reticulum` 工作树的跨 RT 同步路线以 Reticulum/ENS 为唯一 gateway，先读 `docs/plans/2026-06-08-reticulum-next-agent-handoff.md`、`docs/plans/2026-06-08-reticulum-signal-event-data-plane-and-interface-migration-plan.md` 和 `docs/development/reticulum-dual-instance-verification.md`。
+
 > 分析日期：2026-02-10
 > 分析人：Architect
 

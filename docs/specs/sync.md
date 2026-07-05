@@ -1,6 +1,8 @@
 # 多设备同步规格（RT-only）
 
 > 说明：本文件已从旧的 `PouchDB Server + PouchSyncAdapter` 设计切换为当前主路径。旧方案仅保留为历史背景，不再代表现行实现。
+>
+> **Reticulum/ENS 注意**：本文件描述的是 RT-only / mesh relay 历史规格，不是 `exomind-reticulum` 分支的当前跨 RT 网络权威。当前目标是让 Reticulum 成为唯一跨 RT gateway，并在已授权设备之间同步 EventLog、Task、TimeBlock 与 Proposal；冷启动 Agent 应先读 `docs/plans/2026-06-08-reticulum-next-agent-handoff.md`。
 
 ## 1. 当前主路径
 
