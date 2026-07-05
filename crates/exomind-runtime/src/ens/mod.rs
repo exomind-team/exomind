@@ -8,10 +8,11 @@ pub mod service;
 
 pub use data_protocol::{EnsDataFrame, EnsReceivedDataFrame, EnsSignalEventFrame};
 pub use dto::{
-    EnsCommandAck, EnsEndpointAdvertisement, EnsGatewayKind, EnsInterfaceMedium,
-    EnsInterfaceSnapshot, EnsInterfaceTopology, EnsOperationKind, EnsOperationSnapshot,
-    EnsOperationStatus, EnsPairingOfferTicket, EnsPeerIdentity, EnsPeerSnapshot,
-    EnsTransportHealth, EnsTransportHealthStatus, EnsTransportSnapshot,
+    EnsCommandAck, EnsDeliverySnapshot, EnsDeliveryStatus, EnsEndpointAdvertisement,
+    EnsGatewayKind, EnsInterfaceMedium, EnsInterfaceSnapshot, EnsInterfaceTopology,
+    EnsOperationKind, EnsOperationSnapshot, EnsOperationStatus, EnsPairingOfferTicket,
+    EnsPeerIdentity, EnsPeerSnapshot, EnsTransportHealth, EnsTransportHealthStatus,
+    EnsTransportSnapshot,
 };
 pub use fake_provider::FakeEnsProvider;
 pub use pairing_protocol::{

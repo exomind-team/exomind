@@ -56,6 +56,18 @@ export interface EnsOperationSnapshot {
   updated_at: string;
 }
 
+export type EnsDeliveryStatus = 'sent' | 'failed' | 'skipped';
+
+export interface EnsDeliverySnapshot {
+  event_id: string;
+  route_id: string;
+  peer_identity_hex: string;
+  status: EnsDeliveryStatus;
+  reason?: string;
+  started_at: string;
+  finished_at: string;
+}
+
 export interface EnsPeerSnapshot {
   identity: EnsPeerIdentity;
   endpoint?: EnsEndpointAdvertisement;
@@ -80,6 +92,7 @@ export interface EnsTransportSnapshot {
   peers: EnsPeerSnapshot[];
   interfaces: EnsInterfaceSnapshot[];
   operations: EnsOperationSnapshot[];
+  deliveries: EnsDeliverySnapshot[];
   updated_at: string;
 }
 

@@ -116,6 +116,7 @@ function snapshotWithTopology(
       pairing_pending: false,
     }],
     operations: [],
+    deliveries: [],
     updated_at: '2026-06-08T00:00:00Z',
   };
 }
@@ -143,6 +144,32 @@ function snapshotWithFailedPairingOperation(): EnsTransportSnapshot {
       updated_at: '2026-06-08T00:01:00Z',
     }],
     updated_at: '2026-06-08T00:01:00Z',
+  };
+}
+
+function snapshotWithFailedDelivery(): EnsTransportSnapshot {
+  return {
+    ...snapshotWithTopology('active'),
+    deliveries: [
+      {
+        event_id: 'signal-1',
+        route_id: 'ens:identity-b',
+        peer_identity_hex: 'identity-b',
+        status: 'failed',
+        reason: 'ENS provider failed to send data frame: link unavailable',
+        started_at: '2026-06-08T00:02:00Z',
+        finished_at: '2026-06-08T00:02:01Z',
+      },
+      {
+        event_id: 'signal-2',
+        route_id: 'ens:identity-b',
+        peer_identity_hex: 'identity-b',
+        status: 'sent',
+        started_at: '2026-06-08T00:03:00Z',
+        finished_at: '2026-06-08T00:03:00Z',
+      },
+    ],
+    updated_at: '2026-06-08T00:02:01Z',
   };
 }
 
@@ -244,6 +271,46 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
     });
   });
 
+  it('does not optimistically flip interface topology while backend command is pending（接口命令未确认时不乐观翻转）', async () => {
+    let currentSnapshot = snapshotWithTopology('active');
+    let resolveSetInterface: (() => void) | null = null;
+    runtimeEnsMocks.getSnapshot.mockImplementation(async () => currentSnapshot);
+    runtimeEnsMocks.setInterfaceTopology.mockImplementation(
+      async () =>
+        new Promise((resolve) => {
+          resolveSetInterface = () => {
+            currentSnapshot = snapshotWithTopology('passive');
+            resolve(currentSnapshot.interfaces[0]);
+          };
+        }),
+    );
+    runtimeEnsMocks.setGlobalTopology.mockReset();
+    runtimeEnsMocks.initiatePairingWithDiscoveredPeer.mockReset();
+
+    renderDeviceView();
+
+    const panel = await screen.findByTestId('reticulum-debug-panel');
+    fireEvent.click(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-passive'));
+
+    expect(runtimeEnsMocks.setInterfaceTopology).toHaveBeenCalledWith(
+      'http://127.0.0.1:9124',
+      '127.0.0.1:4242',
+      'passive',
+    );
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-active')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-passive')).toHaveAttribute('aria-pressed', 'false');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-configured')).toHaveTextContent('Active');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-effective')).toHaveTextContent('Active');
+
+    resolveSetInterface?.();
+
+    await waitFor(() => {
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-passive')).toHaveAttribute('aria-pressed', 'true');
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-configured')).toHaveTextContent('Passive');
+      expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-effective')).toHaveTextContent('Passive');
+    });
+  });
+
   it('keeps dynamic UDP interface topology updates scoped to the selected public name（动态 UDP 多接口只更新选中的 public name）', async () => {
     const activeInterface = {
       name: '127.0.0.1:4242',
@@ -323,6 +390,59 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
     );
   });
 
+  it('shows ENS delivery state from backend snapshot（展示后端快照中的 ENS 投递状态）', async () => {
+    runtimeEnsMocks.getSnapshot.mockResolvedValue(snapshotWithFailedDelivery());
+    runtimeEnsMocks.setInterfaceTopology.mockReset();
+    runtimeEnsMocks.setGlobalTopology.mockReset();
+    runtimeEnsMocks.initiatePairingWithDiscoveredPeer.mockReset();
+
+    renderDeviceView();
+
+    const panel = await screen.findByTestId('reticulum-debug-panel');
+    expect(within(panel).getByText('ENS 投递状态')).toBeInTheDocument();
+
+    const delivery = within(panel).getByTestId('reticulum-delivery-signal-1');
+    expect(delivery).toHaveTextContent('signal-1');
+    expect(delivery).toHaveTextContent('ens:identity-b · peer identity-b');
+    expect(within(panel).getByTestId('reticulum-delivery-signal-1-status')).toHaveTextContent('失败');
+    expect(within(panel).getByTestId('reticulum-delivery-signal-1-reason')).toHaveTextContent(
+      'ENS provider failed to send data frame: link unavailable',
+    );
+    expect(within(panel).getByTestId('reticulum-delivery-signal-2-status')).toHaveTextContent('已记录');
+    expect(within(panel).queryByText('已送达')).not.toBeInTheDocument();
+  });
+
+  it('keeps the last confirmed snapshot when ENS refresh fails（刷新失败时保留上一份后端确认快照）', async () => {
+    runtimeEnsMocks.getSnapshot
+      .mockResolvedValueOnce(snapshotWithFailedDelivery())
+      .mockRejectedValueOnce(new Error('network down'));
+    runtimeEnsMocks.setInterfaceTopology.mockReset();
+    runtimeEnsMocks.setGlobalTopology.mockReset();
+    runtimeEnsMocks.initiatePairingWithDiscoveredPeer.mockReset();
+
+    renderDeviceView();
+
+    const panel = await screen.findByTestId('reticulum-debug-panel');
+    expect(within(panel).getByTestId('reticulum-delivery-signal-1')).toBeInTheDocument();
+    expect(within(panel).getByTestId('reticulum-last-confirmed-at')).toHaveTextContent(
+      '2026-06-08T00:02:01Z',
+    );
+
+    fireEvent.click(within(panel).getByRole('button', { name: '刷新' }));
+
+    await waitFor(() => {
+      expect(within(panel).getByTestId('reticulum-debug-error')).toHaveTextContent('network down');
+      expect(within(panel).getByTestId('reticulum-stale-snapshot')).toHaveTextContent(
+        '刷新失败，保留上一份后端快照',
+      );
+      expect(within(panel).getByTestId('reticulum-delivery-signal-1')).toBeInTheDocument();
+      expect(within(panel).getByTestId('reticulum-last-confirmed-at')).toHaveTextContent(
+        '2026-06-08T00:02:01Z',
+      );
+      expect(within(panel).getByRole('button', { name: '刷新' })).toBeEnabled();
+    });
+  });
+
   it('starts pairing from discovered ENS peer（可从发现的 ENS peer 发起配对）', async () => {
     runtimeEnsMocks.getSnapshot.mockResolvedValue(snapshotWithTopology('active'));
     runtimeEnsMocks.initiatePairingWithDiscoveredPeer.mockResolvedValue({
@@ -361,8 +481,50 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
     renderDeviceView();
 
     const panel = await screen.findByTestId('reticulum-debug-panel');
-    expect(within(panel).getByTestId('reticulum-health-status')).toHaveTextContent('未启用');
+    expect(within(panel).getByTestId('reticulum-health-status')).toHaveTextContent('未知');
+    expect(within(panel).getByTestId('reticulum-global-topology-status')).toHaveTextContent('未知');
+    expect(within(panel).getByTestId('reticulum-global-topology-active')).toHaveAttribute('aria-pressed', 'false');
+    expect(within(panel).getByTestId('reticulum-global-topology-active')).toBeDisabled();
     expect(within(panel).getByText('暂无 ENS interface snapshot。')).toBeInTheDocument();
     expect(within(panel).getByText('暂无 ENS discovered peers。')).toBeInTheDocument();
+  });
+
+  it('marks malformed peer and interface facts as unknown（后端缺少关键事实时显示未知而非猜测）', async () => {
+    runtimeEnsMocks.getSnapshot.mockResolvedValue({
+      ...snapshotWithTopology('active'),
+      health: {},
+      global_topology: undefined,
+      interfaces: [{
+        name: '127.0.0.1:4242',
+        type: 'udp',
+        online: true,
+        outgoing: true,
+        topology: 'active',
+      }],
+      peers: [{
+        identity: {
+          identity_hex: 'identity-b',
+          host_id: 'rt-b',
+        },
+      }],
+      deliveries: [{
+        event_id: 'signal-malformed',
+        route_id: 'ens:identity-b',
+        peer_identity_hex: 'identity-b',
+        started_at: '2026-06-08T00:02:00Z',
+        finished_at: '2026-06-08T00:02:01Z',
+      }],
+    } as unknown as EnsTransportSnapshot);
+
+    renderDeviceView();
+
+    const panel = await screen.findByTestId('reticulum-debug-panel');
+    expect(within(panel).getByTestId('reticulum-health-status')).toHaveTextContent('未知');
+    expect(within(panel).getByTestId('reticulum-global-topology-status')).toHaveTextContent('未知');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-configured')).toHaveTextContent('Active');
+    expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-effective')).toHaveTextContent('未知');
+    expect(within(panel).getByTestId('reticulum-peer-identity-b')).toHaveTextContent('状态未知');
+    expect(within(panel).queryByTestId('reticulum-peer-pair-identity-b')).not.toBeInTheDocument();
+    expect(within(panel).getByTestId('reticulum-delivery-signal-malformed-status')).toHaveTextContent('状态未知');
   });
 });

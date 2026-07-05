@@ -6,13 +6,14 @@ use uuid::Uuid;
 
 use crate::mesh::{MeshState, PeerInfo, PeerStatus};
 use crate::pairing::{PairingError, PairingManager};
-use crate::signal::SignalEvent;
+use crate::signal::{DeliveryRecord, DeliveryStatus, SignalEvent};
 
 use super::data_protocol::{EnsDataFrame, EnsReceivedDataFrame, EnsSignalEventFrame};
 use super::dto::{
-    EnsCommandAck, EnsEndpointAdvertisement, EnsInterfaceSnapshot, EnsInterfaceTopology,
-    EnsOperationKind, EnsOperationSnapshot, EnsOperationStatus, EnsPairingOfferTicket,
-    EnsPeerIdentity, EnsPeerSnapshot, EnsTransportHealth, EnsTransportSnapshot,
+    EnsCommandAck, EnsDeliverySnapshot, EnsDeliveryStatus, EnsEndpointAdvertisement,
+    EnsInterfaceSnapshot, EnsInterfaceTopology, EnsOperationKind, EnsOperationSnapshot,
+    EnsOperationStatus, EnsPairingOfferTicket, EnsPeerIdentity, EnsPeerSnapshot,
+    EnsTransportHealth, EnsTransportSnapshot,
 };
 use super::fake_provider::FakeEnsProvider;
 use super::pairing_protocol::{
@@ -203,6 +204,14 @@ impl EnsTransportService {
             })
             .collect();
         let local_endpoint = self.current_local_endpoint();
+        let deliveries = self
+            .mesh
+            .as_ref()
+            .map(|mesh| mesh.recent_delivery_records(100))
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(ens_delivery_snapshot_from_record)
+            .collect();
 
         EnsTransportSnapshot {
             enabled: state.enabled && !state.shutdown,
@@ -217,6 +226,7 @@ impl EnsTransportService {
             peers,
             interfaces,
             operations,
+            deliveries,
             updated_at: now_rfc3339(),
         }
     }
@@ -378,7 +388,16 @@ impl EnsTransportService {
         self.ensure_ready()?;
         let mesh = self.mesh.as_ref().ok_or(EnsTransportError::NotConfigured)?;
         let peer = self.authorized_mesh_peer(peer_identity_hex)?;
+        let event_id = event.id.clone();
+        let route_id = format!("ens:{peer_identity_hex}");
         if !mesh.should_stream_event_to_peer(&peer.id, &event) {
+            mesh.record_signal_delivery(
+                &event_id,
+                route_id,
+                peer_identity_hex.to_string(),
+                DeliveryStatus::Skipped,
+                Some("mesh routing policy skipped event".to_string()),
+            );
             return Ok(false);
         }
 
@@ -393,8 +412,28 @@ impl EnsTransportService {
             scope_hint: signal_scope_hint(&event),
             event,
         });
-        self.provider.send_data_frame(&target, frame)?;
-        Ok(true)
+        match self.provider.send_data_frame(&target, frame) {
+            Ok(()) => {
+                mesh.record_signal_delivery(
+                    &event_id,
+                    route_id,
+                    peer_identity_hex.to_string(),
+                    DeliveryStatus::Sent,
+                    None,
+                );
+                Ok(true)
+            }
+            Err(error) => {
+                mesh.record_signal_delivery(
+                    &event_id,
+                    route_id,
+                    peer_identity_hex.to_string(),
+                    DeliveryStatus::Failed,
+                    Some(error.to_string()),
+                );
+                Err(error.into())
+            }
+        }
     }
 
     pub async fn handle_data_frame(&self, frame: EnsDataFrame) -> Result<bool, EnsTransportError> {
@@ -939,4 +978,26 @@ fn signal_scope_hint(event: &SignalEvent) -> Option<String> {
         .get("scopeKey")
         .and_then(|value| value.as_str())
         .map(str::to_string)
+}
+
+fn ens_delivery_snapshot_from_record(record: DeliveryRecord) -> Option<EnsDeliverySnapshot> {
+    if !record.route_id.starts_with("ens:") {
+        return None;
+    }
+
+    let status = match record.status {
+        DeliveryStatus::Sent => EnsDeliveryStatus::Sent,
+        DeliveryStatus::Failed => EnsDeliveryStatus::Failed,
+        DeliveryStatus::Skipped => EnsDeliveryStatus::Skipped,
+    };
+
+    Some(EnsDeliverySnapshot {
+        event_id: record.event_id,
+        route_id: record.route_id,
+        peer_identity_hex: record.target_ref,
+        status,
+        reason: record.reason,
+        started_at: record.started_at,
+        finished_at: record.finished_at,
+    })
 }

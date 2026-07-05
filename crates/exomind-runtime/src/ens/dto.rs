@@ -167,6 +167,26 @@ pub struct EnsOperationSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EnsDeliveryStatus {
+    Sent,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnsDeliverySnapshot {
+    pub event_id: String,
+    pub route_id: String,
+    pub peer_identity_hex: String,
+    pub status: EnsDeliveryStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub started_at: String,
+    pub finished_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnsPeerSnapshot {
     pub identity: EnsPeerIdentity,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -202,5 +222,6 @@ pub struct EnsTransportSnapshot {
     pub peers: Vec<EnsPeerSnapshot>,
     pub interfaces: Vec<EnsInterfaceSnapshot>,
     pub operations: Vec<EnsOperationSnapshot>,
+    pub deliveries: Vec<EnsDeliverySnapshot>,
     pub updated_at: String,
 }

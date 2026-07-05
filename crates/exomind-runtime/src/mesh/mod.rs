@@ -516,6 +516,39 @@ impl MeshState {
         topics
     }
 
+    pub fn recent_delivery_records(&self, limit: usize) -> Vec<DeliveryRecord> {
+        self.signal_pool.journal().recent(limit)
+    }
+
+    pub fn record_signal_delivery(
+        &self,
+        event_id: &str,
+        route_id: impl Into<String>,
+        target_ref: impl Into<String>,
+        status: DeliveryStatus,
+        reason: Option<String>,
+    ) {
+        let route_id = route_id.into();
+        let target_ref = target_ref.into();
+        let now = now_rfc3339();
+        if let Err(error) = self.signal_pool.journal().append(DeliveryRecord {
+            event_id: event_id.to_string(),
+            route_id: route_id.clone(),
+            target_ref,
+            status,
+            reason,
+            started_at: now.clone(),
+            finished_at: now,
+        }) {
+            tracing::warn!(
+                event_id = %event_id,
+                route_id = %route_id,
+                error = %error,
+                "signal delivery journal append failed (Signal 投递日志追加失败)"
+            );
+        }
+    }
+
     pub fn should_stream_event_to_peer(&self, peer_id: &str, event: &SignalEvent) -> bool {
         if event.origin_host_id == peer_id {
             return false;
@@ -642,23 +675,13 @@ impl MeshState {
         status: DeliveryStatus,
         reason: Option<String>,
     ) {
-        let now = now_rfc3339();
-        if let Err(error) = self.signal_pool.journal().append(DeliveryRecord {
-            event_id: event_id.to_string(),
-            route_id: format!("mesh:{peer_id}"),
-            target_ref: peer_id.to_string(),
+        self.record_signal_delivery(
+            event_id,
+            format!("mesh:{peer_id}"),
+            peer_id.to_string(),
             status,
             reason,
-            started_at: now.clone(),
-            finished_at: now,
-        }) {
-            tracing::warn!(
-                event_id = %event_id,
-                peer_id = %peer_id,
-                error = %error,
-                "mesh delivery journal append failed (网格投递日志追加失败)"
-            );
-        }
+        );
     }
 
     fn persist(&self) {

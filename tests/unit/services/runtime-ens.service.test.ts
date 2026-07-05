@@ -11,6 +11,14 @@ describe('RuntimeEnsService', () => {
       peers: [],
       interfaces: [],
       operations: [],
+      deliveries: [{
+        event_id: 'signal-1',
+        route_id: 'ens:identity-b',
+        peer_identity_hex: 'identity-b',
+        status: 'sent',
+        started_at: '2026-06-08T00:00:00Z',
+        finished_at: '2026-06-08T00:00:00Z',
+      }],
       updated_at: '2026-06-08T00:00:00Z',
     })));
     const service = new RuntimeEnsService({ fetchImpl });
@@ -18,6 +26,8 @@ describe('RuntimeEnsService', () => {
     const snapshot = await service.getSnapshot('http://127.0.0.1:9124', 'admin-token');
 
     expect(snapshot.provider_id).toBe('fake-ens');
+    expect(snapshot.deliveries[0]?.status).toBe('sent');
+    expect(snapshot.deliveries[0]?.peer_identity_hex).toBe('identity-b');
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://127.0.0.1:9124/mesh/ens/snapshot',
       expect.objectContaining({
@@ -73,6 +83,7 @@ describe('RuntimeEnsService', () => {
         effective_topology: 'passive',
       }],
       operations: [],
+      deliveries: [],
       updated_at: '2026-06-08T00:00:00Z',
     })));
     const service = new RuntimeEnsService({ fetchImpl });

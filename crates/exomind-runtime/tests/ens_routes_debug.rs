@@ -6,6 +6,7 @@ use exomind_runtime::ens::{
     EnsEndpointAdvertisement, EnsGatewayKind, EnsInterfaceMedium, EnsInterfaceSnapshot,
     EnsInterfaceTopology, EnsPairingFrame, EnsPeerSnapshot, EnsTransportService, FakeEnsProvider,
 };
+use exomind_runtime::signal::{DeliveryRecord, DeliveryStatus};
 use exomind_runtime::{AppState, app_with_state};
 use http_body_util::BodyExt;
 use serde_json::Value;
@@ -83,6 +84,70 @@ async fn ens_snapshot_route_exposes_provider_interfaces() {
     assert_eq!(payload["interfaces"][0]["name"], "lan-udp");
     assert_eq!(payload["interfaces"][0]["topology"], "active");
     assert_eq!(payload["interfaces"][0]["effective_topology"], "active");
+}
+
+#[tokio::test]
+async fn ens_snapshot_route_exposes_ens_delivery_records_only() {
+    let (state, _provider) = state_with_ens_provider();
+    state.mesh.record_signal_delivery(
+        "signal-ens",
+        "ens:identity-b",
+        "identity-b",
+        DeliveryStatus::Failed,
+        Some("link unavailable".to_string()),
+    );
+    state.mesh.record_signal_delivery(
+        "signal-mesh",
+        "mesh:identity-b",
+        "identity-b",
+        DeliveryStatus::Sent,
+        None,
+    );
+    state
+        .signal_pool
+        .journal()
+        .append(DeliveryRecord {
+            event_id: "signal-actor".to_string(),
+            route_id: "actor:local".to_string(),
+            target_ref: "local-actor".to_string(),
+            status: DeliveryStatus::Sent,
+            reason: None,
+            started_at: "2026-06-08T00:00:00Z".to_string(),
+            finished_at: "2026-06-08T00:00:01Z".to_string(),
+        })
+        .expect("append non-ENS delivery record");
+
+    let response = app_with_state(state)
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ens/snapshot")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    let deliveries = payload["deliveries"].as_array().unwrap();
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0]["event_id"], "signal-ens");
+    assert_eq!(deliveries[0]["route_id"], "ens:identity-b");
+    assert_eq!(deliveries[0]["peer_identity_hex"], "identity-b");
+    assert_eq!(deliveries[0]["status"], "failed");
+    assert_eq!(deliveries[0]["reason"], "link unavailable");
+    assert!(
+        deliveries
+            .iter()
+            .all(|delivery| delivery["route_id"] != "mesh:identity-b"),
+        "ENS snapshot must not project legacy mesh delivery records as Reticulum peer delivery state"
+    );
+    assert!(
+        deliveries
+            .iter()
+            .all(|delivery| delivery["route_id"] != "actor:local"),
+        "ENS snapshot must not mix local actor delivery records into data-plane delivery state"
+    );
 }
 
 #[tokio::test]
@@ -260,10 +325,7 @@ async fn ens_snapshot_route_exposes_failed_pairing_operation_error_and_peer_last
         .find(|operation| operation["status"] == "failed")
         .expect("failed operation should be included in snapshot");
     assert_eq!(operation["kind"], "pairing_offer");
-    assert_eq!(
-        operation["peer_identity"]["identity_hex"],
-        "identity-b"
-    );
+    assert_eq!(operation["peer_identity"]["identity_hex"], "identity-b");
     assert_eq!(operation["error"], expected_error);
 
     let peer = snapshot["peers"]

@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use exomind_runtime::ens::{
-    EnsDataFrame, EnsEndpointAdvertisement, EnsGatewayKind, EnsInterfaceMedium, EnsPeerIdentity,
-    EnsReceivedDataFrame, EnsSignalEventFrame, EnsTransportError, EnsTransportService,
+    EnsDataFrame, EnsDeliveryStatus, EnsEndpointAdvertisement, EnsGatewayKind, EnsInterfaceMedium,
+    EnsPeerIdentity, EnsReceivedDataFrame, EnsSignalEventFrame, EnsTransportError,
+    EnsTransportService,
 };
 use exomind_runtime::eventlog::{EventLogStore, EventRecord};
 use exomind_runtime::eventlog_appender::{
@@ -12,8 +13,8 @@ use exomind_runtime::mesh::{MeshState, PeerInfo, PeerStatus};
 use exomind_runtime::pairing::PairingManager;
 use exomind_runtime::proposal::ProposalStore;
 use exomind_runtime::proposal::{ActionType, ProposalStatus};
-use exomind_runtime::signal::SignalEvent;
 use exomind_runtime::signal::actors::replication_actor::spawn_replication_actor;
+use exomind_runtime::signal::{DeliveryStatus, SignalEvent};
 use exomind_runtime::task::TaskStore;
 use exomind_runtime::task::{TaskPriority, TaskStatus};
 use exomind_runtime::timeblock::{
@@ -343,6 +344,25 @@ async fn eventlog_append_replicates_through_ens_signal_event_frame() {
     assert_eq!(frame.scope_hint.as_deref(), Some("profile-sync"));
     assert_eq!(frame.event.topic, EVENTLOG_REPLICATION_APPENDED_TOPIC);
 
+    let delivery_records = node_a.mesh.recent_delivery_records(10);
+    let delivery = delivery_records
+        .iter()
+        .find(|record| record.event_id == frame.event.id)
+        .expect("successful ENS send should be recorded in delivery journal");
+    assert_eq!(delivery.route_id, "ens:identity-b");
+    assert_eq!(delivery.target_ref, "identity-b");
+    assert_eq!(delivery.status, DeliveryStatus::Sent);
+    assert_eq!(delivery.reason, None);
+    let snapshot = node_a.service.snapshot();
+    let snapshot_delivery = snapshot
+        .deliveries
+        .iter()
+        .find(|record| record.event_id == frame.event.id)
+        .expect("ENS service snapshot should expose successful data-plane delivery");
+    assert_eq!(snapshot_delivery.route_id, "ens:identity-b");
+    assert_eq!(snapshot_delivery.peer_identity_hex, "identity-b");
+    assert_eq!(snapshot_delivery.status, EnsDeliveryStatus::Sent);
+
     let accepted = node_b
         .service
         .handle_received_data_frame(received_data_frame_with_transport_peer(
@@ -356,6 +376,104 @@ async fn eventlog_append_replicates_through_ens_signal_event_frame() {
     let replicated = wait_for_event(&node_b.eventlog_store, "event-1").await;
     assert_eq!(replicated.content, "Reticulum data-plane event");
     assert_eq!(replicated.tags, vec!["note", "reticulum"]);
+}
+
+#[tokio::test]
+async fn provider_send_failure_is_recorded_as_failed_ens_delivery() {
+    let node_a = test_node("rt-a", "identity-a", "192.168.1.10:1949");
+    authorize_peer(&node_a.mesh, "identity-b", "rt-b");
+    node_a.mesh.set_peer_interests(
+        "identity-b",
+        vec![EVENTLOG_REPLICATION_APPENDED_TOPIC.to_string()],
+    );
+    node_a.provider.set_fail_next_send("link unavailable");
+
+    let event = replication_signal("signal-provider-failure", "rt-a", "event-provider-failure");
+    let error = node_a
+        .service
+        .send_signal_event_to_peer("identity-b", event)
+        .expect_err("provider send failure should be surfaced to caller");
+
+    assert!(
+        error
+            .to_string()
+            .contains("ENS provider failed to send data frame: link unavailable")
+    );
+    assert!(node_a.provider.sent_data_frames().is_empty());
+
+    let delivery_records = node_a.mesh.recent_delivery_records(10);
+    let delivery = delivery_records
+        .iter()
+        .find(|record| record.event_id == "signal-provider-failure")
+        .expect("failed ENS send should be recorded in delivery journal");
+    assert_eq!(delivery.route_id, "ens:identity-b");
+    assert_eq!(delivery.target_ref, "identity-b");
+    assert_eq!(delivery.status, DeliveryStatus::Failed);
+    assert_eq!(
+        delivery.reason.as_deref(),
+        Some("ENS provider failed to send data frame: link unavailable")
+    );
+    let snapshot = node_a.service.snapshot();
+    let snapshot_delivery = snapshot
+        .deliveries
+        .iter()
+        .find(|record| record.event_id == "signal-provider-failure")
+        .expect("ENS service snapshot should expose failed data-plane delivery");
+    assert_eq!(snapshot_delivery.route_id, "ens:identity-b");
+    assert_eq!(snapshot_delivery.peer_identity_hex, "identity-b");
+    assert_eq!(snapshot_delivery.status, EnsDeliveryStatus::Failed);
+    assert_eq!(
+        snapshot_delivery.reason.as_deref(),
+        Some("ENS provider failed to send data frame: link unavailable")
+    );
+}
+
+#[tokio::test]
+async fn routing_policy_skip_is_recorded_as_skipped_ens_delivery() {
+    let node_a = test_node("rt-a", "identity-a", "192.168.1.10:1949");
+    authorize_peer(&node_a.mesh, "identity-b", "rt-b");
+
+    let sent = node_a
+        .service
+        .send_signal_event_to_peer(
+            "identity-b",
+            signal_event(
+                "signal-routing-skipped",
+                "task.replication.upserted",
+                "rt-a",
+                serde_json::json!({ "scopeKey": "profile-sync" }),
+            ),
+        )
+        .expect("routing skip should not be reported as provider failure");
+
+    assert!(!sent);
+    assert!(node_a.provider.sent_data_frames().is_empty());
+
+    let delivery_records = node_a.mesh.recent_delivery_records(10);
+    let delivery = delivery_records
+        .iter()
+        .find(|record| record.event_id == "signal-routing-skipped")
+        .expect("routing skip should be recorded in delivery journal");
+    assert_eq!(delivery.route_id, "ens:identity-b");
+    assert_eq!(delivery.target_ref, "identity-b");
+    assert_eq!(delivery.status, DeliveryStatus::Skipped);
+    assert_eq!(
+        delivery.reason.as_deref(),
+        Some("mesh routing policy skipped event")
+    );
+    let snapshot = node_a.service.snapshot();
+    let snapshot_delivery = snapshot
+        .deliveries
+        .iter()
+        .find(|record| record.event_id == "signal-routing-skipped")
+        .expect("ENS service snapshot should expose skipped data-plane delivery");
+    assert_eq!(snapshot_delivery.route_id, "ens:identity-b");
+    assert_eq!(snapshot_delivery.peer_identity_hex, "identity-b");
+    assert_eq!(snapshot_delivery.status, EnsDeliveryStatus::Skipped);
+    assert_eq!(
+        snapshot_delivery.reason.as_deref(),
+        Some("mesh routing policy skipped event")
+    );
 }
 
 #[tokio::test]
