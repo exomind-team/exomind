@@ -342,6 +342,8 @@ UI 一致性约束：
 - 当前阶段的可人验构建基线是从 `codex/ens-reticulum-adapter` 构建 `G:\exomind-cargo-target\debug\exomind.exe`；这个文件名仍是产品可执行文件名，不能单靠窗口标题或文件名判断是否为 Reticulum 版本。
 - debug 运行态必须用 `/mesh/ens/snapshot` 判断是否进入 Reticulum/ENS 路径：`enabled=true`、`provider_id=runtime-reticulum-ens`、`local_endpoint.gateway=reticulum`、`global_topology` 有后端事实值，并且 `interfaces[*].effective_topology` 来自后端 snapshot。
 - 截至 2026-07-05，React `ReticulumDebugPanel` 的显示值来自 `RuntimeEnsService.getSnapshot()` 读取的 `/mesh/ens/snapshot`；全局 topology、单接口 topology 和 discovered peer 配对按钮只设置 pending 状态、调用后端命令并随后 refresh，不把点击目标值直接写入 `snapshot`。因此它基本符合“后端事实优先、禁止乐观成功”的调试 UI 要求，但仍是初次加载/手动 refresh 语义，不是毫秒级实时状态订阅。
+- 2026-07-05 后续切片已把 backend snapshot 中已有的 `operations[*]` 与 `peers[*].last_error` 显示到 `ReticulumDebugPanel`：配对 operation 的 kind/status/session/error/updated_at 和 discovered peer 最近错误都来自 `/mesh/ens/snapshot`，前端仍不本地伪造成功或失败事实。
+- `tests/unit/ui/agent-hub/device-view.reticulum-debug.test.tsx` 已覆盖 UI 展示 snapshot 中的失败 pairing operation 与 peer last_error；`crates/exomind-runtime/tests/ens_routes_debug.rs` 已覆盖 provider 发送 pairing frame 失败后，POST route 返回 `502 Bad Gateway`，随后 GET `/mesh/ens/snapshot` 暴露 failed operation error 与 peer last_error。
 - 2026-07-05 的阶段收口 commit 是 `6b3b315de27faab5fe52e102db82356a8f087702`，已推送到 `origin/codex/ens-reticulum-adapter`；该收口只证明当前分支能编译、运行并看到 Reticulum/ENS debug 状态，不等同于多端同步最终完成。
 
 因此下一阶段不再继续扩展 debug UI，也不再停留在 fake data-plane 或重复 TCP endpoint 纵切；下一步应从“单实例可编译、可打开、可查看 Reticulum/ENS 状态”推进到“双实例或双设备可发现、可配对、可授权、可同步用户数据”的闭环验收，同时把 local JSON/default startup config 等剩余日用入口继续收敛到 Reticulum interface 下方，并对 mDNS bootstrap 做真实局域网双进程验收。
@@ -362,7 +364,7 @@ UI 一致性约束：
 - 配对和授权状态形成闭环；未授权 peer 的 data frame 仍 fail closed。
 - EventLog、Task、TimeBlock active/completed、Proposal 至少在一个真实 daily medium 上完成端到端同步验收；TCP server/client 仍是当前四域主验收基线，JSONL/file/local JSON 等入口按 medium 风险逐步补齐。
 - mDNS 只作为 Reticulum bootstrap/discovered endpoint 入口验收，不直接授权 data-plane，也不复活 legacy HTTP mesh pairing。
-- 人工验收必须能在 UI 或 debug route 中看见 peer、interface、pairing、authorization、delivery/error 状态；点击操作后的显示仍以 backend snapshot/SSE 为准。
+- 人工验收必须能在 UI 或 debug route 中看见 peer、interface、pairing operation/error、authorization、delivery/error 状态；点击操作后的显示仍以 backend snapshot/SSE 为准。
 - 若状态刷新不是实时 SSE，人工验收 UI 必须提供可见 refresh/stale/error 路径；不能让用户误以为 pending 或失败的后端操作已经成功。
 
 ### Phase 1：fake EventLog 用户功能纵切（已完成）
@@ -514,7 +516,7 @@ UI 一致性约束：
 4. 保持 TCP server/client 四域真实 provider 回归作为当前“多端 Reticulum data-plane 可同步用户数据”的主验收；下一步应把这个测试能力提升为可人工复现的 debug 场景。
 5. JSONL/file 已作为 local-dev/file medium 接入并完成 EventLog 纵切；local JSON registry/default startup config 等剩余入口继续作为 Reticulum physical layer 收敛，避免把轮询文件协议或本地注册表上升为正式跨 RT truth。
 6. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 Reticulum bootstrap/discovered endpoint，不授权 data frame，也不能完成 legacy HTTP mesh pairing。
-7. 在 UI/debug route 中补齐多端验收所需的状态闭环：peer discovered、pairing pending/authorized、interface configured/effective topology、delivery/error 都必须来自 backend snapshot/SSE；若暂时没有 SSE，就必须用手动 refresh/轮询/stale 标记表达“尚未确认”，不得乐观显示成功。
+7. 在 UI/debug route 中补齐多端验收所需的状态闭环：peer discovered、pairing pending/authorized、pairing operation/error、interface configured/effective topology、delivery/error 都必须来自 backend snapshot/SSE；当前 UI 已能展示 pairing operation/error 和 peer last_error，但还不是实时 SSE，后续仍需把授权、投递 receipt/error 和 stale/refresh 语义补齐。若暂时没有 SSE，就必须用手动 refresh/轮询/stale 标记表达“尚未确认”，不得乐观显示成功。
 8. 若 ExoNet-Reticulum 后续暴露 observed link sender，补 observed sender 与 verified signer 一致性校验。
 9. 最后再考虑默认启动集成和更大范围 AppState/UI 接入；route/UI 仍只消费 typed snapshot，仍禁止乐观显示 topology、provider、pairing 或 delivery 状态。
 

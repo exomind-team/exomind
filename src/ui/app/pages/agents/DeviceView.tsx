@@ -19,6 +19,7 @@ import {
   getRuntimeEnsService,
   type EnsInterfaceTopology,
   type EnsInterfaceMedium,
+  type EnsOperationSnapshot,
   type EnsPeerSnapshot,
   type EnsTransportSnapshot,
 } from '@/lib/services/runtime-ens.service';
@@ -89,6 +90,48 @@ function formatEnsHealthLabel(status: EnsTransportSnapshot['health']['status']):
     return '错误';
   }
   return '未启用';
+}
+
+function formatEnsOperationKindLabel(kind: EnsOperationSnapshot['kind']): string {
+  if (kind === 'pairing_offer') {
+    return '配对请求';
+  }
+  if (kind === 'pairing_response') {
+    return '配对响应';
+  }
+  if (kind === 'pairing_complete') {
+    return '配对完成';
+  }
+  return '配对取消';
+}
+
+function formatEnsOperationStatusLabel(status: EnsOperationSnapshot['status']): string {
+  if (status === 'pending') {
+    return '进行中';
+  }
+  if (status === 'completed') {
+    return '已完成';
+  }
+  if (status === 'cancelled') {
+    return '已取消';
+  }
+  if (status === 'failed') {
+    return '失败';
+  }
+  return '已超时';
+}
+
+function ensOperationStatusClass(status: EnsOperationSnapshot['status']): string {
+  if (status === 'completed') {
+    return 'bg-[#22C55E20] text-[#16A34A]';
+  }
+  if (status === 'pending') {
+    return 'bg-[#F59E0B20] text-[#B45309]';
+  }
+  if (status === 'failed' || status === 'timed_out') {
+    return 'bg-[#EF444420] text-[#DC2626]';
+  }
+  return 'bg-[#E7E5E4] text-[#57534E] dark:bg-[#44403C] dark:text-[#D6D3D1]';
 }
 
 function ensDebugTestIdSegment(value: string): string {
@@ -219,6 +262,7 @@ function ReticulumDebugPanel({
 
   const interfaces = Array.isArray(snapshot?.interfaces) ? snapshot.interfaces : [];
   const peers = Array.isArray(snapshot?.peers) ? snapshot.peers : [];
+  const operations = Array.isArray(snapshot?.operations) ? snapshot.operations : [];
   const healthStatus = snapshot?.health?.status ?? 'disabled';
   const globalTopology = snapshot?.global_topology ?? 'off';
   const localEndpointAddress = snapshot?.local_endpoint?.interface_address ?? '--';
@@ -430,6 +474,14 @@ function ReticulumDebugPanel({
                         >
                           {identityHex} · {formatEnsEndpointRoute(peer)}
                         </p>
+                        {peer.last_error && (
+                          <p
+                            data-testid={`reticulum-peer-${identityHex}-last-error`}
+                            className="mt-0.5 text-[10px] text-[#DC2626]"
+                          >
+                            最近错误：{peer.last_error}
+                          </p>
+                        )}
                       </div>
                       <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
                         peer.authorized
@@ -460,6 +512,69 @@ function ReticulumDebugPanel({
             ) : (
               <div className="rounded-lg border border-dashed border-[#D6D3D1] bg-white px-3 py-3 text-[11px] text-[#78716C] dark:border-[#57534E] dark:bg-[#1C1917] dark:text-[#A8A29E]">
                 暂无 ENS discovered peers。
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2 rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-3 dark:border-[#292524] dark:bg-[#292524]">
+            <div>
+              <p className="text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">ENS 操作状态</p>
+              <p className="text-[10px] text-[#A8A29E]">
+                配对、投递与错误证据来自后端 snapshot。
+              </p>
+            </div>
+            {operations.length > 0 ? (
+              <div className="space-y-1.5">
+                {operations.map((operation) => {
+                  const operationTestId = ensDebugTestIdSegment(operation.id);
+                  const peerLabel = operation.peer_identity
+                    ? formatEnsPeerName({
+                        identity: operation.peer_identity,
+                        authorized: false,
+                        pairing_pending: false,
+                      })
+                    : '--';
+                  return (
+                    <div
+                      key={operation.id}
+                      data-testid={`reticulum-operation-${operationTestId}`}
+                      className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                            {formatEnsOperationKindLabel(operation.kind)}
+                          </p>
+                          <p className="truncate text-[10px] text-[#A8A29E]">
+                            {operation.id} · peer {peerLabel}
+                          </p>
+                        </div>
+                        <span
+                          data-testid={`reticulum-operation-${operationTestId}-status`}
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${ensOperationStatusClass(operation.status)}`}
+                        >
+                          {formatEnsOperationStatusLabel(operation.status)}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+                        {operation.session_id && <span>session {operation.session_id}</span>}
+                        <span>{operation.updated_at}</span>
+                      </div>
+                      {operation.error && (
+                        <p
+                          data-testid={`reticulum-operation-${operationTestId}-error`}
+                          className="mt-1 text-[10px] text-[#DC2626]"
+                        >
+                          {operation.error}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-[#D6D3D1] bg-white px-3 py-3 text-[11px] text-[#78716C] dark:border-[#57534E] dark:bg-[#1C1917] dark:text-[#A8A29E]">
+                暂无 ENS operation snapshot。
               </div>
             )}
           </div>

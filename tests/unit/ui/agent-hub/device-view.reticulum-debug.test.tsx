@@ -120,6 +120,32 @@ function snapshotWithTopology(
   };
 }
 
+function snapshotWithFailedPairingOperation(): EnsTransportSnapshot {
+  const snapshot = snapshotWithTopology('active');
+  const error = 'ENS provider failed to send pairing frame: link unavailable';
+
+  return {
+    ...snapshot,
+    peers: snapshot.peers.map((peer) => ({
+      ...peer,
+      last_error: peer.identity.identity_hex === 'identity-b' ? error : peer.last_error,
+    })),
+    operations: [{
+      id: 'op-failed-1',
+      kind: 'pairing_offer',
+      status: 'failed',
+      peer_identity: {
+        identity_hex: 'identity-b',
+        host_id: 'rt-b',
+      },
+      session_id: 'session-1',
+      error,
+      updated_at: '2026-06-08T00:01:00Z',
+    }],
+    updated_at: '2026-06-08T00:01:00Z',
+  };
+}
+
 function snapshotWithInterfaces(
   interfaces: EnsTransportSnapshot['interfaces'],
   localInterfaceName = interfaces[0]?.name ?? '127.0.0.1:4242',
@@ -271,6 +297,30 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
       expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4343-configured')).toHaveTextContent('Passive');
       expect(within(panel).getByTestId('reticulum-interface-127-0-0-1-4343-effective')).toHaveTextContent('Passive');
     });
+  });
+
+  it('shows peer and ENS operation errors from backend snapshot（展示后端快照中的 peer 与 ENS 操作错误）', async () => {
+    runtimeEnsMocks.getSnapshot.mockResolvedValue(snapshotWithFailedPairingOperation());
+    runtimeEnsMocks.setInterfaceTopology.mockReset();
+    runtimeEnsMocks.setGlobalTopology.mockReset();
+    runtimeEnsMocks.initiatePairingWithDiscoveredPeer.mockReset();
+
+    renderDeviceView();
+
+    const panel = await screen.findByTestId('reticulum-debug-panel');
+    expect(within(panel).getByTestId('reticulum-peer-identity-b-last-error')).toHaveTextContent(
+      'ENS provider failed to send pairing frame: link unavailable',
+    );
+
+    const operation = within(panel).getByTestId('reticulum-operation-op-failed-1');
+    expect(operation).toHaveTextContent('配对请求');
+    expect(operation).toHaveTextContent('op-failed-1 · peer rt-b');
+    expect(operation).toHaveTextContent('session session-1');
+    expect(operation).toHaveTextContent('2026-06-08T00:01:00Z');
+    expect(within(panel).getByTestId('reticulum-operation-op-failed-1-status')).toHaveTextContent('失败');
+    expect(within(panel).getByTestId('reticulum-operation-op-failed-1-error')).toHaveTextContent(
+      'ENS provider failed to send pairing frame: link unavailable',
+    );
   });
 
   it('starts pairing from discovered ENS peer（可从发现的 ENS peer 发起配对）', async () => {

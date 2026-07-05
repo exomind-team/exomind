@@ -211,6 +211,72 @@ async fn ens_pairing_route_starts_offer_for_discovered_peer() {
 }
 
 #[tokio::test]
+async fn ens_snapshot_route_exposes_failed_pairing_operation_error_and_peer_last_error() {
+    let (state, provider) = state_with_ens_provider();
+    let peer_endpoint = endpoint_for("identity-b", "rt-b");
+    provider.set_peers(vec![EnsPeerSnapshot {
+        identity: peer_endpoint.identity(),
+        endpoint: Some(peer_endpoint),
+        authorized: false,
+        pairing_pending: false,
+        last_error: None,
+    }]);
+    provider.set_fail_next_send("link unavailable");
+
+    let app = app_with_state(state);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mesh/ens/pairing/discovered/identity-b")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let expected_error = "ENS provider failed to send pairing frame: link unavailable";
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let payload = response_json(response).await;
+    assert_eq!(payload["error"], expected_error);
+
+    let snapshot_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ens/snapshot")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(snapshot_response.status(), StatusCode::OK);
+    let snapshot = response_json(snapshot_response).await;
+    let operation = snapshot["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|operation| operation["status"] == "failed")
+        .expect("failed operation should be included in snapshot");
+    assert_eq!(operation["kind"], "pairing_offer");
+    assert_eq!(
+        operation["peer_identity"]["identity_hex"],
+        "identity-b"
+    );
+    assert_eq!(operation["error"], expected_error);
+
+    let peer = snapshot["peers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|peer| peer["identity"]["identity_hex"] == "identity-b")
+        .expect("peer should be included in snapshot");
+    assert_eq!(peer["last_error"], expected_error);
+    assert_eq!(peer["pairing_pending"], false);
+}
+
+#[tokio::test]
 async fn ens_interface_topology_route_rejects_unknown_interface() {
     let (state, _provider) = state_with_ens_provider();
     let response = app_with_state(state)
