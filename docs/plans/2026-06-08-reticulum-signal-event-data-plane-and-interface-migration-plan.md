@@ -299,7 +299,7 @@ UI 一致性约束：
 
 ### 当前完成状态
 
-截至 2026-06-09，本计划的 control-plane 前置条件、fake data-plane 最低功能集和第一条真实 Reticulum provider signed data-plane 纵切已经推进到可提交状态；queue、dynamic UDP、JSONL 与 file 都已完成 EventLog 真实 provider 纵切，dynamic TCP server/client 已完成 EventLog 与 Task/TimeBlock/Proposal 真实 provider 纵切：
+截至 2026-07-05，本计划的 control-plane 前置条件、fake data-plane 最低功能集、真实 Reticulum provider signed data-plane 纵切和 debug 构建可人验基线已经推进到可提交状态；queue、dynamic UDP、JSONL 与 file 都已完成 EventLog 真实 provider 纵切，dynamic TCP server/client 已完成 EventLog 与 Task/TimeBlock/Proposal 真实 provider 纵切：
 
 - ENS/Reticulum fake control-plane 能完成双节点 PIN pairing happy path。
 - 后端支持 `global_topology`、`interface.topology` 与 `interface.effective_topology = min(global_topology, interface.topology)`。
@@ -330,8 +330,30 @@ UI 一致性约束：
 - mDNS bootstrap 只发布和发现 Reticulum interface bootstrap，不写 `MeshState`，不授权 data frame，也不能完成 legacy HTTP mesh pairing；invalid / zero `ret_port` fail closed。
 - `ReticulumEnsProvider` 已新增 `add_jsonl_interface` 与 `add_file_interface`，把 JSONL 目录和 shared file 路径投影为 `via_medium=jsonl/file`、`interface_address=jsonl://.../file://...` 的 Reticulum local-dev/file medium。
 - `crates/exomind-runtime/tests/ens_reticulum_provider.rs` 已证明 JSONL 与 file provider 能经真实 Reticulum interface 传递 signed EventLog `SignalEvent` 到 B 端 `EventLogStore`；这只是 EventLog 级 physical medium 纵切，不代表这两个 medium 已完成四域同步验收。
+- `bun.lock` 已纳入版本控制，`bun install --frozen-lockfile` 不再因为缺少 lockfile 阻断 debug 构建。
+- 当前阶段的可人验构建基线是从 `codex/ens-reticulum-adapter` 构建 `G:\exomind-cargo-target\debug\exomind.exe`；这个文件名仍是产品可执行文件名，不能单靠窗口标题或文件名判断是否为 Reticulum 版本。
+- debug 运行态必须用 `/mesh/ens/snapshot` 判断是否进入 Reticulum/ENS 路径：`enabled=true`、`provider_id=runtime-reticulum-ens`、`local_endpoint.gateway=reticulum`、`global_topology` 有后端事实值，并且 `interfaces[*].effective_topology` 来自后端 snapshot。
+- 2026-07-05 的阶段收口 commit 是 `6b3b315de27faab5fe52e102db82356a8f087702`，已推送到 `origin/codex/ens-reticulum-adapter`；该收口只证明当前分支能编译、运行并看到 Reticulum/ENS debug 状态，不等同于多端同步最终完成。
 
-因此下一阶段不再继续扩展 debug UI，也不再停留在 fake data-plane 或重复 TCP endpoint 纵切；下一步应把 local JSON/default startup config 等剩余日用入口继续收敛到 Reticulum interface 下方，并对 mDNS bootstrap 做真实局域网双进程验收。
+因此下一阶段不再继续扩展 debug UI，也不再停留在 fake data-plane 或重复 TCP endpoint 纵切；下一步应从“单实例可编译、可打开、可查看 Reticulum/ENS 状态”推进到“双实例或双设备可发现、可配对、可授权、可同步用户数据”的闭环验收，同时把 local JSON/default startup config 等剩余日用入口继续收敛到 Reticulum interface 下方，并对 mDNS bootstrap 做真实局域网双进程验收。
+
+### 2026-07-05 阶段收口与下一阶段达成条件
+
+当前阶段已经达成的不是最终用户同步目标，而是后续多端验收的最低可用底座：
+
+- 能从干净工作区编译出 debug `exomind.exe`。
+- 能打开 debug `exomind.exe`，且不影响已安装版外心实例。
+- 能通过 runtime route 看到 Reticulum/ENS provider、local endpoint、global topology 和 interface snapshot。
+- 能用后端 snapshot 证明 UI/route 看到的是真实 provider 状态，而不是乐观呈现。
+- 构建修复已提交并推送，工作区保持干净。
+
+下一阶段只有满足以下条件，才算从“可查看 Reticulum 状态”进入“多端 Reticulum 同步可用”：
+
+- 至少两个 RT 实例或两台设备能通过 Reticulum interface 发现彼此；发现结果必须投影为 `gateway=reticulum`，不能退回 HTTP base URL peer truth。
+- 配对和授权状态形成闭环；未授权 peer 的 data frame 仍 fail closed。
+- EventLog、Task、TimeBlock active/completed、Proposal 至少在一个真实 daily medium 上完成端到端同步验收；TCP server/client 仍是当前四域主验收基线，JSONL/file/local JSON 等入口按 medium 风险逐步补齐。
+- mDNS 只作为 Reticulum bootstrap/discovered endpoint 入口验收，不直接授权 data-plane，也不复活 legacy HTTP mesh pairing。
+- 人工验收必须能在 UI 或 debug route 中看见 peer、interface、pairing、authorization、delivery/error 状态；点击操作后的显示仍以 backend snapshot/SSE 为准。
 
 ### Phase 1：fake EventLog 用户功能纵切（已完成）
 
@@ -472,11 +494,14 @@ UI 一致性约束：
 
 ## 下一步执行顺序
 
-1. 保持 `ReticulumEnsProvider` 为唯一真实 gateway provider，不新增 Reticulum-only route island。
-2. 保持 TCP server/client 四域真实 provider 回归作为当前“多端 Reticulum data-plane 可同步用户数据”的主验收。
-3. JSONL/file 已作为 local-dev/file medium 接入并完成 EventLog 纵切；local JSON registry/default startup config 等剩余入口继续作为 Reticulum physical layer 收敛，避免把轮询文件协议或本地注册表上升为正式跨 RT truth。
-4. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 Reticulum bootstrap/discovered endpoint，不授权 data frame。
-5. 若 ExoNet-Reticulum 后续暴露 observed link sender，补 observed sender 与 verified signer 一致性校验。
-6. 最后再考虑 AppState/route/UI 启动集成；route/UI 仍只消费 typed snapshot，仍禁止乐观显示 topology 或 provider 状态。
+1. 保持每一步都能收口：改动后必须能编译出 debug `exomind.exe`、打开后看到真实 Reticulum/ENS 状态、提交推送并保持工作区干净。
+2. 保持 `ReticulumEnsProvider` 为唯一真实 gateway provider，不新增 Reticulum-only route island，不把 HTTP/SSE 扩展回 peer transport。
+3. 做双实例或双设备局域网验收脚本/手册：端口、临时数据目录、Reticulum interface bind、RT route、MCP bridge 都必须隔离，且不能杀已安装版外心。
+4. 保持 TCP server/client 四域真实 provider 回归作为当前“多端 Reticulum data-plane 可同步用户数据”的主验收；下一步应把这个测试能力提升为可人工复现的 debug 场景。
+5. JSONL/file 已作为 local-dev/file medium 接入并完成 EventLog 纵切；local JSON registry/default startup config 等剩余入口继续作为 Reticulum physical layer 收敛，避免把轮询文件协议或本地注册表上升为正式跨 RT truth。
+6. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 Reticulum bootstrap/discovered endpoint，不授权 data frame，也不能完成 legacy HTTP mesh pairing。
+7. 在 UI/debug route 中补齐多端验收所需的状态闭环：peer discovered、pairing pending/authorized、interface configured/effective topology、delivery/error 都必须来自 backend snapshot/SSE。
+8. 若 ExoNet-Reticulum 后续暴露 observed link sender，补 observed sender 与 verified signer 一致性校验。
+9. 最后再考虑默认启动集成和更大范围 AppState/UI 接入；route/UI 仍只消费 typed snapshot，仍禁止乐观显示 topology、provider、pairing 或 delivery 状态。
 
-这个顺序的理由是：fake gateway 已证明用户功能可以经 `SignalEvent` data frame 闭环，queue-backed、dynamic UDP、dynamic TCP、JSONL 与 file 真实 provider 已证明 Reticulum signed gateway 可以在不经跨 RT HTTP/SSE 的情况下完成 EventLog 可信 ingest，dynamic bind endpoint 能被投影成可调试、可配对的稳定状态，mDNS 已作为 Reticulum bootstrap 而非 peer truth 接入。旧分支的 local JSON/JSONL/file/queue 经验要迁移到 Reticulum provider 的 physical layer 下方，不能重新滑回 mDNS/local registry 与 Reticulum 平级、或巨型后台循环直接驱动业务同步的旧形态。
+这个顺序的理由是：fake gateway 已证明用户功能可以经 `SignalEvent` data frame 闭环，queue-backed、dynamic UDP、dynamic TCP、JSONL 与 file 真实 provider 已证明 Reticulum signed gateway 可以在不经跨 RT HTTP/SSE 的情况下完成 EventLog 可信 ingest，TCP server/client 已证明四域同步语义可复用同一 data-plane，dynamic bind endpoint 能被投影成可调试、可配对的稳定状态，mDNS 已作为 Reticulum bootstrap 而非 peer truth 接入。2026-07-05 的 debug 构建收口说明当前分支已经具备继续做人工多端验收的底座；下一步的风险不在“能不能看到一个 Reticulum 状态区”，而在发现、配对、授权、投递和 domain projector 是否能在真实多实例现场保持一致。旧分支的 local JSON/JSONL/file/queue 经验要迁移到 Reticulum provider 的 physical layer 下方，不能重新滑回 mDNS/local registry 与 Reticulum 平级、或巨型后台循环直接驱动业务同步的旧形态。
