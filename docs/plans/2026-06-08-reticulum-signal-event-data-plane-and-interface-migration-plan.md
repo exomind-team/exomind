@@ -301,6 +301,7 @@ UI 一致性约束：
 - 点击 topology、pairing、delivery 等命令后，前端只允许进入 pending/disabled/loading 状态；展示值必须继续来自最后一次已确认的 backend snapshot/SSE。
 - 命令返回成功只表示后端接受了请求，不表示 UI 可以自行宣布运行时已切换成功。UI 必须重新读取 backend snapshot，或等待后端 SSE 推送确认后，才能显示新的 provider/interface/peer/delivery 状态。
 - 命令失败、refresh 失败或 SSE 断开时，UI 应保留上一份已确认 snapshot，显示错误或 stale/需要刷新状态；不得把目标值显示成“已经成功”。
+- backend snapshot 缺少关键字段或字段值不合法时，UI 必须显示“未知”或 malformed/stale 语义；不能把缺失的 `health.status` 当成 `disabled`，不能把缺失的 `global_topology` 当成 `off`，不能把缺失的 `interfaces[*].effective_topology` 回退成配置值，也不能把缺失的 `peers[*].authorized` / `peers[*].pairing_pending` 推断为“待配对”并展示配对按钮。
 - 在没有实时 SSE 的阶段，允许 UI 滞后到下一次手动 refresh 或轮询 refresh；滞后、等待、卡顿都优先于乐观成功。质量红线是：用户看到的 Reticulum 运行态不能比后端事实更“成功”。
 
 ## 阶段计划
@@ -344,9 +345,22 @@ UI 一致性约束：
 - 截至 2026-07-05，React `ReticulumDebugPanel` 的显示值来自 `RuntimeEnsService.getSnapshot()` 读取的 `/mesh/ens/snapshot`；全局 topology、单接口 topology 和 discovered peer 配对按钮只设置 pending 状态、调用后端命令并随后 refresh，不把点击目标值直接写入 `snapshot`。因此它基本符合“后端事实优先、禁止乐观成功”的调试 UI 要求，但仍是初次加载/手动 refresh 语义，不是毫秒级实时状态订阅。
 - 2026-07-05 后续切片已把 backend snapshot 中已有的 `operations[*]` 与 `peers[*].last_error` 显示到 `ReticulumDebugPanel`：配对 operation 的 kind/status/session/error/updated_at 和 discovered peer 最近错误都来自 `/mesh/ens/snapshot`，前端仍不本地伪造成功或失败事实。
 - `tests/unit/ui/agent-hub/device-view.reticulum-debug.test.tsx` 已覆盖 UI 展示 snapshot 中的失败 pairing operation 与 peer last_error；`crates/exomind-runtime/tests/ens_routes_debug.rs` 已覆盖 provider 发送 pairing frame 失败后，POST route 返回 `502 Bad Gateway`，随后 GET `/mesh/ens/snapshot` 暴露 failed operation error 与 peer last_error。
-- 2026-07-05 的阶段收口 commit 是 `6b3b315de27faab5fe52e102db82356a8f087702`，已推送到 `origin/codex/ens-reticulum-adapter`；该收口只证明当前分支能编译、运行并看到 Reticulum/ENS debug 状态，不等同于多端同步最终完成。
+- 2026-07-05 后续切片已把 data-plane delivery 从 pairing/control-plane `operations[*]` 中拆出，`/mesh/ens/snapshot` 现在暴露独立的 `deliveries[*]`：
+  - `event_id`
+  - `route_id`
+  - `peer_identity_hex`
+  - `status`
+  - `reason`
+  - `started_at`
+  - `finished_at`
+- `EnsTransportService::send_signal_event_to_peer` 会把发送侧 data-plane 尝试记录到 Mesh delivery journal：provider 发送成功记录 `sent`，provider 返回错误记录 `failed` 并保留错误文本，mesh routing policy 跳过记录 `skipped`。`/mesh/ens/snapshot.deliveries` 只投影 ENS-owned outbound `ens:` route，不能投影 legacy `mesh:` route，也不能混入本地 actor 或其他内部 delivery record。原因是 legacy `mesh:` journal 可能来自 HTTP `/mesh/events`、旧 relay 或 `MeshState::ingest_remote_event(from_peer_id, ...)`，其 `target_ref` 不是 Reticulum `peer_identity_hex`，不能作为 Reticulum trust/delivery 主键展示。
+- `DeliveryStatus::Sent` 在当前阶段只表示“发送尝试已被后端记录/交给 provider 成功返回”，不是远端业务 store 已应用确认，也不是 end-to-end receipt。UI 文案必须使用“已记录”，不得写成“已送达”。
+- `ReticulumDebugPanel` 已新增独立“ENS 投递状态”区域，显示 backend snapshot 中的 delivery status/reason/timestamp；配对 operation 仍留在“ENS 操作状态”区域，避免把 control-plane 与 data-plane 状态混在同一个 `operations` 概念里。
+- `ReticulumDebugPanel` 已展示最后一次后端确认时间；refresh 失败且已有 snapshot 时保留上一份 confirmed snapshot，显示 error 与 stale 标记，不清空状态、不把点击目标值或命令返回伪造成运行时成功。
+- 当前 UI 仍是初次加载和手动 refresh 的 snapshot 模式，不是实时 SSE。没有 SSE 的阶段允许滞后或卡顿，但屏幕上展示的 provider/interface/peer/operation/delivery 事实必须来自最后一次成功的 `/mesh/ens/snapshot`。
+- 2026-07-05 的阶段收口应以 `origin/codex/ens-reticulum-adapter` 的实际 Git 历史和验证记录为准；收口只证明当前分支能编译、运行并看到 Reticulum/ENS debug 状态，不等同于多端同步最终完成。
 
-因此下一阶段不再继续扩展 debug UI，也不再停留在 fake data-plane 或重复 TCP endpoint 纵切；下一步应从“单实例可编译、可打开、可查看 Reticulum/ENS 状态”推进到“双实例或双设备可发现、可配对、可授权、可同步用户数据”的闭环验收，同时把 local JSON/default startup config 等剩余日用入口继续收敛到 Reticulum interface 下方，并对 mDNS bootstrap 做真实局域网双进程验收。
+因此下一阶段不应把新增 debug UI 当成主线，也不应停留在 fake data-plane 或重复 TCP endpoint 纵切；下一步应从“单实例可编译、可打开、可查看 Reticulum/ENS 状态与 delivery/error/stale 证据”推进到“双实例或双设备可发现、可配对、可授权、可同步用户数据”的闭环验收，同时把 local JSON/default startup config 等剩余日用入口继续收敛到 Reticulum interface 下方，并对 mDNS bootstrap 做真实局域网双进程验收。
 
 ### 2026-07-05 阶段收口与下一阶段达成条件
 
@@ -355,7 +369,8 @@ UI 一致性约束：
 - 能从干净工作区编译出 debug `exomind.exe`。
 - 能打开 debug `exomind.exe`，且不影响已安装版外心实例。
 - 能通过 runtime route 看到 Reticulum/ENS provider、local endpoint、global topology 和 interface snapshot。
-- 能用后端 snapshot 证明 UI/route 看到的是真实 provider 状态，而不是乐观呈现；在没有 SSE 的阶段，UI 允许滞后，但必须显式依赖 refresh 后的后端事实。
+- 能用后端 snapshot 证明 UI/route 看到的是真实 provider/interface/operation/delivery 状态，而不是乐观呈现；在没有 SSE 的阶段，UI 允许滞后，但必须显式依赖 refresh 后的后端事实。
+- 能在 UI/debug route 中看见 data-plane delivery 的 `sent`/`failed`/`skipped`、错误原因和 stale/refresh 状态；`sent` 当前只按“已记录”呈现，不能被解释成远端业务层 ack。
 - 构建修复已提交并推送，工作区保持干净。
 
 下一阶段只有满足以下条件，才算从“可查看 Reticulum 状态”进入“多端 Reticulum 同步可用”：
@@ -473,9 +488,13 @@ UI 一致性约束：
 - [ ] effective topology 由后端 snapshot 计算并暴露，UI 不自行推导事实。
 - [ ] UI 不乐观显示 Reticulum 状态；命令后以 snapshot/SSE 结果为准。
 - [ ] UI command handler 没有把点击目标值写入 displayed `snapshot`，也没有本地伪造 `authorized`、`pairing_pending`、delivery success 或 provider health。
+- [ ] backend snapshot 缺少关键字段或字段不合法时，UI 显示“未知”或 malformed/stale，不把缺失字段回退成 Off/Disabled/待配对/配置即生效。
 - [ ] pending 状态只用于禁用控件、显示等待或阻止重复提交；屏幕上的 provider/interface/peer/delivery 事实仍来自最后一次 backend snapshot/SSE。
 - [ ] 命令失败、refresh 失败或 SSE 断开时，UI 保留上一份已确认 snapshot，并显示错误或 stale 状态；不得显示目标值成功。
 - [ ] 没有实时 SSE 的 UI 必须提供手动 refresh 或明确 stale 语义；宁可滞后、等待或卡顿，也不能显示比后端实际运行态更成功的 Reticulum 状态。
+- [ ] `operations[*]` 只承载 pairing/control-plane 状态；data-plane delivery 必须放在独立的 `deliveries[*]` 或后续等价 SSE 事件里。
+- [ ] `deliveries[*]` 只投影 ENS-owned outbound `ens:` data-plane route，不能把 legacy `mesh:`、actor/local/internal delivery record 混成 Reticulum 投递状态；除非后续新增 verified Reticulum inbound source 类型并完成签名/来源绑定测试，否则 `mesh:` 不得作为 `peer_identity_hex` truth 暴露给 UI。
+- [ ] `DeliveryStatus::Sent` 在 UI 中只能表达为“已记录”或等价保守文案；没有 end-to-end receipt 前不得显示为“已送达”。
 - [ ] 没有 `ExoNet-Reticulum/src` path dependency。
 - [ ] 没有生产代码中的 localhost hardcode 或端口偏移推导。
 - [ ] `127.0.0.1:0` / `udp://127.0.0.1:0` 只作为 UDP bind input；snapshot、endpoint、route payload、UI payload 不得出现 `:0`。
@@ -516,7 +535,7 @@ UI 一致性约束：
 4. 保持 TCP server/client 四域真实 provider 回归作为当前“多端 Reticulum data-plane 可同步用户数据”的主验收；下一步应把这个测试能力提升为可人工复现的 debug 场景。
 5. JSONL/file 已作为 local-dev/file medium 接入并完成 EventLog 纵切；local JSON registry/default startup config 等剩余入口继续作为 Reticulum physical layer 收敛，避免把轮询文件协议或本地注册表上升为正式跨 RT truth。
 6. 对 mDNS bootstrap 做真实局域网双进程人工验收；这只验证 Reticulum bootstrap/discovered endpoint，不授权 data frame，也不能完成 legacy HTTP mesh pairing。
-7. 在 UI/debug route 中补齐多端验收所需的状态闭环：peer discovered、pairing pending/authorized、pairing operation/error、interface configured/effective topology、delivery/error 都必须来自 backend snapshot/SSE；当前 UI 已能展示 pairing operation/error 和 peer last_error，但还不是实时 SSE，后续仍需把授权、投递 receipt/error 和 stale/refresh 语义补齐。若暂时没有 SSE，就必须用手动 refresh/轮询/stale 标记表达“尚未确认”，不得乐观显示成功。
+7. 在 UI/debug route 中补齐多端验收所需的状态闭环：peer discovered、pairing pending/authorized、pairing operation/error、interface configured/effective topology、delivery/error/stale 都必须来自 backend snapshot/SSE；当前 UI 已能展示 pairing operation/error、peer last_error、delivery status/reason 和手动 refresh stale 标记，但还不是实时 SSE，也没有 end-to-end receipt/ack。若暂时没有 SSE，就必须用手动 refresh/轮询/stale 标记表达“尚未确认”，不得乐观显示成功。
 8. 若 ExoNet-Reticulum 后续暴露 observed link sender，补 observed sender 与 verified signer 一致性校验。
 9. 最后再考虑默认启动集成和更大范围 AppState/UI 接入；route/UI 仍只消费 typed snapshot，仍禁止乐观显示 topology、provider、pairing 或 delivery 状态。
 
