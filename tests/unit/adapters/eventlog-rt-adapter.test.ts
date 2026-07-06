@@ -5,6 +5,7 @@ import {
   createLocalProfile,
   setProfileSession,
 } from "@/lib/profile/profile-storage";
+import { useSyncStore } from "@/ui/stores/sync-store";
 
 function activateProfileScope(): string {
   const profile = createLocalProfile({
@@ -15,6 +16,12 @@ function activateProfileScope(): string {
     version: 1,
     activeProfileId: profile.profileId,
     unlockedProfileIds: [profile.profileId],
+  });
+  useSyncStore.setState({
+    isLoggedIn: true,
+    currentUser: profile.displayName,
+    activeProfileId: profile.profileId,
+    credentials: null,
   });
   return profile.profileId;
 }

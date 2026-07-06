@@ -64,9 +64,9 @@ describe('SyncStore', () => {
       expect(store.status.syncMode).toBe('realtime');
       expect(store.status.pollInterval).toBe(5);
       expect(store.credentials).toBeNull();
-      expect(store.isLoggedIn).toBe(false);
-      expect(store.currentUser).toBeNull();
-      expect((store as typeof store & { activeProfileId?: string | null }).activeProfileId).toBeNull();
+      expect(store.isLoggedIn).toBe(true);
+      expect(store.currentUser).toBe('默认档案');
+      expect((store as typeof store & { activeProfileId?: string | null }).activeProfileId).toBe('profile-default');
       expect(store.conflicts).toEqual([]);
     });
 
@@ -165,8 +165,7 @@ describe('SyncStore', () => {
       // 验证 canonical profile storage（规范档案存储）也已创建
       const profileModule = await import('@/lib/profile/profile-storage');
       const profiles = profileModule.listLocalProfiles();
-      expect(profiles).toHaveLength(1);
-      expect(profiles[0].slug).toBe('newuser');
+      expect(profiles.map((profile) => profile.slug)).toEqual(['default', 'newuser']);
     });
 
     it('应该拒绝空用户名', async () => {
@@ -336,6 +335,7 @@ describe('SyncStore', () => {
 
   describe('连接管理', () => {
     it('未登录时连接应该失败', async () => {
+      await useSyncStore.getState().logout();
       const { connect } = useSyncStore.getState();
 
       await expect(connect('http://localhost:5984')).rejects.toThrow('未登录，请先登录');

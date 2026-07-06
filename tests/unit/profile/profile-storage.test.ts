@@ -35,6 +35,48 @@ describe('profile-storage（本地档案存储）', () => {
     vi.resetModules();
   });
 
+  it('creates an unlocked default local profile for empty storage（空存储启动默认本地档案）', async () => {
+    const module = await import('@/lib/profile/profile-storage');
+
+    module.ensureProfileStorageMigrated();
+
+    const profiles = module.listLocalProfiles();
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]).toEqual(expect.objectContaining({
+      profileId: module.DEFAULT_LOCAL_PROFILE_ID,
+      slug: 'default',
+      displayName: '默认档案',
+      authMode: 'none',
+      state: 'active',
+      defaultSyncPolicy: 'local-only',
+    }));
+    expect(module.getProfileSession()).toEqual({
+      version: 1,
+      activeProfileId: module.DEFAULT_LOCAL_PROFILE_ID,
+      unlockedProfileIds: [module.DEFAULT_LOCAL_PROFILE_ID],
+    });
+    expect(module.getCurrentProfileOrLegacyId()).toBe(module.DEFAULT_LOCAL_PROFILE_ID);
+  });
+
+  it('heals a locked default local profile session（修复默认档案未解锁的历史 session）', async () => {
+    const module = await import('@/lib/profile/profile-storage');
+
+    module.ensureDefaultLocalProfile();
+    module.setProfileSession({
+      version: 1,
+      activeProfileId: module.DEFAULT_LOCAL_PROFILE_ID,
+      unlockedProfileIds: [],
+    });
+
+    module.ensureProfileStorageMigrated();
+
+    expect(module.getProfileSession()).toEqual({
+      version: 1,
+      activeProfileId: module.DEFAULT_LOCAL_PROFILE_ID,
+      unlockedProfileIds: [module.DEFAULT_LOCAL_PROFILE_ID],
+    });
+  });
+
   it('migrates legacy users and active sync state into profiles（迁移旧 users 与激活用户）', async () => {
     mockLocalStorageData['exomind:users'] = JSON.stringify([
       {
@@ -147,6 +189,7 @@ describe('profile-storage（本地档案存储）', () => {
     expect(upper?.profileId).not.toBe(lower?.profileId);
     expect(module.listLocalProfiles()).toHaveLength(2);
     expect(module.getActiveProfileId()).toBe(lower?.profileId ?? null);
+    expect(module.getLocalProfile(module.DEFAULT_LOCAL_PROFILE_ID)).toBeNull();
   });
 
   it('falls back to legacy currentUser when session not migrated（未迁移时回退旧 currentUser）', async () => {

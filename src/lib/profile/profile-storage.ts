@@ -10,6 +10,9 @@ const PROFILE_SESSION_KEY = 'exomind:profile-session';
 const LEGACY_USERS_KEY = 'exomind:users';
 const LEGACY_SYNC_STORE_KEY = 'exomind:sync-store';
 const LEGACY_LOGIN_ALIAS_KEY = 'exomind:profiles:legacy-login-aliases';
+export const DEFAULT_LOCAL_PROFILE_ID = 'profile-default';
+const DEFAULT_LOCAL_PROFILE_SLUG = 'default';
+const DEFAULT_LOCAL_PROFILE_DISPLAY_NAME = '默认档案';
 
 function getProfileMetaKey(profileId: string): string {
   return `exomind:profiles:${profileId}:meta`;
@@ -93,6 +96,33 @@ function getProfileIndex(): string[] {
 
 function setProfileIndex(profileIds: string[]): void {
   writeJson(PROFILE_INDEX_KEY, profileIds);
+}
+
+export function ensureDefaultLocalProfile(): LocalProfile {
+  const index = getProfileIndex();
+  if (!index.includes(DEFAULT_LOCAL_PROFILE_ID)) {
+    setProfileIndex([DEFAULT_LOCAL_PROFILE_ID, ...index]);
+  }
+
+  const existing = getLocalProfile(DEFAULT_LOCAL_PROFILE_ID);
+  if (existing) {
+    return existing;
+  }
+
+  const now = new Date().toISOString();
+  const profile: LocalProfile = {
+    profileId: DEFAULT_LOCAL_PROFILE_ID,
+    slug: DEFAULT_LOCAL_PROFILE_SLUG,
+    displayName: DEFAULT_LOCAL_PROFILE_DISPLAY_NAME,
+    createdAt: now,
+    updatedAt: now,
+    authMode: 'none',
+    state: 'active',
+    defaultSyncPolicy: 'local-only',
+  };
+
+  writeJson(getProfileMetaKey(DEFAULT_LOCAL_PROFILE_ID), profile);
+  return profile;
 }
 
 export function getProfileSession(): ProfileSessionState {
@@ -297,6 +327,32 @@ export function ensureProfileStorageMigrated(): void {
   migrateLegacyProfileStorage();
 
   const session = getProfileSession();
+  if (listLocalProfiles().length === 0) {
+    const defaultProfile = ensureDefaultLocalProfile();
+    setProfileSession({
+      version: 1,
+      activeProfileId: defaultProfile.profileId,
+      unlockedProfileIds: [defaultProfile.profileId],
+    });
+    return;
+  }
+
+  if (
+    session.activeProfileId === DEFAULT_LOCAL_PROFILE_ID
+    && getLocalProfile(DEFAULT_LOCAL_PROFILE_ID)
+    && !session.unlockedProfileIds.includes(DEFAULT_LOCAL_PROFILE_ID)
+  ) {
+    setProfileSession({
+      version: 1,
+      activeProfileId: DEFAULT_LOCAL_PROFILE_ID,
+      unlockedProfileIds: Array.from(new Set([
+        ...session.unlockedProfileIds,
+        DEFAULT_LOCAL_PROFILE_ID,
+      ])),
+    });
+    return;
+  }
+
   if (typeof session.version !== 'number') {
     setProfileSession({
       version: 1,
@@ -318,6 +374,11 @@ export function getCurrentProfileOrLegacyId(): string {
   if (activeProfile) {
     _cachedProfileId = activeProfile.profileId;
     return _cachedProfileId;
+  }
+
+  const legacyActiveUser = getLegacyActiveUser();
+  if (legacyActiveUser) {
+    return legacyActiveUser;
   }
 
   throw new Error('getCurrentProfileOrLegacyId: 无法获取当前档案，请确保已设置档案');

@@ -39,8 +39,7 @@ describe('sync-store hybrid identity（混合式身份兼容门面）', () => {
     await syncModule.useSyncStore.getState().register('newuser', 'password123');
 
     const profiles = profileModule.listLocalProfiles();
-    expect(profiles).toHaveLength(1);
-    expect(profiles[0].slug).toBe('newuser');
+    expect(profiles.map((profile) => profile.slug)).toEqual(['default', 'newuser']);
   });
 
   it('login activates a profile and derives currentUser from active profile（登录激活档案）', async () => {
