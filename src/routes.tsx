@@ -1,6 +1,6 @@
 ﻿import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, Brain, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, Brain, FileCheck2, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
@@ -60,6 +60,11 @@ const MOSSASRTestPage = lazy(async () => {
 const AgentsPage = lazy(async () => {
   const module = await import('@/ui/app/pages/AgentsPage');
   return { default: module.AgentsPage };
+});
+
+const IntentProgramsPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/IntentProgramsPage');
+  return { default: module.IntentProgramsPage };
 });
 
 const UpdatePage = lazy(async () => {
@@ -205,6 +210,7 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
     { key: 'dashboard', title: '总览', path: '/dashboard', icon: LayoutDashboard, match: (path: string) => path === '/dashboard' },
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
+    { key: 'intent', title: '意图', path: '/intent-programs', icon: FileCheck2, match: (path: string) => path === '/intent-programs' },
     { key: 'agents', title: 'Agent', path: '/agents', icon: Bot, match: (path: string) => path === '/agents' || path.startsWith('/agents/') },
     { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
@@ -354,6 +360,7 @@ function NewLayout() {
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
     { title: '任务', path: '/tasks', icon: SquareCheckBig },
+    { title: '意图', path: '/intent-programs', icon: FileCheck2 },
     { title: 'Me', path: '/me', icon: UserRound },
     ...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : []),
     { title: '设置', path: '/settings', icon: Settings },
@@ -427,6 +434,18 @@ const newTasksRoute = createRoute({
     return (
       <LazyPage>
         <TasksPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newIntentProgramsRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/intent-programs',
+  component: function NewIntentPrograms() {
+    return (
+      <LazyPage>
+        <IntentProgramsPage />
       </LazyPage>
     );
   },
@@ -596,6 +615,7 @@ const newRouteTree = newRootRoute.addChildren([
   newDashboardRoute,
   newEventlogRoute,
   newTasksRoute,
+  newIntentProgramsRoute,
   newTaskDetailRoute,
   newMeRoute,
   newSettingsRoute,

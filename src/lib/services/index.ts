@@ -11,6 +11,9 @@ export type { TimeBlockService } from './timeblock.service';
 export { TaskServiceImpl, getTaskService } from './task.service';
 export type { TaskService } from './task.service';
 
+export { IntentProgramServiceImpl, getIntentProgramService } from './intent-program.service';
+export type { IntentProgramService, RunIntentProgramResult } from './intent-program.service';
+
 export { MeServiceImpl, getMeService } from './me.service';
 export type { MeService } from './me.service';
 export { AgentHubServiceImpl, getAgentHubService } from './agent-hub.service';

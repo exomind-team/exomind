@@ -1,7 +1,7 @@
 import { setTasksDefaultTab } from '@/config/tasks-default-tab';
 import type { CommandDefinition } from '@/lib/types/command-palette';
 
-export type CoreNavigationPath = '/eventlog' | '/tasks' | '/settings' | '/me' | '/agents';
+export type CoreNavigationPath = '/eventlog' | '/tasks' | '/settings' | '/me' | '/agents' | '/intent-programs';
 
 interface CreateCoreNavigationCommandsOptions {
   navigate: (path: CoreNavigationPath) => Promise<void> | void;
@@ -95,6 +95,19 @@ export function createCoreNavigationCommands(
       },
       async execute() {
         await options.navigate('/agents');
+        return { ok: true };
+      },
+    },
+    {
+      id: 'navigate:intent-programs',
+      title: '打开意图程序',
+      description: '跳转到 Intent Deck 意图程序运行时',
+      category: 'navigation',
+      permissionTier: 'safe',
+      aliases: ['意图程序', 'intent', 'intent deck', '外心宪法'],
+      keywords: ['委托', '再认证', '人核闸门', '主权'],
+      async execute() {
+        await options.navigate('/intent-programs');
         return { ok: true };
       },
     },
