@@ -11,9 +11,9 @@ use crate::signal::{DeliveryRecord, DeliveryStatus, SignalEvent};
 use super::data_protocol::{EnsDataFrame, EnsReceivedDataFrame, EnsSignalEventFrame};
 use super::dto::{
     EnsCommandAck, EnsDeliverySnapshot, EnsDeliveryStatus, EnsEndpointAdvertisement,
-    EnsInterfaceSnapshot, EnsInterfaceTopology, EnsOperationKind, EnsOperationSnapshot,
-    EnsOperationStatus, EnsPairingOfferTicket, EnsPeerIdentity, EnsPeerSnapshot,
-    EnsTransportHealth, EnsTransportSnapshot,
+    EnsInterfaceSnapshot, EnsInterfaceTopology, EnsOperationDirection, EnsOperationKind,
+    EnsOperationSnapshot, EnsOperationStatus, EnsPairingOfferTicket, EnsPeerIdentity,
+    EnsPeerSnapshot, EnsTransportHealth, EnsTransportSnapshot,
 };
 use super::fake_provider::FakeEnsProvider;
 use super::pairing_protocol::{
@@ -34,6 +34,8 @@ pub enum EnsTransportError {
     PairingOperationCancelled,
     #[error("ENS pairing operation was not found")]
     PairingOperationNotFound,
+    #[error("ENS pairing operation is not pending: {0}")]
+    PairingOperationNotPending(String),
     #[error("ENS pairing PIN was incorrect")]
     IncorrectPin,
     #[error("ENS local endpoint is not configured")]
@@ -306,6 +308,7 @@ impl EnsTransportService {
                 EnsOperationSnapshot {
                     id: operation_id.clone(),
                     kind: EnsOperationKind::PairingOffer,
+                    direction: EnsOperationDirection::Outbound,
                     status: EnsOperationStatus::Pending,
                     peer_identity: Some(remote_identity.clone()),
                     session_id: Some(session.session_id.clone()),
@@ -355,6 +358,22 @@ impl EnsTransportService {
         })?;
 
         self.initiate_pairing_offer(endpoint)
+    }
+
+    pub fn operation_status(
+        &self,
+        operation_id: &str,
+    ) -> Result<EnsOperationSnapshot, EnsTransportError> {
+        self.ensure_ready()?;
+        let state = match self.state.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        state
+            .operations
+            .get(operation_id)
+            .cloned()
+            .ok_or(EnsTransportError::PairingOperationNotFound)
     }
 
     pub fn upsert_mdns_bootstrap(
@@ -614,6 +633,7 @@ impl EnsTransportService {
                 EnsOperationSnapshot {
                     id: response.operation_id.clone(),
                     kind: EnsOperationKind::PairingResponse,
+                    direction: EnsOperationDirection::Inbound,
                     status: EnsOperationStatus::Completed,
                     peer_identity: Some(response.responder),
                     session_id: Some(response.session_id),
@@ -655,6 +675,7 @@ impl EnsTransportService {
                 EnsOperationSnapshot {
                     id: offer.operation_id.clone(),
                     kind: EnsOperationKind::PairingOffer,
+                    direction: EnsOperationDirection::Inbound,
                     status: EnsOperationStatus::Pending,
                     peer_identity: Some(offer.initiator.clone()),
                     session_id: Some(offer.session_id.clone()),
@@ -679,12 +700,25 @@ impl EnsTransportService {
         pin: String,
     ) -> Result<EnsCommandAck, EnsTransportError> {
         self.ensure_ready()?;
+        let operation = self.operation_status(operation_id)?;
+        if operation.status == EnsOperationStatus::Cancelled {
+            return Err(EnsTransportError::PairingOperationCancelled);
+        }
+        if operation.status != EnsOperationStatus::Pending
+            || operation.kind != EnsOperationKind::PairingOffer
+            || operation.direction != EnsOperationDirection::Inbound
+        {
+            return Err(EnsTransportError::PairingOperationNotPending(
+                operation_id.to_string(),
+            ));
+        }
+
         let local_endpoint = self
             .current_local_endpoint()
             .ok_or(EnsTransportError::MissingLocalEndpoint)?;
-        let offer = self
-            .pending_offer(operation_id)
-            .ok_or(EnsTransportError::PairingOperationNotFound)?;
+        let offer = self.pending_offer(operation_id).ok_or_else(|| {
+            EnsTransportError::PairingOperationNotPending(operation_id.to_string())
+        })?;
         let responder_inbound_secret = Uuid::new_v4().to_string();
 
         let frame = EnsPairingFrame::PairingResponse(EnsPairingResponse {
@@ -697,6 +731,7 @@ impl EnsTransportService {
         });
 
         if let Err(error) = self.provider.send_pairing_frame(frame) {
+            self.clear_pending_pairing_state(&offer.operation_id);
             self.mark_operation_failed(
                 &offer.operation_id,
                 error.to_string(),
@@ -712,6 +747,7 @@ impl EnsTransportService {
                 EnsOperationSnapshot {
                     id: offer.operation_id.clone(),
                     kind: EnsOperationKind::PairingResponse,
+                    direction: EnsOperationDirection::Outbound,
                     status: EnsOperationStatus::Pending,
                     peer_identity: Some(offer.initiator.clone()),
                     session_id: Some(offer.session_id.clone()),
@@ -719,6 +755,7 @@ impl EnsTransportService {
                     updated_at: now_rfc3339(),
                 },
             );
+            state.pending_offers.remove(operation_id);
             state
                 .pending_responder_inbound_secrets
                 .insert(offer.operation_id.clone(), responder_inbound_secret);
@@ -727,6 +764,79 @@ impl EnsTransportService {
         Ok(EnsCommandAck {
             operation_id: offer.operation_id,
             status: EnsOperationStatus::Pending,
+        })
+    }
+
+    pub fn cancel_pairing_operation(
+        &self,
+        operation_id: &str,
+        reason: String,
+    ) -> Result<EnsCommandAck, EnsTransportError> {
+        self.ensure_ready()?;
+        let pairing = self
+            .pairing
+            .as_ref()
+            .ok_or(EnsTransportError::NotConfigured)?;
+        let operation = self.operation_status(operation_id)?;
+        if operation.status == EnsOperationStatus::Cancelled {
+            return Err(EnsTransportError::PairingOperationCancelled);
+        }
+        if operation.status != EnsOperationStatus::Pending {
+            return Err(EnsTransportError::PairingOperationNotPending(
+                operation_id.to_string(),
+            ));
+        }
+
+        let session_id = operation
+            .session_id
+            .clone()
+            .ok_or(EnsTransportError::PairingSessionNotFound)?;
+        let peer_id = operation
+            .peer_identity
+            .as_ref()
+            .map(|identity| identity.identity_hex.clone());
+        pairing.cancel(&session_id);
+
+        let frame = EnsPairingFrame::PairingCancel(EnsPairingCancel {
+            operation_id: operation.id.clone(),
+            session_id: session_id.clone(),
+            peer: self.local_identity(),
+            reason: reason.clone(),
+        });
+        if let Err(error) = self.provider.send_pairing_frame(frame) {
+            self.clear_pending_pairing_state(operation_id);
+            self.mark_operation_failed(&operation.id, error.to_string(), peer_id.as_deref());
+            return Err(error.into());
+        }
+
+        {
+            let mut state = self.write_state();
+            if let Some(peer_id) = peer_id.as_deref() {
+                if let Some(peer) = state.peers.get_mut(peer_id) {
+                    peer.pairing_pending = false;
+                    peer.last_error = Some(reason.clone());
+                }
+            }
+            state.pending_offers.remove(operation_id);
+            state.pending_responder_inbound_secrets.remove(operation_id);
+            state.operations.insert(
+                operation.id.clone(),
+                EnsOperationSnapshot {
+                    id: operation.id.clone(),
+                    kind: EnsOperationKind::PairingCancel,
+                    direction: EnsOperationDirection::Outbound,
+                    status: EnsOperationStatus::Cancelled,
+                    peer_identity: operation.peer_identity,
+                    session_id: Some(session_id),
+                    error: Some(reason),
+                    updated_at: now_rfc3339(),
+                },
+            );
+        }
+
+        Ok(EnsCommandAck {
+            operation_id: operation.id,
+            status: EnsOperationStatus::Cancelled,
         })
     }
 
@@ -799,6 +909,7 @@ impl EnsTransportService {
                 EnsOperationSnapshot {
                     id: complete.operation_id.clone(),
                     kind: EnsOperationKind::PairingComplete,
+                    direction: EnsOperationDirection::Inbound,
                     status: EnsOperationStatus::Completed,
                     peer_identity: Some(complete.initiator),
                     session_id: Some(complete.session_id),
@@ -837,6 +948,7 @@ impl EnsTransportService {
                 EnsOperationSnapshot {
                     id: cancel.operation_id.clone(),
                     kind: EnsOperationKind::PairingCancel,
+                    direction: EnsOperationDirection::Inbound,
                     status: EnsOperationStatus::Cancelled,
                     peer_identity: Some(cancel.peer),
                     session_id: Some(cancel.session_id),
@@ -909,6 +1021,12 @@ impl EnsTransportService {
     fn take_pending_responder_inbound_secret(&self, operation_id: &str) -> Option<String> {
         let mut state = self.write_state();
         state.pending_responder_inbound_secrets.remove(operation_id)
+    }
+
+    fn clear_pending_pairing_state(&self, operation_id: &str) {
+        let mut state = self.write_state();
+        state.pending_offers.remove(operation_id);
+        state.pending_responder_inbound_secrets.remove(operation_id);
     }
 
     fn authorized_mesh_peer(&self, peer_identity_hex: &str) -> Result<PeerInfo, EnsTransportError> {

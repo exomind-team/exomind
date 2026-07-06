@@ -8,6 +8,9 @@ const runtimeEnsMocks = vi.hoisted(() => ({
   setInterfaceTopology: vi.fn(),
   setGlobalTopology: vi.fn(),
   initiatePairingWithDiscoveredPeer: vi.fn(),
+  getPairingOperationStatus: vi.fn(),
+  acceptPairingOperation: vi.fn(),
+  cancelPairingOperation: vi.fn(),
 }));
 
 const uiActionMocks = vi.hoisted(() => ({
@@ -208,12 +211,40 @@ function snapshotWithInterfaces(
   };
 }
 
+function snapshotWithInboundPairingOperation(): EnsTransportSnapshot {
+  const snapshot = snapshotWithTopology('active');
+
+  return {
+    ...snapshot,
+    peers: snapshot.peers.map((peer) => ({
+      ...peer,
+      pairing_pending: peer.identity.identity_hex === 'identity-b' ? true : peer.pairing_pending,
+    })),
+    operations: [{
+      id: 'op-inbound-1',
+      kind: 'pairing_offer',
+      direction: 'inbound',
+      status: 'pending',
+      peer_identity: {
+        identity_hex: 'identity-b',
+        host_id: 'rt-b',
+      },
+      session_id: 'session-1',
+      updated_at: '2026-06-08T00:01:00Z',
+    }],
+    updated_at: '2026-06-08T00:01:00Z',
+  };
+}
+
 describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）', () => {
   beforeEach(() => {
     runtimeEnsMocks.getSnapshot.mockReset();
     runtimeEnsMocks.setInterfaceTopology.mockReset();
     runtimeEnsMocks.setGlobalTopology.mockReset();
     runtimeEnsMocks.initiatePairingWithDiscoveredPeer.mockReset();
+    runtimeEnsMocks.getPairingOperationStatus.mockReset();
+    runtimeEnsMocks.acceptPairingOperation.mockReset();
+    runtimeEnsMocks.cancelPairingOperation.mockReset();
     uiActionMocks.writeClipboard.mockReset();
     uiActionMocks.writeClipboard.mockResolvedValue({ ok: true });
     uiActionMocks.toast.mockReset();
@@ -529,6 +560,106 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
       expect(runtimeEnsMocks.initiatePairingWithDiscoveredPeer).toHaveBeenCalledWith(
         'http://127.0.0.1:9124',
         'identity-b',
+      );
+    });
+  });
+
+  it('drives pairing operation controls from backend snapshot（配对操作控件只跟随后端快照）', async () => {
+    let currentSnapshot = snapshotWithInboundPairingOperation();
+    runtimeEnsMocks.getSnapshot.mockImplementation(async () => currentSnapshot);
+    runtimeEnsMocks.getPairingOperationStatus.mockImplementation(async () => currentSnapshot.operations[0]);
+    runtimeEnsMocks.acceptPairingOperation.mockImplementation(async () => {
+      currentSnapshot = {
+        ...currentSnapshot,
+        operations: [{
+          ...currentSnapshot.operations[0]!,
+          kind: 'pairing_response',
+          direction: 'outbound',
+          status: 'pending',
+          updated_at: '2026-06-08T00:02:00Z',
+        }],
+        updated_at: '2026-06-08T00:02:00Z',
+      };
+      return {
+        operation_id: 'op-inbound-1',
+        status: 'pending',
+      };
+    });
+    runtimeEnsMocks.cancelPairingOperation.mockImplementation(async () => {
+      currentSnapshot = {
+        ...currentSnapshot,
+        peers: currentSnapshot.peers.map((peer) => ({
+          ...peer,
+          pairing_pending: false,
+          last_error: peer.identity.identity_hex === 'identity-b'
+            ? 'cancelled from DeviceView Reticulum debug panel'
+            : peer.last_error,
+        })),
+        operations: [{
+          ...currentSnapshot.operations[0]!,
+          kind: 'pairing_cancel',
+          direction: 'outbound',
+          status: 'cancelled',
+          error: 'cancelled from DeviceView Reticulum debug panel',
+          updated_at: '2026-06-08T00:03:00Z',
+        }],
+        updated_at: '2026-06-08T00:03:00Z',
+      };
+      return {
+        operation_id: 'op-inbound-1',
+        status: 'cancelled',
+      };
+    });
+
+    renderDeviceView();
+
+    const panel = await screen.findByTestId('reticulum-debug-panel');
+    expect(within(panel).getByTestId('reticulum-operation-op-inbound-1')).toHaveTextContent('入站');
+    expect(within(panel).getByTestId('reticulum-operation-op-inbound-1-accept')).toBeDisabled();
+
+    fireEvent.click(within(panel).getByTestId('reticulum-operation-op-inbound-1-refresh-status'));
+
+    await waitFor(() => {
+      expect(runtimeEnsMocks.getPairingOperationStatus).toHaveBeenCalledWith(
+        'http://127.0.0.1:9124',
+        'op-inbound-1',
+      );
+    });
+
+    fireEvent.change(within(panel).getByTestId('reticulum-operation-op-inbound-1-pin'), {
+      target: { value: '123456' },
+    });
+
+    await waitFor(() => {
+      expect(within(panel).getByTestId('reticulum-operation-op-inbound-1-accept')).toBeEnabled();
+    });
+
+    fireEvent.click(within(panel).getByTestId('reticulum-operation-op-inbound-1-accept'));
+
+    await waitFor(() => {
+      expect(runtimeEnsMocks.acceptPairingOperation).toHaveBeenCalledWith(
+        'http://127.0.0.1:9124',
+        'op-inbound-1',
+        '123456',
+      );
+      expect(within(panel).getByTestId('reticulum-operation-op-inbound-1')).toHaveTextContent('配对响应');
+      expect(within(panel).getByTestId('reticulum-operation-op-inbound-1')).toHaveTextContent('出站');
+      expect(within(panel).getByTestId('reticulum-operation-op-inbound-1-status')).toHaveTextContent('进行中');
+    });
+
+    expect(within(panel).queryByTestId('reticulum-operation-op-inbound-1-accept')).not.toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByTestId('reticulum-operation-op-inbound-1-cancel'));
+
+    await waitFor(() => {
+      expect(runtimeEnsMocks.cancelPairingOperation).toHaveBeenCalledWith(
+        'http://127.0.0.1:9124',
+        'op-inbound-1',
+        'cancelled from DeviceView Reticulum debug panel',
+      );
+      expect(within(panel).getByTestId('reticulum-operation-op-inbound-1-status')).toHaveTextContent('已取消');
+      expect(within(panel).getByTestId('reticulum-operation-op-inbound-1-error')).toHaveTextContent(
+        'cancelled from DeviceView Reticulum debug panel',
       );
     });
   });

@@ -4,7 +4,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use exomind_runtime::ens::{
     EnsEndpointAdvertisement, EnsGatewayKind, EnsInterfaceMedium, EnsInterfaceSnapshot,
-    EnsInterfaceTopology, EnsPairingFrame, EnsPeerSnapshot, EnsTransportService, FakeEnsProvider,
+    EnsInterfaceTopology, EnsPairingFrame, EnsPairingOffer, EnsPeerSnapshot, EnsTransportService,
+    FakeEnsProvider,
 };
 use exomind_runtime::signal::{DeliveryRecord, DeliveryStatus};
 use exomind_runtime::{AppState, app_with_state};
@@ -279,6 +280,193 @@ async fn ens_pairing_route_starts_offer_for_discovered_peer() {
         provider.sent_frames().first(),
         Some(EnsPairingFrame::PairingOffer(_))
     ));
+}
+
+#[tokio::test]
+async fn ens_pairing_operation_status_route_reads_backend_snapshot() {
+    let (state, _provider) = state_with_ens_provider();
+    let peer_endpoint = endpoint_for("identity-b", "rt-b");
+    state
+        .ens_transport
+        .handle_pairing_offer(EnsPairingOffer {
+            operation_id: "op-inbound-1".to_string(),
+            session_id: "session-1".to_string(),
+            initiator: peer_endpoint.identity(),
+            initiator_endpoint: Some(peer_endpoint),
+        })
+        .expect("record inbound pairing offer");
+
+    let response = app_with_state(state)
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ens/pairing/operations/op-inbound-1/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload["id"], "op-inbound-1");
+    assert_eq!(payload["kind"], "pairing_offer");
+    assert_eq!(payload["direction"], "inbound");
+    assert_eq!(payload["status"], "pending");
+    assert_eq!(payload["peer_identity"]["identity_hex"], "identity-b");
+    assert_eq!(payload["session_id"], "session-1");
+}
+
+#[tokio::test]
+async fn ens_pairing_operation_accept_route_sends_pairing_response() {
+    let (state, provider) = state_with_ens_provider();
+    let peer_endpoint = endpoint_for("identity-b", "rt-b");
+    state
+        .ens_transport
+        .handle_pairing_offer(EnsPairingOffer {
+            operation_id: "op-inbound-1".to_string(),
+            session_id: "session-1".to_string(),
+            initiator: peer_endpoint.identity(),
+            initiator_endpoint: Some(peer_endpoint),
+        })
+        .expect("record inbound pairing offer");
+
+    let app = app_with_state(state);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mesh/ens/pairing/operations/op-inbound-1/accept")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"pin":"123456"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload["operation_id"], "op-inbound-1");
+    assert_eq!(payload["status"], "pending");
+
+    let sent_frames = provider.sent_frames();
+    match sent_frames.first() {
+        Some(EnsPairingFrame::PairingResponse(response)) => {
+            assert_eq!(response.operation_id, "op-inbound-1");
+            assert_eq!(response.session_id, "session-1");
+            assert_eq!(response.responder.identity_hex, "identity-a");
+            assert_eq!(response.responder_endpoint.identity_hex, "identity-a");
+            assert_eq!(response.pin, "123456");
+            assert!(response.responder_inbound_secret.is_some());
+        }
+        other => panic!("expected pairing response frame, got {other:?}"),
+    }
+
+    let duplicate_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mesh/ens/pairing/operations/op-inbound-1/accept")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"pin":"123456"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(duplicate_response.status(), StatusCode::CONFLICT);
+    assert_eq!(provider.sent_frames().len(), 1);
+
+    let status_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ens/pairing/operations/op-inbound-1/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response_json(status_response).await;
+    assert_eq!(status["kind"], "pairing_response");
+    assert_eq!(status["direction"], "outbound");
+    assert_eq!(status["status"], "pending");
+    assert_eq!(status["peer_identity"]["identity_hex"], "identity-b");
+}
+
+#[tokio::test]
+async fn ens_pairing_operation_cancel_route_sends_cancel_and_clears_pending_state() {
+    let (state, provider) = state_with_ens_provider();
+    let peer_endpoint = endpoint_for("identity-b", "rt-b");
+    state
+        .ens_transport
+        .handle_pairing_offer(EnsPairingOffer {
+            operation_id: "op-inbound-1".to_string(),
+            session_id: "session-1".to_string(),
+            initiator: peer_endpoint.identity(),
+            initiator_endpoint: Some(peer_endpoint),
+        })
+        .expect("record inbound pairing offer");
+
+    let app = app_with_state(state);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mesh/ens/pairing/operations/op-inbound-1/cancel")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"reason":"operator declined"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload = response_json(response).await;
+    assert_eq!(payload["operation_id"], "op-inbound-1");
+    assert_eq!(payload["status"], "cancelled");
+
+    let sent_frames = provider.sent_frames();
+    match sent_frames.first() {
+        Some(EnsPairingFrame::PairingCancel(cancel)) => {
+            assert_eq!(cancel.operation_id, "op-inbound-1");
+            assert_eq!(cancel.session_id, "session-1");
+            assert_eq!(cancel.peer.identity_hex, "identity-a");
+            assert_eq!(cancel.reason, "operator declined");
+        }
+        other => panic!("expected pairing cancel frame, got {other:?}"),
+    }
+
+    let snapshot_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/mesh/ens/snapshot")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let snapshot = response_json(snapshot_response).await;
+    let operation = snapshot["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|operation| operation["id"] == "op-inbound-1")
+        .expect("cancelled operation should be included in snapshot");
+    assert_eq!(operation["kind"], "pairing_cancel");
+    assert_eq!(operation["status"], "cancelled");
+    assert_eq!(operation["peer_identity"]["identity_hex"], "identity-b");
+    assert_eq!(operation["error"], "operator declined");
+
+    let peer = snapshot["peers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|peer| peer["identity"]["identity_hex"] == "identity-b")
+        .expect("peer should be included in snapshot");
+    assert_eq!(peer["pairing_pending"], false);
+    assert_eq!(peer["last_error"], "operator declined");
 }
 
 #[tokio::test]

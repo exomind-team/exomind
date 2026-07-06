@@ -146,6 +146,13 @@ pub enum EnsOperationKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum EnsOperationDirection {
+    Inbound,
+    Outbound,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EnsOperationStatus {
     Pending,
     Completed,
@@ -158,6 +165,7 @@ pub enum EnsOperationStatus {
 pub struct EnsOperationSnapshot {
     pub id: String,
     pub kind: EnsOperationKind,
+    pub direction: EnsOperationDirection,
     pub status: EnsOperationStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub peer_identity: Option<EnsPeerIdentity>,

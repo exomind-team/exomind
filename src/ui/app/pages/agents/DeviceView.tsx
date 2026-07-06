@@ -165,6 +165,16 @@ function ensOperationStatusClass(status: EnsOperationSnapshot['status']): string
   return 'bg-[#E7E5E4] text-[#57534E] dark:bg-[#44403C] dark:text-[#D6D3D1]';
 }
 
+function formatEnsOperationDirectionLabel(direction: EnsOperationSnapshot['direction']): string {
+  if (direction === 'inbound') {
+    return '入站';
+  }
+  if (direction === 'outbound') {
+    return '出站';
+  }
+  return '方向未知';
+}
+
 function isEnsDeliveryStatus(value: unknown): value is EnsDeliverySnapshot['status'] {
   return value === 'sent' || value === 'failed' || value === 'skipped';
 }
@@ -298,6 +308,7 @@ function ReticulumDebugPanel({
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [operationPins, setOperationPins] = useState<Record<string, string>>({});
   const ensService = useMemo(() => getRuntimeEnsService(), []);
 
   const refresh = useCallback(async () => {
@@ -367,6 +378,61 @@ function ReticulumDebugPanel({
       await refresh();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Reticulum 配对发起失败');
+    } finally {
+      setPendingKey(null);
+    }
+  };
+
+  const handleRefreshPairingOperation = async (operationId: string) => {
+    if (!runtimeBaseUrl) {
+      return;
+    }
+    setPendingKey(`operation-status:${operationId}`);
+    try {
+      await ensService.getPairingOperationStatus(runtimeBaseUrl, operationId);
+      await refresh();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Reticulum 配对状态读取失败');
+    } finally {
+      setPendingKey(null);
+    }
+  };
+
+  const handleAcceptPairingOperation = async (operationId: string) => {
+    if (!runtimeBaseUrl) {
+      return;
+    }
+    const pin = operationPins[operationId]?.trim() ?? '';
+    if (!pin) {
+      setError('请输入 Reticulum 配对 PIN');
+      return;
+    }
+
+    setPendingKey(`operation-accept:${operationId}`);
+    try {
+      await ensService.acceptPairingOperation(runtimeBaseUrl, operationId, pin);
+      await refresh();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Reticulum 配对接受失败');
+    } finally {
+      setPendingKey(null);
+    }
+  };
+
+  const handleCancelPairingOperation = async (operationId: string) => {
+    if (!runtimeBaseUrl) {
+      return;
+    }
+    setPendingKey(`operation-cancel:${operationId}`);
+    try {
+      await ensService.cancelPairingOperation(
+        runtimeBaseUrl,
+        operationId,
+        'cancelled from DeviceView Reticulum debug panel',
+      );
+      await refresh();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Reticulum 配对取消失败');
     } finally {
       setPendingKey(null);
     }
@@ -707,6 +773,11 @@ function ReticulumDebugPanel({
               <div className="space-y-1.5">
                 {operations.map((operation) => {
                   const operationTestId = ensDebugTestIdSegment(operation.id);
+                  const isPendingOperation = operation.status === 'pending';
+                  const canAcceptPairingOffer = isPendingOperation
+                    && operation.kind === 'pairing_offer'
+                    && operation.direction === 'inbound';
+                  const pinValue = operationPins[operation.id] ?? '';
                   const peerLabel = operation.peer_identity
                     ? formatEnsPeerName({
                         identity: operation.peer_identity,
@@ -738,8 +809,67 @@ function ReticulumDebugPanel({
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
                         {operation.session_id && <span>session {operation.session_id}</span>}
+                        <span>{formatEnsOperationDirectionLabel(operation.direction)}</span>
                         <span>{operation.updated_at}</span>
                       </div>
+                      {isPendingOperation && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {canAcceptPairingOffer && (
+                            <>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="one-time-code"
+                                data-testid={`reticulum-operation-${operationTestId}-pin`}
+                                value={pinValue}
+                                onChange={(event) => {
+                                  const nextPin = event.currentTarget.value;
+                                  setOperationPins((previous) => ({
+                                    ...previous,
+                                    [operation.id]: nextPin,
+                                  }));
+                                }}
+                                placeholder="PIN"
+                                className="h-7 w-24 rounded-lg border border-[#D6D3D1] bg-white px-2 text-[11px] text-[#1C1917] outline-none focus:border-[#0D9488] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#57534E] dark:bg-[#292524] dark:text-[#FAFAF9]"
+                                disabled={pendingKey !== null}
+                              />
+                              <button
+                                type="button"
+                                data-testid={`reticulum-operation-${operationTestId}-accept`}
+                                onClick={() => {
+                                  void handleAcceptPairingOperation(operation.id);
+                                }}
+                                disabled={pendingKey !== null || !pinValue.trim()}
+                                className="h-7 rounded-lg bg-[#0D9488] px-2 text-[10px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                接受
+                              </button>
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            data-testid={`reticulum-operation-${operationTestId}-refresh-status`}
+                            onClick={() => {
+                              void handleRefreshPairingOperation(operation.id);
+                            }}
+                            disabled={pendingKey !== null}
+                            className="h-7 rounded-lg bg-[#F5F0ED] px-2 text-[10px] font-semibold text-[#57534E] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#292524] dark:text-[#D6D3D1]"
+                          >
+                            刷新状态
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`reticulum-operation-${operationTestId}-cancel`}
+                            onClick={() => {
+                              void handleCancelPairingOperation(operation.id);
+                            }}
+                            disabled={pendingKey !== null}
+                            className="h-7 rounded-lg bg-[#EF444410] px-2 text-[10px] font-semibold text-[#DC2626] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      )}
                       {operation.error && (
                         <p
                           data-testid={`reticulum-operation-${operationTestId}-error`}

@@ -47,10 +47,14 @@ export interface EnsTransportHealth {
   message?: string;
 }
 
+export type EnsOperationStatus = 'pending' | 'completed' | 'cancelled' | 'failed' | 'timed_out';
+export type EnsOperationDirection = 'inbound' | 'outbound';
+
 export interface EnsOperationSnapshot {
   id: string;
   kind: 'pairing_offer' | 'pairing_response' | 'pairing_complete' | 'pairing_cancel';
-  status: 'pending' | 'completed' | 'cancelled' | 'failed' | 'timed_out';
+  direction?: EnsOperationDirection;
+  status: EnsOperationStatus;
   peer_identity?: EnsPeerIdentity;
   session_id?: string;
   error?: string;
@@ -81,7 +85,12 @@ export interface EnsPairingOfferTicket {
   operation_id: string;
   session_id: string;
   pin: string;
-  status: 'pending' | 'completed' | 'cancelled' | 'failed' | 'timed_out';
+  status: EnsOperationStatus;
+}
+
+export interface EnsCommandAck {
+  operation_id: string;
+  status: EnsOperationStatus;
 }
 
 export interface EnsTransportSnapshot {
@@ -198,6 +207,52 @@ export class RuntimeEnsService {
     });
     await assertOk('initiateEnsPairingWithDiscoveredPeer', 'POST', url, response as Response);
     return (await response.json()) as EnsPairingOfferTicket;
+  }
+
+  async getPairingOperationStatus(
+    runtimeBaseUrl: string,
+    operationId: string,
+    authToken?: string,
+  ): Promise<EnsOperationSnapshot> {
+    const url = `${runtimeBaseUrl}/mesh/ens/pairing/operations/${encodeURIComponent(operationId)}/status`;
+    const response = await this.fetchImpl(url, {
+      method: 'GET',
+      headers: authHeaders(authToken, { Accept: 'application/json' }),
+    });
+    await assertOk('getEnsPairingOperationStatus', 'GET', url, response as Response);
+    return (await response.json()) as EnsOperationSnapshot;
+  }
+
+  async acceptPairingOperation(
+    runtimeBaseUrl: string,
+    operationId: string,
+    pin: string,
+    authToken?: string,
+  ): Promise<EnsCommandAck> {
+    const url = `${runtimeBaseUrl}/mesh/ens/pairing/operations/${encodeURIComponent(operationId)}/accept`;
+    const response = await this.fetchImpl(url, {
+      method: 'POST',
+      headers: authHeaders(authToken, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ pin }),
+    });
+    await assertOk('acceptEnsPairingOperation', 'POST', url, response as Response);
+    return (await response.json()) as EnsCommandAck;
+  }
+
+  async cancelPairingOperation(
+    runtimeBaseUrl: string,
+    operationId: string,
+    reason?: string,
+    authToken?: string,
+  ): Promise<EnsCommandAck> {
+    const url = `${runtimeBaseUrl}/mesh/ens/pairing/operations/${encodeURIComponent(operationId)}/cancel`;
+    const response = await this.fetchImpl(url, {
+      method: 'POST',
+      headers: authHeaders(authToken, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(reason ? { reason } : {}),
+    });
+    await assertOk('cancelEnsPairingOperation', 'POST', url, response as Response);
+    return (await response.json()) as EnsCommandAck;
   }
 }
 

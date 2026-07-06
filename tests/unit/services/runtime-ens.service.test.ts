@@ -152,4 +152,85 @@ describe('RuntimeEnsService', () => {
       }),
     );
   });
+
+  it('reads one pairing operation status（读取单个配对 operation 状态）', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      id: 'op-1',
+      kind: 'pairing_offer',
+      status: 'pending',
+      peer_identity: {
+        identity_hex: 'identity-b',
+        host_id: 'rt-b',
+      },
+      session_id: 'session-1',
+      updated_at: '2026-06-08T00:00:00Z',
+    })));
+    const service = new RuntimeEnsService({ fetchImpl });
+
+    const operation = await service.getPairingOperationStatus(
+      'http://127.0.0.1:9124',
+      'op-1',
+      'admin-token',
+    );
+
+    expect(operation.id).toBe('op-1');
+    expect(operation.peer_identity?.identity_hex).toBe('identity-b');
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:9124/mesh/ens/pairing/operations/op-1/status',
+      expect.objectContaining({
+        method: 'GET',
+      }),
+    );
+    const headers = fetchImpl.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get('Authorization')).toBe('Bearer admin-token');
+  });
+
+  it('accepts one pairing operation with PIN（用 PIN 接受配对 operation）', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      operation_id: 'op-1',
+      status: 'pending',
+    })));
+    const service = new RuntimeEnsService({ fetchImpl });
+
+    const ack = await service.acceptPairingOperation(
+      'http://127.0.0.1:9124',
+      'op-1',
+      '123456',
+    );
+
+    expect(ack.status).toBe('pending');
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:9124/mesh/ens/pairing/operations/op-1/accept',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ pin: '123456' }),
+      }),
+    );
+  });
+
+  it('cancels one pairing operation with a reason（取消配对 operation 并发送原因）', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      operation_id: 'op-1',
+      status: 'cancelled',
+    })));
+    const service = new RuntimeEnsService({ fetchImpl });
+
+    const ack = await service.cancelPairingOperation(
+      'http://127.0.0.1:9124',
+      'op-1',
+      'operator declined',
+      'admin-token',
+    );
+
+    expect(ack.status).toBe('cancelled');
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:9124/mesh/ens/pairing/operations/op-1/cancel',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ reason: 'operator declined' }),
+      }),
+    );
+    const headers = fetchImpl.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get('Authorization')).toBe('Bearer admin-token');
+  });
 });

@@ -322,6 +322,16 @@ struct SetEnsInterfaceTopologyRequest {
     topology: EnsInterfaceTopology,
 }
 
+#[derive(Debug, Deserialize)]
+struct AcceptEnsPairingOperationRequest {
+    pin: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CancelEnsPairingOperationRequest {
+    reason: Option<String>,
+}
+
 fn ens_error_response(error: EnsTransportError) -> (StatusCode, Json<serde_json::Value>) {
     let status = match &error {
         EnsTransportError::NotConfigured | EnsTransportError::ShutDown => {
@@ -339,7 +349,8 @@ fn ens_error_response(error: EnsTransportError) -> (StatusCode, Json<serde_json:
         EnsTransportError::MissingLocalEndpoint
         | EnsTransportError::MissingRuntimeEndpoint
         | EnsTransportError::DiscoveredPeerMissingEndpoint(_)
-        | EnsTransportError::PairingOperationCancelled => StatusCode::CONFLICT,
+        | EnsTransportError::PairingOperationCancelled
+        | EnsTransportError::PairingOperationNotPending(_) => StatusCode::CONFLICT,
         EnsTransportError::PairingSessionNotFound => StatusCode::FORBIDDEN,
         EnsTransportError::Provider(_) => StatusCode::BAD_GATEWAY,
     };
@@ -390,6 +401,45 @@ async fn initiate_ens_pairing_with_discovered_peer(
         .map_err(ens_error_response)
 }
 
+async fn ens_pairing_operation_status(
+    Path(operation_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<crate::ens::EnsOperationSnapshot>, (StatusCode, Json<serde_json::Value>)> {
+    state
+        .ens_transport
+        .operation_status(&operation_id)
+        .map(Json)
+        .map_err(ens_error_response)
+}
+
+async fn accept_ens_pairing_operation(
+    Path(operation_id): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<AcceptEnsPairingOperationRequest>,
+) -> Result<Json<crate::ens::EnsCommandAck>, (StatusCode, Json<serde_json::Value>)> {
+    state
+        .ens_transport
+        .accept_pairing_offer(&operation_id, req.pin)
+        .map(Json)
+        .map_err(ens_error_response)
+}
+
+async fn cancel_ens_pairing_operation(
+    Path(operation_id): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<CancelEnsPairingOperationRequest>,
+) -> Result<Json<crate::ens::EnsCommandAck>, (StatusCode, Json<serde_json::Value>)> {
+    let reason = req
+        .reason
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "cancelled by local operator".to_string());
+    state
+        .ens_transport
+        .cancel_pairing_operation(&operation_id, reason)
+        .map(Json)
+        .map_err(ens_error_response)
+}
+
 /// Protected mesh routes (behind auth middleware).
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -408,6 +458,18 @@ pub fn router() -> Router<AppState> {
         .route(
             "/mesh/ens/pairing/discovered/:identity_hex",
             post(initiate_ens_pairing_with_discovered_peer),
+        )
+        .route(
+            "/mesh/ens/pairing/operations/:operation_id/status",
+            get(ens_pairing_operation_status),
+        )
+        .route(
+            "/mesh/ens/pairing/operations/:operation_id/accept",
+            post(accept_ens_pairing_operation),
+        )
+        .route(
+            "/mesh/ens/pairing/operations/:operation_id/cancel",
+            post(cancel_ens_pairing_operation),
         )
         // Initiate is protected: only the local admin can create pairing sessions.
         // This prevents remote attackers from calling initiate + respond to self-pair.
