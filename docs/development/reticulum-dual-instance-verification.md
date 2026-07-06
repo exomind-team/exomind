@@ -333,7 +333,16 @@ powershell -ExecutionPolicy Bypass -File scripts/dev/reticulum-four-domain-probe
   -TargetRuntime "http://127.0.0.1:9324"
 ```
 
-脚本会先检查两端 `/mesh/ens/snapshot`：provider 必须是 `runtime-reticulum-ens`、health 必须 healthy、双方必须以 Reticulum `identity_hex` 互相授权且 `pairing_pending=false`。随后脚本写入 EventLog、Task、TimeBlock 与 Proposal，并轮询 B 端业务 route；只有 B 端业务 route 读到唯一 id/marker 才通过。这里的 HTTP route 只用于“本机向 A 写入”和“本机从 B 回读”的控制面/观察面，不是 RT-to-RT peer transport。`sent`、接口在线、discovered peer、toast、operation accepted 都不能替代 B 端业务数据出现。
+若要一次验证 A -> B 与 B -> A 两个方向，添加 `-Bidirectional`：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/dev/reticulum-four-domain-probe.ps1 `
+  -SourceRuntime "http://127.0.0.1:9224" `
+  -TargetRuntime "http://127.0.0.1:9324" `
+  -Bidirectional
+```
+
+脚本会先检查两端 `/mesh/ens/snapshot`：provider 必须是 `runtime-reticulum-ens`、health 必须 healthy、双方必须以 Reticulum `identity_hex` 互相授权且 `pairing_pending=false`。随后脚本写入 EventLog、Task、TimeBlock 与 Proposal，并轮询远端业务 route；单向模式只验证 A 写入、B 回读，`-Bidirectional` 会再用独立 scope 验证 B 写入、A 回读。只有远端业务 route 读到唯一 id/marker 才通过。这里的 HTTP route 只用于本机写入与本机回读的控制面/观察面，不是 RT-to-RT peer transport。`sent`、接口在线、discovered peer、toast、operation accepted 都不能替代远端业务数据出现。
 
 若需要逐步排查，可以手动拆成下面四组命令：
 

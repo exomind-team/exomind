@@ -4,7 +4,8 @@ param(
   [string]$Scope = "",
   [int]$TimeoutSeconds = 40,
   [int]$PollMilliseconds = 500,
-  [string]$ExpectedProviderId = "runtime-reticulum-ens"
+  [string]$ExpectedProviderId = "runtime-reticulum-ens",
+  [switch]$Bidirectional
 )
 
 $ErrorActionPreference = "Stop"
@@ -127,7 +128,96 @@ function Wait-RouteContains {
     Start-Sleep -Milliseconds $PollMilliseconds
   }
 
-  throw "$Domain did not appear on target business route before timeout. route=$Uri needle=$Needle"
+  throw "$Domain did not appear on read runtime business route before timeout. route=$Uri needle=$Needle"
+}
+
+function Invoke-FourDomainProbeRun {
+  param(
+    [string]$Direction,
+    [string]$WriteRuntime,
+    [string]$ReadRuntime,
+    [object]$WriteSnapshot,
+    [object]$ReadSnapshot,
+    [string]$RunScope,
+    [switch]$IncludeDirectionInDomain
+  )
+
+  $scopeQuery = [uri]::EscapeDataString($RunScope)
+  $marker = $RunScope
+  $eventlogDomain = if ($IncludeDirectionInDomain) { "$Direction EventLog" } else { "EventLog" }
+  $taskDomain = if ($IncludeDirectionInDomain) { "$Direction Task" } else { "Task" }
+  $timeblockDomain = if ($IncludeDirectionInDomain) { "$Direction TimeBlock" } else { "TimeBlock" }
+  $proposalDomain = if ($IncludeDirectionInDomain) { "$Direction Proposal" } else { "Proposal" }
+
+  $eventId = "manual-event-$([guid]::NewGuid().ToString("N"))"
+  Invoke-JsonPost -Uri "$WriteRuntime/eventlog?user_id=$scopeQuery" -Body @{
+    id = $eventId
+    content = "Reticulum EventLog manual probe $marker"
+    tags = @("reticulum-manual", $marker)
+    refs = @()
+    metadata = @{
+      reticulumProbeId = $marker
+      domain = "eventlog"
+    }
+  } | Out-Null
+
+  $task = Invoke-JsonPost -Uri "$WriteRuntime/tasks?user_id=$scopeQuery" -Body @{
+    title = "Reticulum Task manual probe $marker"
+    tags = @("reticulum-manual", $marker)
+    source = "reticulum-manual"
+    depends_on = @()
+    time_block_ids = @()
+  }
+  if ([string]::IsNullOrWhiteSpace($task.id)) {
+    throw "$Direction task creation did not return an id"
+  }
+
+  Invoke-JsonPost -Uri "$WriteRuntime/timeblocks/new?user_id=$scopeQuery" -Body @{
+    blockType = "active"
+    name = "Reticulum TimeBlock manual probe $marker"
+    mode = "countup"
+    targetMinutes = 25
+  } | Out-Null
+
+  $proposal = Invoke-JsonPost -Uri "$WriteRuntime/api/proposals?user_id=$scopeQuery" -Body @{
+    title = "Reticulum Proposal manual probe $marker"
+    body = "Reticulum Proposal manual probe body $marker"
+    action_type = "append_event"
+    action_params = @{
+      content = "Reticulum proposal sync probe $marker"
+      tags = @("reticulum-manual", $marker)
+    }
+    publisher = @{
+      publisher_type = "human"
+      id = "manual-verifier"
+      name = "Manual Verifier"
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($proposal.id)) {
+    throw "$Direction proposal creation did not return an id"
+  }
+
+  $results = @()
+  $results += Wait-RouteContains -Domain $eventlogDomain -Uri "$ReadRuntime/eventlog?user_id=$scopeQuery" -Needle $eventId
+  $results += Wait-RouteContains -Domain $taskDomain -Uri "$ReadRuntime/tasks?user_id=$scopeQuery" -Needle $task.id
+  $results += Wait-RouteContains -Domain $timeblockDomain -Uri "$ReadRuntime/timeblocks/active?user_id=$scopeQuery" -Needle $marker
+  $results += Wait-RouteContains -Domain $proposalDomain -Uri "$ReadRuntime/api/proposals?user_id=$scopeQuery" -Needle $proposal.id
+
+  return [pscustomobject]@{
+    direction = $Direction
+    write_runtime = $WriteRuntime
+    read_runtime = $ReadRuntime
+    scope = $RunScope
+    write_identity_hex = $WriteSnapshot.local_identity.identity_hex
+    read_identity_hex = $ReadSnapshot.local_identity.identity_hex
+    writes = [pscustomobject]@{
+      event_id = $eventId
+      task_id = $task.id
+      timeblock_marker = $marker
+      proposal_id = $proposal.id
+    }
+    remote_business_route_reads = $results
+  }
 }
 
 $SourceRuntime = Normalize-RuntimeUrl -Value $SourceRuntime
@@ -135,81 +225,52 @@ $TargetRuntime = Normalize-RuntimeUrl -Value $TargetRuntime
 if ([string]::IsNullOrWhiteSpace($Scope)) {
   $Scope = New-ProbeId
 }
-$scopeQuery = [uri]::EscapeDataString($Scope)
-$marker = $Scope
 
 $sourceSnapshot = Get-EnsSnapshot -Runtime $SourceRuntime -Name "source"
 $targetSnapshot = Get-EnsSnapshot -Runtime $TargetRuntime -Name "target"
 Assert-AuthorizedPeer -Snapshot $sourceSnapshot -ExpectedPeerIdentity $targetSnapshot.local_identity.identity_hex -Name "source"
 Assert-AuthorizedPeer -Snapshot $targetSnapshot -ExpectedPeerIdentity $sourceSnapshot.local_identity.identity_hex -Name "target"
 
-$eventId = "manual-event-$([guid]::NewGuid().ToString("N"))"
-$event = Invoke-JsonPost -Uri "$SourceRuntime/eventlog?user_id=$scopeQuery" -Body @{
-  id = $eventId
-  content = "Reticulum EventLog manual probe $marker"
-  tags = @("reticulum-manual", $marker)
-  refs = @()
-  metadata = @{
-    reticulumProbeId = $marker
-    domain = "eventlog"
-  }
+$runs = @()
+$forwardScope = $Scope
+if ($Bidirectional) {
+  $forwardScope = "$Scope-source-to-target"
+}
+$runs += Invoke-FourDomainProbeRun `
+  -Direction "source_to_target" `
+  -WriteRuntime $SourceRuntime `
+  -ReadRuntime $TargetRuntime `
+  -WriteSnapshot $sourceSnapshot `
+  -ReadSnapshot $targetSnapshot `
+  -RunScope $forwardScope `
+  -IncludeDirectionInDomain:$Bidirectional
+
+if ($Bidirectional) {
+  $runs += Invoke-FourDomainProbeRun `
+    -Direction "target_to_source" `
+    -WriteRuntime $TargetRuntime `
+    -ReadRuntime $SourceRuntime `
+    -WriteSnapshot $targetSnapshot `
+    -ReadSnapshot $sourceSnapshot `
+    -RunScope "$Scope-target-to-source" `
+    -IncludeDirectionInDomain
 }
 
-$task = Invoke-JsonPost -Uri "$SourceRuntime/tasks?user_id=$scopeQuery" -Body @{
-  title = "Reticulum Task manual probe $marker"
-  tags = @("reticulum-manual", $marker)
-  source = "reticulum-manual"
-  depends_on = @()
-  time_block_ids = @()
-}
-if ([string]::IsNullOrWhiteSpace($task.id)) {
-  throw "Task creation did not return an id"
-}
-
-$timeblock = Invoke-JsonPost -Uri "$SourceRuntime/timeblocks/new?user_id=$scopeQuery" -Body @{
-  blockType = "active"
-  name = "Reticulum TimeBlock manual probe $marker"
-  mode = "countup"
-  targetMinutes = 25
-}
-
-$proposal = Invoke-JsonPost -Uri "$SourceRuntime/api/proposals?user_id=$scopeQuery" -Body @{
-  title = "Reticulum Proposal manual probe $marker"
-  body = "Reticulum Proposal manual probe body $marker"
-  action_type = "append_event"
-  action_params = @{
-    content = "Reticulum proposal sync probe $marker"
-    tags = @("reticulum-manual", $marker)
-  }
-  publisher = @{
-    publisher_type = "human"
-    id = "manual-verifier"
-    name = "Manual Verifier"
-  }
-}
-if ([string]::IsNullOrWhiteSpace($proposal.id)) {
-  throw "Proposal creation did not return an id"
-}
-
-$results = @()
-$results += Wait-RouteContains -Domain "EventLog" -Uri "$TargetRuntime/eventlog?user_id=$scopeQuery" -Needle $eventId
-$results += Wait-RouteContains -Domain "Task" -Uri "$TargetRuntime/tasks?user_id=$scopeQuery" -Needle $task.id
-$results += Wait-RouteContains -Domain "TimeBlock" -Uri "$TargetRuntime/timeblocks/active?user_id=$scopeQuery" -Needle $marker
-$results += Wait-RouteContains -Domain "Proposal" -Uri "$TargetRuntime/api/proposals?user_id=$scopeQuery" -Needle $proposal.id
-
-[pscustomobject]@{
+$output = [ordered]@{
   ok = $true
+  bidirectional = [bool]$Bidirectional
   source_runtime = $SourceRuntime
   target_runtime = $TargetRuntime
   scope = $Scope
   source_identity_hex = $sourceSnapshot.local_identity.identity_hex
   target_identity_hex = $targetSnapshot.local_identity.identity_hex
-  writes = [pscustomobject]@{
-    event_id = $eventId
-    task_id = $task.id
-    timeblock_marker = $marker
-    proposal_id = $proposal.id
-  }
-  remote_business_route_reads = $results
-  note = "HTTP routes were used only as local control/observation. Pass criteria are target business route reads after Reticulum authorization."
-} | ConvertTo-Json -Depth 40
+  runs = $runs
+  note = "HTTP routes were used only as local control/observation. Pass criteria are remote/read-runtime business route reads after Reticulum authorization."
+}
+
+if (-not $Bidirectional) {
+  $output["writes"] = $runs[0].writes
+  $output["remote_business_route_reads"] = $runs[0].remote_business_route_reads
+}
+
+[pscustomobject]$output | ConvertTo-Json -Depth 40
