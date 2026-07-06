@@ -53,6 +53,8 @@ interface NowInputRowProps {
   resolveQuotedRefSummary?: (eventId: string) => string | undefined;
   resolveQuotedRefExcerpt?: (eventId: string) => string | undefined;
   onOpenQuotedEvent?: (eventId: string) => void;
+  sendFailureTitle?: string;
+  sendFailureDescription?: string;
 }
 
 function buildAutoDraftStorageKey(placeholder: string): string {
@@ -181,6 +183,8 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   resolveQuotedRefSummary,
   resolveQuotedRefExcerpt,
   onOpenQuotedEvent,
+  sendFailureTitle,
+  sendFailureDescription,
 }, ref) {
   const effectiveDraftStorageKey = draftStorageKey === null ? null : draftStorageKey ?? buildAutoDraftStorageKey(placeholder);
   const [value, setValue] = useState('');
@@ -386,12 +390,16 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       }
       focusTextarea(textareaRef.current);
       log.error(`[NowInputRow] send failed: ${error instanceof Error ? error.message : String(error)}`);
-      toast({ title: '发送失败', description: '请检查网络连接后重试', variant: 'destructive' });
+      toast({
+        title: sendFailureTitle ?? '发送失败',
+        description: sendFailureDescription ?? '操作未完成，请稍后重试',
+        variant: 'destructive',
+      });
     } finally {
       submittingRef.current = false;
       setIsSubmitting(false);
     }
-  }, [effectiveDraftStorageKey, normalizedQuotedRefs, onQuotedRefsChange, onSend, quoteFeatureEnabled, resolveQuotedRefExcerpt, resolveQuotedRefSummary, value]);
+  }, [effectiveDraftStorageKey, normalizedQuotedRefs, onQuotedRefsChange, onSend, quoteFeatureEnabled, resolveQuotedRefExcerpt, resolveQuotedRefSummary, sendFailureDescription, sendFailureTitle, value]);
 
   const insertClipboardText = useCallback((text: string) => {
     if (!text) return;

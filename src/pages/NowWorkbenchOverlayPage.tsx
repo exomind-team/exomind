@@ -1140,7 +1140,12 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                     ))}
                   </div>
                   <section className="overflow-hidden rounded-[18px] border border-white/10 bg-white/8">
-                    <NowInputRow onSend={onSend} placeholder="记录当下的事实..." />
+                    <NowInputRow
+                      onSend={onSend}
+                      placeholder="记录当下的事实..."
+                      sendFailureTitle="记录失败"
+                      sendFailureDescription="事件没有保存到本地运行时；请确认运行时与当前档案已就绪后重试。"
+                    />
                   </section>
                 </div>
               ) : null}
@@ -1155,7 +1160,12 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                     <p className="mt-1 text-[12px] text-[#A8A29E] dark:text-[#78716C]">先记一条输入，或者稍后再开始时间块。</p>
                   </section>
                   <section className="overflow-hidden rounded-[18px] border border-white/10 bg-white/8">
-                    <NowInputRow onSend={onSend} placeholder="记录当下的事实..." />
+                    <NowInputRow
+                      onSend={onSend}
+                      placeholder="记录当下的事实..."
+                      sendFailureTitle="记录失败"
+                      sendFailureDescription="事件没有保存到本地运行时；请确认运行时与当前档案已就绪后重试。"
+                    />
                   </section>
                 </div>
               ) : null}
@@ -1423,7 +1433,12 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
           </section>
 
           <section className="overflow-hidden rounded-[20px] border border-[#E7E5E4] bg-white/75 dark:border-[#292524] dark:bg-[#1C1917]/70">
-            <NowInputRow onSend={onSend} placeholder="记录当下的事实..." />
+            <NowInputRow
+              onSend={onSend}
+              placeholder="记录当下的事实..."
+              sendFailureTitle="记录失败"
+              sendFailureDescription="事件没有保存到本地运行时；请确认运行时与当前档案已就绪后重试。"
+            />
           </section>
         </main>
       </div>

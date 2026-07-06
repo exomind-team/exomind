@@ -1256,6 +1256,8 @@ export function ChatPage({
           resolveQuotedRefSummary={resolveEventRefSummary}
           resolveQuotedRefExcerpt={resolveQuotedRefExcerpt}
           onOpenQuotedEvent={(eventId) => locateEventInRecord(eventId, true)}
+          sendFailureTitle="记录失败"
+          sendFailureDescription="事件没有保存到本地运行时；请确认运行时与当前档案已就绪后重试。"
         />
       ) : (
         <VoiceMessageInput

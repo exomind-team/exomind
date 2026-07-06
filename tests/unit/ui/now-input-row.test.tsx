@@ -277,6 +277,35 @@ describe('NowInputRow', () => {
     });
   });
 
+  it('uses configured failure copy and restores text when send fails（发送失败时使用调用方文案并恢复输入）', async () => {
+    const onSend = vi.fn().mockRejectedValue(new Error('missing profile scope'));
+    render(
+      <NowInputRow
+        onSend={onSend}
+        placeholder="输入内容记录事件..."
+        sendFailureTitle="记录失败"
+        sendFailureDescription="事件没有保存到本地运行时；请确认运行时与当前档案已就绪后重试。"
+      />,
+    );
+
+    const textarea = screen.getByTestId('new-now-input-textarea') as HTMLTextAreaElement;
+    const sendButton = screen.getByTestId('new-now-send-button');
+    fireEvent.change(textarea, { target: { value: '需要保留的记录' } });
+
+    await act(async () => {
+      fireEvent.click(sendButton);
+      await Promise.resolve();
+    });
+
+    expect(onSend).toHaveBeenCalledWith('需要保留的记录', undefined, undefined);
+    expect(textarea.value).toBe('需要保留的记录');
+    expect(mockToast).toHaveBeenCalledWith({
+      title: '记录失败',
+      description: '事件没有保存到本地运行时；请确认运行时与当前档案已就绪后重试。',
+      variant: 'destructive',
+    });
+  });
+
   it('keeps Shift+Enter as newline in auto-enter-send mode', () => {
     const onSend = vi.fn();
     emitInputSendMode('enter-send');

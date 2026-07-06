@@ -241,6 +241,8 @@ export function TasksPage() {
         onValueChange={setQuickAddValue}
         placeholder="添加任务与描述..."
         draftStorageKey={TASKS_QUICK_ADD_DRAFT_KEY}
+        sendFailureTitle="添加失败"
+        sendFailureDescription="任务没有保存到本地运行时；请确认运行时与当前档案已就绪后重试。"
       />
     </PageShell>
   );
