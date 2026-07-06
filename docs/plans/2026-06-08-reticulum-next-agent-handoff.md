@@ -42,17 +42,17 @@
 如果 `docs/architecture/overview.md`、`docs/plans/2026-06-08-ens-reticulum-fresh-dev-implementation-plan.md`
 或旧原型审计材料与上述答案冲突，以本文件、SignalEvent 迁移计划、双实例验收手册和当前源码事实为准。
 
-## 当前暴露面与阻塞缺口
+## 当前暴露面与下一阻塞点
 
 这张表是冷启动 Agent 的第一层事实校准。service 层已有的能力不等于 route、TypeScript client 或 UI 已经能人工操作；人工双窗口/双设备验收必须以实际暴露面为准。
 
 | 层级 | 当前已暴露 | 当前缺口 | 对验收的影响 |
 |------|------------|----------|--------------|
-| 后端 debug route | `GET /mesh/ens/snapshot`、`PUT /mesh/ens/topology`、`PUT /mesh/ens/interfaces/:name/topology`、`POST /mesh/ens/pairing/discovered/:identity_hex` | 尚未暴露 pairing accept / complete / cancel / status route | 只能从 discovered peer 发起 offer，不能闭合人工授权状态机 |
-| TypeScript client | `getSnapshot`、`setGlobalTopology`、`setInterfaceTopology`、`setTopology`、`initiatePairingWithDiscoveredPeer` | 尚未提供 accept / complete / cancel / status typed client | UI 不能用 typed service 驱动完整 pairing 闭环 |
-| `DeviceView` Reticulum 面板 | 展示 backend snapshot/refresh 中的 provider、health、本机 identity、interfaces、peers、operations、deliveries、stale/error，并可发起 discovered pairing offer | 尚无人工 accept / complete / cancel / status 控件 | 当前 UI 可调试运行态，但不能单独证明 discovery -> pairing -> authorization -> data-plane 已完成 |
+| 后端 debug route | `GET /mesh/ens/snapshot`、`PUT /mesh/ens/topology`、`PUT /mesh/ens/interfaces/:name/topology`、`POST /mesh/ens/pairing/discovered/:identity_hex`、`GET /mesh/ens/pairing/operations/:operation_id/status`、`POST /mesh/ens/pairing/operations/:operation_id/accept`、`POST /mesh/ens/pairing/operations/:operation_id/cancel` | 不暴露 fake/manual complete route；authorization 完成仍必须来自真实 `PairingComplete` control-plane frame | 可以人工查看 operation status、接受 inbound offer 或取消 operation；仍要通过真实双实例/双设备验收确认 authorized peer 和 data-plane |
+| TypeScript client | `getSnapshot`、`setGlobalTopology`、`setInterfaceTopology`、`setTopology`、`initiatePairingWithDiscoveredPeer`、`getPairingOperationStatus`、`acceptPairingOperation`、`cancelPairingOperation` | 不提供 fake complete typed client | UI 能用 typed service 驱动 status/accept/cancel；完成态必须等待 backend snapshot/refresh 中的真实事实 |
+| `DeviceView` Reticulum 面板 | 展示 backend snapshot/refresh 中的 provider、health、本机 identity、interfaces、peers、operations、operation direction、deliveries、stale/error，并可发起 discovered pairing offer、刷新 operation status、用 PIN 接受 inbound offer、取消 operation | 尚未完成双窗口/双设备人工验收脚本收口 | 当前 UI 已能操作 pairing debug 闭环，但不能单独证明 discovery -> pairing -> authorization -> data-plane 已完成 |
 
-因此，当前阶段的明确断点是：**双窗口 data-plane 人工验收被 ENS pairing accept/complete/cancel/status route/client/UI 缺口阻塞**。补齐前，不得把 pending operation、toast、`sent`、接口 online 或 discovered peer 当作端到端同步通过。
+因此，当前阶段的明确断点不再是 status/accept/cancel route/client/UI 缺口，而是：**把真实双窗口或双设备链路从 discovery -> pairing -> authorization -> delivery/error/stale 跑完，并以远端业务 route/store 读到 EventLog、Task、TimeBlock、Proposal 作为通过标准**。不得把 pending operation、operation accepted、toast、`sent`、接口 online 或 discovered peer 当作端到端同步通过。
 
 ## 长跑目标
 
@@ -142,23 +142,24 @@ tests/unit/services/runtime-ens.service.test.ts
 - real Reticulum provider：signed frame、queue/UDP/TCP/JSONL/file/local registry/mDNS bootstrap、动态端口投影、`:0` 不泄漏、坏签名/错 target fail closed。
 - runtime startup：`EXOMIND_RT_ENS_RETICULUM=1` 可启动 `runtime-reticulum-ens` provider，并从真实 bound interface 投影 local identity 与 endpoint。
 - runtime TCP 双节点测试：两个 runtime 可经 Reticulum TCP 同步 EventLog 与 Task/TimeBlock/Proposal frame。
+- pairing operation debug 闭环：后端 route、TypeScript client 与 DeviceView 面板已支持 operation status、inbound offer PIN accept、cancel 和 operation direction；没有 fake complete route，授权完成仍依赖真实 `PairingComplete` frame。
 - debug UI：DeviceView 的 Reticulum 面板展示 backend snapshot 中的本机 `identity_hex`、interfaces、peers、operations、deliveries、stale/error；本机身份支持完整 ID hover/title 与点击复制。
 
 仍需补齐的接手任务：
 
 - 把自动测试中的双 runtime Reticulum TCP 纵切转化为可重复的双窗口或双设备人工验收。
-- 闭合 discovery -> pairing -> authorization -> delivery/error/stale 的 UI/debug route 人工验证脚本。
+- 跑通并固化 discovery -> pairing -> authorization -> delivery/error/stale 的 UI/debug route 人工验证脚本。
 - 对真实 LAN/mDNS bootstrap 做双进程或双设备验收；mDNS 只证明 Reticulum endpoint bootstrap，不授权 data-plane。
 - 后续默认启动与用户侧同步 UX 必须继续消费 typed snapshot/refresh；未来可替换或补充为 SSE，但不得改变后端事实优先、不乐观显示的契约。
 
 ## 下一步实施顺序
 
 1. 先建立可人工复现的双实例或双设备验收链路：端口、临时数据目录、Reticulum interface bind、runtime route、Tauri/MCP bridge 都要隔离，不能影响已安装版外心。
-2. 闭合 discovery -> pairing -> authorization -> snapshot/UI 可见的状态链路。UI/debug route 必须能显示 discovered peer、pairing operation/error、authorized state、fail-closed 结果。
+2. 执行 discovery -> pairing -> authorization -> snapshot/UI 可见的状态链路。UI/debug route 必须能显示 discovered peer、pairing operation/error、authorized state、fail-closed 结果。
 3. 以 TCP server/client 四域真实 provider 测试作为多端 data-plane 主回归，把它提升为可打开 debug 构建后纯人验证的场景。
 4. 组合验收 local registry、mDNS bootstrap、UDP/TCP、JSONL/File physical medium。它们只能产生 Reticulum endpoint/bootstrap，不得自动授权 Mesh peer。
 5. 对 mDNS bootstrap 做真实局域网双进程验收。mDNS 只验证 Reticulum endpoint bootstrap，不恢复 legacy HTTP mesh pairing。
-6. 补齐缺口后再扩大默认启动集成、AppState/UI 接入和用户侧同步 UX；仍然只消费 typed snapshot/refresh，未来接 SSE 时也必须保持同一 snapshot truth，仍然禁止乐观显示 topology、pairing、provider 或 delivery 状态。
+6. 人工验收收口后再扩大默认启动集成、AppState/UI 接入和用户侧同步 UX；仍然只消费 typed snapshot/refresh，未来接 SSE 时也必须保持同一 snapshot truth，仍然禁止乐观显示 topology、pairing、provider 或 delivery 状态。
 
 每一步都要能收口：相关测试通过、能编译 debug `exomind.exe`、打开后能看到真实 Reticulum/ENS 状态，并且提交后工作区干净。
 

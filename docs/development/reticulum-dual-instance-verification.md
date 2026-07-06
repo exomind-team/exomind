@@ -285,8 +285,13 @@ G:\exomind-cargo-target\debug\exomind.exe
 - `PUT /mesh/ens/topology`
 - `PUT /mesh/ens/interfaces/:name/topology`
 - `POST /mesh/ens/pairing/discovered/:identity_hex`
+- `GET /mesh/ens/pairing/operations/:operation_id/status`
+- `POST /mesh/ens/pairing/operations/:operation_id/accept`
+- `POST /mesh/ens/pairing/operations/:operation_id/cancel`
 
-但当前 HTTP/TS client 只覆盖 snapshot、topology 和“从 discovered peer 发起 ENS pairing offer”。如果 UI 或 debug route 尚未暴露 accept/complete/cancel/status 控件，就只能观察到 pending/failed/timed_out，不能把它算作人工授权闭环完成。此时本手册的结论应是：“双窗口 data-plane 人工验收被 ENS pairing accept/complete/cancel/status debug route/UI 缺口阻塞”，下一步先补 route/UI，而不是继续写业务同步。
+当前 HTTP route、TypeScript client 与 DeviceView Reticulum 面板已覆盖 operation status、inbound offer PIN accept 与 cancel。这里刻意不提供 fake/manual complete route：接受 inbound offer 只表示本机发送了 `PairingResponse`，authorization 完成仍必须来自真实 `PairingComplete` control-plane frame，并以双方 snapshot 中 `authorized=true` 为准。
+
+因此，当前手册应进入真实双窗口或双设备验收：用 status/accept/cancel 调试控件推进 pairing，再用双方 `/mesh/ens/snapshot` 确认 authorized peer，最后以远端业务 route/store 读到 EventLog、Task、TimeBlock、Proposal 作为通过标准。`operation accepted`、toast、`sent`、interface online 或 discovered peer 都不能替代这个标准。
 
 最小检查流程：
 
