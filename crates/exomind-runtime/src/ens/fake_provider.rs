@@ -23,6 +23,7 @@ pub struct FakeEnsProvider {
     peers: RwLock<Vec<EnsPeerSnapshot>>,
     interfaces: RwLock<Vec<EnsInterfaceSnapshot>>,
     sent_frames: Mutex<Vec<EnsPairingFrame>>,
+    received_pairing_frames: Mutex<Vec<EnsPairingFrame>>,
     sent_data_frames: Mutex<Vec<FakeEnsSentDataFrame>>,
     received_data_frames: Mutex<Vec<EnsReceivedDataFrame>>,
     fail_next_send: Mutex<Option<String>>,
@@ -36,6 +37,7 @@ impl FakeEnsProvider {
             peers: RwLock::new(Vec::new()),
             interfaces: RwLock::new(Vec::new()),
             sent_frames: Mutex::new(Vec::new()),
+            received_pairing_frames: Mutex::new(Vec::new()),
             sent_data_frames: Mutex::new(Vec::new()),
             received_data_frames: Mutex::new(Vec::new()),
             fail_next_send: Mutex::new(None),
@@ -69,6 +71,14 @@ impl FakeEnsProvider {
             transport_peer,
             frame,
         });
+    }
+
+    pub fn push_received_pairing_frame(&self, frame: EnsPairingFrame) {
+        let mut frames = match self.received_pairing_frames.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        frames.push(frame);
     }
 
     pub fn set_fail_next_send(&self, message: impl Into<String>) {
@@ -163,6 +173,14 @@ impl EnsProvider for FakeEnsProvider {
         };
         frames.push(frame);
         Ok(())
+    }
+
+    fn drain_received_pairing_frames(&self) -> Vec<EnsPairingFrame> {
+        let mut frames = match self.received_pairing_frames.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        frames.drain(..).collect()
     }
 
     fn send_data_frame(

@@ -328,6 +328,14 @@ impl ReticulumEnsProvider {
         }
     }
 
+    pub fn set_runtime_base_url(&self, runtime_base_url: Option<String>) {
+        let mut endpoint = match self.local_endpoint.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        endpoint.runtime_base_url = runtime_base_url;
+    }
+
     pub async fn add_queue_interface(
         &self,
         name: &str,
@@ -1309,6 +1317,10 @@ impl EnsProvider for ReticulumEnsProvider {
                 .map_err(|error| EnsProviderError::SendPairingFrame(error.to_string()))?;
         }
         Ok(())
+    }
+
+    fn drain_received_pairing_frames(&self) -> Vec<EnsPairingFrame> {
+        ReticulumEnsProvider::drain_received_pairing_frames(self)
     }
 
     fn send_data_frame(

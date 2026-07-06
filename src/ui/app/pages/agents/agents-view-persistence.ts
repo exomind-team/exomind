@@ -17,10 +17,28 @@ function getDefaultStorage(): StorageLike | null {
   return window.localStorage;
 }
 
-function sanitizeAgentHubViewMode(value: unknown): AgentHubViewMode {
+export function sanitizeAgentHubViewMode(value: unknown): AgentHubViewMode {
   return typeof value === 'string' && VALID_VIEW_MODES.has(value as AgentHubViewMode)
     ? value as AgentHubViewMode
     : DEFAULT_AGENT_HUB_VIEW_MODE;
+}
+
+export function readAgentsViewModeFromLocationSearch(search: string | null | undefined): AgentHubViewMode | null {
+  if (!search) {
+    return null;
+  }
+
+  try {
+    const raw = new URLSearchParams(search).get('view');
+    if (!raw) {
+      return null;
+    }
+
+    const sanitized = sanitizeAgentHubViewMode(raw);
+    return sanitized === raw ? sanitized : null;
+  } catch {
+    return null;
+  }
 }
 
 export function readAgentsViewModePersistState(storage = getDefaultStorage()): AgentHubViewMode {

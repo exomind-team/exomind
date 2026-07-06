@@ -1583,15 +1583,15 @@ export function DeviceView({
         <div className="flex items-center gap-2">
           <Wifi size={14} className="text-[#0D9488]" />
           <div>
-            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">已发现节点</h3>
+            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">兼容发现节点</h3>
             <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
-              {renderSectionSummary(discoveredPeers.length, '待配对节点')}
+              {renderSectionSummary(discoveredPeers.length, 'legacy 待配对节点')}
             </p>
           </div>
         </div>
         {discoveredPeers.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-3 py-3 text-[11px] text-[#78716C] dark:border-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]">
-            还没有发现候选节点。请先让其他设备启动 embedded RT，并把本机切到局域网模式。
+            暂无 legacy discovered_candidate。Reticulum ENS peer 以上方“ENS 发现节点”为准。
           </div>
         ) : (
           <div className="space-y-2">

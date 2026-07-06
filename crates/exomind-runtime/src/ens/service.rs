@@ -506,6 +506,39 @@ impl EnsTransportService {
         Ok(results)
     }
 
+    pub fn handle_pending_pairing_frames(&self) -> Result<Vec<EnsCommandAck>, EnsTransportError> {
+        self.ensure_ready()?;
+        let frames = self.provider.drain_received_pairing_frames();
+        let mut results = Vec::with_capacity(frames.len());
+        let mut first_error = None;
+        for frame in frames {
+            let result = match frame {
+                EnsPairingFrame::PairingOffer(offer) => self.handle_pairing_offer(offer),
+                EnsPairingFrame::PairingResponse(response) => {
+                    self.handle_pairing_response(response)
+                }
+                EnsPairingFrame::PairingComplete(complete) => {
+                    self.handle_pairing_complete(complete)
+                }
+                EnsPairingFrame::PairingCancel(cancel) => self.handle_pairing_cancel(cancel),
+            };
+            match result {
+                Ok(ack) => results.push(ack),
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+
+        Ok(results)
+    }
+
     async fn handle_signal_event_frame(
         &self,
         transport_peer: Option<EnsPeerIdentity>,

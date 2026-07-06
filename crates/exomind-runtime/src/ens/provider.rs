@@ -37,6 +37,9 @@ pub trait EnsProvider: Send + Sync {
         None
     }
     fn send_pairing_frame(&self, frame: EnsPairingFrame) -> Result<(), EnsProviderError>;
+    fn drain_received_pairing_frames(&self) -> Vec<EnsPairingFrame> {
+        Vec::new()
+    }
     fn send_data_frame(
         &self,
         peer: &EnsPeerIdentity,

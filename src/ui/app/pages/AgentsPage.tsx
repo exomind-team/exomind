@@ -203,6 +203,7 @@ import {
   type TiledPaneSplitAxis,
 } from "./agents/tiled-pane-tree";
 import {
+  readAgentsViewModeFromLocationSearch,
   readAgentsViewModePersistState,
   writeAgentsViewModePersistState,
 } from "./agents/agents-view-persistence";
@@ -1138,10 +1139,13 @@ export function AgentsPage() {
     initialApiAgentTabEnabled,
   );
   const [viewMode, setViewMode] = useState<AgentHubViewMode>(() => {
-    const persisted = readAgentsViewModePersistState();
-    return persisted === "api-agent" && !initialApiAgentTabEnabled
+    const requested =
+      readAgentsViewModeFromLocationSearch(
+        typeof window === "undefined" ? null : window.location.search,
+      ) ?? readAgentsViewModePersistState();
+    return requested === "api-agent" && !initialApiAgentTabEnabled
       ? "topology"
-      : persisted;
+      : requested;
   });
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>("all");
   const [topologyLayoutMode, setTopologyLayoutMode] =

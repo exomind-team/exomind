@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AGENT_HUB_MOCK_FIXTURE } from '@/lib/adapters/mock/fixtures/agent-hub';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
+import { AGENTS_VIEW_PERSISTENCE_STORAGE_KEY } from '@/ui/app/pages/agents/agents-view-persistence';
 
 const serviceMocks = vi.hoisted(() => ({
   getTopology: vi.fn(),
@@ -63,6 +64,8 @@ vi.mock('@/ui/app/pages/agents/ApiAgentTabView', () => ({
 describe('agents page api agent tab（网络页 API Agent 页签）', () => {
   beforeEach(() => {
     apiAgentTabFlagState.enabled = false;
+    window.history.replaceState({}, '', '/agents');
+    window.localStorage.removeItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY);
     serviceMocks.getTopology.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.topology);
     serviceMocks.getDeviceView.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.deviceGroups);
     runtimeControlMocks.getStatus.mockResolvedValue({
@@ -88,6 +91,28 @@ describe('agents page api agent tab（网络页 API Agent 页签）', () => {
       expect(screen.getByTestId('agent-hub-page')).toBeInTheDocument();
     });
 
+    expect(screen.queryByRole('tab', { name: 'API Agent' })).not.toBeInTheDocument();
+  });
+
+  it('opens the device network view from the URL query（通过 URL query 直接进入设备网络页）', async () => {
+    window.localStorage.setItem(AGENTS_VIEW_PERSISTENCE_STORAGE_KEY, 'topology');
+    window.history.pushState({}, '', '/agents?view=device');
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByTestId('agent-device-view')).toBeInTheDocument();
+    expect(screen.getByTestId('reticulum-debug-panel')).toBeInTheDocument();
+  });
+
+  it('falls back from the API Agent URL query when the flag is off（开关关闭时 URL query 不能打开 API Agent 页）', async () => {
+    window.history.pushState({}, '', '/agents?view=api-agent');
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-hub-page')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('mock-api-agent-tab-view')).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'API Agent' })).not.toBeInTheDocument();
   });
 

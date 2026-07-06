@@ -760,6 +760,7 @@ pub async fn start_with_options(
         )
         .await?;
         provider.apply_config(config).await?;
+        provider.set_runtime_base_url(Some(format!("http://127.0.0.1:{}", local_addr.port())));
         let local_endpoint = provider.local_endpoint();
         let provider: Arc<dyn ens::EnsProvider> = provider;
         state.ens_transport = Arc::new(ens::EnsTransportService::new_with_endpoint(
@@ -836,6 +837,12 @@ pub async fn start_with_options(
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 interval.tick().await;
+                if let Err(error) = pending_frame_transport.handle_pending_pairing_frames() {
+                    tracing::warn!(
+                        error = %error,
+                        "failed to handle pending Reticulum ENS pairing frames"
+                    );
+                }
                 if let Err(error) = pending_frame_transport.handle_pending_data_frames().await {
                     tracing::warn!(
                         error = %error,

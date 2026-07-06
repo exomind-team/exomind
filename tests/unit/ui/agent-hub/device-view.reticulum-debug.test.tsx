@@ -280,6 +280,14 @@ describe('DeviceView Reticulum debug panel（设备页 Reticulum 调试面板）
     expect(within(panel).getByTestId('reticulum-peer-identity-b-endpoint')).toHaveTextContent(
       'Reticulum via 127.0.0.1:4242 / UDP',
     );
+    const legacyDiscoveredSection = screen.getByTestId('runtime-peer-section-discovered');
+    expect(within(legacyDiscoveredSection).getByRole('heading', { name: '兼容发现节点' })).toBeInTheDocument();
+    expect(legacyDiscoveredSection).toHaveTextContent(
+      '暂无 legacy discovered_candidate。Reticulum ENS peer 以上方“ENS 发现节点”为准。',
+    );
+    expect(legacyDiscoveredSection).not.toHaveTextContent(
+      '还没有发现候选节点。请先让其他设备启动 embedded RT，并把本机切到局域网模式。',
+    );
 
     fireEvent.click(within(panel).getByTestId('reticulum-interface-127-0-0-1-4242-passive'));
 

@@ -300,7 +300,10 @@ async fn start_with_options_projects_reticulum_ens_snapshot() {
         .as_ref()
         .expect("Reticulum provider should expose local endpoint");
     assert_eq!(endpoint.host_id.as_deref(), Some("rt-start-reticulum"));
-    assert_eq!(endpoint.runtime_base_url, None);
+    assert_eq!(
+        endpoint.runtime_base_url.as_deref(),
+        Some(format!("http://127.0.0.1:{}", handle.port()).as_str())
+    );
     assert_eq!(endpoint.via_medium, Some(EnsInterfaceMedium::Udp));
     assert!(endpoint.reticulum_destination.is_some());
     let interface_address = endpoint

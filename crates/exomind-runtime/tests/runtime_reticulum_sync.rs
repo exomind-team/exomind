@@ -1,11 +1,12 @@
 mod support;
 
-use std::time::Duration;
+use std::{net::TcpListener, time::Duration};
 
 use exomind_runtime::{
     RuntimeHandle, RuntimeStartOptions,
     ens::{
-        EnsEndpointAdvertisement, EnsInterfaceTopology, ReticulumEnsInterfaceConfig,
+        EnsEndpointAdvertisement, EnsInterfaceTopology, EnsOperationDirection, EnsOperationKind,
+        EnsOperationSnapshot, EnsOperationStatus, EnsPeerSnapshot, ReticulumEnsInterfaceConfig,
         ReticulumEnsProviderConfig,
     },
     eventlog::EventRecord,
@@ -28,12 +29,13 @@ const PROPOSAL_REPLICATION_TOPIC: &str = "proposal.replication.upserted";
 struct RuntimeTcpPair {
     handle_a: RuntimeHandle,
     handle_b: RuntimeHandle,
+    endpoint_a: EnsEndpointAdvertisement,
     endpoint_b: EnsEndpointAdvertisement,
     _dir_a: TempDir,
     _dir_b: TempDir,
 }
 
-async fn start_connected_tcp_runtime_pair(topics: Vec<String>) -> RuntimeTcpPair {
+async fn start_tcp_runtime_pair(server_bind_addr: String) -> RuntimeTcpPair {
     let dir_a = tempdir().expect("runtime A tempdir");
     let dir_b = tempdir().expect("runtime B tempdir");
 
@@ -50,7 +52,7 @@ async fn start_connected_tcp_runtime_pair(topics: Vec<String>) -> RuntimeTcpPair
         reticulum_ens: Some(ReticulumEnsProviderConfig {
             local_registry_path: None,
             interfaces: vec![ReticulumEnsInterfaceConfig::TcpServer {
-                bind_addr: "127.0.0.1:0".to_string(),
+                bind_addr: server_bind_addr,
                 topology: EnsInterfaceTopology::Active,
             }],
             load_local_registry: false,
@@ -75,6 +77,7 @@ async fn start_connected_tcp_runtime_pair(topics: Vec<String>) -> RuntimeTcpPair
         .as_deref()
         .and_then(tcp_endpoint_port)
         .expect("runtime B TCP endpoint should expose a non-zero port");
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     let handle_a = start_with_options(RuntimeStartOptions {
         bind_host: "127.0.0.1".to_string(),
@@ -107,37 +110,38 @@ async fn start_connected_tcp_runtime_pair(topics: Vec<String>) -> RuntimeTcpPair
     .await;
     yield_for_runtime_actors().await;
 
-    handle_a
-        .clone_ens_transport()
-        .upsert_discovered_endpoint(endpoint_b.clone())
-        .expect("runtime A should accept runtime B discovered endpoint");
-    handle_b
-        .clone_ens_transport()
-        .upsert_discovered_endpoint(endpoint_a.clone())
-        .expect("runtime B should accept runtime A discovered endpoint");
-
-    authorize_peer(
-        &handle_a.clone_mesh_state(),
-        &endpoint_b.identity_hex,
-        "rt-reticulum-b",
-    );
-    authorize_peer(
-        &handle_b.clone_mesh_state(),
-        &endpoint_a.identity_hex,
-        "rt-reticulum-a",
-    );
-    handle_a
-        .clone_mesh_state()
-        .set_peer_interests(&endpoint_b.identity_hex, topics);
-    yield_for_runtime_actors().await;
-
     RuntimeTcpPair {
         handle_a,
         handle_b,
+        endpoint_a,
         endpoint_b,
         _dir_a: dir_a,
         _dir_b: dir_b,
     }
+}
+
+async fn start_connected_tcp_runtime_pair(topics: Vec<String>) -> RuntimeTcpPair {
+    let pair = start_tcp_runtime_pair("127.0.0.1:0".to_string()).await;
+
+    wait_for_runtime_peer(&pair.handle_a, "A", &pair.endpoint_b.identity_hex).await;
+    wait_for_runtime_peer(&pair.handle_b, "B", &pair.endpoint_a.identity_hex).await;
+
+    authorize_peer(
+        &pair.handle_a.clone_mesh_state(),
+        &pair.endpoint_b.identity_hex,
+        "rt-reticulum-b",
+    );
+    authorize_peer(
+        &pair.handle_b.clone_mesh_state(),
+        &pair.endpoint_a.identity_hex,
+        "rt-reticulum-a",
+    );
+    pair.handle_a
+        .clone_mesh_state()
+        .set_peer_interests(&pair.endpoint_b.identity_hex, topics);
+    yield_for_runtime_actors().await;
+
+    pair
 }
 
 fn authorize_peer(mesh: &MeshState, identity_hex: &str, host_id: &str) {
@@ -260,6 +264,14 @@ fn tcp_endpoint_port(address: &str) -> Option<u16> {
     (port != 0).then_some(port)
 }
 
+fn reserve_tcp_port() -> u16 {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("reserve local TCP port");
+    listener
+        .local_addr()
+        .expect("reserved TCP listener should have local addr")
+        .port()
+}
+
 async fn wait_for_runtime_endpoint(
     handle: &RuntimeHandle,
     label: &str,
@@ -276,6 +288,81 @@ async fn wait_for_runtime_endpoint(
     }
 
     panic!("runtime {label} Reticulum endpoint did not become ready");
+}
+
+async fn wait_for_runtime_peer(
+    handle: &RuntimeHandle,
+    label: &str,
+    identity_hex: &str,
+) -> EnsPeerSnapshot {
+    for _ in 0..250 {
+        let snapshot = handle.clone_ens_transport().snapshot();
+        if let Some(peer) = snapshot
+            .peers
+            .into_iter()
+            .find(|peer| peer.identity.identity_hex == identity_hex)
+        {
+            return peer;
+        }
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let snapshot = handle.clone_ens_transport().snapshot();
+    panic!(
+        "runtime {label} did not discover Reticulum peer {identity_hex}; peers: {:?}",
+        snapshot.peers
+    );
+}
+
+async fn wait_for_runtime_operation(
+    handle: &RuntimeHandle,
+    label: &str,
+    operation_id: &str,
+) -> EnsOperationSnapshot {
+    for _ in 0..250 {
+        let snapshot = handle.clone_ens_transport().snapshot();
+        if let Some(operation) = snapshot
+            .operations
+            .into_iter()
+            .find(|operation| operation.id == operation_id)
+        {
+            return operation;
+        }
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let snapshot = handle.clone_ens_transport().snapshot();
+    panic!(
+        "runtime {label} did not project Reticulum pairing operation {operation_id}; operations: {:?}",
+        snapshot.operations
+    );
+}
+
+async fn wait_for_authorized_runtime_peer(
+    handle: &RuntimeHandle,
+    label: &str,
+    identity_hex: &str,
+) -> EnsPeerSnapshot {
+    for _ in 0..250 {
+        let snapshot = handle.clone_ens_transport().snapshot();
+        if let Some(peer) = snapshot
+            .peers
+            .into_iter()
+            .find(|peer| peer.identity.identity_hex == identity_hex && peer.authorized)
+        {
+            return peer;
+        }
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let snapshot = handle.clone_ens_transport().snapshot();
+    panic!(
+        "runtime {label} did not authorize Reticulum peer {identity_hex}; peers: {:?}, operations: {:?}",
+        snapshot.peers, snapshot.operations
+    );
 }
 
 async fn wait_for_runtime_event(
@@ -402,6 +489,79 @@ async fn yield_for_runtime_actors() {
     tokio::task::yield_now().await;
     tokio::task::yield_now().await;
     tokio::time::sleep(Duration::from_millis(30)).await;
+}
+
+#[tokio::test]
+async fn runtime_reticulum_tcp_pairing_authorizes_peers_via_control_frames() {
+    let mut pair = start_tcp_runtime_pair("127.0.0.1:0".to_string()).await;
+
+    wait_for_runtime_peer(&pair.handle_a, "A", &pair.endpoint_b.identity_hex).await;
+    wait_for_runtime_peer(&pair.handle_b, "B", &pair.endpoint_a.identity_hex).await;
+
+    let ticket = pair
+        .handle_a
+        .clone_ens_transport()
+        .initiate_pairing_with_discovered_peer(&pair.endpoint_b.identity_hex)
+        .expect("runtime A should send Reticulum pairing offer to discovered runtime B");
+
+    let inbound_offer = wait_for_runtime_operation(&pair.handle_b, "B", &ticket.operation_id).await;
+    assert_eq!(inbound_offer.kind, EnsOperationKind::PairingOffer);
+    assert_eq!(inbound_offer.direction, EnsOperationDirection::Inbound);
+    assert_eq!(inbound_offer.status, EnsOperationStatus::Pending);
+    assert_eq!(
+        inbound_offer.session_id.as_deref(),
+        Some(ticket.session_id.as_str())
+    );
+    assert_eq!(
+        inbound_offer
+            .peer_identity
+            .as_ref()
+            .map(|identity| identity.identity_hex.as_str()),
+        Some(pair.endpoint_a.identity_hex.as_str())
+    );
+
+    pair.handle_b
+        .clone_ens_transport()
+        .accept_pairing_offer(&ticket.operation_id, ticket.pin)
+        .expect("runtime B should accept inbound Reticulum pairing offer");
+
+    let authorized_b =
+        wait_for_authorized_runtime_peer(&pair.handle_a, "A", &pair.endpoint_b.identity_hex).await;
+    let authorized_a =
+        wait_for_authorized_runtime_peer(&pair.handle_b, "B", &pair.endpoint_a.identity_hex).await;
+
+    assert!(!authorized_b.pairing_pending);
+    assert!(!authorized_a.pairing_pending);
+
+    stop_runtime(&mut pair.handle_a, "rt-reticulum-a").await;
+    stop_runtime(&mut pair.handle_b, "rt-reticulum-b").await;
+}
+
+#[tokio::test]
+async fn runtime_reticulum_tcp_discovers_peers_via_announces_on_fixed_port() {
+    let port = reserve_tcp_port();
+    let mut pair = start_tcp_runtime_pair(format!("127.0.0.1:{port}")).await;
+
+    let peer_b = wait_for_runtime_peer(&pair.handle_a, "A", &pair.endpoint_b.identity_hex).await;
+    let peer_a = wait_for_runtime_peer(&pair.handle_b, "B", &pair.endpoint_a.identity_hex).await;
+
+    assert_eq!(
+        peer_b
+            .endpoint
+            .as_ref()
+            .map(|endpoint| endpoint.discovery_source.as_str()),
+        Some("reticulum-announce")
+    );
+    assert_eq!(
+        peer_a
+            .endpoint
+            .as_ref()
+            .map(|endpoint| endpoint.discovery_source.as_str()),
+        Some("reticulum-announce")
+    );
+
+    stop_runtime(&mut pair.handle_a, "rt-reticulum-a").await;
+    stop_runtime(&mut pair.handle_b, "rt-reticulum-b").await;
 }
 
 #[tokio::test]
