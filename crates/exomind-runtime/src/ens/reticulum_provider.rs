@@ -3,7 +3,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
 
 use ed25519_dalek::Signature;
@@ -43,6 +43,8 @@ const RETICULUM_IDENTITY_HEX_LEN: usize = 128;
 const RETICULUM_DATA_SIGNATURE_LEN: usize = 64;
 const LOCAL_ENDPOINT_READY_ATTEMPTS: usize = 100;
 const LOCAL_ENDPOINT_READY_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const LOCAL_ANNOUNCE_BURST_ATTEMPTS: usize = 16;
+const LOCAL_ANNOUNCE_BURST_INTERVAL: Duration = Duration::from_millis(250);
 pub(super) const RETICULUM_MDNS_BOOTSTRAP_DISCOVERY_SOURCE: &str = "reticulum-mdns-bootstrap";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,6 +233,7 @@ struct ReticulumInterfaceSource {
 }
 
 pub struct ReticulumEnsProvider {
+    self_ref: Weak<ReticulumEnsProvider>,
     provider_id: String,
     identity: PrivateIdentity,
     transport: Arc<Transport>,
@@ -289,7 +292,8 @@ impl ReticulumEnsProvider {
         let (outbound_tx, outbound_rx) = mpsc::unbounded_channel();
         let transport = Arc::new(transport);
 
-        let provider = Arc::new(Self {
+        let provider = Arc::new_cyclic(|self_ref| Self {
+            self_ref: self_ref.clone(),
             provider_id,
             identity,
             transport,
@@ -311,6 +315,7 @@ impl ReticulumEnsProvider {
         provider.spawn_outbound_loop(outbound_rx);
         provider.spawn_received_data_loop();
         provider.spawn_announce_receiver().await;
+        provider.spawn_local_announce_burst();
 
         Ok(provider)
     }
@@ -344,6 +349,7 @@ impl ReticulumEnsProvider {
             EnsInterfaceMedium::Queue,
             Some(format!("queue://{name}")),
         );
+        self.spawn_local_announce_burst();
         Ok(())
     }
 
@@ -373,6 +379,7 @@ impl ReticulumEnsProvider {
                 udp_endpoint_address(&bind_addr, bound_port.load(Ordering::Relaxed));
             self.set_local_interface_source(&bind_addr, EnsInterfaceMedium::Udp, endpoint_address);
         }
+        self.spawn_local_announce_burst();
         Ok(bound_port)
     }
 
@@ -403,6 +410,7 @@ impl ReticulumEnsProvider {
                 Some(format!("tcp-listen://{bind_addr}")),
             );
         }
+        self.spawn_local_announce_burst();
         Ok(())
     }
 
@@ -419,6 +427,7 @@ impl ReticulumEnsProvider {
             EnsInterfaceMedium::Tcp,
             Some(format!("tcp://{remote_addr}")),
         );
+        self.spawn_local_announce_burst();
         Ok(())
     }
 
@@ -445,6 +454,7 @@ impl ReticulumEnsProvider {
             EnsInterfaceMedium::Jsonl,
             Some(format!("jsonl://{}", stream_dir.display())),
         );
+        self.spawn_local_announce_burst();
         Ok(())
     }
 
@@ -466,6 +476,7 @@ impl ReticulumEnsProvider {
             EnsInterfaceMedium::File,
             Some(format!("file://{}", file_path.display())),
         );
+        self.spawn_local_announce_burst();
         Ok(())
     }
 
@@ -538,10 +549,11 @@ impl ReticulumEnsProvider {
         self.refresh_interfaces();
     }
 
-    pub fn upsert_discovered_endpoint(&self, endpoint: EnsEndpointAdvertisement) {
+    pub fn upsert_discovered_endpoint(&self, endpoint: EnsEndpointAdvertisement) -> bool {
         if endpoint.identity_hex == self.local_endpoint().identity_hex {
-            return;
+            return false;
         }
+        let identity_hex = endpoint.identity_hex.clone();
         let peer = EnsPeerSnapshot {
             identity: endpoint.identity(),
             endpoint: Some(endpoint),
@@ -553,7 +565,17 @@ impl ReticulumEnsProvider {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        peers.insert(peer.identity.identity_hex.clone(), peer);
+        match peers.get_mut(&identity_hex) {
+            Some(existing) if existing.endpoint == peer.endpoint => false,
+            Some(existing) => {
+                *existing = peer;
+                true
+            }
+            None => {
+                peers.insert(identity_hex, peer);
+                true
+            }
+        }
     }
 
     pub fn upsert_mdns_bootstrap(
@@ -625,6 +647,39 @@ impl ReticulumEnsProvider {
                 .await;
         });
         Ok(())
+    }
+
+    async fn send_local_announce(&self) -> Result<(), EnsProviderError> {
+        let frame = serde_json::to_vec(&self.local_endpoint())
+            .map_err(|error| EnsProviderError::Unavailable(error.to_string()))?;
+        self.transport
+            .send_announce(&self.local_destination, Some(frame.as_slice()))
+            .await;
+        Ok(())
+    }
+
+    fn spawn_local_announce_burst(&self) {
+        let provider = self.self_ref.clone();
+        tokio::spawn(async move {
+            for attempt in 0..LOCAL_ANNOUNCE_BURST_ATTEMPTS {
+                let Some(provider) = provider.upgrade() else {
+                    break;
+                };
+                if let Err(error) = provider.send_local_announce().await {
+                    provider.set_health(EnsTransportHealth {
+                        status: EnsTransportHealthStatus::Degraded,
+                        message: Some(format!(
+                            "failed to announce Reticulum ENS endpoint: {error}"
+                        )),
+                    });
+                }
+                drop(provider);
+
+                if attempt + 1 < LOCAL_ANNOUNCE_BURST_ATTEMPTS {
+                    tokio::time::sleep(LOCAL_ANNOUNCE_BURST_INTERVAL).await;
+                }
+            }
+        });
     }
 
     pub fn drain_received_pairing_frames(&self) -> Vec<EnsPairingFrame> {
@@ -711,7 +766,9 @@ impl ReticulumEnsProvider {
                 endpoint.gateway = EnsGatewayKind::Reticulum;
                 endpoint.reticulum_destination = Some(destination_hex);
                 endpoint.discovery_source = "reticulum-announce".to_string();
-                provider.upsert_discovered_endpoint(endpoint);
+                if provider.upsert_discovered_endpoint(endpoint) {
+                    provider.spawn_local_announce_burst();
+                }
             }
         });
     }

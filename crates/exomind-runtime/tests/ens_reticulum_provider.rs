@@ -3,10 +3,10 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use exomind_runtime::ens::{
-    EnsDataFrame, EnsInterfaceMedium, EnsInterfaceTopology, EnsPeerIdentity, EnsProvider,
-    EnsProviderError, EnsSignalEventFrame, EnsTransportError, EnsTransportHealthStatus,
-    EnsTransportService, ReticulumEnsInterfaceConfig, ReticulumEnsProvider,
-    ReticulumEnsProviderConfig, ReticulumMdnsBootstrap,
+    EnsDataFrame, EnsInterfaceMedium, EnsInterfaceTopology, EnsPeerIdentity, EnsPeerSnapshot,
+    EnsProvider, EnsProviderError, EnsSignalEventFrame, EnsTransportError,
+    EnsTransportHealthStatus, EnsTransportService, ReticulumEnsInterfaceConfig,
+    ReticulumEnsProvider, ReticulumEnsProviderConfig, ReticulumMdnsBootstrap,
 };
 use exomind_runtime::eventlog::{EventLogStore, EventRecord};
 use exomind_runtime::eventlog_appender::{
@@ -412,6 +412,26 @@ async fn wait_for_bound_tcp_endpoint(provider: &ReticulumEnsProvider) -> String 
     panic!("TCP dynamic port was not projected into the local endpoint");
 }
 
+async fn wait_for_discovered_peer(
+    provider: &ReticulumEnsProvider,
+    identity_hex: &str,
+) -> EnsPeerSnapshot {
+    for _ in 0..240 {
+        if let Some(peer) = provider
+            .snapshot()
+            .peers
+            .into_iter()
+            .find(|peer| peer.identity.identity_hex == identity_hex)
+        {
+            return peer;
+        }
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    panic!("Reticulum peer {identity_hex} was not discovered through announce");
+}
+
 fn tcp_endpoint_port(address: &str) -> Option<u16> {
     address
         .strip_prefix("tcp-listen://127.0.0.1:")?
@@ -539,6 +559,98 @@ async fn replicate_eventlog_append_from_a_to_b(
     assert_eq!(replicated.refs, expected.refs);
     assert_eq!(replicated.metadata, expected.metadata);
     replicated
+}
+
+#[tokio::test]
+async fn tcp_server_client_discovers_reticulum_peers_via_announces() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-tcp-discovery-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-tcp-discovery-b").await;
+
+    node_b
+        .provider
+        .add_tcp_server_interface("127.0.0.1:0", EnsInterfaceTopology::Active)
+        .await
+        .expect("node B dynamic TCP server should bind");
+    let node_b_endpoint_address = wait_for_bound_tcp_endpoint(&node_b.provider).await;
+    let node_b_port =
+        tcp_endpoint_port(&node_b_endpoint_address).expect("TCP endpoint should expose a port");
+
+    node_a
+        .provider
+        .add_tcp_client_interface(
+            format!("127.0.0.1:{node_b_port}"),
+            EnsInterfaceTopology::Active,
+        )
+        .await
+        .expect("node A TCP client should connect to node B server");
+
+    let endpoint_a = node_a.provider.local_endpoint();
+    let endpoint_b = node_b.provider.local_endpoint();
+    let peer_b = wait_for_discovered_peer(&node_a.provider, &endpoint_b.identity_hex).await;
+    let peer_a = wait_for_discovered_peer(&node_b.provider, &endpoint_a.identity_hex).await;
+
+    assert_eq!(peer_b.identity.identity_hex, endpoint_b.identity_hex);
+    assert_eq!(peer_a.identity.identity_hex, endpoint_a.identity_hex);
+    assert_eq!(
+        peer_b
+            .endpoint
+            .as_ref()
+            .map(|endpoint| endpoint.discovery_source.as_str()),
+        Some("reticulum-announce")
+    );
+    assert_eq!(
+        peer_a
+            .endpoint
+            .as_ref()
+            .map(|endpoint| endpoint.discovery_source.as_str()),
+        Some("reticulum-announce")
+    );
+}
+
+#[tokio::test]
+async fn tcp_server_replies_to_late_client_announce_for_symmetric_discovery() {
+    let node_a = reticulum_node("ens-ret-a", "rt-a", "ens-reticulum-tcp-late-discovery-a").await;
+    let node_b = reticulum_node("ens-ret-b", "rt-b", "ens-reticulum-tcp-late-discovery-b").await;
+
+    node_b
+        .provider
+        .add_tcp_server_interface("127.0.0.1:0", EnsInterfaceTopology::Active)
+        .await
+        .expect("node B dynamic TCP server should bind");
+    let node_b_endpoint_address = wait_for_bound_tcp_endpoint(&node_b.provider).await;
+    let node_b_port =
+        tcp_endpoint_port(&node_b_endpoint_address).expect("TCP endpoint should expose a port");
+
+    tokio::time::sleep(Duration::from_millis(4_500)).await;
+
+    node_a
+        .provider
+        .add_tcp_client_interface(
+            format!("127.0.0.1:{node_b_port}"),
+            EnsInterfaceTopology::Active,
+        )
+        .await
+        .expect("node A TCP client should connect after node B's initial announce burst");
+
+    let endpoint_a = node_a.provider.local_endpoint();
+    let endpoint_b = node_b.provider.local_endpoint();
+    let peer_b = wait_for_discovered_peer(&node_a.provider, &endpoint_b.identity_hex).await;
+    let peer_a = wait_for_discovered_peer(&node_b.provider, &endpoint_a.identity_hex).await;
+
+    assert_eq!(
+        peer_b
+            .endpoint
+            .as_ref()
+            .map(|endpoint| endpoint.discovery_source.as_str()),
+        Some("reticulum-announce")
+    );
+    assert_eq!(
+        peer_a
+            .endpoint
+            .as_ref()
+            .map(|endpoint| endpoint.discovery_source.as_str()),
+        Some("reticulum-announce")
+    );
 }
 
 #[tokio::test]
