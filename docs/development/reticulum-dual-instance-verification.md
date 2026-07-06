@@ -325,7 +325,17 @@ B snapshot peers[*].identity.identity_hex == A local_identity.identity_hex 且 a
 
 不要使用 legacy `/mesh/pairing/initiate` 与 `/mesh/pairing/respond` 伪造通过。那组 route 是 HTTP mesh 配对路径，主键偏向 host/base URL，不等于 Reticulum identity 的 ENS authorization truth。
 
-9. 写入业务数据并从远端 runtime 回读。以下命令默认 A 在 `9224`，B 在 `9324`，A 写入、B 回读。这里的 HTTP route 只用于“本机向 A 写入”和“本机从 B 回读”的控制面/观察面，不是 RT-to-RT peer transport。`sent`、接口在线、discovered peer、toast、operation accepted 都不能替代 B 端业务数据出现。
+9. 写入业务数据并从远端 runtime 回读。推荐使用仓库脚本跑完整四域 probe。以下命令默认 A 在 `9224`，B 在 `9324`，A 写入、B 回读；如果 `tauri:manager` 本轮分配了其他 RT 端口，显式传入当前端口即可。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/dev/reticulum-four-domain-probe.ps1 `
+  -SourceRuntime "http://127.0.0.1:9224" `
+  -TargetRuntime "http://127.0.0.1:9324"
+```
+
+脚本会先检查两端 `/mesh/ens/snapshot`：provider 必须是 `runtime-reticulum-ens`、health 必须 healthy、双方必须以 Reticulum `identity_hex` 互相授权且 `pairing_pending=false`。随后脚本写入 EventLog、Task、TimeBlock 与 Proposal，并轮询 B 端业务 route；只有 B 端业务 route 读到唯一 id/marker 才通过。这里的 HTTP route 只用于“本机向 A 写入”和“本机从 B 回读”的控制面/观察面，不是 RT-to-RT peer transport。`sent`、接口在线、discovered peer、toast、operation accepted 都不能替代 B 端业务数据出现。
+
+若需要逐步排查，可以手动拆成下面四组命令：
 
 ```powershell
 $profile = 'reticulum-manual'
