@@ -85,6 +85,17 @@ import {
   subscribeDesktopAdaptiveChanges,
 } from '@/config/desktop-adaptive';
 import {
+  getWindowsAppBarEnabled,
+  getWindowsAppBarWidthDip,
+  MAX_WINDOWS_APPBAR_WIDTH_DIP,
+  MIN_WINDOWS_APPBAR_WIDTH_DIP,
+  normalizeWindowsAppBarWidthDip,
+  setWindowsAppBarEnabled,
+  setWindowsAppBarWidthDip,
+  subscribeWindowsAppBarEnabledChanges,
+  subscribeWindowsAppBarWidthChanges,
+} from '@/config/windows-appbar-preferences';
+import {
   getUseMockDataEnabled,
   setUseMockDataEnabled,
   subscribeUseMockDataChanges,
@@ -300,6 +311,7 @@ import {
   subscribeEventlogMarkdownMirrorEnabledChanges,
 } from '@/config/eventlog-markdown-mirror-enabled';
 import { syncMainWindowShortcutSelectionWithRuntime } from '@/services/main-window-shortcut-runtime';
+import { applyWindowsAppBarPreference } from '@/services/windows-appbar-runtime';
 import {
   getBuiltinTimeblockSummaryEnabled,
   setBuiltinTimeblockSummaryEnabled,
@@ -440,6 +452,25 @@ function androidTauriOnly(): boolean {
 
 function tauriWindowOnly(ctx: SettingsContext): boolean {
   return Boolean(ctx.isTauriWindow);
+}
+
+function windowsTauriOnly(ctx: SettingsContext): boolean {
+  return Boolean(ctx.isTauriWindow)
+    && typeof navigator !== 'undefined'
+    && /Windows/i.test(navigator.userAgent ?? '');
+}
+
+async function setWindowsAppBarEnabledWithRuntime(value: boolean): Promise<boolean> {
+  await applyWindowsAppBarPreference({ enabled: value, widthDip: getWindowsAppBarWidthDip() });
+  return setWindowsAppBarEnabled(value);
+}
+
+async function setWindowsAppBarWidthWithRuntime(value: number): Promise<number> {
+  const widthDip = normalizeWindowsAppBarWidthDip(value);
+  if (getWindowsAppBarEnabled()) {
+    await applyWindowsAppBarPreference({ enabled: true, widthDip });
+  }
+  return setWindowsAppBarWidthDip(widthDip);
 }
 
 function embeddedRuntimeOnly(ctx: SettingsContext): boolean {
@@ -1006,6 +1037,42 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
       setThemePreference(value as 'system' | 'light' | 'dark');
     },
     subscribe: subscribeThemePreferenceChanges,
+  },
+  {
+    id: 'windows-appbar-enabled',
+    label: '停靠到桌面右侧',
+    description: '使用 Windows AppBar 创建右侧 action-dock 面板；其他最大化窗口会自动避让。',
+    icon: Monitor,
+    category: 'appearance',
+    type: 'boolean',
+    visible: windowsTauriOnly,
+    rowTestId: 'new-settings-windows-appbar-enabled-row',
+    controlTestId: 'new-settings-windows-appbar-enabled-switch',
+    get: getWindowsAppBarEnabled,
+    set: setWindowsAppBarEnabledWithRuntime,
+    subscribe: subscribeWindowsAppBarEnabledChanges,
+    successMessage: (enabled) => enabled ? 'action-dock 已停靠到桌面右侧' : '已退出桌面停靠',
+    errorMessagePrefix: '桌面停靠切换失败',
+  },
+  {
+    id: 'windows-appbar-width',
+    label: '停靠面板宽度',
+    description: '调整 action-dock 面板宽度（DIP）；停靠开启时立即生效。',
+    icon: Monitor,
+    category: 'appearance',
+    type: 'number',
+    visible: windowsTauriOnly,
+    rowTestId: 'new-settings-windows-appbar-width-row',
+    controlTestId: 'new-settings-windows-appbar-width-slider',
+    min: MIN_WINDOWS_APPBAR_WIDTH_DIP,
+    max: MAX_WINDOWS_APPBAR_WIDTH_DIP,
+    step: 20,
+    unit: 'DIP',
+    get: getWindowsAppBarWidthDip,
+    set: setWindowsAppBarWidthWithRuntime,
+    subscribe: subscribeWindowsAppBarWidthChanges,
+    successMessage: (widthDip) => `停靠宽度已调整为 ${widthDip} DIP`,
+    errorMessagePrefix: '停靠宽度调整失败',
   },
   {
     id: 'countdown-end-mode',

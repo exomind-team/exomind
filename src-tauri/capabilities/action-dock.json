@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "action-dock",
+  "description": "Capability for the action-dock AppBar window",
+  "windows": ["action-dock"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-emit"
+  ]
+}

@@ -1,7 +1,9 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
+mod appbar;
 mod commands;
 mod dev_instance_paths;
+mod windows_appbar;
 
 use commands::asr_commands::{
     volcano_asr_check_config, volcano_asr_recognize, volcano_asr_stream_cancel,
@@ -58,6 +60,10 @@ use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
 use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+use windows_appbar::{
+    ensure_action_dock_window, windows_appbar_attach_right, windows_appbar_detach,
+    windows_appbar_resize,
+};
 
 const DEFAULT_SIGNAL_ROUTES_FILE_NAME: &str = "signal-routes.default.json";
 const DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON: &str =
@@ -328,6 +334,9 @@ pub fn run() {
             if let Err(error) = ensure_voice_overlay_window(app.handle()) {
                 log::warn!("failed to prewarm voice overlay window: {error}");
             }
+            if let Err(error) = ensure_action_dock_window(app.handle()) {
+                log::warn!("failed to prewarm action-dock window: {error}");
+            }
 
             if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none()
                 || std::env::var_os("EXOMIND_RT_EVENTLOG_SQLITE_PATH").is_none()
@@ -501,6 +510,10 @@ pub fn run() {
             main_window_shortcut_take_pending_activation,
             voice_recording_set_active,
             foreground_window_get,
+            // Windows 桌面停靠 / Windows AppBar
+            windows_appbar_attach_right,
+            windows_appbar_resize,
+            windows_appbar_detach,
             timeblock_end_alert_schedule,
             timeblock_end_alert_cancel,
             timeblock_end_alert_take_pending_handoff,
@@ -542,6 +555,7 @@ pub fn run() {
             // so that overlay windows (voice-overlay) don't linger.
             if window.label() == "main" {
                 if let tauri::WindowEvent::Destroyed = event {
+                    windows_appbar::detach_on_shutdown(window.app_handle());
                     std::process::exit(0);
                 }
             }
