@@ -45,6 +45,10 @@ Tauri 2.0 + React 18 + TypeScript + Rust | Zustand | Tailwind CSS + Radix UI | B
 
 Phase 2 完成（SignalPool L3-L5），Phase 3 待启动（资源管控 + 可观测性）。#555 内置 `timeblock_summary` Agent Harness：Phase 1 MVP（2026-06-03）+ Phase 3 AI Registry 桥接 + 设置页开关（2026-06-04）已完成，端到端验证通过。
 
+当前产品迭代主线是 [v0.5.x 日常核心能力迭代计划](plans/2026-08-24-v0.5x-daily-core-iteration-plan.md)：先恢复悬浮工作台并统一桌面/移动端版本，再修复长跨度 EventLog 完整同步、响应式同步与能耗、桌面后台/快捷记录、设置搜索和 Agent 配置热迭代。该轮保持现有 RT SQLite 与 Mesh/Signal，不引入 DSON、Reticulum 或插件平台。
+
+[#906](https://github.com/exomind-team/exomind/issues/906) 是上述日常核心迭代之后的架构阶段和上位约束，不再作为当前 `0.5.x` 功能的实施前置条件。
+
 ## 文档索引
 
 -> [docs/README.md](README.md)
