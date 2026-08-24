@@ -1073,7 +1073,7 @@ jobs:
         run: bun scripts/dev/check-version-consistency.ts
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Build macOS app (构建 macOS 应用)
         run: npx tauri build
@@ -1174,7 +1174,7 @@ jobs:
         run: bun scripts/dev/check-version-consistency.ts
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Build Linux app (构建 Linux 应用)
         run: npx tauri build

@@ -130,7 +130,7 @@ describe('release workflow / 发布流程：单 tag + GitHub Pages', () => {
 
     expect(workflowContent.match(/uses: oven-sh\/setup-bun@v2/g)?.length).toBeGreaterThanOrEqual(3);
     expect(workflowContent.match(/bun-version: \$\{\{ env\.BUN_VERSION \}\}/g)?.length).toBeGreaterThanOrEqual(3);
-    expect(workflowContent.match(/bun install --frozen-lockfile/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(workflowContent.match(/bun install --frozen-lockfile --ignore-scripts/g)?.length).toBeGreaterThanOrEqual(2);
     expect(workflowContent).not.toContain('npm install -g bun');
   });
 
