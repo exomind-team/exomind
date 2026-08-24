@@ -116,4 +116,40 @@ describe('release workflow / 发布流程：单 tag + GitHub Pages', () => {
     expect(workflowContent).toContain('promote_tag');
     expect(workflowContent).toContain('Promote existing GitHub Release');
   });
+
+  it('supports a build-only release validation before tagging / 支持打 tag 前只构建不发布的验证', () => {
+    const workflowContent = readReleaseWorkflow();
+
+    expect(workflowContent).toContain('validate_release:');
+    expect(workflowContent).toContain('inputs.validate_release == true');
+    expect(workflowContent).toContain('Build every release target without publishing');
+  });
+
+  it('pins Bun on macOS and Linux and installs from the lockfile / macOS 与 Linux 固定 Bun 并按锁文件安装', () => {
+    const workflowContent = readReleaseWorkflow();
+
+    expect(workflowContent.match(/uses: oven-sh\/setup-bun@v2/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(workflowContent.match(/bun-version: \$\{\{ env\.BUN_VERSION \}\}/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(workflowContent.match(/bun install --frozen-lockfile/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(workflowContent).not.toContain('npm install -g bun');
+  });
+
+  it('publishes only after every platform job succeeds / 仅在全部平台构建成功后发布', () => {
+    const workflowContent = readReleaseWorkflow();
+
+    expect(workflowContent).toContain('always() &&');
+    expect(workflowContent).toContain("needs.build-android-windows.result == 'success'");
+    expect(workflowContent).toContain("needs.build-windows.result == 'success'");
+    expect(workflowContent).toContain("needs.build-macos.result == 'success'");
+    expect(workflowContent).toContain("needs.build-linux.result == 'success'");
+  });
+
+  it('requires a real NSIS setup artifact instead of renaming the raw app binary / 要求真实 NSIS 安装包', () => {
+    const workflowContent = readReleaseWorkflow();
+
+    expect(workflowContent).toContain('bun tauri build --bundles nsis');
+    expect(workflowContent).toContain('bundle/nsis/');
+    expect(workflowContent).toContain('Missing Windows NSIS installer artifact.');
+    expect(workflowContent).not.toContain('path: |\n            target/release/exomind.exe');
+  });
 });

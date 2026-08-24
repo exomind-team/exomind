@@ -41,6 +41,8 @@ When release-related sources disagree, use this priority order:
 - Preferred local entry is `bun run release:build`; `bun run build:tag` is fallback only when a manual tag push is explicitly needed.
 - Non-dry-run `release:build` assumes `gh` is installed and authenticated because it shells out to GitHub CLI to locate and watch Actions runs after pushing.
 - Preview release is created by pushing a canonical `v0.x.y` tag; formal release is a promotion of the existing tag, not a second tag family.
+- A preview is successful only when the tag-triggered `Build & Release` run is green across Android, Windows, macOS, Linux, and `create-release`; a manually uploaded asset or a green Pages sync cannot override a failed release run.
+- Before creating an immutable canonical tag, run the same workflow with `validate_release=true` on the exact candidate ref and require it to succeed. A failed public tag remains an auditable failed candidate and must never be moved to repaired code.
 - Preview release body is generated deterministically from PR / commit / asset data; do not couple LLM calls into the main Action.
 - Public release surfaces are product statements, not developer logs. Before publishing or editing a public preview/formal release, translate technical changes into user-visible outcomes: what changed in a user workflow, who should care, how to try it, and what risk remains.
 - Public release copy should speak from the contributor-as-user / 贡献者也是使用者 position: "we changed this because it affects how we actually use ExoMind." Avoid detached product-manager language, raw commit-title translation, and closed-door engineering narration on website-facing surfaces.
