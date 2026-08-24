@@ -6,6 +6,7 @@ import { access, mkdir, open, readFile, readdir, rm, writeFile } from 'node:fs/p
 import path from 'node:path';
 import {
   appendManagedTauriLogSessionStart,
+  buildLowMemoryTauriEnv,
   collectManagedDesktopAppPids,
   collectManagedTauriCleanupPids,
   evaluateManagedTauriInstanceHealth,
@@ -35,7 +36,7 @@ type PortListenerInfo = {
 
 function printUsage(): never {
   console.log(`Usage:
-  bun scripts/dev/tauri-dev-manager.ts start --name <instance> [--target desktop|android] [--web-port <port>] [--hmr-port <port>] [--rt-port <port>] [--watch]
+  bun scripts/dev/tauri-dev-manager.ts start --name <instance> [--target desktop|android] [--web-port <port>] [--hmr-port <port>] [--rt-port <port>] [--watch] [--low-memory]
   bun scripts/dev/tauri-dev-manager.ts list
   bun scripts/dev/tauri-dev-manager.ts stop --name <instance>
   bun scripts/dev/tauri-dev-manager.ts logs --name <instance> [--tail <n>] [--follow]
@@ -290,7 +291,7 @@ async function collectManagedTauriHealthSnapshot(
   const expectedDesktopProcess = await resolveDesktopProcessBaseName(record.projectRoot);
   const expectedExecutablePath = expectedDesktopProcess
     ? path.join(
-      resolveTauriDevTargetDir(record.projectRoot, {
+      record.targetDir ?? resolveTauriDevTargetDir(record.projectRoot, {
         EXOMIND_TAURI_INSTANCE_NAME: record.name,
       }),
       'debug',
@@ -334,8 +335,54 @@ function parseTarget(flags: Map<string, string | true>): TauriDevTarget {
   throw new Error(`invalid target: ${raw} (expected desktop or android)`);
 }
 
+async function resolveBundledRustLldPath(): Promise<string> {
+  const result = spawnSync('rustc', ['--print', 'sysroot'], {
+    cwd: PROJECT_ROOT,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr?.trim() || 'failed to resolve Rust sysroot');
+  }
+
+  const rustLldPath = path.join(
+    result.stdout.trim(),
+    'lib',
+    'rustlib',
+    'x86_64-pc-windows-msvc',
+    'bin',
+    'rust-lld.exe',
+  );
+  if (!(await fileExists(rustLldPath))) {
+    throw new Error(`bundled rust-lld not found: ${rustLldPath}`);
+  }
+
+  return rustLldPath;
+}
+
+async function assertStartConcurrencyAllowed(lowMemory: boolean): Promise<void> {
+  const runningRecords = (await listRecords()).filter((record) => isPidAlive(record.rootPid));
+  if (lowMemory && runningRecords.length > 0) {
+    throw new Error(
+      `low-memory mode requires exclusive Tauri execution; stop first: ${runningRecords.map((record) => record.name).join(', ')}`,
+    );
+  }
+
+  const runningLowMemoryRecord = runningRecords.find((record) => record.lowMemory);
+  if (runningLowMemoryRecord) {
+    throw new Error(
+      `low-memory instance already owns the Tauri build slot: ${runningLowMemoryRecord.name}`,
+    );
+  }
+}
+
 async function startCommand(flags: Map<string, string | true>): Promise<void> {
   const target = parseTarget(flags);
+  const lowMemory = hasFlag(flags, '--low-memory');
+  if (lowMemory && target !== 'desktop') {
+    throw new Error('--low-memory currently supports the Windows desktop target only');
+  }
+  await assertStartConcurrencyAllowed(lowMemory);
   const explicitWebPort = parsePortFlag(flags, '--web-port');
   const webPort = explicitWebPort ?? await findFreePort(DEFAULT_WEB_PORT);
   const hmrPort = parsePortFlag(flags, '--hmr-port') ?? await findFreePort(webPort + 1);
@@ -352,7 +399,7 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     throw new Error(`instance already running: ${paths.name} (PID ${existing.rootPid})`);
   }
 
-  const env = {
+  const baseEnv = {
     ...process.env,
     EXOMIND_WEB_PORT: String(webPort),
     EXOMIND_HMR_PORT: String(hmrPort),
@@ -360,6 +407,18 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     EXOMIND_TAURI_INSTANCE_NAME: paths.name,
     ...(enableWatch ? { EXOMIND_TAURI_ENABLE_WATCH: '1' } : {}),
   };
+  const targetDir = lowMemory
+    ? resolveTauriDevTargetDir(PROJECT_ROOT, {
+      EXOMIND_TAURI_INSTANCE_NAME: 'low-memory-shared',
+    })
+    : resolveTauriDevTargetDir(PROJECT_ROOT, baseEnv);
+  const env = lowMemory
+    ? buildLowMemoryTauriEnv({
+      baseEnv,
+      targetDir,
+      rustLldPath: await resolveBundledRustLldPath(),
+    })
+    : baseEnv;
   const startedAt = new Date().toISOString();
 
   await appendManagedTauriLogSessionStart(paths.logPath, {
@@ -398,6 +457,8 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     startedAt,
     enableWatch,
     target,
+    lowMemory,
+    targetDir,
   };
   await writeInstanceRecord(record);
 
@@ -410,6 +471,8 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
 
   console.log(`started: ${paths.name}`);
   console.log(`target: ${target}`);
+  console.log(`mode: ${lowMemory ? 'low-memory' : 'normal'}`);
+  console.log(`cargo target: ${targetDir}`);
   console.log(`pid: ${record.rootPid}`);
   console.log(`web: http://localhost:${webPort}`);
   console.log(`hmr: ${hmrPort}`);
@@ -432,6 +495,7 @@ async function listCommand(): Promise<void> {
     return {
       name: record.name,
       target: record.target ?? 'desktop',
+      mode: record.lowMemory ? 'low-memory' : 'normal',
       pid: record.rootPid,
       status: health.status,
       detail: health.detail,
