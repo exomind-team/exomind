@@ -1010,6 +1010,18 @@ jobs:
             src-tauri/target/release/bundle/nsis/
           if-no-files-found: error
 
+      - name: Upload Windows portable EXE Artifact (上传免安装 EXE 测试产物)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-portable-${{ steps.hash.outputs.HASH }}
+          path: |
+            target/release/exomind.exe
+            target/release/ExoMind.exe
+            src-tauri/target/release/exomind.exe
+            src-tauri/target/release/ExoMind.exe
+          if-no-files-found: error
+
       - name: Upload Windows MSI Artifact (上传 MSI)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
         uses: actions/upload-artifact@v7

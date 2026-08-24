@@ -150,6 +150,14 @@ describe('release workflow / 发布流程：单 tag + GitHub Pages', () => {
     expect(workflowContent).toContain('bun tauri build --bundles nsis');
     expect(workflowContent).toContain('bundle/nsis/');
     expect(workflowContent).toContain('Missing Windows NSIS installer artifact.');
-    expect(workflowContent).not.toContain('path: |\n            target/release/exomind.exe');
+    expect(workflowContent).not.toContain('cp "$app_exe" "$output_dir/ExoMind-${version}-windows-x64-setup.exe"');
+  });
+
+  it('keeps the raw Windows executable as a validation artifact without publishing it as setup / 保留原始 EXE 测试产物但不冒充安装包', () => {
+    const workflowContent = readReleaseWorkflow();
+
+    expect(workflowContent).toContain('windows-portable-${{ steps.hash.outputs.HASH }}');
+    expect(workflowContent).toContain('target/release/exomind.exe');
+    expect(workflowContent).toContain('setup_files=("$source_dir"/**/*setup*.exe');
   });
 });
