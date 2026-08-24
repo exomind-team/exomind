@@ -12,7 +12,6 @@ export interface CommandContext {
   developerModeEnabled: boolean;
   commandPaletteEnabled: boolean;
   featureFlags: {
-    mePageEnabled: boolean;
     agentPageEnabled: boolean;
     goalsV2Enabled: boolean;
     [key: string]: boolean | undefined;

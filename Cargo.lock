@@ -1402,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "exomind"
-version = "0.4.21"
+version = "0.5.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1433,6 +1433,7 @@ dependencies = [
  "tungstenite 0.21.0",
  "url",
  "uuid",
+ "windows 0.61.3",
 ]
 
 [[package]]

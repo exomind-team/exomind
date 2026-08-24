@@ -38,6 +38,9 @@ GitHub Releases remain the download asset source.
 GitHub Pages remains the public metadata / channel surface.
 Pages channel metadata is gated by release metadata rules, not by GitHub Release existence alone.
 Pages timeline output is looser and may still show non-draft canonical or legacy-compatible tags even when channel metadata is absent.
+Website changelog output is derived from GitHub Release bodies through `scripts/dev/sync-release-pages.ts`
+and `website/src/lib/release-highlights.ts`. Editing an existing GitHub Release body, then rerunning
+`Sync Release Pages`, can update the public `/releases/timeline.json` used by `/changelog/`.
 
 ## Preview Build
 
@@ -45,7 +48,16 @@ Pages timeline output is looser and may still show non-draft canonical or legacy
    - default `bump+tag`: do not pre-bump local version files; keep `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` aligned with the latest released version so `release:build` can bump them itself
    - when the repo tracks `Cargo.lock`, the script also normalizes the root `exomind` package version there before commit so the worktree returns to a clean state after release
    - manual/tag-prepared path: only pre-align those files yourself when you intentionally plan to use `--tag-only` or another manual fallback
-2. Preferred local entry:
+2. Before publishing a public preview, review the user-facing release meaning:
+   - list the shipped PRs / direct commits that affect product behavior
+   - map each meaningful change to a user scenario, user-visible change, try/verify path, and public copy
+   - write the public copy from the contributor-as-user voice: explain what we changed because it affects how we actually use ExoMind
+   - for the current Chinese public website, put readable Simplified Chinese first and keep English-only engineering terms out of the primary public blocks
+   - exclude or demote version bumps, dependency pins, CI fixes, Pages sync, manifests, lockfiles, and internal release pipeline work from primary website highlights
+   - write or review one concise `给使用者看的摘要` for the website changelog/download surface
+   - place the curated website bullets in the first `## What Changed / 本次变化` block, because Pages parses that block and keeps at most 5 highlights
+   - if no meaningful user-visible change exists, treat the build as an engineering validation build and avoid presenting it as a product iteration on public surfaces
+3. Preferred local entry:
 
 ```bash
 bun run release:build --dry-run
@@ -89,7 +101,7 @@ bun run release:build --tag-only
    - `tag-only`
    - `bump+tag`
 
-3. Manual fallback:
+4. Manual fallback:
 
 ```bash
 bun run build:tag
@@ -98,22 +110,24 @@ bun run build:tag
    `build:tag` only creates/pushes `v{current-version}` from already-aligned local version files.
    It does not perform the remote `dev` state checks that `release:build` does.
 
-4. Run any additional local verification needed for the change when the default checks are insufficient.
-5. Confirm GitHub Actions:
+5. Run any additional local verification needed for the change when the default checks are insufficient.
+6. Confirm GitHub Actions:
    - `Build & Release`
    - `Sync Release Pages`
-6. Check:
+7. Check:
    - GitHub Release assets
    - `exomind-release-manifest.json` is present on the GitHub Release and matches the release tag/version
    - GitHub Pages root
    - `releases/preview/latest.json`
+   - website changelog/download copy describes user-visible outcomes before raw developer notes
    - if the release is expected on Pages, confirm it was not dropped by missing manifest or manifest/tag/version mismatch during Pages sync
    - if specific asset entries are missing from Pages metadata, compare the manifest asset names against the actual GitHub Release assets because partial omission is possible without dropping the whole release entry
 
 ## Formal Release
 
 1. Start from an existing stable preview tag.
-2. Review / edit release body if needed, but preserve the structured compare/highlight semantics if you want curated Pages highlights to survive; otherwise Pages sync can fall back to synthesized highlights from compare data, with weaker recovery on first-canonical-release edge cases.
+2. Review / edit release body and public website copy from the product side: summarize why the release matters to users in the contributor-as-user voice, put readable Simplified Chinese first for the current Chinese public site, preserve the structured compare/highlight semantics if you want curated Pages highlights to survive, and keep raw engineering evidence outside the primary public changelog.
+   - If the formal release is the stable publication of a long preview line, summarize the accumulated user-visible change since the last stable/public baseline, not just the final preview-to-preview diff.
 3. Promote the release via `workflow_dispatch` with `promote_tag`; do not create a second `release/...` tag.
 4. If GitHub UI was used as an emergency/manual fallback, manually trigger `Sync Release Pages` and verify the missing scripted side effects separately.
 5. Manually update `CHANGELOG.md` with the final curated summary.
@@ -126,6 +140,23 @@ bun run build:tag
 - Some repository docs and historical artifacts still mention `build/...` or `release/...` tags.
 - Some Pages timeline code still tolerates legacy `release/...` tags for historical display.
 - Neither case means those namespaces are valid for new releases. New publishing must stay on the current project policy tag line `v0.x.y`.
+
+## Historical Release Note Backfill
+
+Use historical backfill when a public website changelog entry is visible but its Release Note
+only exposes developer artifacts, such as version bumps, CI changes, dependency pins, or release
+pipeline housekeeping.
+
+1. Edit only existing GitHub Releases; do not invent releases for tags that have no GitHub Release.
+2. Preserve the original generated notes under `## Developer Notes / 工程证据` so reviewers can still audit PRs, commits, assets, and compare ranges.
+3. Add `## 给使用者看的摘要`, then put the public bullets in the first `## What Changed / 本次变化` block.
+4. Limit public bullets to the highest-signal 3-5 user-visible outcomes because Pages timeline metadata keeps at most 5 highlights.
+5. Rerun `Sync Release Pages` and verify both GitHub Pages and the public domain JSON, for example:
+
+```bash
+curl.exe https://exomind-team.github.io/exomind/releases/timeline.json
+curl.exe https://exo-mind.ai/releases/timeline.json
+```
 
 ## Verification Commands
 

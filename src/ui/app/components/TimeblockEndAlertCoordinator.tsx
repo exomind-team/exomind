@@ -10,6 +10,7 @@ import {
   subscribeTimerPreferencesChanges,
 } from '@/config/timer-preferences';
 import { log } from '@/lib/logger';
+import { resolveHandoffAction } from '@/lib/timeblock/handoff-policy';
 import { getTimeBlockService } from '@/lib/services';
 import {
   resolveTimeblockEndAlertRequest,
@@ -22,6 +23,7 @@ import {
   getTimeblockEndAlertSupport,
   requestTimeblockEndAlertNotificationPermissionInRuntime,
   scheduleTimeblockEndAlertInRuntime,
+  subscribeTimeblockEndAlertIntentFromRuntime,
   takePendingTimeblockEndHandoffFromRuntime,
 } from '@/services/timeblock-end-alert-runtime';
 import {
@@ -43,6 +45,18 @@ const TIMEBLOCK_END_ALERT_BLOCK_LOAD_RETRY_MS = 500;
 export interface TimeblockEndAlertSyncDecision {
   kind: 'skip' | 'cancel' | 'schedule';
   request?: TimeblockEndAlertRequest;
+}
+
+export interface ResolveTimeblockEndAlertSyncDecisionOptions {
+  armedStartIds?: ReadonlySet<string>;
+  now?: number;
+}
+
+export function isTimeblockEndAlertRequestOverdue(
+  request: TimeblockEndAlertRequest,
+  now: number = Date.now(),
+): boolean {
+  return request.dueAt <= now;
 }
 
 export function isFocusPageCountdownOwner(
@@ -68,6 +82,7 @@ export function resolveTimeblockEndAlertSyncDecision(
   supported: boolean,
   blockStateReady: boolean,
   desiredAlert: TimeblockEndAlertRequest | null,
+  options: ResolveTimeblockEndAlertSyncDecisionOptions = {},
 ): TimeblockEndAlertSyncDecision {
   if (!supported || !blockStateReady) {
     return { kind: 'skip' };
@@ -75,6 +90,13 @@ export function resolveTimeblockEndAlertSyncDecision(
 
   if (!desiredAlert) {
     return { kind: 'cancel' };
+  }
+
+  if (
+    options.armedStartIds?.has(desiredAlert.startId)
+    && isTimeblockEndAlertRequestOverdue(desiredAlert, options.now)
+  ) {
+    return { kind: 'skip' };
   }
 
   return {
@@ -88,6 +110,7 @@ export function TimeblockEndAlertCoordinator(): null {
   const location = useLocation();
   const timeBlockServiceRef = useRef(getTimeBlockService());
   const activeBlockRef = useRef<ActiveBlockData | null>(null);
+  const armedAlertStartIdsRef = useRef<Set<string>>(new Set());
   const notificationPermissionPromptedRef = useRef(false);
   const notificationPermissionTipShownRef = useRef(false);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
@@ -117,6 +140,9 @@ export function TimeblockEndAlertCoordinator(): null {
       support.supported,
       blockStateReady,
       desiredAlert,
+      {
+        armedStartIds: armedAlertStartIdsRef.current,
+      },
     ),
     [blockStateReady, desiredAlert, support.supported],
   );
@@ -138,12 +164,17 @@ export function TimeblockEndAlertCoordinator(): null {
 
       if (pending.startId) {
         try {
-          const currentBlock = activeBlockRef.current;
-          if (currentBlock?.startId === pending.startId) {
-            const phase = resolveTimeBlockPhase(currentBlock);
-            if (phase === 'running' || phase === 'paused') {
-              await timeBlockServiceRef.current.markEnding();
-            }
+          const decision = resolveHandoffAction({
+            pendingStartId: pending.startId,
+            currentBlock: activeBlockRef.current,
+            countdownEndMode: timerPreferences.countdownEndMode,
+          });
+          if (decision.kind === 'markEnding') {
+            await timeBlockServiceRef.current.markEnding();
+          } else {
+            log.info(
+              `[TimeblockEndAlert] handoff skipped markEnding (${decision.reason})`,
+            );
           }
         } catch (error) {
           log.warn(`[TimeblockEndAlert] markEnding from handoff failed ${error instanceof Error ? error.message : String(error)}`);
@@ -157,7 +188,7 @@ export function TimeblockEndAlertCoordinator(): null {
     } catch (error) {
       log.warn(`[TimeblockEndAlert] consume handoff failed ${error instanceof Error ? error.message : String(error)}`);
     }
-  }, [blockStateReady, navigate]);
+  }, [blockStateReady, navigate, timerPreferences.countdownEndMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -235,8 +266,23 @@ export function TimeblockEndAlertCoordinator(): null {
     window.addEventListener('focus', handleWindowFocus);
     window.addEventListener(TIMEBLOCK_END_ALERT_INTENT_EVENT, handleRuntimeIntent);
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    let unlistenRuntimeIntent: (() => void) | null = null;
+    let runtimeIntentListenerCancelled = false;
+    void subscribeTimeblockEndAlertIntentFromRuntime(handleRuntimeIntent)
+      .then((unlisten) => {
+        if (runtimeIntentListenerCancelled) {
+          unlisten();
+          return;
+        }
+        unlistenRuntimeIntent = unlisten;
+      })
+      .catch((error) => {
+        log.warn(`[TimeblockEndAlert] runtime intent listener failed ${error instanceof Error ? error.message : String(error)}`);
+      });
 
     return () => {
+      runtimeIntentListenerCancelled = true;
+      unlistenRuntimeIntent?.();
       window.removeEventListener('focus', handleWindowFocus);
       window.removeEventListener(TIMEBLOCK_END_ALERT_INTENT_EVENT, handleRuntimeIntent);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -307,6 +353,7 @@ export function TimeblockEndAlertCoordinator(): null {
         }
 
         await scheduleTimeblockEndAlertInRuntime(request);
+        armedAlertStartIdsRef.current.add(request.startId);
       } catch (error) {
         if (!cancelled) {
           log.warn(`[TimeblockEndAlert] runtime sync failed ${error instanceof Error ? error.message : String(error)}`);

@@ -7,6 +7,8 @@ export interface EventLogListOptions {
   sinceId?: string;
   sinceTimestamp?: number;
   untilTimestamp?: number;
+  /** 与 untilTimestamp 搭配，按 (untilTimestamp, untilId) 复合游标向更早分页（滚动回溯）。 */
+  untilId?: string;
 }
 
 export type EventLogListSemantics = "full_snapshot" | "incremental_batch";

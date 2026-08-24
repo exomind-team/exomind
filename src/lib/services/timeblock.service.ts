@@ -36,17 +36,11 @@ import {
   getFeedbackPreferences,
   type FeedbackPreferences,
 } from "../../config/feedback-preferences";
-import {
-  getSelectedRuntimeTarget,
-  type RuntimeTarget,
-} from "@/config/runtime-target";
 import { createUuidV4 } from "../utils/uuid";
 import { getEventSourceMetadata } from "../eventlog/source-metadata";
 import { generateGapBlocks } from "./gap-backfill";
 import { appendEventWithEcsReplication } from "./ecs-eventlog-replication.service";
-import { getEventLogService } from "./eventlog.service";
 import { publishActiveBlockReplicationSnapshot } from "./ecs-active-block-replication.service";
-import { SignalStreamService } from "./signal-stream.service";
 import { log } from "@/lib/logger";
 import { PerfTrace, logPerfInfo, perfNow } from "@/lib/utils/perf-trace";
 import {
@@ -90,11 +84,19 @@ interface TimeBlockRtPort {
   }): Promise<{ completed: TimeBlockData | null; active: TimeBlockData }>;
   rtPauseBlock(): Promise<{ status: string }>;
   rtResumeBlock(): Promise<{ status: string }>;
+  rtDescribeBlock(params: {
+    name?: string;
+    note?: string;
+  }): Promise<{ updated: string; blockId: string }>;
   rtPatchActiveBlockTasks(params: {
     taskIds: string[];
     taskAssociationLog: BlockTaskAssociationEvent[];
   }): Promise<TimeBlockData | null>;
 }
+
+type ActiveBlockPatch = Partial<
+  Pick<ActiveBlockData, "name" | "taskIds" | "taskAssociationLog">
+>;
 
 export interface TimeBlockServiceOptions {
   backendMode?: DomainBackendMode;
@@ -123,10 +125,8 @@ export interface TimeBlockService {
     traceContext?: TimeBlockMutationTraceContext,
   ): Promise<TimeBlockData>;
 
-  /** 更新当前进行中时间块的任务关联 */
-  updateActiveBlock(
-    patch: Partial<Pick<TimeBlockData, "taskIds" | "taskAssociationLog">>,
-  ): Promise<TimeBlockData | null>;
+  /** 更新当前进行中时间块的名称与任务关联 */
+  updateActiveBlock(patch: ActiveBlockPatch): Promise<TimeBlockData | null>;
 
   /** 标记“行动结束/开始填写反馈”（点击结束时刻） */
   markEnding(): Promise<void>;
@@ -256,9 +256,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return gaps.length;
   }
 
-  async updateActiveBlock(
-    patch: Partial<Pick<ActiveBlockData, "taskIds" | "taskAssociationLog">>,
-  ): Promise<ActiveBlockData | null> {
+  async updateActiveBlock(patch: ActiveBlockPatch): Promise<ActiveBlockData | null> {
     const existing = await this.readActiveBlock();
     if (!existing) return null;
 
@@ -270,16 +268,36 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     }
 
     if (this.backendMode === "rt-sqlite" && this.rtAdapter) {
-      const updated = await this.rtAdapter.rtPatchActiveBlockTasks({
-        taskIds: patch.taskIds ?? normalizedExisting.taskIds ?? [],
-        taskAssociationLog:
-          patch.taskAssociationLog ??
-          normalizedExisting.taskAssociationLog ??
-          [],
-      });
+      const hasTaskPatch =
+        Object.prototype.hasOwnProperty.call(patch, "taskIds") ||
+        Object.prototype.hasOwnProperty.call(patch, "taskAssociationLog");
+      const nextName =
+        typeof patch.name === "string" ? patch.name.trim() : undefined;
+      const hasNamePatch =
+        typeof nextName === "string" && nextName !== normalizedExisting.name;
+
+      let updated: ActiveBlockData | null = normalizedExisting;
+      if (hasTaskPatch) {
+        updated = await this.rtAdapter.rtPatchActiveBlockTasks({
+          taskIds: patch.taskIds ?? normalizedExisting.taskIds ?? [],
+          taskAssociationLog:
+            patch.taskAssociationLog ??
+            normalizedExisting.taskAssociationLog ??
+            [],
+        });
+      }
       if (!updated) {
         return null;
       }
+
+      if (hasNamePatch) {
+        await this.rtAdapter.rtDescribeBlock({ name: nextName });
+        updated = await this.rtAdapter.getActiveBlock();
+        if (!updated) {
+          return null;
+        }
+      }
+
       const normalizedUpdated = this.normalizeActiveBlock(updated, now);
       this.rememberAcceptedBlock(normalizedUpdated);
       this.notifyChange(normalizedUpdated);
@@ -1023,16 +1041,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       });
       this.rememberAcceptedBlock(terminalBlock);
 
-      // 发布 timeblock.completed 信号（fire-and-forget，失败不阻塞）
-      // #759: gap 块不触发 completed 信号
-      if (timeBlock.blockType !== "gap") {
-        this.publishTimeblockCompleted(timeBlock, report).catch((err) => {
-          log.warn(
-            `[TimeBlockService] failed to publish timeblock.completed signal: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        });
-      }
-
       // #759: 持久化 gap 块截断空档；UI 订阅仍暴露为无活跃块。
       const gapStartId = createUuidV4();
       const gapBlock: ActiveBlockData = this.normalizeActiveBlock(
@@ -1102,8 +1110,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   async applyReplicatedActiveBlock(block: ActiveBlockData): Promise<void> {
     const normalized = this.normalizeActiveBlock(block);
     if (this.backendMode === "rt-sqlite") {
+      const baseline = await this.resolveRtSqliteReplicationBaseline();
       const decision = this.decidePreferredBlock(
-        this.lastAcceptedBlock,
+        baseline,
         normalized,
       );
       const preferred = decision.preferred;
@@ -1233,104 +1242,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const visibleBlock =
       block && !this.isCompletedBlock(block) ? block : null;
     this.listeners.forEach((cb) => cb(visibleBlock));
-  }
-
-  /**
-   * 发布 timeblock.completed 信号到 RT，触发 Reviewer Agent 反馈。
-   * Fire-and-forget：失败不影响 endBlock 主流程。
-   */
-  private async publishTimeblockCompleted(
-    block: TimeBlockData,
-    feedbackReport: string,
-  ): Promise<void> {
-    const trace = new PerfTrace("TB-SVC publishTimeblockCompleted", {
-      blockId: block.id,
-      endTime: block.endTime,
-      startId: block.startId,
-    });
-    const runtimeTarget = this.resolveRuntimeTarget();
-    if (!runtimeTarget) {
-      trace.finish({
-        outcome: "skip-no-runtime-target",
-      });
-      return;
-    }
-
-    try {
-      // 只拉取最近 20 条上下文事件，避免结束时间块时整页读取 EventLog。
-      const recentEvents = (
-        await getEventLogService().loadEvents({ limit: 20 })
-      )
-        .slice(0, 20)
-        .map((event) => ({
-          text: event.content,
-          ts: event.timestamp,
-        }));
-      trace.step("load-recent-events", {
-        recentEventCount: recentEvents.length,
-      });
-
-      const publisher = new SignalStreamService({
-        host: {
-          id: `runtime-${runtimeTarget.mode}`,
-          name:
-            runtimeTarget.mode === "embedded"
-              ? "Embedded Runtime（内嵌运行时）"
-              : "External Runtime（外部运行时）",
-          host: runtimeTarget.host,
-          port: runtimeTarget.port,
-          authToken: runtimeTarget.authToken,
-          status: "online",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          isLocal:
-            runtimeTarget.mode === "embedded" ||
-            runtimeTarget.host === "127.0.0.1" ||
-            runtimeTarget.host === "localhost",
-        },
-        agentId: "timeblock-service",
-      });
-
-      const response = await publisher.publish({
-        topic: "timeblock.completed",
-        source: "frontend:timeblock-service",
-        trace_id: `timeblock:${block.id}:${block.endTime}`,
-        payload: {
-          block: {
-            id: block.id,
-            name: block.name,
-            startTime: block.startTime,
-            endTime: block.endTime,
-          },
-          feedbackReport,
-          recentEvents,
-        },
-      });
-      trace.step("publish-signal", {
-        accepted: response.accepted,
-        recentEventCount: recentEvents.length,
-      });
-
-      if (!response.accepted) {
-        log.warn("[TimeBlockService] RT publish was not accepted");
-      }
-      trace.finish({
-        accepted: response.accepted,
-        outcome: "published",
-        recentEventCount: recentEvents.length,
-      });
-    } catch (error) {
-      trace.fail(error);
-      throw error;
-    }
-  }
-
-  private resolveRuntimeTarget(): RuntimeTarget | null {
-    try {
-      return getSelectedRuntimeTarget();
-    } catch {
-      return null;
-    }
   }
 
   private attachStorageListener(): void {
@@ -1995,6 +1906,21 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (this.shouldPersistCanonicalization(raw, normalized)) {
       await this.saveActiveBlock(normalized);
     }
+    this.rememberAcceptedBlock(normalized);
+    return normalized;
+  }
+
+  private async resolveRtSqliteReplicationBaseline(): Promise<ActiveBlockData | null> {
+    if (this.lastAcceptedBlock || this.backendMode !== "rt-sqlite") {
+      return this.lastAcceptedBlock;
+    }
+
+    const raw = (await this.rtAdapter?.getActiveBlock()) ?? null;
+    if (!raw) {
+      return null;
+    }
+
+    const normalized = this.normalizeActiveBlock(raw);
     this.rememberAcceptedBlock(normalized);
     return normalized;
   }

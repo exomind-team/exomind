@@ -83,7 +83,6 @@ async fn mesh_stream_replays_remote_routed_events_from_last_event_id() {
         port: 0,
         host_id: "rt-a".to_string(),
         spawn_builtin_actors: false,
-        spawn_ts_agents: false,
         mesh_state_path: None,
         ..Default::default()
     })

@@ -3,18 +3,15 @@ import packageJson from '../../../../../package.json';
 import {
   Activity,
   Bot,
-  Bug,
   Code,
   Command,
   DatabaseZap,
   GitCommit,
   Globe,
-  Heart,
   Inbox,
   Key,
   LifeBuoy,
   List,
-  MessageSquare,
   Mic,
   Monitor,
   Moon,
@@ -30,7 +27,6 @@ import {
   SunMoon,
   Tag,
   Timer,
-  UserRound,
   Waypoints,
   Wifi,
 } from 'lucide-react';
@@ -79,11 +75,6 @@ import {
   subscribeApiAgentTabEnabledChanges,
 } from '@/config/api-agent-tab-enabled';
 import {
-  getMePageEnabled,
-  setMePageEnabled,
-  subscribeMePageEnabledChanges,
-} from '@/config/me-page-enabled';
-import {
   getGoalsPageEnabled,
   setGoalsPageEnabled,
   subscribeGoalsPageEnabledChanges,
@@ -93,6 +84,17 @@ import {
   setDesktopAdaptiveEnabled,
   subscribeDesktopAdaptiveChanges,
 } from '@/config/desktop-adaptive';
+import {
+  getWindowsAppBarEnabled,
+  getWindowsAppBarWidthDip,
+  MAX_WINDOWS_APPBAR_WIDTH_DIP,
+  MIN_WINDOWS_APPBAR_WIDTH_DIP,
+  normalizeWindowsAppBarWidthDip,
+  setWindowsAppBarEnabled,
+  setWindowsAppBarWidthDip,
+  subscribeWindowsAppBarEnabledChanges,
+  subscribeWindowsAppBarWidthChanges,
+} from '@/config/windows-appbar-preferences';
 import {
   getUseMockDataEnabled,
   setUseMockDataEnabled,
@@ -236,78 +238,6 @@ import {
   subscribeVoiceOverlayTranscriptLinesChanges,
 } from '@/config/voice-overlay-preferences';
 import {
-  getNowWorkbenchOverlayEnabled,
-  setNowWorkbenchOverlayEnabled,
-  subscribeNowWorkbenchOverlayEnabledChanges,
-} from '@/config/now-workbench-overlay-preferences';
-import {
-  getVoiceOmniModelId,
-  getVoiceOmniOptimizeEnabled,
-  subscribeVoiceOmniModelIdChanges,
-  subscribeVoiceOmniOptimizeEnabledChanges,
-  setVoiceOmniModelId,
-  setVoiceOmniOptimizeEnabled,
-} from '@/config/voice-omni-settings';
-import {
-  getVoiceRuntimeAutoSpeakEnabled,
-  getVoiceRuntimeCloudSessionPolicy,
-  VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER,
-  VOICE_RUNTIME_OMNI_PROVIDER,
-  setVoiceRuntimeAutoSpeakEnabled,
-  setVoiceRuntimeCloudSessionPolicy,
-  subscribeVoiceRuntimeAutoSpeakEnabledChanges,
-  subscribeVoiceRuntimeCloudSessionPolicyChanges,
-} from '@/config/voice-runtime-settings';
-import {
-  getVoiceRuntimeDoubaoAccessToken,
-  getVoiceRuntimeDoubaoAppId,
-  getVoiceRuntimeDoubaoSecretKey,
-  getVoiceRuntimeDoubaoSpeaker,
-  getVoiceRuntimeDoubaoWebsocketUrl,
-  setVoiceRuntimeDoubaoAccessToken,
-  setVoiceRuntimeDoubaoAppId,
-  setVoiceRuntimeDoubaoSecretKey,
-  setVoiceRuntimeDoubaoSpeaker,
-  setVoiceRuntimeDoubaoWebsocketUrl,
-  subscribeVoiceRuntimeDoubaoAccessTokenChanges,
-  subscribeVoiceRuntimeDoubaoAppIdChanges,
-  subscribeVoiceRuntimeDoubaoSecretKeyChanges,
-  subscribeVoiceRuntimeDoubaoSpeakerChanges,
-  subscribeVoiceRuntimeDoubaoWebsocketUrlChanges,
-} from '@/config/voice-runtime-doubao';
-import {
-  getVoiceRuntimeOmniCompatibleAudioFormat,
-  getVoiceRuntimeOmniCompatibleBaseUrl,
-  getVoiceRuntimeOmniCompatibleModel,
-  setVoiceRuntimeOmniCompatibleAudioFormat,
-  setVoiceRuntimeOmniCompatibleBaseUrl,
-  setVoiceRuntimeOmniCompatibleModel,
-  subscribeVoiceRuntimeOmniCompatibleAudioFormatChanges,
-  subscribeVoiceRuntimeOmniCompatibleBaseUrlChanges,
-  subscribeVoiceRuntimeOmniCompatibleModelChanges,
-} from '@/config/voice-runtime-omni-compatible';
-import {
-  getVoiceRuntimeOmniApiKey,
-  getVoiceRuntimeOmniInstructions,
-  getVoiceRuntimeOmniModel,
-  getVoiceRuntimeOmniVoice,
-  getVoiceRuntimeOmniWebsocketUrl,
-  setVoiceRuntimeOmniApiKey,
-  setVoiceRuntimeOmniInstructions,
-  setVoiceRuntimeOmniModel,
-  setVoiceRuntimeOmniVoice,
-  setVoiceRuntimeOmniWebsocketUrl,
-  subscribeVoiceRuntimeOmniApiKeyChanges,
-  subscribeVoiceRuntimeOmniInstructionsChanges,
-  subscribeVoiceRuntimeOmniModelChanges,
-  subscribeVoiceRuntimeOmniVoiceChanges,
-  subscribeVoiceRuntimeOmniWebsocketUrlChanges,
-} from '@/config/voice-runtime-omni';
-import {
-  getMossApiKey,
-  setMossApiKey,
-} from '@/config/moss-api-key';
-import {
   DEFAULT_VOLCANO_RESOURCE_ID,
   VOLCANO_ENDPOINT_OPTIONS,
   VOLCANO_LANGUAGE_OPTIONS,
@@ -365,16 +295,12 @@ import {
   DevicePairingSetting,
   FocusBgmSetting,
   SoundPresetSetting,
-  MossVoiceTestSetting,
-  QwenOmniProfileSetting,
-  QwenOmniPromptDocsSetting,
   VolcanoEngineKeySetting,
   VolcanoUsageSummarySetting,
   VolcanoVoiceTestSetting,
 } from '@/ui/app/components/settings/settings-custom-items';
 import { AIRegistrySetting } from '@/ui/app/components/settings/ai-registry-settings-card';
 import { VoiceInputProviderSettings } from '@/ui/app/components/settings/voice-input-provider-settings';
-import { VoiceAssistantProviderSettings } from '@/ui/app/components/settings/voice-assistant-provider-settings';
 import {
   getEventlogBackendMode,
   setEventlogBackendMode,
@@ -385,6 +311,7 @@ import {
   subscribeEventlogMarkdownMirrorEnabledChanges,
 } from '@/config/eventlog-markdown-mirror-enabled';
 import { syncMainWindowShortcutSelectionWithRuntime } from '@/services/main-window-shortcut-runtime';
+import { applyWindowsAppBarPreference } from '@/services/windows-appbar-runtime';
 import {
   getBuiltinTimeblockSummaryEnabled,
   setBuiltinTimeblockSummaryEnabled,
@@ -410,35 +337,6 @@ import {
  * Do not read settings elsewhere by importing this registry and scanning it.
  * Product/runtime code should import the owning config/service module directly.
  */
-
-function normalizeMossApiKey(value: string): string {
-  if (!value) {
-    return '';
-  }
-  let normalized = value.trim();
-  normalized = normalized.replace(/^['"]|['"]$/g, '');
-  normalized = normalized.replace(/^Bearer\s+/i, '');
-  return normalized.trim();
-}
-
-function readStoredMossApiKey(): string {
-  return normalizeMossApiKey(getMossApiKey());
-}
-
-function writeStoredMossApiKey(value: string): void {
-  const normalized = normalizeMossApiKey(value);
-  setMossApiKey(normalized);
-}
-
-function maskStoredSecret(value: string): string {
-  if (!value) {
-    return '未配置';
-  }
-  if (value.length <= 6) {
-    return `${value.slice(0, 2)}***`;
-  }
-  return `${value.slice(0, 4)}***${value.slice(-2)}`;
-}
 
 function getFeedbackContentSelection(): string[] {
   const preferences = getFeedbackPreferences();
@@ -541,26 +439,6 @@ function volcanoOnly(ctx: SettingsContext): boolean {
   return ctx.voiceShortcutAsrProvider === 'volcano';
 }
 
-function mossOnly(ctx: SettingsContext): boolean {
-  return ctx.voiceShortcutAsrProvider === 'moss';
-}
-
-function qwenOmniOnly(ctx: SettingsContext): boolean {
-  return devOnly(ctx) && ctx.voiceShortcutAsrProvider === 'qwen-omni';
-}
-
-function voiceRuntimeDoubaoOnly(ctx: SettingsContext): boolean {
-  return (ctx.voiceRuntimeProvider ?? 'doubao-o2-realtime') === 'doubao-o2-realtime';
-}
-
-function voiceRuntimeOmniCompatibleOnly(ctx: SettingsContext): boolean {
-  return devOnly(ctx) && ctx.voiceRuntimeProvider === VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER;
-}
-
-function voiceRuntimeOmniRealtimeOnly(ctx: SettingsContext): boolean {
-  return devOnly(ctx) && ctx.voiceRuntimeProvider === VOICE_RUNTIME_OMNI_PROVIDER;
-}
-
 function desktopOperatingSystemOnly(): boolean {
   return isDesktopOperatingSystem();
 }
@@ -574,6 +452,25 @@ function androidTauriOnly(): boolean {
 
 function tauriWindowOnly(ctx: SettingsContext): boolean {
   return Boolean(ctx.isTauriWindow);
+}
+
+function windowsTauriOnly(ctx: SettingsContext): boolean {
+  return Boolean(ctx.isTauriWindow)
+    && typeof navigator !== 'undefined'
+    && /Windows/i.test(navigator.userAgent ?? '');
+}
+
+async function setWindowsAppBarEnabledWithRuntime(value: boolean): Promise<boolean> {
+  await applyWindowsAppBarPreference({ enabled: value, widthDip: getWindowsAppBarWidthDip() });
+  return setWindowsAppBarEnabled(value);
+}
+
+async function setWindowsAppBarWidthWithRuntime(value: number): Promise<number> {
+  const widthDip = normalizeWindowsAppBarWidthDip(value);
+  if (getWindowsAppBarEnabled()) {
+    await applyWindowsAppBarPreference({ enabled: true, widthDip });
+  }
+  return setWindowsAppBarWidthDip(widthDip);
 }
 
 function embeddedRuntimeOnly(ctx: SettingsContext): boolean {
@@ -649,274 +546,6 @@ const VOICE_INPUT_PROVIDER_SETTINGS_ITEM: SettingsItem = {
   category: 'voice',
   type: 'custom',
   component: VoiceInputProviderSettings,
-};
-
-const VOICE_ASSISTANT_PROVIDER_SETTINGS_ITEM: SettingsItem = {
-  id: 'voice-assistant-provider-settings',
-  label: '常驻语音助手 Provider',
-  category: 'voice',
-  type: 'custom',
-  component: VoiceAssistantProviderSettings,
-};
-
-const VOICE_RUNTIME_DOUBAO_APP_ID_ITEM: SettingsItem = {
-  id: 'voice-runtime-doubao-app-id',
-  label: 'Doubao App ID',
-  icon: Key,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeDoubaoOnly,
-  stringStyle: 'dialog',
-  dialogFieldKind: 'plain',
-  placeholder: '输入 Doubao App ID',
-  dialogTitle: 'Doubao App ID',
-  dialogDescription: '用于 Doubao Realtime（豆包实时）运行时鉴权。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeDoubaoAppId,
-  set: setVoiceRuntimeDoubaoAppId,
-  subscribe: subscribeVoiceRuntimeDoubaoAppIdChanges,
-  successMessage: 'Doubao App ID 已保存',
-};
-
-const VOICE_RUNTIME_DOUBAO_ACCESS_TOKEN_ITEM: SettingsItem = {
-  id: 'voice-runtime-doubao-access-token',
-  label: 'Doubao Access Token',
-  icon: Key,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeDoubaoOnly,
-  stringStyle: 'dialog',
-  sensitive: true,
-  dialogFieldKind: 'secret',
-  dialogFooterStart: { type: 'secret-toggle', showLabel: '显示 Token', hideLabel: '隐藏 Token' },
-  allowClear: true,
-  placeholder: '输入 Doubao Access Token',
-  dialogTitle: 'Doubao Access Token',
-  dialogDescription: '用于 Doubao Realtime（豆包实时）运行时鉴权。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeDoubaoAccessToken,
-  set: setVoiceRuntimeDoubaoAccessToken,
-  subscribe: subscribeVoiceRuntimeDoubaoAccessTokenChanges,
-  successMessage: 'Doubao Access Token 已保存',
-  clearSuccessMessage: 'Doubao Access Token 已清除',
-};
-
-const VOICE_RUNTIME_DOUBAO_SECRET_KEY_ITEM: SettingsItem = {
-  id: 'voice-runtime-doubao-secret-key',
-  label: 'Doubao Secret Key',
-  icon: Key,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeDoubaoOnly,
-  stringStyle: 'dialog',
-  sensitive: true,
-  dialogFieldKind: 'secret',
-  dialogFooterStart: { type: 'secret-toggle', showLabel: '显示 Secret', hideLabel: '隐藏 Secret' },
-  allowClear: true,
-  placeholder: '输入 Doubao Secret Key',
-  dialogTitle: 'Doubao Secret Key',
-  dialogDescription: '用于 Doubao Realtime（豆包实时）运行时鉴权。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeDoubaoSecretKey,
-  set: setVoiceRuntimeDoubaoSecretKey,
-  subscribe: subscribeVoiceRuntimeDoubaoSecretKeyChanges,
-  successMessage: 'Doubao Secret Key 已保存',
-  clearSuccessMessage: 'Doubao Secret Key 已清除',
-};
-
-const VOICE_RUNTIME_DOUBAO_SPEAKER_ITEM: SettingsItem = {
-  id: 'voice-runtime-doubao-speaker',
-  label: 'Doubao Speaker',
-  icon: Bot,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeDoubaoOnly,
-  stringStyle: 'dialog',
-  dialogFieldKind: 'plain',
-  placeholder: 'zh_female_vv_jupiter_bigtts',
-  dialogTitle: 'Doubao Speaker',
-  dialogDescription: '配置 Doubao 返回音频的 speaker / 音色。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeDoubaoSpeaker,
-  set: setVoiceRuntimeDoubaoSpeaker,
-  subscribe: subscribeVoiceRuntimeDoubaoSpeakerChanges,
-  successMessage: 'Doubao Speaker 已保存',
-};
-
-const VOICE_RUNTIME_DOUBAO_WEBSOCKET_URL_ITEM: SettingsItem = {
-  id: 'voice-runtime-doubao-websocket-url',
-  label: 'Doubao WebSocket URL',
-  icon: Wifi,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeDoubaoOnly,
-  stringStyle: 'dialog',
-  dialogFieldKind: 'plain',
-  dialogInputType: 'url',
-  placeholder: 'wss://openspeech.bytedance.com/api/v3/realtime/dialogue',
-  dialogTitle: 'Doubao WebSocket URL',
-  dialogDescription: '默认使用官方 Doubao Realtime WebSocket 地址。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeDoubaoWebsocketUrl,
-  set: setVoiceRuntimeDoubaoWebsocketUrl,
-  subscribe: subscribeVoiceRuntimeDoubaoWebsocketUrlChanges,
-  successMessage: 'Doubao WebSocket URL 已保存',
-};
-
-const VOICE_RUNTIME_OMNI_COMPATIBLE_MODEL_ITEM: SettingsItem = {
-  id: 'voice-runtime-omni-compatible-model',
-  label: 'Omni Compatible 模型',
-  icon: Bot,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeOmniCompatibleOnly,
-  stringStyle: 'dialog',
-  dialogFieldKind: 'plain',
-  placeholder: 'qwen3.5-omni-plus',
-  dialogTitle: 'Omni Compatible 模型',
-  dialogDescription: '半实时兼容链路默认使用 qwen3.5-omni-plus。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeOmniCompatibleModel,
-  set: setVoiceRuntimeOmniCompatibleModel,
-  subscribe: subscribeVoiceRuntimeOmniCompatibleModelChanges,
-  successMessage: 'Omni Compatible 模型已保存',
-};
-
-const VOICE_RUNTIME_OMNI_COMPATIBLE_BASE_URL_ITEM: SettingsItem = {
-  id: 'voice-runtime-omni-compatible-base-url',
-  label: 'Omni Compatible Base URL',
-  icon: Wifi,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeOmniCompatibleOnly,
-  stringStyle: 'dialog',
-  dialogFieldKind: 'plain',
-  dialogInputType: 'url',
-  placeholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  dialogTitle: 'Omni Compatible Base URL',
-  dialogDescription: 'DashScope OpenAI-compatible 接口地址。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeOmniCompatibleBaseUrl,
-  set: setVoiceRuntimeOmniCompatibleBaseUrl,
-  subscribe: subscribeVoiceRuntimeOmniCompatibleBaseUrlChanges,
-  successMessage: 'Omni Compatible Base URL 已保存',
-};
-
-const VOICE_RUNTIME_OMNI_COMPATIBLE_AUDIO_FORMAT_ITEM: SettingsItem = {
-  id: 'voice-runtime-omni-compatible-audio-format',
-  label: 'Omni Compatible 音频格式',
-  icon: Bot,
-  category: 'voice',
-  type: 'enum',
-  visible: voiceRuntimeOmniCompatibleOnly,
-  options: [
-    { label: 'WAV', value: 'wav' },
-    { label: 'PCM16', value: 'pcm16' },
-  ],
-  optionTestId: (value) => `new-settings-voice-runtime-omni-compatible-audio-format-${value}`,
-  get: getVoiceRuntimeOmniCompatibleAudioFormat,
-  set: (value: string) => setVoiceRuntimeOmniCompatibleAudioFormat(value as 'wav' | 'pcm16'),
-  subscribe: subscribeVoiceRuntimeOmniCompatibleAudioFormatChanges,
-};
-
-const VOICE_RUNTIME_OMNI_API_KEY_ITEM: SettingsItem = {
-  id: 'voice-runtime-omni-api-key',
-  label: 'Omni Realtime API Key',
-  icon: Key,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeOmniRealtimeOnly,
-  stringStyle: 'dialog',
-  sensitive: true,
-  dialogFieldKind: 'secret',
-  dialogFooterStart: { type: 'secret-toggle', showLabel: '显示 Key', hideLabel: '隐藏 Key' },
-  allowClear: true,
-  placeholder: '输入 Omni Realtime API Key',
-  dialogTitle: 'Omni Realtime API Key',
-  dialogDescription: '仅用于实验性 Omni Realtime WebSocket 链路。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeOmniApiKey,
-  set: setVoiceRuntimeOmniApiKey,
-  subscribe: subscribeVoiceRuntimeOmniApiKeyChanges,
-  successMessage: 'Omni Realtime API Key 已保存',
-  clearSuccessMessage: 'Omni Realtime API Key 已清除',
-};
-
-const VOICE_RUNTIME_OMNI_MODEL_ITEM: SettingsItem = {
-  id: 'voice-runtime-omni-model',
-  label: 'Omni Realtime 模型',
-  icon: Bot,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeOmniRealtimeOnly,
-  stringStyle: 'dialog',
-  dialogFieldKind: 'plain',
-  placeholder: 'qwen3.5-omni-plus-realtime',
-  dialogTitle: 'Omni Realtime 模型',
-  dialogDescription: '实验性实时链路使用的模型 ID。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeOmniModel,
-  set: setVoiceRuntimeOmniModel,
-  subscribe: subscribeVoiceRuntimeOmniModelChanges,
-  successMessage: 'Omni Realtime 模型已保存',
-};
-
-const VOICE_RUNTIME_OMNI_VOICE_ITEM: SettingsItem = {
-  id: 'voice-runtime-omni-voice',
-  label: 'Omni Realtime 音色',
-  icon: Bot,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeOmniRealtimeOnly,
-  stringStyle: 'dialog',
-  dialogFieldKind: 'plain',
-  placeholder: 'Ethan',
-  dialogTitle: 'Omni Realtime 音色',
-  dialogDescription: '返回语音时使用的音色名称。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeOmniVoice,
-  set: setVoiceRuntimeOmniVoice,
-  subscribe: subscribeVoiceRuntimeOmniVoiceChanges,
-  successMessage: 'Omni Realtime 音色已保存',
-};
-
-const VOICE_RUNTIME_OMNI_INSTRUCTIONS_ITEM: SettingsItem = {
-  id: 'voice-runtime-omni-instructions',
-  label: 'Omni Realtime 指令',
-  icon: Bot,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeOmniRealtimeOnly,
-  stringStyle: 'dialog',
-  dialogFieldKind: 'plain',
-  placeholder: '你是 ExoMind 的实时语音助手',
-  dialogTitle: 'Omni Realtime 指令',
-  dialogDescription: '用于配置实验性实时链路的系统提示词。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeOmniInstructions,
-  set: setVoiceRuntimeOmniInstructions,
-  subscribe: subscribeVoiceRuntimeOmniInstructionsChanges,
-  successMessage: 'Omni Realtime 指令已保存',
-};
-
-const VOICE_RUNTIME_OMNI_WEBSOCKET_URL_ITEM: SettingsItem = {
-  id: 'voice-runtime-omni-websocket-url',
-  label: 'Omni Realtime WebSocket URL',
-  icon: Wifi,
-  category: 'voice',
-  type: 'string',
-  visible: voiceRuntimeOmniRealtimeOnly,
-  stringStyle: 'dialog',
-  dialogFieldKind: 'plain',
-  dialogInputType: 'url',
-  placeholder: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
-  dialogTitle: 'Omni Realtime WebSocket URL',
-  dialogDescription: '实验性实时 WebSocket 地址。',
-  emptyValueLabel: '未配置',
-  get: getVoiceRuntimeOmniWebsocketUrl,
-  set: setVoiceRuntimeOmniWebsocketUrl,
-  subscribe: subscribeVoiceRuntimeOmniWebsocketUrlChanges,
-  successMessage: 'Omni Realtime WebSocket URL 已保存',
 };
 
 const VOICE_SHORTCUT_SETTINGS_GROUP: SettingsItem = {
@@ -1072,55 +701,6 @@ const VOICE_SHORTCUT_SETTINGS_GROUP: SettingsItem = {
       subscribe: subscribeVoiceOverlayBottomOffsetChanges,
     },
     {
-      id: 'voice-omni-profile',
-      label: 'Qwen Omni 供应商档案',
-      category: 'voice',
-      type: 'custom',
-      visible: qwenOmniOnly,
-      component: QwenOmniProfileSetting,
-    },
-    {
-      id: 'voice-omni-prompts',
-      label: 'Qwen Omni 提示词',
-      category: 'voice',
-      type: 'custom',
-      visible: qwenOmniOnly,
-      component: QwenOmniPromptDocsSetting,
-    },
-    {
-      id: 'voice-omni-model',
-      label: 'Qwen Omni 模型 ID',
-      icon: Bot,
-      category: 'voice',
-      rowTestId: 'new-settings-voice-omni-model-row',
-      controlTestId: 'new-settings-voice-omni-model-input',
-      type: 'string',
-      visible: qwenOmniOnly,
-      stringStyle: 'dialog',
-      dialogFieldKind: 'plain',
-      placeholder: 'qwen3-omni-flash',
-      dialogTitle: 'Qwen Omni 模型 ID',
-      dialogDescription: '默认推荐 qwen3-omni-flash；也可以切换到其他已开通的 Qwen Omni 模型。',
-      get: () => getVoiceOmniModelId(),
-      set: (value: string) => setVoiceOmniModelId(value),
-      subscribe: subscribeVoiceOmniModelIdChanges,
-      successMessage: 'Qwen Omni 模型 ID 已保存',
-    },
-    {
-      id: 'voice-omni-optimize',
-      label: '启用 Qwen 二次排版',
-      icon: Bot,
-      category: 'voice',
-      rowTestId: 'new-settings-voice-omni-optimize-row',
-      controlTestId: 'new-settings-voice-omni-optimize-switch',
-      type: 'boolean',
-      visible: qwenOmniOnly,
-      description: '开启后会在语音转写完成后再做一次文本排版，不改内容，只优化可读性。',
-      get: () => getVoiceOmniOptimizeEnabled(),
-      set: (value: boolean) => setVoiceOmniOptimizeEnabled(value),
-      subscribe: subscribeVoiceOmniOptimizeEnabledChanges,
-    },
-    {
       id: 'volcano-engine-key',
       label: '火山引擎 Key',
       category: 'voice',
@@ -1216,46 +796,6 @@ const VOICE_SHORTCUT_SETTINGS_GROUP: SettingsItem = {
       subscribe: subscribeVolcanoLanguageChanges,
     },
     {
-      id: 'moss-api-token',
-      label: 'MOSS API Token',
-      icon: Key,
-      category: 'voice',
-      rowTestId: 'new-settings-voice-token-row',
-      type: 'string',
-      visible: mossOnly,
-      stringStyle: 'dialog',
-      sensitive: true,
-      dialogFieldKind: 'secret',
-      dialogFooterStart: {
-        type: 'secret-toggle',
-        showLabel: '显示 Token',
-        hideLabel: '隐藏 Token',
-      },
-      dialogFooterEnd: '用于新 UI 语音输入转写',
-      allowClear: true,
-      placeholder: '输入 MOSS API Token',
-      dialogTitle: '语音输入设置',
-      dialogDescription: '配置 MOSS API Token（仅保存在当前设备）',
-      emptyValueLabel: '未配置',
-      get: readStoredMossApiKey,
-      set: (value: string) => {
-        const normalized = normalizeMossApiKey(value);
-        writeStoredMossApiKey(normalized);
-        return normalized;
-      },
-      mask: (value: string) => `已配置 (${maskStoredSecret(value)})`,
-      successMessage: 'MOSS API Token 已保存',
-      clearSuccessMessage: 'MOSS API Token 已清除',
-    },
-    {
-      id: 'moss-voice-test',
-      label: 'MOSS 语音测试',
-      category: 'voice',
-      type: 'custom',
-      visible: (ctx) => devOnly(ctx) && mossOnly(ctx),
-      component: MossVoiceTestSetting,
-    },
-    {
       id: 'volcano-asr-test',
       label: '火山引擎 ASR 测试',
       category: 'voice',
@@ -1263,65 +803,6 @@ const VOICE_SHORTCUT_SETTINGS_GROUP: SettingsItem = {
       visible: (ctx) => devOnly(ctx) && volcanoOnly(ctx),
       component: VolcanoVoiceTestSetting,
     },
-  ],
-};
-
-const VOICE_ASSISTANT_SETTINGS_GROUP: SettingsItem = {
-  id: 'voice-assistant-settings',
-  label: '常驻语音助手',
-  description: '面向按键说话 / 环境监听的持续对话能力，未来可承载更多多模态输入。',
-  icon: Bot,
-  category: 'voice',
-  type: 'group',
-  groupStyle: 'inline-panel',
-  dialogTitle: '常驻语音助手',
-  dialogDescription: '先选模式，再选 Provider，并配置对应的对话运行时参数。',
-  children: [
-    VOICE_ASSISTANT_PROVIDER_SETTINGS_ITEM,
-    {
-      id: 'voice-runtime-cloud-session-policy',
-      label: '云端会话策略',
-      icon: Wifi,
-      category: 'voice',
-      rowTestId: 'new-settings-voice-runtime-cloud-session-policy-row',
-      type: 'enum',
-      enumStyle: 'dialog',
-      dialogTitle: '云端会话策略',
-      dialogDescription: '第一阶段支持按需上云与前台长连两种策略。',
-      options: [
-        { label: '按需上云', value: 'on-demand', description: '仅在需要时建立或使用云端会话。' },
-        { label: '前台长连', value: 'foreground-persistent', description: '页面前台保持时持续维持会话。' },
-      ],
-      get: getVoiceRuntimeCloudSessionPolicy,
-      set: (value: string) => setVoiceRuntimeCloudSessionPolicy(value as 'on-demand' | 'foreground-persistent'),
-      subscribe: subscribeVoiceRuntimeCloudSessionPolicyChanges,
-    },
-    {
-      id: 'voice-runtime-auto-speak-enabled',
-      label: '启用自动播报',
-      icon: Bot,
-      category: 'voice',
-      rowTestId: 'new-settings-voice-runtime-auto-speak-enabled-row',
-      controlTestId: 'new-settings-voice-runtime-auto-speak-enabled-switch',
-      type: 'boolean',
-      description: '开启后，语音助手可响应后续信号驱动的主动播报。',
-      get: getVoiceRuntimeAutoSpeakEnabled,
-      set: setVoiceRuntimeAutoSpeakEnabled,
-      subscribe: subscribeVoiceRuntimeAutoSpeakEnabledChanges,
-    },
-    VOICE_RUNTIME_DOUBAO_APP_ID_ITEM,
-    VOICE_RUNTIME_DOUBAO_ACCESS_TOKEN_ITEM,
-    VOICE_RUNTIME_DOUBAO_SECRET_KEY_ITEM,
-    VOICE_RUNTIME_DOUBAO_SPEAKER_ITEM,
-    VOICE_RUNTIME_DOUBAO_WEBSOCKET_URL_ITEM,
-    VOICE_RUNTIME_OMNI_COMPATIBLE_MODEL_ITEM,
-    VOICE_RUNTIME_OMNI_COMPATIBLE_BASE_URL_ITEM,
-    VOICE_RUNTIME_OMNI_COMPATIBLE_AUDIO_FORMAT_ITEM,
-    VOICE_RUNTIME_OMNI_API_KEY_ITEM,
-    VOICE_RUNTIME_OMNI_MODEL_ITEM,
-    VOICE_RUNTIME_OMNI_VOICE_ITEM,
-    VOICE_RUNTIME_OMNI_INSTRUCTIONS_ITEM,
-    VOICE_RUNTIME_OMNI_WEBSOCKET_URL_ITEM,
   ],
 };
 
@@ -1365,8 +846,6 @@ const LOCAL_CACHE_RUNTIME_CONFIG_KEYS = [
   'exomind:voiceOverlayShowDiagnostics',
   'exomind:voiceOverlayTranscriptLines',
   'exomind:voiceOverlayBottomOffset',
-  'exomind:nowWorkbenchOverlayEnabled',
-  'exomind:nowWorkbenchOverlayPosition',
 ] as const;
 const LOCAL_CACHE_LOCAL_ONLY_KEYS = [
   EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
@@ -1471,7 +950,6 @@ function resetAllSettings(): string {
 }
 
 export const FEATURE_TOGGLE_SETTING_IDS = [
-  'me-page-enabled',
   'agent-page-enabled',
   'goals-page-enabled',
   'proposal-inbox-enabled',
@@ -1480,16 +958,6 @@ export const FEATURE_TOGGLE_SETTING_IDS = [
 ] as const;
 
 export const FEATURE_TOGGLE_SETTINGS = [
-  {
-    id: 'me-page-enabled',
-    label: 'Me 页面',
-    icon: UserRound,
-    rowTestId: 'feature-toggle-me-page-row',
-    controlTestId: 'feature-toggle-me-page-switch',
-    get: getMePageEnabled,
-    set: setMePageEnabled,
-    subscribe: subscribeMePageEnabledChanges,
-  },
   {
     id: 'agent-page-enabled',
     label: '网络页面',
@@ -1569,6 +1037,42 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
       setThemePreference(value as 'system' | 'light' | 'dark');
     },
     subscribe: subscribeThemePreferenceChanges,
+  },
+  {
+    id: 'windows-appbar-enabled',
+    label: '停靠到桌面右侧',
+    description: '使用 Windows AppBar 创建右侧 action-dock 面板；其他最大化窗口会自动避让。',
+    icon: Monitor,
+    category: 'appearance',
+    type: 'boolean',
+    visible: windowsTauriOnly,
+    rowTestId: 'new-settings-windows-appbar-enabled-row',
+    controlTestId: 'new-settings-windows-appbar-enabled-switch',
+    get: getWindowsAppBarEnabled,
+    set: setWindowsAppBarEnabledWithRuntime,
+    subscribe: subscribeWindowsAppBarEnabledChanges,
+    successMessage: (enabled) => enabled ? 'action-dock 已停靠到桌面右侧' : '已退出桌面停靠',
+    errorMessagePrefix: '桌面停靠切换失败',
+  },
+  {
+    id: 'windows-appbar-width',
+    label: '停靠面板宽度',
+    description: '调整 action-dock 面板宽度（DIP）；停靠开启时立即生效。',
+    icon: Monitor,
+    category: 'appearance',
+    type: 'number',
+    visible: windowsTauriOnly,
+    rowTestId: 'new-settings-windows-appbar-width-row',
+    controlTestId: 'new-settings-windows-appbar-width-slider',
+    min: MIN_WINDOWS_APPBAR_WIDTH_DIP,
+    max: MAX_WINDOWS_APPBAR_WIDTH_DIP,
+    step: 20,
+    unit: 'DIP',
+    get: getWindowsAppBarWidthDip,
+    set: setWindowsAppBarWidthWithRuntime,
+    subscribe: subscribeWindowsAppBarWidthChanges,
+    successMessage: (widthDip) => `停靠宽度已调整为 ${widthDip} DIP`,
+    errorMessagePrefix: '停靠宽度调整失败',
   },
   {
     id: 'countdown-end-mode',
@@ -1728,7 +1232,6 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     subscribe: subscribeTaskDagZoomSpeedChanges,
   },
   VOICE_SHORTCUT_SETTINGS_GROUP,
-  VOICE_ASSISTANT_SETTINGS_GROUP,
   {
     id: 'main-window-shortcut',
     label: '主窗口全局快捷键',
@@ -1860,19 +1363,6 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     get: () => getTiledWorkbenchPassthroughShortcut(),
     set: (value: string) => setTiledWorkbenchPassthroughShortcut(value as TiledWorkbenchPassthroughShortcut),
     subscribe: subscribeTiledWorkbenchPassthroughShortcutChanges,
-  },
-  {
-    id: 'now-workbench-overlay-enabled',
-    label: '启用当下工作台悬浮窗',
-    icon: Monitor,
-    category: 'input',
-    description: '开启后会在桌面最上层显示固定尺寸的当下工作台悬浮窗，关闭后完全隐藏。',
-    rowTestId: 'new-settings-now-overlay-enabled-row',
-    controlTestId: 'new-settings-now-overlay-enabled-switch',
-    type: 'boolean',
-    get: () => getNowWorkbenchOverlayEnabled(),
-    set: setNowWorkbenchOverlayEnabled,
-    subscribe: subscribeNowWorkbenchOverlayEnabledChanges,
   },
   {
     id: 'ai-registry',
@@ -2121,30 +1611,6 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     onAction: () => openExternalUrl('https://github.com/exomind-team/exomind/wiki'),
   },
   {
-    id: 'more-feedback',
-    label: '反馈建议',
-    icon: MessageSquare,
-    category: 'more',
-    type: 'action',
-    onAction: () => openExternalUrl('https://github.com/exomind-team/exomind/issues/new?labels=feedback&template=feedback.md'),
-  },
-  {
-    id: 'more-telemetry',
-    label: '遥测',
-    icon: Activity,
-    category: 'more',
-    type: 'action',
-    onAction: () => '敬请期待',
-  },
-  {
-    id: 'more-report-bug',
-    label: '报告问题',
-    icon: Bug,
-    category: 'more',
-    type: 'action',
-    onAction: () => openExternalUrl('https://github.com/exomind-team/exomind/issues/new?labels=bug&template=bug_report.md'),
-  },
-  {
     id: 'more-debug-log',
     label: '调试日志',
     icon: ScrollText,
@@ -2162,24 +1628,6 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     category: 'about',
     type: 'action',
     onAction: () => openExternalUrl('https://exo-mind.ai/'),
-  },
-  {
-    id: 'about-sponsor',
-    label: '赞助开发者（Starlin）',
-    icon: Heart,
-    category: 'about',
-    type: 'action',
-    onAction: () => openExternalUrl('https://exo-mind.ai/'),
-  },
-  {
-    id: 'about-legal',
-    label: '法律与支持',
-    icon: Shield,
-    category: 'about',
-    type: 'action',
-    onAction: () => {
-      window.location.pathname = '/settings/legal-support';
-    },
   },
   {
     id: 'about-version',

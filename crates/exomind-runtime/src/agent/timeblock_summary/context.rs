@@ -100,7 +100,7 @@ impl CollectedContext {
 
         // Energy status
         sections.push(format!(
-            "### 系统状态\n- 当前能量：{}/{}\n- 能量耗尽时将自动停止",
+            "### 作为Agent，你的自我状态\n- Agent当前能量：{}/{}\n- 当Agent自己的能量耗尽时，你将无法继续行动",
             self.energy_current, self.energy_max
         ));
 
@@ -119,7 +119,11 @@ pub async fn collect_context(
     user_id: &str,
 ) -> CollectedContext {
     // 1. Events in this timeblock range
-    let uid = if user_id.is_empty() { None } else { Some(user_id) };
+    let uid = if user_id.is_empty() {
+        None
+    } else {
+        Some(user_id)
+    };
     let events = eventlog_store
         .list_events_filtered(
             uid,

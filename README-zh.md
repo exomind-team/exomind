@@ -37,6 +37,21 @@ ExoMind 是一个基于 Tauri v2 的跨平台个人 AI 助手（Windows/macOS/Li
 <em>语音输入 — 实时语音识别与事件日志记录</em>
 </div>
 
+## macOS 首次启动（未签名版）
+
+macOS 安装包目前是**未签名**的（暂无 Apple Developer 账号），首次打开需要多一步 —— 这是 Gatekeeper 拦截，**不是文件真的损坏**。
+
+- **快速解法（Intel，或先试这个）：** 右键 `ExoMind.app` →「打开」，或执行 `sudo xattr -cr "/Applications/ExoMind.app"`。
+- **Apple Silicon（M1–M4），若仍提示「ExoMind 已损坏」：** macOS 强制 arm64 二进制必须带签名，所以做一次 ad-hoc 自签 —— 免费、无需 Apple 账号：
+
+```bash
+sudo codesign --force --deep --sign - "/Applications/ExoMind.app"
+sudo xattr -cr "/Applications/ExoMind.app"
+open "/Applications/ExoMind.app"
+```
+
+完整说明（全部方案 + 排障）：**[docs/macos-install.md](docs/macos-install.md)**。
+
 ## 技术栈
 
 | 分类 | 技术 |
@@ -142,6 +157,7 @@ exomind/
 > 文档以中文为主，部分内容提供英文版本。
 
 - [文档索引](docs/README.md) — 全部文档导航
+- [macOS 安装说明](docs/macos-install.md) — 未签名版首次启动 & ad-hoc 自签
 - [开发日志](https://exomind-team.github.io/exomind-devlog/)（中文 · AI 生成 · 实验性）
 - [架构概览](docs/architecture/overview.md) — 系统架构设计
 - [产品需求](docs/product/PRD.md) — 产品需求文档

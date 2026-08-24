@@ -57,7 +57,6 @@ describe('vite env prefix config', () => {
     expect(ignored).toEqual(expect.arrayContaining([
       '**/.worktrees/**',
       '**/website/**',
-      '**/packages/ts-agent-cli/**',
     ]));
   });
 

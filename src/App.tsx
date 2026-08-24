@@ -9,6 +9,7 @@ import { RtDomainBackfillCoordinator } from "@/ui/app/components/RtDomainBackfil
 import { FocusBgmCoordinator } from "@/ui/app/components/FocusBgmCoordinator";
 import { MigrationDialogController } from "@/ui/components/MigrationDialogController";
 import { RuntimeInteractionPolicyController } from "@/ui/app/components/RuntimeInteractionPolicyController";
+import { WindowsAppBarController } from "@/ui/app/components/WindowsAppBarController";
 import {
   initUpdateChecker,
   destroyUpdateChecker,
@@ -19,29 +20,20 @@ import {
   getVoiceShortcutService,
 } from "@/services/voice-shortcut.service";
 import {
-  destroyVoiceAssistantRuntimeService,
-  initVoiceAssistantRuntimeService,
-} from "@/services/voice-assistant-runtime.service";
-import {
   getMainWindowShortcutService,
   initMainWindowShortcutService,
 } from "@/services/main-window-shortcut.service";
-import { getNowWorkbenchOverlayService } from "@/services/now-workbench-overlay.service";
 import "./App.css";
 
 function App() {
   useEffect(() => {
     initUpdateChecker();
     initVoiceShortcutService();
-    void initVoiceAssistantRuntimeService();
     initMainWindowShortcutService();
-    void getNowWorkbenchOverlayService().init();
     return () => {
       destroyUpdateChecker();
       getVoiceShortcutService().destroy();
-      void destroyVoiceAssistantRuntimeService();
       getMainWindowShortcutService().destroy();
-      getNowWorkbenchOverlayService().destroy();
     };
   }, []);
 
@@ -51,6 +43,7 @@ function App() {
   return (
     <>
       <RuntimeInteractionPolicyController />
+      <WindowsAppBarController />
       <DevInstanceTitleSync />
       <ThemeController />
       <TimeBlockSyncCoordinator />

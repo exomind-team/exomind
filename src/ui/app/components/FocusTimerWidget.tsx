@@ -44,10 +44,12 @@ import { PerfTrace, logPerfInfo, perfNow, waitForNextPaint } from "@/lib/utils/p
 import {
   getTaskService,
   getTaskTimerService,
+  getEventLogService,
   getTimeBlockService,
   type TimerConfig,
   type TimerMode,
 } from "@/lib/services";
+import { getEventSourceMetadata } from "@/lib/eventlog/source-metadata";
 import { appendTaskStatusChangeDescription } from "@/lib/task/task-status-change-description";
 import { resolveCountdownOverrunMs } from "@/lib/timeblock/countdown-overrun";
 import { resolveCountdownEndTimeDisplay } from "@/lib/timeblock/expected-end-time";
@@ -64,6 +66,7 @@ import {
 } from "@/ui/app/components/TaskStatusSelector";
 import { FocusKeepAwakeButton } from "@/ui/app/components/FocusKeepAwakeButton";
 import type { FocusKeepAwakeControl } from "@/ui/app/components/FocusKeepAwakeController";
+import { createUuidV4 } from "@/lib/utils/uuid";
 import {
   resolveFeedbackSubmitLabel,
   useFeedbackSubmitControls,
@@ -119,6 +122,28 @@ function isRenderableActiveBlock(block: ActiveBlockData): boolean {
     !block.feedbackSubmittedAt &&
     !(block.transitions ?? []).some((transition) => transition.type === "end")
   );
+}
+
+function isQuickStartKeyEvent(event: KeyboardEvent<HTMLElement>): boolean {
+  return (
+    !event.nativeEvent.isComposing &&
+    event.key === "Enter" &&
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    !event.shiftKey
+  );
+}
+
+function parseCustomDurationMinutes(rawValue: string): number | null {
+  const parsedValue = Number.parseInt(rawValue.trim(), 10);
+  if (!Number.isFinite(parsedValue)) {
+    return null;
+  }
+  return Math.max(1, Math.min(MAX_CUSTOM_COUNTDOWN_MINUTES, parsedValue));
+}
+
+function formatRunningBlockName(name: string | null | undefined): string {
+  return name?.trim() || "未命名任务";
 }
 
 function formatClock(ms: number): string {
@@ -326,6 +351,7 @@ export const FocusTimerWidget = forwardRef<
   const frameRef = useRef<number | null>(null);
   const taskInputRef = useRef<HTMLTextAreaElement | null>(null);
   const customDurationInputRef = useRef<HTMLInputElement | null>(null);
+  const runningNameInputRef = useRef<HTMLInputElement | null>(null);
   const countdownEndedRef = useRef(false);
   const countdownOverrunRef = useRef(false);
   const hardEndTriggeredRef = useRef(false);
@@ -338,6 +364,8 @@ export const FocusTimerWidget = forwardRef<
   const taskInputFocusIntentRef = useRef(false);
   const localStartInFlightRef = useRef(false);
   const locallyEndedStartIdsRef = useRef<Set<string>>(new Set());
+  const isRunningNameEditingRef = useRef(false);
+  const runningNameSaveInFlightRef = useRef(false);
   const initialConfigDraftRef = useRef<
     FocusConfigDraftSnapshot | null | undefined
   >(undefined);
@@ -362,6 +390,9 @@ export const FocusTimerWidget = forwardRef<
     initialConfigDraft?.taskNameDraft ?? "",
   );
   const [taskName, setTaskName] = useState("");
+  const [runningNameDraft, setRunningNameDraft] = useState("");
+  const [isRunningNameEditing, setIsRunningNameEditingState] = useState(false);
+  const [isRunningNameSaving, setIsRunningNameSaving] = useState(false);
   const [timerMode, setTimerMode] = useState<TimerMode>(
     initialConfigDraft?.timerMode ?? "countdown",
   );
@@ -421,6 +452,12 @@ export const FocusTimerWidget = forwardRef<
   const customDurationTriggerText = isCustomDurationSelected
     ? `${countdownMinutes}m`
     : "自定义";
+  const runningNameDisplayText = formatRunningBlockName(taskName);
+
+  const setRunningNameEditing = useCallback((nextEditing: boolean) => {
+    isRunningNameEditingRef.current = nextEditing;
+    setIsRunningNameEditingState(nextEditing);
+  }, []);
   const activeExpectedIndex = resolveExpectedOptionIndex(
     timerMode,
     countdownMinutes,
@@ -698,6 +735,10 @@ export const FocusTimerWidget = forwardRef<
         setFocusUiState(storedDraft?.inputFocused ? "config" : "idle");
         setRunningSubState("running");
         setTaskName("");
+        setRunningNameDraft("");
+        setRunningNameEditing(false);
+        setIsRunningNameSaving(false);
+        runningNameSaveInFlightRef.current = false;
         setTaskNameDraft(storedDraft?.taskNameDraft ?? "");
         if (storedDraft) {
           setTimerMode(storedDraft.timerMode);
@@ -771,6 +812,9 @@ export const FocusTimerWidget = forwardRef<
       });
 
       setTaskName(visibleBlock.name);
+      if (!isRunningNameEditingRef.current) {
+        setRunningNameDraft(visibleBlock.name);
+      }
       setTaskNameDraft(visibleBlock.name);
       setTimerMode(visibleBlock.mode ?? "countup");
       if (visibleBlock.mode === "countdown" && visibleBlock.targetMinutes) {
@@ -807,6 +851,7 @@ export const FocusTimerWidget = forwardRef<
       preserveProtectedLocalConfigDraft,
       resetSkipFeedbackConfirm,
       setFocusUiState,
+      setRunningNameEditing,
       syncIdleElapsedFromMode,
       timerMode,
       timerPreferences.countdownEndMode,
@@ -927,10 +972,16 @@ export const FocusTimerWidget = forwardRef<
     syncIdleElapsedFromMode(timerMode, countdownMinutes);
   }, [countdownMinutes, syncIdleElapsedFromMode, timerMode, uiState]);
 
-  const handleStart = useCallback(async () => {
+  const handleStart = useCallback(async (timerConfigOverride?: TimerConfig) => {
+    const config: TimerConfig =
+      timerConfigOverride ??
+      {
+        mode: timerMode,
+        minutes: timerMode === "countdown" ? countdownMinutes : undefined,
+      };
     const trace = new PerfTrace("TB-UI startBlock", {
       component: "FocusTimerWidget",
-      timerMode,
+      timerMode: config.mode,
       selectedTaskCount: selectedTaskIds.length,
     });
     const lines = taskNameDraft.split(/\r?\n/);
@@ -941,18 +992,13 @@ export const FocusTimerWidget = forwardRef<
       return;
     }
 
-    const config: TimerConfig = {
-      mode: timerMode,
-      minutes: timerMode === "countdown" ? countdownMinutes : undefined,
-    };
-
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;
     hardEndTriggeredRef.current = false;
     setCountdownOvertimeMs(0);
     trace.step("prepare-start", {
       hasDescription: description.length > 0,
-      countdownMinutes: timerMode === "countdown" ? countdownMinutes : null,
+      countdownMinutes: config.mode === "countdown" ? config.minutes : null,
     });
 
     const selectedTasks = selectedTaskIds
@@ -1051,10 +1097,17 @@ export const FocusTimerWidget = forwardRef<
 
   const handleTaskInputKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (event.nativeEvent.isComposing) return;
-      if (event.key !== "Enter") return;
-      if (!(event.ctrlKey || event.metaKey)) return;
-      if (event.altKey || event.shiftKey) return;
+      if (!isQuickStartKeyEvent(event)) return;
+
+      event.preventDefault();
+      void handleStart();
+    },
+    [handleStart],
+  );
+
+  const handleExpectedTimeKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!isQuickStartKeyEvent(event)) return;
 
       event.preventDefault();
       void handleStart();
@@ -1080,12 +1133,8 @@ export const FocusTimerWidget = forwardRef<
 
   const applyCustomDuration = useCallback(
     (rawValue: string) => {
-      const parsedValue = Number.parseInt(rawValue.trim(), 10);
-      if (Number.isFinite(parsedValue)) {
-        const safeMinutes = Math.max(
-          1,
-          Math.min(MAX_CUSTOM_COUNTDOWN_MINUTES, parsedValue),
-        );
+      const safeMinutes = parseCustomDurationMinutes(rawValue);
+      if (safeMinutes !== null) {
         setTimerMode("countdown");
         setCountdownMinutes(safeMinutes);
         setCustomDurationDraft(String(safeMinutes));
@@ -1095,6 +1144,36 @@ export const FocusTimerWidget = forwardRef<
       setIsCustomDurationEditing(false);
     },
     [countdownMinutes],
+  );
+
+  const handleCustomDurationKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (isQuickStartKeyEvent(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        const safeMinutes =
+          parseCustomDurationMinutes(event.currentTarget.value) ??
+          countdownMinutes;
+        setTimerMode("countdown");
+        setCountdownMinutes(safeMinutes);
+        setCustomDurationDraft(String(safeMinutes));
+        setIsCustomDurationEditing(false);
+        void handleStart({ mode: "countdown", minutes: safeMinutes });
+        return;
+      }
+
+      if (event.nativeEvent.isComposing) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        applyCustomDuration(event.currentTarget.value);
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setCustomDurationDraft(String(countdownMinutes));
+        setIsCustomDurationEditing(false);
+      }
+    },
+    [applyCustomDuration, countdownMinutes, handleStart],
   );
 
   const enqueueServiceMutation = useCallback(
@@ -1118,6 +1197,120 @@ export const FocusTimerWidget = forwardRef<
       });
     },
     [applyActiveBlock],
+  );
+
+  const handleBeginRunningNameEdit = useCallback(() => {
+    if (!isRunningUi || feedbackInProgress) return;
+    setRunningNameDraft(formatRunningBlockName(taskName));
+    setRunningNameEditing(true);
+    requestAnimationFrame(() => {
+      runningNameInputRef.current?.focus();
+      runningNameInputRef.current?.select();
+    });
+  }, [feedbackInProgress, isRunningUi, setRunningNameEditing, taskName]);
+
+  const handleCancelRunningNameEdit = useCallback(() => {
+    setRunningNameDraft(taskName);
+    setRunningNameEditing(false);
+  }, [setRunningNameEditing, taskName]);
+
+  const appendRunningNameRenameEvent = useCallback(
+    async (
+      block: ActiveBlockData,
+      previousName: string,
+      nextName: string,
+    ) => {
+      try {
+        await getEventLogService().appendEventData({
+          id: createUuidV4(),
+          timestamp: Date.now(),
+          content: `时间块改名：${formatRunningBlockName(previousName)} → ${formatRunningBlockName(nextName)}`,
+          tags: ["block_rename"],
+          metadata: {
+            source: getEventSourceMetadata(),
+            blockId: block.startId,
+            previousName,
+            nextName,
+            recordType: "timeblock_rename",
+          },
+        });
+      } catch (error) {
+        log.error(
+          `[TB-UI] append timeblock rename event failed ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+    [],
+  );
+
+  const handleSubmitRunningName = useCallback(async () => {
+    if (runningNameSaveInFlightRef.current) return;
+    const activeBlock = activeBlockDataRef.current;
+    if (!activeBlock) {
+      setRunningNameEditing(false);
+      return;
+    }
+
+    const previousName = activeBlock.name;
+    const nextName =
+      runningNameDraft.trim() || formatRunningBlockName(previousName);
+    setRunningNameDraft(nextName);
+    if (nextName === previousName) {
+      setRunningNameEditing(false);
+      return;
+    }
+
+    runningNameSaveInFlightRef.current = true;
+    setIsRunningNameSaving(true);
+    try {
+      await mutationQueueRef.current;
+      const updated = await timeBlockServiceRef.current.updateActiveBlock({
+        name: nextName,
+      });
+      if (!updated) {
+        throw new Error("updateActiveBlock returned null");
+      }
+      applyActiveBlock(updated);
+      setRunningNameEditing(false);
+      await appendRunningNameRenameEvent(updated, previousName, updated.name);
+    } catch (error) {
+      log.error(
+        `[TB-UI] rename active block failed ${error instanceof Error ? error.message : String(error)}`,
+      );
+      setRunningNameEditing(false);
+      try {
+        const block = await timeBlockServiceRef.current.loadActiveBlock();
+        applyActiveBlock(block);
+      } catch (reloadError) {
+        log.error(
+          `[TB-UI] rename active block recover failed ${reloadError instanceof Error ? reloadError.message : String(reloadError)}`,
+        );
+      }
+    } finally {
+      runningNameSaveInFlightRef.current = false;
+      setIsRunningNameSaving(false);
+    }
+  }, [
+    appendRunningNameRenameEvent,
+    applyActiveBlock,
+    runningNameDraft,
+    setRunningNameEditing,
+  ]);
+
+  const handleRunningNameKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.nativeEvent.isComposing) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleCancelRunningNameEdit();
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void handleSubmitRunningName();
+      }
+    },
+    [handleCancelRunningNameEdit, handleSubmitRunningName],
   );
 
   const handlePauseOrResume = useCallback(async () => {
@@ -1315,6 +1508,10 @@ export const FocusTimerWidget = forwardRef<
       setRunningSubState("running");
       taskInputFocusIntentRef.current = storedDraft?.inputFocused ?? false;
       setTaskName("");
+      setRunningNameDraft("");
+      setRunningNameEditing(false);
+      setIsRunningNameSaving(false);
+      runningNameSaveInFlightRef.current = false;
       setTaskNameDraft(storedDraft?.taskNameDraft ?? "");
       if (storedDraft) {
         setTimerMode(storedDraft.timerMode);
@@ -1361,6 +1558,7 @@ export const FocusTimerWidget = forwardRef<
       linkedTasks,
       rememberLocallyEndedStartId,
       setFocusUiState,
+      setRunningNameEditing,
       taskStatusChoices,
       timerMode,
     ],
@@ -1395,6 +1593,52 @@ export const FocusTimerWidget = forwardRef<
     skipConfirmCountdownSec: skipFeedbackCountdownSec,
     defaultLabel: "确认停止",
   });
+
+  const renderRunningNameControl = (variant: "default" | "overlay") => {
+    const isOverlayVariant = variant === "overlay";
+    if (isRunningNameEditing) {
+      return (
+        <Input
+          ref={runningNameInputRef}
+          data-testid="new-focus-running-name-input"
+          value={runningNameDraft}
+          disabled={isRunningNameSaving}
+          onChange={(event) => setRunningNameDraft(event.target.value)}
+          onKeyDown={handleRunningNameKeyDown}
+          onBlur={() => {
+            if (isRunningNameEditingRef.current) {
+              void handleSubmitRunningName();
+            }
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+          aria-label="编辑时间块名称（Edit time block name）"
+          className={`h-8 w-full min-w-0 border-[#E7E5E4]/80 bg-white/70 px-2 text-left font-semibold shadow-none focus-visible:ring-1 focus-visible:ring-[#C75B3A] dark:border-[#FFFFFF20] dark:bg-[#FFFFFF12] ${
+            isOverlayVariant
+              ? "mt-0.5 text-[18px] leading-[1.25] text-[#F5EDE7]"
+              : "text-[20px] leading-[1.25] text-[#1C1917] dark:text-[#FAFAF9]"
+          }`}
+        />
+      );
+    }
+
+    return (
+      <button
+        type="button"
+        data-testid="new-focus-running-name-display"
+        onClick={handleBeginRunningNameEdit}
+        onMouseDown={(event) => event.stopPropagation()}
+        disabled={feedbackInProgress || isRunningNameSaving}
+        title="编辑时间块名称"
+        className={`block min-w-0 max-w-full truncate rounded-[8px] text-left font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C75B3A]/45 disabled:cursor-default disabled:opacity-100 ${
+          isOverlayVariant
+            ? "pt-0.5 text-[18px] leading-[1.35] text-[#F5EDE7] hover:text-white"
+            : `text-[20px] leading-[1.4] ${isOverlaySurface ? "text-[#F5EDE7]" : "text-[#1C1917] hover:text-[#B24D2F] dark:text-[#FAFAF9] dark:hover:text-[#F5B097]"}`
+        }`}
+      >
+        {runningNameDisplayText}
+      </button>
+    );
+  };
 
   useImperativeHandle(
     ref,
@@ -1636,6 +1880,7 @@ export const FocusTimerWidget = forwardRef<
                 <div
                   className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
                   data-testid="new-focus-expected-time-row"
+                  onKeyDown={handleExpectedTimeKeyDown}
                 >
                   <div
                     data-testid="new-focus-expected-active-indicator"
@@ -1687,17 +1932,7 @@ export const FocusTimerWidget = forwardRef<
                           );
                         }}
                         onBlur={() => applyCustomDuration(customDurationDraft)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            applyCustomDuration(customDurationDraft);
-                          }
-                          if (event.key === "Escape") {
-                            event.preventDefault();
-                            setCustomDurationDraft(String(countdownMinutes));
-                            setIsCustomDurationEditing(false);
-                          }
-                        }}
+                        onKeyDown={handleCustomDurationKeyDown}
                         aria-label="自定义倒计时分钟（Custom countdown minutes）"
                         placeholder="分钟"
                         className="relative z-10 h-8 w-full border-transparent bg-transparent px-[6px] text-center text-[12px] font-semibold leading-none text-[#1C1917] shadow-none outline-none ring-0 focus-visible:ring-0 dark:text-[#FAFAF9]"
@@ -1787,12 +2022,7 @@ export const FocusTimerWidget = forwardRef<
                     >
                       {overlayChrome.statusLabel}
                     </p>
-                    <p
-                      className="truncate pt-0.5 text-[18px] font-semibold leading-[1.35] text-[#F5EDE7]"
-                      data-tauri-drag-region
-                    >
-                      {taskName || "未命名任务"}
-                    </p>
+                    {renderRunningNameControl("overlay")}
                   </div>
                   <div className="ml-auto flex shrink-0 items-center gap-1.5">
                     {hasFocusBgmConfigured ? (
@@ -1839,11 +2069,7 @@ export const FocusTimerWidget = forwardRef<
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] dark:bg-[#2A1510] text-[#C75B3A] dark:text-[#E8734E]">
                       <Target size={20} />
                     </div>
-                    <p
-                      className={`truncate text-[20px] font-semibold leading-[1.4] ${isOverlaySurface ? "text-[#F5EDE7]" : "text-[#1C1917] dark:text-[#FAFAF9]"}`}
-                    >
-                      {taskName || "未命名任务"}
-                    </p>
+                    {renderRunningNameControl("default")}
                   </div>
                   <div className="ml-auto flex shrink-0 items-center gap-2">
                     {showKeepAwakeButton && keepAwakeControl ? (

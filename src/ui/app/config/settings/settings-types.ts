@@ -41,8 +41,6 @@ export interface SettingsContext {
   developerMode?: boolean;
   desktopAdaptiveEnabled?: boolean;
   voiceShortcutAsrProvider?: string;
-  voiceRuntimeProvider?: string;
-  voiceRuntimeMode?: string;
   embeddedRuntimeNetworkMode?: 'local' | 'lan';
   runtimeTargetMode?: 'embedded' | 'external';
 }

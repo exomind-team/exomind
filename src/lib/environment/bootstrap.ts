@@ -1,6 +1,4 @@
 import { getUseMockDataEnabled } from '@/config/mock-data';
-import { MeWebAdapter } from '@/lib/adapters/me-web-adapter';
-import { MeMockAdapter } from '@/lib/adapters/mock/me-mock-adapter';
 import { AgentWebAdapter } from '@/lib/adapters/agent-web-adapter';
 import { AgentMockAdapter } from '@/lib/adapters/mock/agent-mock-adapter';
 import { TaskMockAdapter } from '@/lib/adapters/mock/task-mock-adapter';
@@ -17,7 +15,6 @@ import type { IAgentPort } from './interfaces/agent.port';
 import type { IASRPort } from './interfaces/asr.port';
 import type { IClipboardPort } from './interfaces/clipboard.port';
 import type { IEventLogPort } from './interfaces/eventlog.port';
-import type { IMePort } from './interfaces/me.port';
 import type { IStoragePort } from './interfaces/storage.port';
 import type { ITaskPort } from './interfaces/task.port';
 
@@ -30,7 +27,6 @@ export interface RuntimeBootstrapResult {
   storage: IStoragePort;
   eventlog: IEventLogPort;
   task: ITaskPort;
-  me: IMePort;
   agent: IAgentPort;
 }
 
@@ -73,7 +69,6 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
   const task: ITaskPort = useMockData
     ? new TaskMockAdapter()
     : new TaskRtAdapter();
-  const me: IMePort = useMockData ? new MeMockAdapter() : new MeWebAdapter();
   const agent: IAgentPort = useMockData ? new AgentMockAdapter() : new AgentWebAdapter();
   const eventlog: IEventLogPort = useMockData
     ? new WebEventLogStorageAdapter()
@@ -93,7 +88,6 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
       storage: new TauriStorageAdapter(),
       eventlog,
       task,
-      me,
       agent,
     };
   }
@@ -105,7 +99,6 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
     storage: new WebStorageAdapter(),
     eventlog,
     task,
-    me,
     agent,
   };
 }

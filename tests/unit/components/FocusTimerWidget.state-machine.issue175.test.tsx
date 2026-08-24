@@ -29,6 +29,7 @@ const pauseBlockMock = vi.fn();
 const resumeBlockMock = vi.fn();
 const endBlockMock = vi.fn();
 const markEndingMock = vi.fn();
+const updateActiveBlockMock = vi.fn();
 const updateElapsedMock = vi.fn();
 const onBlockChangeMock = vi.fn(() => () => {});
 const startSyncMock = vi.fn().mockResolvedValue(undefined);
@@ -72,6 +73,7 @@ vi.mock("@/lib/services", () => ({
     resumeBlock: resumeBlockMock,
     endBlock: endBlockMock,
     markEnding: markEndingMock,
+    updateActiveBlock: updateActiveBlockMock,
     updateElapsed: updateElapsedMock,
     onBlockChange: onBlockChangeMock,
     startSync: startSyncMock,
@@ -120,6 +122,7 @@ describe("FocusTimerWidget state machine（新专注计时组件状态机）", (
     resumeBlockMock.mockResolvedValue(undefined);
     endBlockMock.mockResolvedValue(null);
     markEndingMock.mockResolvedValue(undefined);
+    updateActiveBlockMock.mockResolvedValue(null);
     updateElapsedMock.mockResolvedValue(undefined);
     getTaskMock.mockReset();
     listTasksMock.mockReset();
@@ -129,6 +132,7 @@ describe("FocusTimerWidget state machine（新专注计时组件状态机）", (
     addTaskToBlockMock.mockReset();
     removeTaskToBlockMock.mockReset();
     onBlockEndForTasksMock.mockReset();
+    updateActiveBlockMock.mockReset();
     appendEventDataMock.mockReset();
     getTaskMock.mockResolvedValue(null);
     listTasksMock.mockResolvedValue([]);
@@ -138,6 +142,7 @@ describe("FocusTimerWidget state machine（新专注计时组件状态机）", (
     addTaskToBlockMock.mockResolvedValue(undefined);
     removeTaskToBlockMock.mockResolvedValue(undefined);
     onBlockEndForTasksMock.mockResolvedValue(undefined);
+    updateActiveBlockMock.mockResolvedValue(null);
     appendEventDataMock.mockResolvedValue(undefined);
     onBlockChangeHandler = null;
     onBlockChangeMock.mockReset();
@@ -679,6 +684,68 @@ describe("FocusTimerWidget state machine（新专注计时组件状态机）", (
     });
   });
 
+  it("starts from expected-time option with Ctrl+Enter（时间选择器聚焦时 Ctrl+Enter 启动）", async () => {
+    render(<FocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId("new-focus-idle-card"));
+    fireEvent.change(screen.getByTestId("new-focus-task-input"), {
+      target: { value: "键盘启动 45 分钟" },
+    });
+
+    const option45 = screen.getByTestId("new-focus-expected-45");
+    fireEvent.click(option45);
+    option45.focus();
+    fireEvent.keyDown(option45, { key: "Enter", ctrlKey: true });
+
+    await waitFor(() => {
+      expect(startBlockMock).toHaveBeenCalledWith(
+        "键盘启动 45 分钟",
+        expect.objectContaining({ mode: "countdown", minutes: 45 }),
+        undefined,
+        undefined,
+        expectFocusTimerStartMeta(),
+      );
+    });
+  });
+
+  it("starts from custom duration input with Ctrl+Enter（自定义时长输入框 Ctrl+Enter 按当前值启动）", async () => {
+    render(<FocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId("new-focus-idle-card"));
+    fireEvent.change(screen.getByTestId("new-focus-task-input"), {
+      target: { value: "键盘启动自定义时长" },
+    });
+    fireEvent.click(screen.getByTestId("new-focus-expected-custom-trigger"));
+    const customInput = screen.getByTestId("new-focus-expected-custom-input");
+    fireEvent.change(customInput, { target: { value: "37" } });
+    fireEvent.keyDown(customInput, { key: "Enter", ctrlKey: true });
+
+    await waitFor(() => {
+      expect(startBlockMock).toHaveBeenCalledWith(
+        "键盘启动自定义时长",
+        expect.objectContaining({ mode: "countdown", minutes: 37 }),
+        undefined,
+        undefined,
+        expectFocusTimerStartMeta(),
+      );
+    });
+  });
+
+  it("applies custom duration without starting on plain Enter（自定义时长普通 Enter 只应用不启动）", () => {
+    render(<FocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId("new-focus-idle-card"));
+    fireEvent.click(screen.getByTestId("new-focus-expected-custom-trigger"));
+    const customInput = screen.getByTestId("new-focus-expected-custom-input");
+    fireEvent.change(customInput, { target: { value: "37" } });
+    fireEvent.keyDown(customInput, { key: "Enter" });
+
+    expect(startBlockMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByTestId("new-focus-expected-custom-trigger"),
+    ).toHaveTextContent("37m");
+  });
+
   it("switches custom trigger to input while editing（自定义编辑态切换为输入框）", () => {
     render(<FocusTimerWidget />);
     fireEvent.click(screen.getByTestId("new-focus-idle-card"));
@@ -782,6 +849,62 @@ describe("FocusTimerWidget state machine（新专注计时组件状态机）", (
     );
     expect(runningCard).toContainElement(
       screen.getByTestId("new-focus-end-button"),
+    );
+  });
+
+  it("renames running block and appends event log（运行中时间块可改名并记录事件）", async () => {
+    const activeBlock = {
+      startId: "active-rename-1",
+      name: "旧时间块",
+      startTime: Date.now(),
+      elapsed: 5 * 60 * 1000,
+      mode: "countdown" as const,
+      targetMinutes: 25,
+      paused: false,
+      phase: "running" as const,
+      taskIds: [],
+      taskAssociationLog: [],
+    };
+    loadActiveBlockMock.mockResolvedValueOnce(activeBlock);
+    updateActiveBlockMock.mockResolvedValue({
+      ...activeBlock,
+      name: "新时间块",
+    });
+
+    render(<FocusTimerWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("new-focus-state-running")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("new-focus-running-name-display")).toHaveTextContent(
+      "旧时间块",
+    );
+    fireEvent.click(screen.getByTestId("new-focus-running-name-display"));
+
+    const input = screen.getByTestId("new-focus-running-name-input");
+    fireEvent.change(input, { target: { value: "新时间块" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(updateActiveBlockMock).toHaveBeenCalledWith({ name: "新时间块" });
+    });
+    await waitFor(() => {
+      expect(appendEventDataMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.stringContaining("时间块改名"),
+          tags: ["block_rename"],
+          metadata: expect.objectContaining({
+            blockId: "active-rename-1",
+            previousName: "旧时间块",
+            nextName: "新时间块",
+            recordType: "timeblock_rename",
+          }),
+        }),
+      );
+    });
+    expect(screen.getByTestId("new-focus-running-name-display")).toHaveTextContent(
+      "新时间块",
     );
   });
 

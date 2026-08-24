@@ -62,6 +62,7 @@ type TimeBlockRtAdapterLike = {
   rtEndBlock: (params: { feedback?: string; taskStatusOutcomes?: Record<string, string> }) => Promise<{ completed: TimeBlockData | null; active: ActiveBlockData }>;
   rtPauseBlock: () => Promise<{ status: string }>;
   rtResumeBlock: () => Promise<{ status: string }>;
+  rtDescribeBlock: (params: { name?: string; note?: string }) => Promise<{ updated: string; blockId: string }>;
   rtPatchActiveBlockTasks: (params: { taskIds: string[]; taskAssociationLog: unknown[] }) => Promise<ActiveBlockData | null>;
 };
 
@@ -189,6 +190,17 @@ function createRtAdapter(initial?: {
         activeBlock = { ...activeBlock, phase: 'running', paused: false, pausedAt: undefined, lastResumedAt: now };
       }
       return { status: 'ok' };
+    }),
+    rtDescribeBlock: vi.fn(async (params: { name?: string; note?: string }) => {
+      if (!activeBlock) {
+        throw new Error('No active block');
+      }
+      activeBlock = {
+        ...activeBlock,
+        name: params.name ?? activeBlock.name,
+        note: params.note ?? activeBlock.note,
+      };
+      return { updated: activeBlock.startId, blockId: activeBlock.startId };
     }),
     rtPatchActiveBlockTasks: vi.fn(async (params: { taskIds: string[]; taskAssociationLog: unknown[] }) => {
       if (!activeBlock) {
@@ -376,6 +388,59 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  it('uses current RT active block as first replication baseline before accepting a stale running snapshot', async () => {
+    const currentActiveBlock: ActiveBlockData = {
+      startId: 'current-block-2',
+      name: 'Fresh block',
+      mode: 'countup',
+      elapsed: 0,
+      paused: false,
+      startTime: 1_700_000_120_000,
+      blockType: 'active',
+      phase: 'running',
+      version: 2,
+      lastTransitionAt: 1_700_000_120_000,
+      lastResumedAt: 1_700_000_120_000,
+      taskIds: [],
+      taskAssociationLog: [],
+      transitions: [
+        { type: 'start', at: 1_700_000_120_000, actorId: 'local' },
+      ],
+    };
+    const staleRunningSnapshot: ActiveBlockData = {
+      startId: 'old-block-1',
+      name: 'Old countdown',
+      mode: 'countdown',
+      targetMinutes: 25,
+      elapsed: 1_500_000,
+      paused: false,
+      startTime: 1_700_000_000_000,
+      blockType: 'active',
+      phase: 'running',
+      version: 1,
+      lastTransitionAt: 1_700_000_000_000,
+      lastResumedAt: 1_700_000_000_000,
+      taskIds: [],
+      taskAssociationLog: [],
+      transitions: [
+        { type: 'start', at: 1_700_000_000_000, actorId: 'remote' },
+      ],
+    };
+    const env = createMemoryEnv();
+    const rtAdapter = createRtAdapter({ activeBlock: currentActiveBlock });
+    const service = new TimeBlockServiceImpl(env as never, {
+      backendMode: 'rt-sqlite',
+      rtAdapter,
+    });
+    const listener = vi.fn();
+    service.onBlockChange(listener);
+
+    await service.applyReplicatedActiveBlock(staleRunningSnapshot);
+
+    expect(rtAdapter.getActiveBlock).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it('allows starting a new block when current RT active block is transition-completed', async () => {
     const env = createMemoryEnv();
     const rtAdapter = createRtAdapter({
@@ -482,6 +547,44 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
     expect(updated).toMatchObject({
       startId: 'active-1',
       taskIds: ['task-1', 'task-2'],
+    });
+  });
+
+  it('renames active block via dedicated RT describe route in rt-sqlite mode', async () => {
+    const env = createMemoryEnv();
+    const rtAdapter = createRtAdapter({
+      activeBlock: {
+        startId: 'active-rename-1',
+        name: 'Deep Work',
+        mode: 'countdown',
+        targetMinutes: 25,
+        elapsed: 300000,
+        paused: false,
+        startTime: 1_700_000_000_000,
+        phase: 'running',
+        version: 1,
+        lastTransitionAt: 1_700_000_000_000,
+        taskIds: ['task-1'],
+        taskAssociationLog: [],
+      },
+    });
+    const service = new TimeBlockServiceImpl(env as never, {
+      backendMode: 'rt-sqlite',
+      rtAdapter,
+    });
+
+    const updated = await service.updateActiveBlock({
+      name: 'Renamed Deep Work',
+    });
+
+    expect(rtAdapter.rtDescribeBlock).toHaveBeenCalledWith({
+      name: 'Renamed Deep Work',
+    });
+    expect(rtAdapter.rtPatchActiveBlockTasks).not.toHaveBeenCalled();
+    expect(updated).toMatchObject({
+      startId: 'active-rename-1',
+      name: 'Renamed Deep Work',
+      taskIds: ['task-1'],
     });
   });
 

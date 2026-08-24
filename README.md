@@ -37,6 +37,21 @@ ExoMind is a cross-platform personal AI assistant built with Tauri v2 (Windows/m
 <em>Voice Input — real-time speech recognition with event logging</em>
 </div>
 
+## macOS: first launch (unsigned build)
+
+The macOS build is currently **unsigned** (no Apple Developer account yet), so the first launch needs one extra step — this is Gatekeeper, **not** a corrupted file.
+
+- **Quick fix (Intel, or as a first try):** right-click `ExoMind.app` → **Open**, or run `sudo xattr -cr "/Applications/ExoMind.app"`.
+- **Apple Silicon (M1–M4), if it still says _"ExoMind is damaged"_:** macOS forces arm64 binaries to carry *a* signature, so ad-hoc self-sign it — free, no Apple account:
+
+```bash
+sudo codesign --force --deep --sign - "/Applications/ExoMind.app"
+sudo xattr -cr "/Applications/ExoMind.app"
+open "/Applications/ExoMind.app"
+```
+
+Full guide (all methods + troubleshooting): **[docs/macos-install.md](docs/macos-install.md)**.
+
 ## Tech Stack
 
 | Category | Technology |
@@ -152,6 +167,7 @@ ExoMind is part of a larger ecosystem of open-source projects:
 > Documentation is primarily written in Chinese. English translations are provided where available.
 
 - [Docs index](docs/README.md)
+- [macOS install guide](docs/macos-install.md) (unsigned build: first-launch & ad-hoc self-sign)
 - [Development log](https://exomind-team.github.io/exomind-devlog/) (Chinese · AI-generated · experimental)
 - [Architecture overview](docs/architecture/overview.md)
 - [Product requirements](docs/product/PRD.md)
