@@ -45,7 +45,9 @@ Tauri 2.0 + React 18 + TypeScript + Rust | Zustand | Tailwind CSS + Radix UI | B
 
 Phase 2 完成（SignalPool L3-L5），Phase 3 待启动（资源管控 + 可观测性）。#555 内置 `timeblock_summary` Agent Harness：Phase 1 MVP（2026-06-03）+ Phase 3 AI Registry 桥接 + 设置页开关（2026-06-04）已完成，端到端验证通过。
 
-当前产品迭代主线是 [v0.5.x 日常核心能力迭代计划](plans/2026-08-24-v0.5x-daily-core-iteration-plan.md)：先恢复悬浮工作台并统一桌面/移动端版本，再修复长跨度 EventLog 完整同步、响应式同步与能耗、桌面后台/快捷记录、设置搜索和 Agent 配置热迭代。该轮保持现有 RT SQLite 与 Mesh/Signal，不引入 DSON、Reticulum 或插件平台。
+当前产品迭代主线见 [v0.5.x 日常核心能力迭代计划](plans/2026-08-24-v0.5x-daily-core-iteration-plan.md)。本轮唯一完成产品验收的正向增量，是恢复悬浮工作台并解除桌面端长期锁定 `0.4.22` 的阻塞；用户确认 `Windows 0.5.1 ↔ Android 0.5.0` 可以正常同步。`v0.5.1` 未通过全平台发布 CI；`v0.5.2` 又在同版本 PC/Android 真机配对中暴露 `Failed to fetch` 与 mesh peer token 缺失，因此该轮迭代宣告失败并撤销发布。应用版本与运行代码已回退到 `v0.5.1@526db22e`，本阶段停止开发。
+
+`v0.5.2` 是不可移动、不可复用的失败标签。未来恢复迭代时，下一个候选必须从 `v0.5.3` 开始，先修配对/认证连续性；任何 preview 必须同时通过精确候选四平台 CI，以及 PC/Android 在新装态与升级态下的发现、PIN 配对、EventLog live sync 和恢复性同步实测。近期仍保持现有 RT SQLite 与 Mesh/Signal，不引入 DSON、Reticulum 或插件平台。
 
 [#906](https://github.com/exomind-team/exomind/issues/906) 是上述日常核心迭代之后的架构阶段和上位约束，不再作为当前 `0.5.x` 功能的实施前置条件。
 
