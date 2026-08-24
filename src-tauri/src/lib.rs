@@ -22,6 +22,11 @@ use commands::file_commands::{
     save_json_file, write_file,
 };
 use commands::keep_awake_commands::focus_keep_awake_set;
+use commands::now_workbench_overlay_commands::{
+    now_workbench_overlay_ensure, now_workbench_overlay_focus_main, now_workbench_overlay_hide,
+    now_workbench_overlay_profile_get, now_workbench_overlay_profile_set,
+    now_workbench_overlay_restore, now_workbench_overlay_set_position, now_workbench_overlay_show,
+};
 use commands::runtime_commands::{
     ensure_runtime_started, load_persisted_runtime_network_mode,
     load_persisted_runtime_target_mode, runtime_external_address_get, runtime_external_address_set,
@@ -503,6 +508,14 @@ pub fn run() {
             voice_overlay_show,
             voice_overlay_hide,
             voice_overlay_set_bottom_offset,
+            now_workbench_overlay_ensure,
+            now_workbench_overlay_show,
+            now_workbench_overlay_restore,
+            now_workbench_overlay_hide,
+            now_workbench_overlay_focus_main,
+            now_workbench_overlay_set_position,
+            now_workbench_overlay_profile_get,
+            now_workbench_overlay_profile_set,
             voice_shortcut_set,
             voice_shortcut_get,
             main_window_shortcut_set,
@@ -552,7 +565,7 @@ pub fn run() {
     builder
         .on_window_event(|window, event| {
             // When the main window is closed (or destroyed), exit the entire application
-            // so that overlay windows (voice-overlay) don't linger.
+            // so that overlay windows (now-workbench-overlay, voice-overlay) don't linger.
             if window.label() == "main" {
                 if let tauri::WindowEvent::Destroyed = event {
                     windows_appbar::detach_on_shutdown(window.app_handle());

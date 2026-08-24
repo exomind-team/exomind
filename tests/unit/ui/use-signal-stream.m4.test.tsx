@@ -114,7 +114,7 @@ vi.mock('@/lib/services/signal-handlers', () => ({
 
 vi.mock('@/lib/services/eventlog.service', () => ({
   getEventLogService: () => ({
-    appendEventData: appendEventDataMock,
+    appendEvent: appendEventDataMock,
   }),
   notifyEventLogChanged: notifyEventLogChangedMock,
 }));
@@ -177,8 +177,14 @@ vi.mock('@/lib/logger', () => ({
   },
 }));
 
-function HookHarness(): null {
-  useSignalStream();
+function HookHarness({
+  activeBlockThrottleMs,
+  enabled,
+}: {
+  activeBlockThrottleMs?: number;
+  enabled?: boolean;
+}): null {
+  useSignalStream({ activeBlockThrottleMs, enabled });
   return null;
 }
 
@@ -220,6 +226,15 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+  });
+
+  it('does not hydrate or open SSE while the owning surface lacks profile scope（未取得档案作用域前不连接 RT）', async () => {
+    render(<HookHarness enabled={false} activeBlockThrottleMs={250} />);
+    await flushMicrotasks();
+
+    expect(getStatusMock).not.toHaveBeenCalled();
+    expect(signalServiceOptions).toHaveLength(0);
+    expect(startMock).not.toHaveBeenCalled();
   });
 
   it('waits for embedded runtime to report running before opening SSE（等待内嵌 Runtime 真正运行后再打开 SSE）', async () => {
@@ -301,8 +316,8 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     });
 
     expect(appendEventDataMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.stringContaining('1773810305000'),
       content: 'external-pipeline-manual-verify-1305',
-      timestamp: 1773810305000,
       tags: ['note'],
       metadata: expect.objectContaining({
         source: expect.any(Object),
@@ -352,8 +367,8 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     });
 
     expect(appendEventDataMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.stringContaining('1773810310000'),
       content: 'voice shortcut appended',
-      timestamp: 1773810310000,
       tags: ['voice'],
       metadata: expect.objectContaining({
         inputSource: 'voice',
@@ -392,7 +407,7 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     expect(appendEventDataMock).not.toHaveBeenCalled();
   });
 
-  it('deduplicates repeated active-block snapshots and only flushes the latest throttled payload（活跃时间块快照去重并只投影节流窗口中的最新值）', async () => {
+  it('honors the overlay 250ms active-block window while deduplicating repeated snapshots（悬浮窗 250ms 窗口去重并只投影最新快照）', async () => {
     runtimeStatuses.push({
       running: true,
       host: '127.0.0.1',
@@ -401,7 +416,7 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
       authSecret: 'embedded-secret',
     });
 
-    render(<HookHarness />);
+    render(<HookHarness activeBlockThrottleMs={250} />);
     await flushMicrotasks();
 
     const onActiveBlockReplicationSnapshot = signalHandlerOptions[0].onActiveBlockReplicationSnapshot as
@@ -479,7 +494,12 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     expect(projectActiveBlockSnapshotMock).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(249);
+    });
+    expect(projectActiveBlockSnapshotMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
     });
 
     expect(projectActiveBlockSnapshotMock).toHaveBeenCalledTimes(2);
@@ -809,7 +829,7 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
       topic: 'proposal.created',
       payload: expect.objectContaining({
         proposal: expect.objectContaining({
-          actionType: 'create_task',
+          actionType: 'task.create',
           createdAt: '2026-04-19T09:00:00.000Z',
         }),
       }),
@@ -818,7 +838,7 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
       topic: 'proposal.status_changed',
       payload: expect.objectContaining({
         proposal: expect.objectContaining({
-          actionType: 'create_task',
+          actionType: 'task.create',
           status: 'approved',
         }),
       }),

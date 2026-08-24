@@ -23,6 +23,7 @@ import {
   getMainWindowShortcutService,
   initMainWindowShortcutService,
 } from "@/services/main-window-shortcut.service";
+import { getNowWorkbenchOverlayService } from "@/services/now-workbench-overlay.service";
 import "./App.css";
 
 function App() {
@@ -30,15 +31,18 @@ function App() {
     initUpdateChecker();
     initVoiceShortcutService();
     initMainWindowShortcutService();
+    void getNowWorkbenchOverlayService().init();
     return () => {
       destroyUpdateChecker();
       getVoiceShortcutService().destroy();
       getMainWindowShortcutService().destroy();
+      getNowWorkbenchOverlayService().destroy();
     };
   }, []);
 
-  // 连接 RT SSE 信号流，接收 Agent 反馈
-  useSignalStream();
+  // Active-block transitions are infrequent and user-visible across windows.
+  // Keep them responsive without reintroducing timer-driven data reloads.
+  useSignalStream({ activeBlockThrottleMs: 250 });
 
   return (
     <>
