@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import {
   appendManagedTauriLogSessionStart,
+  buildLowMemoryTauriEnv,
   buildManagedTauriCommand,
   collectManagedDesktopAppPids,
   collectManagedTauriCleanupPids,
@@ -12,6 +13,37 @@ import {
 } from '../../../scripts/dev/tauri-dev-manager-lib';
 
 describe('tauri-dev-manager-lib', () => {
+  it('builds a bounded Windows linker environment for low-memory Tauri runs（低内存模式应限制编译与链接并发）', () => {
+    const env = buildLowMemoryTauriEnv({
+      baseEnv: { PATH: 'C:\\Tools', RUSTFLAGS: '-C target-cpu=x86-64' },
+      targetDir: 'G:\\exomind-cargo-target\\tauri-dev\\low-memory-shared',
+      rustLldPath: 'C:\\Rust\\bin\\rust-lld.exe',
+    });
+
+    expect(env.CARGO_BUILD_JOBS).toBe('1');
+    expect(env.CARGO_PROFILE_DEV_DEBUG).toBe('0');
+    expect(env.CARGO_PROFILE_DEV_INCREMENTAL).toBe('false');
+    expect(env.CARGO_PROFILE_DEV_CODEGEN_UNITS).toBe('16');
+    expect(env.CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER).toBe('C:\\Rust\\bin\\rust-lld.exe');
+    expect(env.EXOMIND_TAURI_TARGET_DIR).toBe('G:\\exomind-cargo-target\\tauri-dev\\low-memory-shared');
+    expect(env.RUSTFLAGS).toBe(
+      '-C target-cpu=x86-64 -C linker-flavor=lld-link -C link-arg=/threads:1 -C link-arg=/DEBUG:NONE',
+    );
+    expect(env.PATH).toBe('C:\\Tools');
+  });
+
+  it('does not add a blank prefix when low-memory mode starts without RUSTFLAGS（无既有 RUSTFLAGS 时不应生成空白前缀）', () => {
+    const env = buildLowMemoryTauriEnv({
+      baseEnv: {},
+      targetDir: 'G:\\target',
+      rustLldPath: 'C:\\Rust\\rust-lld.exe',
+    });
+
+    expect(env.RUSTFLAGS).toBe(
+      '-C linker-flavor=lld-link -C link-arg=/threads:1 -C link-arg=/DEBUG:NONE',
+    );
+  });
+
   it('resolves managed instance paths under project tmp directory（实例元数据与日志应落到项目内 .tmp 目录）', () => {
     const projectRoot = path.resolve('D:/project/exomind');
     const paths = resolveManagedTauriInstancePaths(projectRoot, 'UI 4K / left panel');

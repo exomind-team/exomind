@@ -36,6 +36,27 @@ Windows 真机验证不得把 Rust 编译、Web 构建、Vitest 全量/聚焦测
 
 验收报告必须同时记录启动真窗验收前的内存快照。未经过资源门禁的并行重操作禁止作为后续默认方案。
 
+### 通用硬规则：链接阶段低内存模式（2026-08-24）
+
+2026-08-24 21:35:43，Windows 最终链接进程启动后，可用物理内存在一秒内下降约 `1.1 GiB`；21:35:44 宿主机随即蓝屏，且转储创建失败。崩溃前仍有约 `18 GiB` 可用内存，因此不能把原因简化成普通 OOM；但最终链接的瞬时分配与 IO 压力是目前最接近故障时刻的触发条件。
+
+在完成驱动、硬件或内核级根因定位前，本机 Tauri MCP 桌面构建必须使用显式低内存模式：
+
+```powershell
+bun run tauri:manager start --name <instance> --web-port <port> --hmr-port <port> --rt-port <port> --low-memory
+```
+
+该模式固定执行以下约束：
+
+1. `CARGO_BUILD_JOBS=1`，Cargo 一次只调度一个编译单元。
+2. 开发 profile 使用 `debug=0`，关闭 incremental，并把 codegen units 从默认增量构建的高并发值压到 `16`。
+3. Windows MSVC target 改用 Rust 工具链自带的 `rust-lld`，传入 `/threads:1`，让最终链接主动降速换取更低并发峰值；同时在 rustc 默认 `/DEBUG` 之后追加 `/DEBUG:NONE`，明确禁止生成完整 PDB。
+4. 所有低内存实例串行复用 `tauri-dev/low-memory-shared` 构建缓存；低内存实例运行期间禁止启动另一个受管 Tauri 实例。
+5. 该模式不改变 `.tmp/tauri-dev-state/<instance>/` 的应用数据隔离；共享的只有编译产物缓存，不是用户档案。
+6. 正式 release 全平台构建优先交给 GitHub Actions。除非正在专门验证本机链接稳定性，不在这台 Windows 主机重复完整 release link。
+
+`/DEBUG:FASTLINK` 已被微软弃用，不能作为长期方案；`/INCREMENTAL` 主要改善后续链接，不能消除第一次完整链接的峰值。若低内存模式仍触发系统异常，立即停止本机完整链接，后续只保留 Web/Rust check 与远端 CI 证据。
+
 ### 阶段补记：桌面标题 / 设置版本真窗验收（2026-04-16）
 
 #### 本轮阶段目标

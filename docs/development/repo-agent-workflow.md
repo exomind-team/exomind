@@ -104,7 +104,11 @@ curl -sS -D - -o /dev/null http://127.0.0.1:6984 | head -n 8
 | `v0.4.0 promotion` | 同一 tag / 同一 commit，仅切换 GitHub Release `prerelease=false` 并刷新 GitHub Pages `release` 元数据 | 正式版 |
 
 ```bash
-# 默认预览发版入口：先 dry-run，再执行正式发布
+# 先对候选 ref 跑完整四平台构建；此模式不创建 Release
+gh workflow run release.yml --ref <candidate-ref> -f validate_release=true
+gh run watch <run-id> --exit-status
+
+# 验证全绿后，才进入默认预览发版入口
 bun run release:build --dry-run
 bun run release:build
 
@@ -119,6 +123,8 @@ bun run build:tag
 - `preview / release` 只作为 GitHub Release 状态与 GitHub Pages 元数据视图
 - 有功能 / 修复：bump patch
 - 纯资源变更（图标等）：不单独 bump，随下一个功能版本一起发
+- 只有 tag 触发的 `Build & Release` 四个平台构建和 `create-release` 全绿，才算发版成功
+- 手工上传资产或单独通过 `Sync Release Pages` 不能覆盖失败的发布 CI；已公开 tag 不移动，修复后使用下一个 patch
 
 公开发布说明规范：
 

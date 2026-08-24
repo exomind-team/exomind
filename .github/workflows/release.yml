@@ -6,9 +6,15 @@ on:
       - "v*" # 单一发布 tag：v0.x.y
   workflow_dispatch:
     inputs:
+      validate_release:
+        description: Build every release target without publishing（构建全部发布目标但不发布）
+        required: false
+        default: false
+        type: boolean
       promote_tag:
         description: Existing tag to promote（要晋升的既有 tag）
-        required: true
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -17,7 +23,7 @@ permissions:
 env:
   RUST_TOOLCHAIN: stable
   BUN_VERSION: "1.3.8" # 固定版本，v1.3.10 在 Windows 上有 resolving hang bug
-  VITE_UPDATE_BASE_URL: https://exo-mind.ai/
+  VITE_UPDATE_BASE_URL: https://exomind-team.github.io/exomind/
 
 jobs:
   # ─────────────────────────────────────────────────────────────
@@ -25,7 +31,9 @@ jobs:
   # Split from the old combined Windows job so Android/Windows can run in parallel.
   # ─────────────────────────────────────────────────────────────
   build-android-windows:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.validate_release == true)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -520,7 +528,7 @@ jobs:
           }
 
       - name: Upload Android signed APK Artifact (上传已签名 APK)
-        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: steps.targets.outputs.BUILD_ANDROID == 'true'
         id: upload_apk
         uses: actions/upload-artifact@v7
         with:
@@ -529,18 +537,20 @@ jobs:
         continue-on-error: true
 
       - name: Retry Upload Android signed APK Artifact
-        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && steps.upload_apk.outcome == 'failure'
+        if: steps.targets.outputs.BUILD_ANDROID == 'true' && steps.upload_apk.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
           path: src-tauri/gen/android/app/build/outputs/apk-signed/
 
   # ─────────────────────────────────────────────────────────────
-  # Job 2: Windows EXE/MSI on Windows runner
+  # Job 2: Windows NSIS/MSI on Windows runner
   # Split from the old combined Windows job so Android/Windows can run in parallel.
   # ─────────────────────────────────────────────────────────────
   build-windows:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.validate_release == true)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -801,14 +811,10 @@ jobs:
 
       # ─── Windows build ──────────────────────────────────────
 
-      - name: Build Windows EXE binary (构建 Windows EXE 可执行文件)
+      - name: Build Windows NSIS installer (构建 Windows NSIS 安装包)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
         shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          # Build EXE via cargo to avoid a second tauri beforeBuild bun install in CI.
-          #（使用 cargo 构建 EXE，避免 CI 中 tauri beforeBuild 再次触发 bun install 卡死）
-          cargo build --manifest-path src-tauri/Cargo.toml --release -p exomind --features custom-protocol
+        run: bun tauri build --bundles nsis
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
@@ -988,26 +994,36 @@ jobs:
           Copy-Item -Path target/release/exomind-rt.exe -Destination artifacts/runtime/exomind-rt-windows-x64.exe -Force
 
       - name: Upload Windows runtime Artifact (上传 Windows runtime)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: windows-runtime-${{ steps.hash.outputs.HASH }}
           path: artifacts/runtime/exomind-rt-windows-x64.exe
 
-      - name: Upload Windows EXE Artifact (上传 EXE)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      - name: Upload Windows NSIS Artifact (上传 NSIS 安装包)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: windows-exe-${{ steps.hash.outputs.HASH }}
+          name: windows-nsis-${{ steps.hash.outputs.HASH }}
+          path: |
+            target/release/bundle/nsis/
+            src-tauri/target/release/bundle/nsis/
+          if-no-files-found: error
+
+      - name: Upload Windows portable EXE Artifact (上传免安装 EXE 测试产物)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-portable-${{ steps.hash.outputs.HASH }}
           path: |
             target/release/exomind.exe
             target/release/ExoMind.exe
             src-tauri/target/release/exomind.exe
             src-tauri/target/release/ExoMind.exe
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload Windows MSI Artifact (上传 MSI)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
@@ -1017,7 +1033,9 @@ jobs:
           if-no-files-found: ignore
 
   build-macos:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.validate_release == true)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
@@ -1028,7 +1046,9 @@ jobs:
           node-version: "20"
 
       - name: Install Bun
-        run: npm install -g bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -1065,7 +1085,7 @@ jobs:
         run: bun scripts/dev/check-version-consistency.ts
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Build macOS app (构建 macOS 应用)
         run: npx tauri build
@@ -1101,7 +1121,9 @@ jobs:
           if-no-files-found: ignore
 
   build-linux:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.validate_release == true)
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
@@ -1112,7 +1134,9 @@ jobs:
           node-version: "20"
 
       - name: Install Bun
-        run: npm install -g bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install Linux system dependencies (安装 Linux 系统依赖)
         run: |
@@ -1162,7 +1186,7 @@ jobs:
         run: bun scripts/dev/check-version-consistency.ts
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Build Linux app (构建 Linux 应用)
         run: npx tauri build
@@ -1216,10 +1240,13 @@ jobs:
       ]
     runs-on: ubuntu-latest
     if: |
+      always() &&
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v') &&
       needs.build-android-windows.result == 'success' &&
-      needs.build-windows.result == 'success'
+      needs.build-windows.result == 'success' &&
+      needs.build-macos.result == 'success' &&
+      needs.build-linux.result == 'success'
     steps:
       - name: Checkout repository (检出代码以生成 release notes)
         uses: actions/checkout@v6
@@ -1258,27 +1285,12 @@ jobs:
           output_dir="release-assets"
           mkdir -p "$output_dir"
 
-          exe_files=("$source_dir"/**/*.exe)
-          if (( ${#exe_files[@]} == 0 )); then
-            echo "::error::Missing Windows EXE artifact."
+          setup_files=("$source_dir"/**/*setup*.exe "$source_dir"/**/*installer*.exe)
+          if (( ${#setup_files[@]} == 0 )); then
+            echo "::error::Missing Windows NSIS installer artifact."
             exit 1
           fi
-          app_exe=""
-          for exe in "${exe_files[@]}"; do
-            lower_name="$(basename "$exe" | tr '[:upper:]' '[:lower:]')"
-            if [[ "$lower_name" == *"exomind-rt"* ]]; then
-              continue
-            fi
-            app_exe="$exe"
-            if [[ "$lower_name" == "exomind.exe" || "$lower_name" == *"setup"* || "$lower_name" == *"installer"* ]]; then
-              break
-            fi
-          done
-          if [[ -z "$app_exe" ]]; then
-            echo "::error::Cannot find non-runtime Windows EXE artifact."
-            exit 1
-          fi
-          cp "$app_exe" "$output_dir/ExoMind-${version}-windows-x64-setup.exe"
+          cp "${setup_files[0]}" "$output_dir/ExoMind-${version}-windows-x64-setup.exe"
 
           msi_files=("$source_dir"/**/*.msi)
           if (( ${#msi_files[@]} > 0 )); then
@@ -1445,7 +1457,7 @@ jobs:
 
   promote-release:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.promote_tag != ''
     steps:
       - name: Promote existing GitHub Release (晋升既有 GitHub Release)
         uses: actions/github-script@v8

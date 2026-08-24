@@ -18,17 +18,21 @@
 
 ## Current CI Topology
 
-1. Push `v0.x.y` tag:
+1. Before tagging, dispatch `Build & Release` on the exact candidate ref with `validate_release=true`:
+   - builds Android, Windows, macOS, and Linux artifacts
+   - uploads validation artifacts but does not create or mutate a GitHub Release
+   - must finish green before the immutable canonical tag is created
+2. Push `v0.x.y` tag:
    - starts `Build & Release`
-2. If the build jobs and `create-release` job succeed:
+3. If all four platform build jobs and `create-release` succeed:
    - `Build & Release` creates or updates a GitHub Release as preview (`prerelease: true`)
-3. `Build & Release` success:
+4. `Build & Release` success:
    - triggers `Sync Release Pages` via `workflow_run`
    - refreshes `website/public/releases/**`
    - rebuilds and deploys GitHub Pages from `dev`
    - note: in the default `release:build` path, the version-bump commit is pushed to `dev` before the tag is pushed, so an earlier `Sync Release Pages` run may also happen from the `push` trigger before the release-tag workflow completes
    - observed on 2026-04-11: that earlier `push`-triggered Pages run completed before the preview GitHub Release existed, so it could not publish the new `releases/preview/latest.json`; treat the later `workflow_run` sync as the final source of truth for the freshly cut preview metadata
-4. Promote existing tag:
+5. Promote existing tag:
    - preferred path: use `workflow_dispatch` input `promote_tag`
    - this updates the existing GitHub Release to `prerelease: false`
    - this also applies the scripted side effects (`make_latest`, release title normalization) on the same canonical tag
@@ -41,6 +45,10 @@ Pages timeline output is looser and may still show non-draft canonical or legacy
 Website changelog output is derived from GitHub Release bodies through `scripts/dev/sync-release-pages.ts`
 and `website/src/lib/release-highlights.ts`. Editing an existing GitHub Release body, then rerunning
 `Sync Release Pages`, can update the public `/releases/timeline.json` used by `/changelog/`.
+
+Release completion is fail-closed: a manually uploaded installer, an existing GitHub Release, or a green
+`Sync Release Pages` run does not make a failed `Build & Release` run successful. Never move a published
+canonical tag to repaired code; retain it as a failed candidate and use the next patch version.
 
 ## Preview Build
 
@@ -57,7 +65,14 @@ and `website/src/lib/release-highlights.ts`. Editing an existing GitHub Release 
    - write or review one concise `给使用者看的摘要` for the website changelog/download surface
    - place the curated website bullets in the first `## What Changed / 本次变化` block, because Pages parses that block and keeps at most 5 highlights
    - if no meaningful user-visible change exists, treat the build as an engineering validation build and avoid presenting it as a product iteration on public surfaces
-3. Preferred local entry:
+3. Push the exact candidate ref, then run the build-only release validation and wait for a green result:
+
+```bash
+gh workflow run release.yml --ref <candidate-ref> -f validate_release=true
+gh run watch <run-id> --exit-status
+```
+
+4. Preferred local entry after the validation run is green:
 
 ```bash
 bun run release:build --dry-run
@@ -101,7 +116,7 @@ bun run release:build --tag-only
    - `tag-only`
    - `bump+tag`
 
-4. Manual fallback:
+5. Manual fallback:
 
 ```bash
 bun run build:tag
@@ -110,11 +125,12 @@ bun run build:tag
    `build:tag` only creates/pushes `v{current-version}` from already-aligned local version files.
    It does not perform the remote `dev` state checks that `release:build` does.
 
-5. Run any additional local verification needed for the change when the default checks are insufficient.
-6. Confirm GitHub Actions:
+6. Run any additional local verification needed for the change when the default checks are insufficient.
+7. Confirm GitHub Actions:
    - `Build & Release`
    - `Sync Release Pages`
-7. Check:
+   - the tag-triggered run—not only the earlier build-only validation—must be green before reporting release success
+8. Check:
    - GitHub Release assets
    - `exomind-release-manifest.json` is present on the GitHub Release and matches the release tag/version
    - GitHub Pages root
