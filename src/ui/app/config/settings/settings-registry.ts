@@ -238,6 +238,11 @@ import {
   subscribeVoiceOverlayTranscriptLinesChanges,
 } from '@/config/voice-overlay-preferences';
 import {
+  getNowWorkbenchOverlayEnabled,
+  setNowWorkbenchOverlayEnabled,
+  subscribeNowWorkbenchOverlayEnabledChanges,
+} from '@/config/now-workbench-overlay-preferences';
+import {
   DEFAULT_VOLCANO_RESOURCE_ID,
   VOLCANO_ENDPOINT_OPTIONS,
   VOLCANO_LANGUAGE_OPTIONS,
@@ -1073,6 +1078,21 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     subscribe: subscribeWindowsAppBarWidthChanges,
     successMessage: (widthDip) => `停靠宽度已调整为 ${widthDip} DIP`,
     errorMessagePrefix: '停靠宽度调整失败',
+  },
+  {
+    id: 'now-workbench-overlay-enabled',
+    label: '启用悬浮工作台',
+    description: '在桌面最上层显示可独立隐藏的当下工作台，提供专注计时、任务启动与事件记录。',
+    icon: Monitor,
+    category: 'appearance',
+    type: 'boolean',
+    visible: windowsTauriOnly,
+    rowTestId: 'new-settings-now-overlay-enabled-row',
+    controlTestId: 'new-settings-now-overlay-enabled-switch',
+    get: getNowWorkbenchOverlayEnabled,
+    set: setNowWorkbenchOverlayEnabled,
+    subscribe: subscribeNowWorkbenchOverlayEnabledChanges,
+    successMessage: (enabled) => enabled ? '悬浮工作台已显示' : '悬浮工作台已隐藏',
   },
   {
     id: 'countdown-end-mode',

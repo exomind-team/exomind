@@ -50,6 +50,24 @@ import { emitProposalLifecycle } from '@/lib/services/proposal-lifecycle.service
 import { log } from '@/lib/logger';
 
 const EMBEDDED_RUNTIME_STATUS_RETRY_MS = 1_000;
+const DEFAULT_ACTIVE_BLOCK_THROTTLE_MS = 1_000;
+
+export interface UseSignalStreamOptions {
+  /**
+   * Active-block snapshots can be noisy. Callers may request a smaller bounded
+   * coalescing window for cross-window responsiveness without introducing polling.
+   */
+  activeBlockThrottleMs?: number;
+  /** Disable all Runtime hydration and SSE work while the owning surface lacks scope. */
+  enabled?: boolean;
+}
+
+function normalizeActiveBlockThrottleMs(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_ACTIVE_BLOCK_THROTTLE_MS;
+  }
+  return Math.max(0, Math.round(value ?? DEFAULT_ACTIVE_BLOCK_THROTTLE_MS));
+}
 
 function buildActiveBlockSnapshotSignature(payload: ActiveBlockReplicationSnapshotPayload): string {
   const block = getReplicatedActiveBlock(payload);
@@ -116,14 +134,23 @@ function buildSignalEventLogId(payload: EventLogAppendedPayload): string {
   return `signal-eventlog-${payload.ts}-${hash.toString(16)}`;
 }
 
-export function useSignalStream(): void {
+export function useSignalStream(options: UseSignalStreamOptions = {}): void {
   const serviceRef = useRef<SignalStreamService | null>(null);
+  const activeBlockThrottleMs = normalizeActiveBlockThrottleMs(options.activeBlockThrottleMs);
+  const enabled = options.enabled ?? true;
   const [runtimeTarget, setRuntimeTarget] = useState<RuntimeTarget>(() => getSelectedRuntimeTarget());
   const [runtimeTargetHydrated, setRuntimeTargetHydrated] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     let loggedHydrationError = false;
+
+    if (!enabled) {
+      setRuntimeTargetHydrated(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const hydrateEmbeddedRuntimeStatus = async () => {
       if (!(await isTauri()) || runtimeTarget.mode !== 'embedded') {
@@ -173,7 +200,7 @@ export function useSignalStream(): void {
     return () => {
       cancelled = true;
     };
-  }, [runtimeTarget.mode]);
+  }, [enabled, runtimeTarget.mode]);
 
   useEffect(() => {
     const unsubscribe = subscribeRuntimeTargetChanges((nextTarget) => {
@@ -195,9 +222,11 @@ export function useSignalStream(): void {
   }, []);
 
   useEffect(() => {
-    if (!runtimeTargetHydrated) {
+    if (!enabled || !runtimeTargetHydrated) {
       return;
     }
+
+    let disposed = false;
 
     const currentRuntimeHostId = runtimeTarget.mode === 'embedded'
       ? readEmbeddedRuntimeStatus()?.hostId ?? null
@@ -340,8 +369,9 @@ export function useSignalStream(): void {
           log.info('[SignalStream] eventlog.replication.appended → EventStorage');
         }
       },
-      // Throttle: RT may dispatch active block replication at high frequency,
-      // causing UI state overwrites. Cap at 1s. See #554, #944.
+      // Throttle: RT may dispatch active block replication in bursts, causing
+      // UI state overwrites. The caller selects its responsiveness budget.
+      // See #554, #944.
       // State variables declared before startSignalHandlers for cleanup access.
       onActiveBlockReplicationSnapshot: async (payload: ActiveBlockReplicationSnapshotPayload) => {
         const signature = buildActiveBlockSnapshotSignature(payload);
@@ -352,7 +382,7 @@ export function useSignalStream(): void {
         const now = Date.now();
         const elapsed = now - activeBlockLastProcessedAt;
 
-        if (elapsed >= 1000) {
+        if (elapsed >= activeBlockThrottleMs) {
           activeBlockLastProcessedAt = now;
           activeBlockLastSignature = signature;
           await projectActiveBlockSnapshot(payload);
@@ -362,18 +392,20 @@ export function useSignalStream(): void {
         activeBlockPendingPayload = payload;
         activeBlockPendingSignature = signature;
         if (!activeBlockThrottleTimer) {
-          activeBlockThrottleTimer = setTimeout(async () => {
+          activeBlockThrottleTimer = setTimeout(() => {
             activeBlockThrottleTimer = null;
-            if (activeBlockPendingPayload) {
+            if (!disposed && activeBlockPendingPayload) {
               activeBlockLastProcessedAt = Date.now();
               const p = activeBlockPendingPayload;
               const queuedSignature = activeBlockPendingSignature;
               activeBlockPendingPayload = null;
               activeBlockPendingSignature = null;
               activeBlockLastSignature = queuedSignature;
-              await projectActiveBlockSnapshot(p);
+              void projectActiveBlockSnapshot(p).catch((error) => {
+                log.error(`[SignalStream] throttled active-block projection failed: ${error instanceof Error ? error.message : String(error)}`);
+              });
             }
-          }, 1000 - elapsed);
+          }, activeBlockThrottleMs - elapsed);
         }
       },
       onTimeBlockCompletedReplication: async (payload) => {
@@ -412,14 +444,17 @@ export function useSignalStream(): void {
     log.info(`[SignalStream] SSE connection started (${targetLabel})`);
 
     return () => {
+      disposed = true;
       if (activeBlockThrottleTimer) {
         clearTimeout(activeBlockThrottleTimer);
         activeBlockThrottleTimer = null;
       }
+      activeBlockPendingPayload = null;
+      activeBlockPendingSignature = null;
       unsubscribe();
       service.stop();
       serviceRef.current = null;
       log.info(`[SignalStream] SSE connection stopped (${targetLabel})`);
     };
-  }, [runtimeTarget, runtimeTargetHydrated]);
+  }, [activeBlockThrottleMs, enabled, runtimeTarget, runtimeTargetHydrated]);
 }
