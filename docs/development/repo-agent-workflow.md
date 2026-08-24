@@ -123,6 +123,7 @@ bun run build:tag
 - `preview / release` 只作为 GitHub Release 状态与 GitHub Pages 元数据视图
 - 有功能 / 修复：bump patch
 - 纯资源变更（图标等）：不单独 bump，随下一个功能版本一起发
+- 四平台只构建预验证全绿后，必须下载该精确候选的 Windows 与 Android 产物，完成同版本 PC/Android 发布前实测：新装空状态和从上一日用版本升级两条路径都要覆盖发现、PIN 配对、EventLog live sync 与 snapshot/backfill。任何一项失败都不得推 tag。
 - 只有 tag 触发的 `Build & Release` 四个平台构建和 `create-release` 全绿，才算发版成功
 - 手工上传资产或单独通过 `Sync Release Pages` 不能覆盖失败的发布 CI；已公开 tag 不移动，修复后使用下一个 patch
 

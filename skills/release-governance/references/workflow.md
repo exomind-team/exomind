@@ -22,17 +22,18 @@
    - builds Android, Windows, macOS, and Linux artifacts
    - uploads validation artifacts but does not create or mutate a GitHub Release
    - must finish green before the immutable canonical tag is created
-2. Push `v0.x.y` tag:
+2. Download the exact Windows and Android validation artifacts and pass the fresh-state plus upgrade-state cross-device release gate described below.
+3. Push `v0.x.y` tag:
    - starts `Build & Release`
-3. If all four platform build jobs and `create-release` succeed:
+4. If all four platform build jobs and `create-release` succeed:
    - `Build & Release` creates or updates a GitHub Release as preview (`prerelease: true`)
-4. `Build & Release` success:
+5. `Build & Release` success:
    - triggers `Sync Release Pages` via `workflow_run`
    - refreshes `website/public/releases/**`
    - rebuilds and deploys GitHub Pages from `dev`
    - note: in the default `release:build` path, the version-bump commit is pushed to `dev` before the tag is pushed, so an earlier `Sync Release Pages` run may also happen from the `push` trigger before the release-tag workflow completes
    - observed on 2026-04-11: that earlier `push`-triggered Pages run completed before the preview GitHub Release existed, so it could not publish the new `releases/preview/latest.json`; treat the later `workflow_run` sync as the final source of truth for the freshly cut preview metadata
-5. Promote existing tag:
+6. Promote existing tag:
    - preferred path: use `workflow_dispatch` input `promote_tag`
    - this updates the existing GitHub Release to `prerelease: false`
    - this also applies the scripted side effects (`make_latest`, release title normalization) on the same canonical tag
@@ -71,6 +72,13 @@ canonical tag to repaired code; retain it as a failed candidate and use the next
 gh workflow run release.yml --ref <candidate-ref> -f validate_release=true
 gh run watch <run-id> --exit-status
 ```
+
+3.1. Before creating the immutable tag, download the Windows and Android artifacts from that exact validation run and complete the cross-device release gate:
+   - use the same candidate version on PC and a physical Android device
+   - test a fresh state with no pre-existing peer, then an upgrade state that retains the previous version's confirmed peer and runtime data
+   - require mutual mDNS visibility, a complete PIN pairing flow, one EventLog live-sync roundtrip, and EventLog/Task/TimeBlock snapshot or backfill without HTTP 409 authentication errors
+   - record RT truth (`/mesh/discovered`, `/mesh/peers`, relevant response status) separately from UI truth
+   - if either path fails, cancel publishing; do not create or move the canonical tag
 
 4. Preferred local entry after the validation run is green:
 

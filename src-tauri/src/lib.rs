@@ -65,9 +65,10 @@ use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
 use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-use windows_appbar::ensure_action_dock_window;
-use windows_appbar::{windows_appbar_attach_right, windows_appbar_detach, windows_appbar_resize};
+use windows_appbar::{
+    ensure_action_dock_window, windows_appbar_attach_right, windows_appbar_detach,
+    windows_appbar_resize,
+};
 
 const DEFAULT_SIGNAL_ROUTES_FILE_NAME: &str = "signal-routes.default.json";
 const DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON: &str =
@@ -338,7 +339,6 @@ pub fn run() {
             if let Err(error) = ensure_voice_overlay_window(app.handle()) {
                 log::warn!("failed to prewarm voice overlay window: {error}");
             }
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let Err(error) = ensure_action_dock_window(app.handle()) {
                 log::warn!("failed to prewarm action-dock window: {error}");
             }
@@ -568,7 +568,6 @@ pub fn run() {
             // so that overlay windows (now-workbench-overlay, voice-overlay) don't linger.
             if window.label() == "main" {
                 if let tauri::WindowEvent::Destroyed = event {
-                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     windows_appbar::detach_on_shutdown(window.app_handle());
                     std::process::exit(0);
                 }
