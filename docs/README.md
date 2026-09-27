@@ -69,7 +69,7 @@
 - [信号池时间块反馈](development/signal-pool-timeblock-feedback.md) -- 时间块结束 Agent 自动反馈
 - [团队协作规范](development/team-collaboration.md) -- 多角色团队协作流程
 - [团队调度经验](development/team-scheduling.md) -- 多 Agent 团队调度实践
-- [Termux 环境](development/termux-environment.md) -- Android Termux 环境编译运行指南
+- [Termux 环境](development/termux-environment.md) -- ExoMind 所需的通用 Android/Termux 平台基线；完整通用知识见 [sys_manage_termux](https://github.com/ARCJ137442/sys_manage_termux)
 
 ---
 
