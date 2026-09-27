@@ -31,7 +31,6 @@ async fn start_test_runtime_with_data_dir(
         bind_host: "127.0.0.1".to_string(),
         port: 0,
         spawn_builtin_actors: false,
-        spawn_ts_agents: false,
         data_dir,
         ..Default::default()
     })

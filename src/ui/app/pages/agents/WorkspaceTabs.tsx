@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import { formatHostForUrl } from '@/config/runtime-target';
+import { buildDirectRuntimeCandidates } from './agents-utils';
 
 // ---------------------------------------------------------------------------
 // Types — camelCase (matches Tauri command serde output)
@@ -51,10 +52,30 @@ interface WorkspaceStatus {
 // Helpers — Tauri invoke (desktop) with HTTP fallback (web)
 // ---------------------------------------------------------------------------
 
+const WORKSPACE_REQUEST_TIMEOUT_MS = 3500;
+
+function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timeout（请求超时）`));
+    }, WORKSPACE_REQUEST_TIMEOUT_MS);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  });
+}
+
 async function fetchWorkspaceKnowledgeList(agentId: string): Promise<KnowledgeListResponse | null> {
   try {
-    if (isTauri()) {
-      return await invoke<KnowledgeListResponse>('get_agent_workspace_knowledge_list', { agentId });
+    if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
+      return await withTimeout(
+        invoke<KnowledgeListResponse>('get_agent_workspace_knowledge_list', { agentId }),
+        'get_agent_workspace_knowledge_list',
+      );
     }
     return await httpGet<KnowledgeListResponse>(agentId, 'knowledge');
   } catch { return null; }
@@ -62,26 +83,46 @@ async function fetchWorkspaceKnowledgeList(agentId: string): Promise<KnowledgeLi
 
 async function fetchWorkspaceKnowledgeFile(agentId: string, filename: string): Promise<string | null> {
   try {
-    if (isTauri()) {
-      return await invoke<string>('get_agent_workspace_knowledge', { agentId, filename });
+    if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
+      return await withTimeout(
+        invoke<string>('get_agent_workspace_knowledge', { agentId, filename }),
+        'get_agent_workspace_knowledge',
+      );
     }
     return await httpText(agentId, `knowledge/${filename}`);
   } catch { return null; }
 }
 
 async function fetchWorkspaceActions(agentId: string, limit = 50): Promise<ActionsResponse | null> {
-  try {
-    if (isTauri()) {
-      return await invoke<ActionsResponse>('get_agent_workspace_actions', { agentId, limit });
+  if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
+    try {
+      const result = await withTimeout(
+        invoke<ActionsResponse>('get_agent_workspace_actions', { agentId, limit }),
+        'get_agent_workspace_actions',
+      );
+      if (result) return result;
+    } catch {
+      // Fall through to HTTP; release IPC must never keep the tab loading forever.
     }
+  }
+
+  try {
     return await httpGet<ActionsResponse>(agentId, `actions?limit=${limit}`);
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 async function fetchWorkspaceSoul(agentId: string): Promise<string | null> {
   try {
-    if (isTauri()) {
-      return await invoke<string>('get_agent_workspace_soul', { agentId });
+    if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
+      const result = await withTimeout(
+        invoke<string>('get_agent_workspace_soul', { agentId }),
+        'get_agent_workspace_soul',
+      );
+      if (result) return result;
+      // Fallback: built-in agents don't have workspace — try Runtime API
+      return await httpText(agentId, 'soul');
     }
     return await httpText(agentId, 'soul');
   } catch { return null; }
@@ -89,32 +130,45 @@ async function fetchWorkspaceSoul(agentId: string): Promise<string | null> {
 
 async function fetchWorkspaceStatus(agentId: string): Promise<WorkspaceStatus | null> {
   try {
-    if (isTauri()) {
-      return await invoke<WorkspaceStatus>('get_agent_workspace_status', { agentId });
+    if (isTauri() || (typeof window !== 'undefined' && '__TAURI__' in window)) {
+      return await withTimeout(
+        invoke<WorkspaceStatus>('get_agent_workspace_status', { agentId }),
+        'get_agent_workspace_status',
+      );
     }
     return await httpGet<WorkspaceStatus>(agentId, 'status');
   } catch { return null; }
 }
 
-// HTTP fallback for non-Tauri (web) environments
+// HTTP fallback for non-Tauri (web) environments or built-in agents
 async function httpGet<T>(agentId: string, path: string): Promise<T | null> {
   const hosts = await getRuntimeHostService().listHosts();
-  if (hosts.length === 0) return null;
-  const host = hosts[0];
-  const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
-  const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
-  if (!resp.ok) return null;
-  return await resp.json() as T;
+  const candidates = hosts.length > 0
+    ? hosts
+    : buildDirectRuntimeCandidates([]);
+  for (const host of candidates) {
+    try {
+      const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(WORKSPACE_REQUEST_TIMEOUT_MS) });
+      if (resp.ok) return await resp.json() as T;
+    } catch { /* try next candidate */ }
+  }
+  return null;
 }
 
 async function httpText(agentId: string, path: string): Promise<string | null> {
   const hosts = await getRuntimeHostService().listHosts();
-  if (hosts.length === 0) return null;
-  const host = hosts[0];
-  const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
-  const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
-  if (!resp.ok) return null;
-  return await resp.text();
+  const candidates = hosts.length > 0
+    ? hosts
+    : buildDirectRuntimeCandidates([]);
+  for (const host of candidates) {
+    try {
+      const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(WORKSPACE_REQUEST_TIMEOUT_MS) });
+      if (resp.ok) return await resp.text();
+    } catch { /* try next candidate */ }
+  }
+  return null;
 }
 
 const STRATEGY_LABELS: Record<string, string> = {
@@ -125,8 +179,11 @@ const STRATEGY_LABELS: Record<string, string> = {
 };
 
 const ACTION_TYPE_LABELS: Record<string, string> = {
-  think: '思考',
   signal: '信号',
+  thinking: '思考',
+  text: '回复',
+  tool_call: '工具调用',
+  tool_result: '工具返回',
   knowledge_write: '记忆写入',
   knowledge_delete: '记忆删除',
 };
@@ -275,6 +332,19 @@ function KnowledgeTab({ agentId }: { agentId: string }) {
 function ActionsTab({ agentId }: { agentId: string }) {
   const [actions, setActions] = useState<ActionEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  const toggleExpand = useCallback((idx: number) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) {
+        next.delete(idx);
+      } else {
+        next.add(idx);
+      }
+      return next;
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -360,7 +430,37 @@ function ActionsTab({ agentId }: { agentId: string }) {
                         )}
                       </div>
                     </div>
-                    <p className="exomind-selectable mt-1 text-xs leading-5 text-secondary">{entry.description}</p>
+                    <div className="mt-1">
+                      {entry.description.length > 120 && !expanded.has(idx) ? (
+                        <>
+                          <p className="exomind-selectable whitespace-pre-wrap text-xs leading-5 text-secondary">
+                            {entry.description.slice(0, 120)}...
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => toggleExpand(idx)}
+                            className="text-[10px] text-brand-accent hover:underline"
+                          >
+                            展开全文
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="exomind-selectable whitespace-pre-wrap text-xs leading-5 text-secondary">
+                            {entry.description}
+                          </p>
+                          {entry.description.length > 120 && (
+                            <button
+                              type="button"
+                              onClick={() => toggleExpand(idx)}
+                              className="text-[10px] text-brand-accent hover:underline"
+                            >
+                              收起
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

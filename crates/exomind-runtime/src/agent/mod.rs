@@ -21,6 +21,7 @@ pub mod llm_cognition;
 pub mod proposal_tools;
 pub mod runtime_event;
 pub mod session;
+pub mod timeblock_summary;
 pub mod tools;
 pub mod workspace;
 
@@ -66,7 +67,7 @@ pub struct ChatRequest {
 }
 
 /// Session metadata（会话元信息）.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SessionInfo {
     pub session_id: String,
     pub status: String,
@@ -74,6 +75,43 @@ pub struct SessionInfo {
     pub last_active: String,
     pub message_count: u64,
     pub uptime_secs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<session::ToolCallRecord>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_blocks: Option<Vec<api::ContentBlock>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_log: Option<Vec<session::ActionLogEntry>>,
+}
+
+impl Default for SessionInfo {
+    fn default() -> Self {
+        Self {
+            session_id: String::new(),
+            status: String::new(),
+            created_at: String::new(),
+            last_active: String::new(),
+            message_count: 0,
+            uptime_secs: 0,
+            content: None,
+            trigger_source: None,
+            prompt: None,
+            provider: None,
+            model: None,
+            tool_calls: None,
+            content_blocks: None,
+            action_log: None,
+        }
+    }
 }
 
 /// Agent behavior contract (Agent 行为契约).
@@ -107,6 +145,11 @@ pub trait Agent: Send + Sync {
 
     fn close_session(&self, _session_id: &str) -> bool {
         false
+    }
+
+    /// Return the agent's "soul" — its identity, system prompt, or persona description.
+    fn soul(&self) -> String {
+        self.description().to_string()
     }
 
     fn stats(&self, _session_id: Option<String>) -> BoxFuture<'_, Option<Value>> {

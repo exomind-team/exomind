@@ -7,6 +7,7 @@ import {
   getDefaultLLMRegistryDraft,
   saveDefaultLLMRegistryDraft,
 } from '@/lib/ai-registry/compat';
+import { setRuntimeConfigValue } from './runtime-config-cache';
 
 const LEGACY_LLM_API_KEY_STORAGE_KEY = 'exomind:llmApiKey';
 const LEGACY_LLM_BASE_URL_STORAGE_KEY = 'exomind:llmBaseUrl';
@@ -165,4 +166,36 @@ export function subscribeLLMSettingsChanges(listener: (settings: LLMSettings) =>
   return subscribeAIRegistryChanges(() => {
     listener(getLLMSettings());
   });
+}
+
+/**
+ * Map an AI Registry channel vendor to a Runtime-compatible provider identifier.
+ * Runtime only accepts "openai" or "anthropic".
+ */
+function mapVendorToProvider(vendor: string): string {
+  const normalized = vendor.toLowerCase();
+  if (normalized.includes('anthropic')) return 'anthropic';
+  return 'openai';
+}
+
+/**
+ * Bridge: sync the resolved AI Registry LLM settings to the 4 flat config keys
+ * that Runtime built-in agents read via `resolve_provider_profile_from_runtime()`.
+ *
+ * Called after every AI Registry write (save / set-default / delete) and during bootstrap.
+ */
+export function syncLLMSettingsToRuntimeFlatKeys(): void {
+  const settings = getLLMSettings();
+  const snapshot = getAIRegistrySnapshot();
+  const resolved = resolveOfferingForCapability(snapshot, 'llm.chat');
+
+  // Use channel vendor from the resolved offering instead of URL-based inference
+  const provider = resolved
+    ? mapVendorToProvider(resolved.channel.vendor)
+    : mapVendorToProvider(settings.baseUrl);
+
+  setRuntimeConfigValue('exomind:agentApiProvider', provider);
+  setRuntimeConfigValue('exomind:agentApiModel', settings.model);
+  setRuntimeConfigValue('exomind:agentApiBaseUrl', settings.baseUrl);
+  setRuntimeConfigValue('exomind:agentApiApiKey', settings.apiKey, { sensitive: true });
 }

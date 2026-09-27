@@ -1,4 +1,3 @@
-use chrono::Utc;
 use serde_json::Value;
 use serde_json::json;
 
@@ -35,7 +34,6 @@ pub async fn add_event(global: &GlobalOptions, args: &EventlogAddArgs) -> Result
     let context = resolve_command_context(global)?;
     let path = scoped_eventlog_path("/eventlog", context.scope.as_ref());
     let payload = json!({
-        "timestamp": Utc::now().timestamp_millis(),
         "content": args.content,
         "tags": args.tags,
     });

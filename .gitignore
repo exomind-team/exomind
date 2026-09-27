@@ -10,6 +10,7 @@ lerna-debug.log*
 # Dependencies
 node_modules
 /bun.lock
+/package-lock.json
 
 # Build outputs
 dist
@@ -92,9 +93,11 @@ website/.astro/
 
 # === Agent output (local cache) ===
 agent-output/
+skills/*-workspace/
 
 # === Build artifacts (local cache) ===
 artifacts/
+public/dev-assets/
 
 # === Jujutsu metadata ===
 /.jj/

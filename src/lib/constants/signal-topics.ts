@@ -24,9 +24,6 @@ export const KNOWN_AGENT_HUB_TOPICS = [
   USER_INPUT_NORMALIZED_TOPIC,
   EXTERNAL_INPUT_RECEIVED_TOPIC,
   EXTERNAL_INPUT_INGESTED_TOPIC,
-  'session.end',
-  'timeblock.completed',
-  'input.classified',
   '*',
 ] as const;
 

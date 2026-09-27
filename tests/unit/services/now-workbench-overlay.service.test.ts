@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.fn();
+const emitMock = vi.fn();
+const listenMock = vi.fn(async () => () => {});
 const preferenceState = {
   enabled: true,
   position: { x: 120, y: 240 } as { x: number; y: number } | null,
@@ -10,6 +12,11 @@ const enabledListeners = new Set<(value: boolean) => void>();
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
   invoke: (...args: unknown[]) => invokeMock(...args),
+}));
+
+vi.mock('@tauri-apps/api/event', () => ({
+  emit: (...args: unknown[]) => emitMock(...args),
+  listen: (...args: unknown[]) => listenMock(...args),
 }));
 
 vi.mock('@/config/now-workbench-overlay-preferences', () => ({
@@ -30,6 +37,10 @@ describe('NowWorkbenchOverlayService（当下工作台悬浮窗服务）', () =>
   beforeEach(() => {
     vi.resetModules();
     invokeMock.mockReset();
+    emitMock.mockReset();
+    emitMock.mockResolvedValue(undefined);
+    listenMock.mockReset();
+    listenMock.mockImplementation(async () => () => {});
     preferenceState.enabled = true;
     preferenceState.position = { x: 120, y: 240 };
     enabledListeners.clear();
@@ -42,8 +53,47 @@ describe('NowWorkbenchOverlayService（当下工作台悬浮窗服务）', () =>
     await service.init();
 
     expect(invokeMock).toHaveBeenCalledWith('now_workbench_overlay_ensure');
+    expect(invokeMock).toHaveBeenCalledWith('now_workbench_overlay_profile_set', { profileId: null });
     expect(invokeMock).toHaveBeenCalledWith('now_workbench_overlay_set_position', { x: 120, y: 240 });
     expect(invokeMock).toHaveBeenCalledWith('now_workbench_overlay_show');
+  });
+
+  it('does not create the overlay on init when disabled（关闭时不预热悬浮工作台）', async () => {
+    preferenceState.enabled = false;
+    const { createNowWorkbenchOverlayService } = await import('@/services/now-workbench-overlay.service');
+    const service = createNowWorkbenchOverlayService();
+
+    await service.init();
+
+    expect(invokeMock).not.toHaveBeenCalledWith('now_workbench_overlay_ensure');
+    expect(invokeMock).not.toHaveBeenCalledWith('now_workbench_overlay_show');
+  });
+
+  it('disposes a stale listener when StrictMode restarts initialization（StrictMode 重启初始化时清理旧监听器）', async () => {
+    const firstUnlisten = vi.fn();
+    const secondUnlisten = vi.fn();
+    let resolveFirstListen!: (unlisten: () => void) => void;
+    listenMock
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirstListen = resolve;
+      }))
+      .mockImplementationOnce(async () => secondUnlisten);
+
+    const { createNowWorkbenchOverlayService } = await import('@/services/now-workbench-overlay.service');
+    const service = createNowWorkbenchOverlayService();
+
+    const firstInit = service.init();
+    service.destroy();
+    await service.init();
+    resolveFirstListen(firstUnlisten);
+    await firstInit;
+
+    expect(firstUnlisten).toHaveBeenCalledTimes(1);
+    expect(secondUnlisten).not.toHaveBeenCalled();
+    expect(invokeMock.mock.calls.filter(([command]) => command === 'now_workbench_overlay_show')).toHaveLength(1);
+
+    service.destroy();
+    expect(secondUnlisten).toHaveBeenCalledTimes(1);
   });
 
   it('keeps manual hide session-local until explicitly reopened（临时隐藏仅作用于本次会话）', async () => {
@@ -73,6 +123,44 @@ describe('NowWorkbenchOverlayService（当下工作台悬浮窗服务）', () =>
     await service.reopenFromMainWindow();
 
     expect(invokeMock).toHaveBeenCalledWith('now_workbench_overlay_restore');
+  });
+
+  it('serializes rapid profile broadcasts in owner order（快速切换档案时按主窗口顺序广播）', async () => {
+    const { useSyncStore } = await import('@/ui/stores/sync-store');
+    useSyncStore.setState({ activeProfileId: null });
+    const { createNowWorkbenchOverlayService } = await import('@/services/now-workbench-overlay.service');
+    const service = createNowWorkbenchOverlayService();
+    await service.init();
+
+    const operations: string[] = [];
+    invokeMock.mockImplementation(async (command: string, args?: { profileId?: string | null }) => {
+      if (command === 'now_workbench_overlay_profile_set') {
+        operations.push(`set:${args?.profileId ?? 'null'}`);
+      }
+    });
+    emitMock.mockImplementation(async (
+      eventName: string,
+      payload?: { profileId?: string | null },
+    ) => {
+      if (eventName === 'main-window-profile-sync') {
+        operations.push(`emit:${payload?.profileId ?? 'null'}`);
+      }
+    });
+
+    useSyncStore.setState({ activeProfileId: 'profile-a' });
+    useSyncStore.setState({ activeProfileId: 'profile-b' });
+
+    await vi.waitFor(() => {
+      expect(operations).toEqual([
+        'set:profile-a',
+        'emit:profile-a',
+        'set:profile-b',
+        'emit:profile-b',
+      ]);
+    });
+
+    service.destroy();
+    useSyncStore.setState({ activeProfileId: null });
   });
 
   it('savePosition persists position and pushes one native update（显式保存位置时推送一次原生更新）', async () => {

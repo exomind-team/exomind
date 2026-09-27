@@ -1,4 +1,4 @@
-> 最后更新：`2026-04-19` | 更新者：`Codex` | 更新内容概要：`补充 /act/await 与 raw eventlog watch 的职责分层，并保留 raw watch 的 cursor / catch-up 语义说明。`
+> 最后更新：`2026-05-18` | 更新者：`Claude Code` | 更新内容概要：`去硬编码；补充 /act/await 与 raw eventlog watch 的职责分层，并保留 raw watch 的 cursor / catch-up 语义说明。`
 
 # EventLog
 
@@ -13,7 +13,7 @@
 等待“下一条事件”时，默认最小例子是：
 
 ```bash
-curl -N -X POST "http://127.0.0.1:9124/act/await?user_id=profile-argon" \
+curl -N -X POST "http://<RT>/act/await?user_id=<PROFILE>" \
   -H "Content-Type: application/json" \
   --data-binary '{"condition":{"type":"next_event"}}'
 ```
@@ -76,11 +76,11 @@ curl -N -X POST "http://127.0.0.1:9124/act/await?user_id=profile-argon" \
 ## 常用读取
 
 ```bash
-curl -sS "http://127.0.0.1:9124/eventlog?user_id=profile-argon&limit=20"
-curl -sS "http://127.0.0.1:9124/eventlog?user_id=profile-argon&since_timestamp=1776157200000"
-curl -sS "http://127.0.0.1:9124/eventlog?user_id=profile-argon&since_timestamp=1776157200000&until_timestamp=1776165543333"
-curl -sS "http://127.0.0.1:9124/eventlog?user_id=profile-argon&tags=note,task_completed"
-curl -sS "http://127.0.0.1:9124/eventlog/<event-id>?user_id=profile-argon"
+curl -sS "http://<RT>/eventlog?user_id=<PROFILE>&limit=20"
+curl -sS "http://<RT>/eventlog?user_id=<PROFILE>&since_timestamp=1776157200000"
+curl -sS "http://<RT>/eventlog?user_id=<PROFILE>&since_timestamp=1776157200000&until_timestamp=1776165543333"
+curl -sS "http://<RT>/eventlog?user_id=<PROFILE>&tags=note,task_completed"
+curl -sS "http://<RT>/eventlog/<event-id>?user_id=<PROFILE>"
 ```
 
 说明：
@@ -95,9 +95,9 @@ curl -sS "http://127.0.0.1:9124/eventlog/<event-id>?user_id=profile-argon"
 ## raw watch 语义
 
 ```bash
-curl -sS "http://127.0.0.1:9124/eventlog/watch?user_id=profile-argon&timeout=30"
-curl -sS "http://127.0.0.1:9124/eventlog/watch?user_id=profile-argon&since_id=<event-id>&timeout=30"
-curl -sS "http://127.0.0.1:9124/eventlog/watch?user_id=profile-argon&since_timestamp=1776157200000&timeout=30"
+curl -sS "http://<RT>/eventlog/watch?user_id=<PROFILE>&timeout=30"
+curl -sS "http://<RT>/eventlog/watch?user_id=<PROFILE>&since_id=<event-id>&timeout=30"
+curl -sS "http://<RT>/eventlog/watch?user_id=<PROFILE>&since_timestamp=1776157200000&timeout=30"
 ```
 
 当前代码语义：
@@ -114,7 +114,7 @@ curl -sS "http://127.0.0.1:9124/eventlog/watch?user_id=profile-argon&since_times
 ## 追加事件
 
 ```bash
-curl -sS -X POST "http://127.0.0.1:9124/eventlog?user_id=profile-argon" \
+curl -sS -X POST "http://<RT>/eventlog?user_id=<PROFILE>" \
   -H "Content-Type: application/json" \
   -d '{"timestamp":1776164207776,"content":"hello from curl","tags":["note"]}'
 ```
@@ -122,13 +122,13 @@ curl -sS -X POST "http://127.0.0.1:9124/eventlog?user_id=profile-argon" \
 建议写入后立刻回读：
 
 ```bash
-curl -sS "http://127.0.0.1:9124/eventlog?user_id=profile-argon&limit=1"
+curl -sS "http://<RT>/eventlog?user_id=<PROFILE>&limit=1"
 ```
 
 ## 清空事件日志
 
 ```bash
-curl -sS -X DELETE "http://127.0.0.1:9124/eventlog?user_id=profile-argon"
+curl -sS -X DELETE "http://<RT>/eventlog?user_id=<PROFILE>"
 ```
 
 这是危险操作。当前真端点是 `DELETE /eventlog`，不是 `/eventlog/clear`。
@@ -136,9 +136,9 @@ curl -sS -X DELETE "http://127.0.0.1:9124/eventlog?user_id=profile-argon"
 ## 后端状态与备份
 
 ```bash
-curl -sS "http://127.0.0.1:9124/eventlog/backend/status"
-curl -sS "http://127.0.0.1:9124/eventlog/backup/json?user_id=profile-argon"
-curl -sS "http://127.0.0.1:9124/eventlog/backup/sqlite?user_id=profile-argon"
+curl -sS "http://<RT>/eventlog/backend/status"
+curl -sS "http://<RT>/eventlog/backup/json?user_id=<PROFILE>"
+curl -sS "http://<RT>/eventlog/backup/sqlite?user_id=<PROFILE>"
 ```
 
 当前 backend status 形态：
@@ -159,7 +159,7 @@ curl -sS "http://127.0.0.1:9124/eventlog/backup/sqlite?user_id=profile-argon"
 JSON 导入：
 
 ```bash
-curl -sS -X POST "http://127.0.0.1:9124/eventlog/import/json?user_id=profile-argon&strategy=merge" \
+curl -sS -X POST "http://<RT>/eventlog/import/json?user_id=<PROFILE>&strategy=merge" \
   -H "Content-Type: application/json" \
   --data-binary "@eventlog-backup.json"
 ```
@@ -167,7 +167,7 @@ curl -sS -X POST "http://127.0.0.1:9124/eventlog/import/json?user_id=profile-arg
 SQLite 导入：
 
 ```bash
-curl -sS -X POST "http://127.0.0.1:9124/eventlog/import/sqlite?user_id=profile-argon&strategy=overwrite" \
+curl -sS -X POST "http://<RT>/eventlog/import/sqlite?user_id=<PROFILE>&strategy=overwrite" \
   -H "Content-Type: application/json" \
   --data-binary "@eventlog-sqlite-import.json"
 ```

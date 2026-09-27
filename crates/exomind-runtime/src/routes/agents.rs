@@ -71,6 +71,8 @@ pub fn router() -> Router<AppState> {
             "/agents/:id/sessions/:sid",
             get(get_session).delete(close_session),
         )
+        .route("/agents/:id/actions", get(list_actions))
+        .route("/agents/:id/soul", get(get_soul))
 }
 
 async fn list_agents(State(state): State<AppState>) -> Json<Vec<crate::agent::AgentSummary>> {
@@ -500,4 +502,79 @@ async fn close_session(
         status: "closed".to_string(),
         session_id: sid,
     }))
+}
+
+#[derive(serde::Serialize)]
+struct ActionEntry {
+    timestamp: String,
+    tick: u64,
+    #[serde(rename = "actionType")]
+    action_type: String,
+    description: String,
+    #[serde(rename = "energyBefore")]
+    energy_before: u64,
+    #[serde(rename = "energyAfter")]
+    energy_after: u64,
+}
+
+#[derive(serde::Serialize)]
+struct ActionsResponse {
+    actions: Vec<ActionEntry>,
+    total: usize,
+}
+
+async fn list_actions(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<ActionsResponse>, StatusCode> {
+    let Some(agent) = state.registry.get(&id) else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    let sessions = agent.list_sessions();
+    let mut actions: Vec<ActionEntry> = Vec::new();
+
+    // Build actions from per-block action_log entries
+    for session in &sessions {
+        if let Some(ref action_log) = session.action_log {
+            for entry in action_log {
+                actions.push(ActionEntry {
+                    timestamp: entry.timestamp.clone(),
+                    tick: entry.tick,
+                    action_type: entry.action_type.clone(),
+                    description: entry.description.clone(),
+                    energy_before: entry.energy_before,
+                    energy_after: entry.energy_after,
+                });
+            }
+        } else {
+            // Fallback: create a single entry from session metadata
+            actions.push(ActionEntry {
+                timestamp: session.created_at.clone(),
+                tick: 1,
+                action_type: "signal".to_string(),
+                description: format!("session {} ({})", session.session_id, session.status),
+                energy_before: 0,
+                energy_after: 0,
+            });
+        }
+    }
+
+    // Sort by timestamp descending (newest first)
+    actions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+    let total = actions.len();
+    Ok(Json(ActionsResponse { actions, total }))
+}
+
+async fn get_soul(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<String>, StatusCode> {
+    let Some(agent) = state.registry.get(&id) else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    // Return agent's soul (identity/system prompt/persona)
+    Ok(Json(agent.soul()))
 }

@@ -24,6 +24,8 @@ export const PHASE_COLORS: Record<string, string> = {
   dormant: '#6B7280',
 };
 
+const AGENT_DETAIL_FALLBACK_DELAY_MS = 2500;
+
 function AgentDetailHeader({ title }: { title: string }) {
   return (
     <header data-testid="agent-detail-header" className="mb-3 flex items-center justify-between border-b border-border-card pb-3">
@@ -171,6 +173,12 @@ function getTargetIcon(target: AgentHubListItem) {
   return Sparkles;
 }
 
+function getStatsGridClass(count: number): string {
+  if (count <= 1) return 'grid-cols-1';
+  if (count === 2) return 'grid-cols-2';
+  return 'grid-cols-2 sm:grid-cols-3';
+}
+
 async function resolveAgentRuntimeHost(agentId: string) {
   const snapshot = await getRuntimeManager().refreshSnapshot();
   const preferredHost = findPreferredRuntimeHostForAgent(snapshot.hosts, agentId);
@@ -192,6 +200,7 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
 
   useEffect(() => {
     let disposed = false;
+    let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
     const load = async () => {
       if (!targetId) {
         if (!disposed) {
@@ -203,24 +212,31 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
       }
 
       setLoading(true);
+      fallbackTimer = setTimeout(() => {
+        if (!disposed) {
+          setDetail(null);
+          setLoading(false);
+        }
+      }, AGENT_DETAIL_FALLBACK_DELAY_MS);
       try {
         const response = await getAgentHubService().getAgentDetail(targetId);
         if (!disposed) {
           setDetail(response);
+          setLoading(false);
         }
       } catch {
         if (!disposed) {
           setDetail(null);
-        }
-      } finally {
-        if (!disposed) {
           setLoading(false);
         }
+      } finally {
+        if (fallbackTimer) clearTimeout(fallbackTimer);
       }
     };
     void load();
     return () => {
       disposed = true;
+      if (fallbackTimer) clearTimeout(fallbackTimer);
     };
   }, [targetId]);
 
@@ -270,20 +286,41 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
       <AgentDetailHeader title={detail?.title ?? 'Agent 详情'} />
 
       {loading ? <AgentDetailLoadingState isDesktop={isDesktop} /> : !detail ? (
-        <section
-          data-testid="agent-detail-empty-state"
-          className="mt-6 rounded-2xl border border-border-card bg-card px-4 py-6 text-center"
-        >
-          <p className="text-sm font-semibold text-foreground">未找到 Agent 详情</p>
-          <p className="mt-1 text-xs text-muted-foreground">该节点可能已删除或尚未配置详情数据。</p>
-          <button
-            type="button"
-            onClick={() => window.history.back()}
-            className="mt-4 rounded-lg bg-muted px-3 py-2 text-xs font-medium text-muted-foreground"
+        <>
+          <section
+            data-testid="agent-detail-empty-state"
+            className="mt-6 rounded-2xl border border-border-card bg-card px-4 py-6 text-center"
           >
-            返回上一页
-          </button>
-        </section>
+            <p className="text-sm font-semibold text-foreground">基础详情暂不可用</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              该节点尚未返回扩展详情数据，但仍可继续查看 workspace（工作区）内容。
+            </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-center">
+              <button
+                type="button"
+                data-testid="agent-detail-chat-button"
+                onClick={() => {
+                  if (!targetId) return;
+                  window.location.href = `/agents/chat/${targetId}`;
+                }}
+                className="rounded-lg bg-brand-accent px-3 py-2 text-xs font-medium text-white"
+              >
+                与 Agent 对话
+              </button>
+              <button
+                type="button"
+                onClick={() => window.history.back()}
+                className="rounded-lg bg-muted px-3 py-2 text-xs font-medium text-muted-foreground"
+              >
+                返回上一页
+              </button>
+            </div>
+          </section>
+
+          {energy && <EnergyBar energy={energy} onRefill={handleRefillEnergy} isRefilling={isRefilling} />}
+
+          {targetId && <WorkspaceTabs agentId={targetId} />}
+        </>
       ) : (
         <>
           <section className="rounded-[18px] border border-border-card bg-card p-4">
@@ -297,11 +334,16 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
               </div>
             </div>
             <p className="mt-2 text-sm text-muted-foreground">{detail.description}</p>
-            <div className="mt-3 grid grid-cols-3 gap-2">
+            <div data-testid="agent-detail-stats-grid" className={`mt-3 grid gap-2 ${getStatsGridClass(detail.stats.length)}`}>
               {detail.stats.map((stat) => (
-                <div key={stat.label} className="rounded-lg bg-background py-2 text-center">
-                  <span className="text-[11px] text-muted-foreground">{stat.label}</span>
-                  <p className="text-sm font-semibold text-foreground">{stat.value}</p>
+                <div key={stat.label} className="min-w-0 rounded-lg bg-background px-2 py-2 text-center">
+                  <span className="block text-[11px] text-muted-foreground">{stat.label}</span>
+                  <p
+                    data-testid="agent-detail-stat-value"
+                    className="mt-1 whitespace-normal break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]"
+                  >
+                    {stat.value}
+                  </p>
                 </div>
               ))}
             </div>

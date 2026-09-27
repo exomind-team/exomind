@@ -3,7 +3,8 @@ use std::sync::Arc;
 use chrono::Utc;
 use thiserror::Error;
 
-use crate::eventlog::{EventLogStore, EventRecord};
+use crate::eventlog::EventRecord;
+use crate::eventlog_appender::EventLogAppender;
 use crate::proposal::{
     ActionType, AppendEventParams, CreateTaskParams, Proposal, ProposalTaskDependency,
     StartTimeblockParams, UpdateTaskParams,
@@ -46,40 +47,40 @@ pub enum ExecutionOutcome {
 
 pub struct ProposalExecutor {
     task_store: Arc<TaskStore>,
-    eventlog_store: Arc<EventLogStore>,
+    eventlog_appender: EventLogAppender,
     timeblock_store: Arc<TimeBlockStore>,
 }
 
 impl ProposalExecutor {
     pub fn new(
         task_store: Arc<TaskStore>,
-        eventlog_store: Arc<EventLogStore>,
+        eventlog_appender: EventLogAppender,
         timeblock_store: Arc<TimeBlockStore>,
     ) -> Self {
         Self {
             task_store,
-            eventlog_store,
+            eventlog_appender,
             timeblock_store,
         }
     }
 
-    pub fn execute_scoped(
+    pub async fn execute_scoped(
         &self,
         scope_key: Option<&str>,
         proposal: &Proposal,
     ) -> Result<ExecutionOutcome, ExecutionError> {
         match proposal.action_type {
-            ActionType::CreateTask => self.execute_create_task(scope_key, proposal),
-            ActionType::UpdateTask => self.execute_update_task(scope_key, proposal),
-            ActionType::AppendEvent => self.execute_append_event(scope_key, proposal),
-            ActionType::StartTimeblock => self.execute_start_timeblock(scope_key, proposal),
+            ActionType::CreateTask => self.execute_create_task(scope_key, proposal).await,
+            ActionType::UpdateTask => self.execute_update_task(scope_key, proposal).await,
+            ActionType::AppendEvent => self.execute_append_event(scope_key, proposal).await,
+            ActionType::StartTimeblock => self.execute_start_timeblock(scope_key, proposal).await,
             ActionType::ApproveAgentAccess => {
                 Err(ExecutionError::NotYetImplemented("approve_agent_access"))
             }
         }
     }
 
-    fn execute_create_task(
+    async fn execute_create_task(
         &self,
         scope_key: Option<&str>,
         proposal: &Proposal,
@@ -122,13 +123,14 @@ impl ProposalExecutor {
                 "publisher": proposal.publisher.clone(),
             })),
         };
-        self.eventlog_store
+        self.eventlog_appender
             .append_event(scope_key, event.clone())
+            .await
             .map_err(ExecutionError::EventLog)?;
         Ok(ExecutionOutcome::TaskCreated { task, event })
     }
 
-    fn execute_update_task(
+    async fn execute_update_task(
         &self,
         scope_key: Option<&str>,
         proposal: &Proposal,
@@ -187,13 +189,14 @@ impl ProposalExecutor {
                 "publisher": proposal.publisher.clone(),
             })),
         };
-        self.eventlog_store
+        self.eventlog_appender
             .append_event(scope_key, event.clone())
+            .await
             .map_err(ExecutionError::EventLog)?;
         Ok(ExecutionOutcome::TaskUpdated { task, event })
     }
 
-    fn execute_append_event(
+    async fn execute_append_event(
         &self,
         scope_key: Option<&str>,
         proposal: &Proposal,
@@ -215,13 +218,14 @@ impl ProposalExecutor {
                 "publisher": proposal.publisher.clone(),
             })),
         };
-        self.eventlog_store
+        self.eventlog_appender
             .append_event(scope_key, event.clone())
+            .await
             .map_err(ExecutionError::EventLog)?;
         Ok(ExecutionOutcome::EventAppended { event })
     }
 
-    fn execute_start_timeblock(
+    async fn execute_start_timeblock(
         &self,
         scope_key: Option<&str>,
         proposal: &Proposal,
@@ -269,8 +273,9 @@ impl ProposalExecutor {
                 "publisher": proposal.publisher.clone(),
             })),
         };
-        self.eventlog_store
+        self.eventlog_appender
             .append_event(scope_key, event.clone())
+            .await
             .map_err(ExecutionError::EventLog)?;
         Ok(ExecutionOutcome::TimeblockStarted { result, event })
     }
@@ -317,7 +322,9 @@ mod tests {
     use std::sync::Arc;
 
     use crate::eventlog::EventLogStore;
+    use crate::eventlog_appender::{EVENTLOG_REPLICATION_APPENDED_TOPIC, EventLogAppender};
     use crate::proposal::{ActionType, Proposal, ProposalStatus, Publisher, PublisherType};
+    use crate::signal::SignalPool;
     use crate::task::TaskStore;
     use crate::timeblock::TimeBlockStore;
 
@@ -345,15 +352,31 @@ mod tests {
         }
     }
 
-    #[test]
-    fn execute_create_task_creates_task_and_eventlog() {
+    fn test_eventlog_appender(
+        eventlog_store: Arc<EventLogStore>,
+    ) -> (EventLogAppender, Arc<SignalPool>) {
+        let signal_pool = Arc::new(SignalPool::new(None));
+        (
+            EventLogAppender::new(
+                eventlog_store,
+                "proposal-test".to_string(),
+                Arc::clone(&signal_pool),
+                None,
+            ),
+            signal_pool,
+        )
+    }
+
+    #[tokio::test]
+    async fn execute_create_task_creates_task_and_eventlog() {
         let task_store = Arc::new(TaskStore::new());
         let eventlog_store = Arc::new(EventLogStore::new(
             std::env::temp_dir().join(format!("exomind-proposal-exec-{}", uuid::Uuid::new_v4())),
         ));
+        let (eventlog_appender, signal_pool) = test_eventlog_appender(Arc::clone(&eventlog_store));
         let timeblock_store = Arc::new(TimeBlockStore::new());
         let executor =
-            ProposalExecutor::new(task_store.clone(), eventlog_store.clone(), timeblock_store);
+            ProposalExecutor::new(task_store.clone(), eventlog_appender, timeblock_store);
 
         let outcome = executor
             .execute_scoped(
@@ -368,6 +391,7 @@ mod tests {
                     }),
                 ),
             )
+            .await
             .unwrap();
 
         let tasks = task_store.list();
@@ -383,10 +407,17 @@ mod tests {
             }
             _ => panic!("expected task-created outcome"),
         }
+        assert!(
+            signal_pool
+                .window()
+                .recent(10)
+                .into_iter()
+                .any(|event| event.topic == EVENTLOG_REPLICATION_APPENDED_TOPIC)
+        );
     }
 
-    #[test]
-    fn execute_update_task_updates_existing_task_and_eventlog() {
+    #[tokio::test]
+    async fn execute_update_task_updates_existing_task_and_eventlog() {
         let task_store = Arc::new(TaskStore::new());
         let existing = task_store.create(crate::task::CreateTaskInput {
             title: "Existing task".to_string(),
@@ -404,9 +435,10 @@ mod tests {
         let eventlog_store = Arc::new(EventLogStore::new(
             std::env::temp_dir().join(format!("exomind-proposal-exec-{}", uuid::Uuid::new_v4())),
         ));
+        let (eventlog_appender, signal_pool) = test_eventlog_appender(Arc::clone(&eventlog_store));
         let timeblock_store = Arc::new(TimeBlockStore::new());
         let executor =
-            ProposalExecutor::new(task_store.clone(), eventlog_store.clone(), timeblock_store);
+            ProposalExecutor::new(task_store.clone(), eventlog_appender, timeblock_store);
 
         let outcome = executor
             .execute_scoped(
@@ -422,6 +454,7 @@ mod tests {
                     }),
                 ),
             )
+            .await
             .unwrap();
 
         let tasks = task_store.list();
@@ -438,5 +471,12 @@ mod tests {
             }
             _ => panic!("expected task-updated outcome"),
         }
+        assert!(
+            signal_pool
+                .window()
+                .recent(10)
+                .into_iter()
+                .any(|event| event.topic == EVENTLOG_REPLICATION_APPENDED_TOPIC)
+        );
     }
 }

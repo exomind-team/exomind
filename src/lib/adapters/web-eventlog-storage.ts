@@ -1,5 +1,7 @@
 import type { EventData, EventMetadata, Tag } from "../types/event";
 import type {
+  EventLogAppendInput,
+  EventLogImportResult,
   EventLogListOptions,
   EventLogListResult,
   EventLogListSemantics,
@@ -11,6 +13,7 @@ import {
   readEventRefsFromMetadata,
   stripEventRefsFromMetadata,
 } from "../eventlog/event-refs";
+import { mergeEventsById } from "../eventlog/transfer";
 import {
   getEventStorage,
   type Event as StorageEvent,
@@ -99,12 +102,58 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
     };
   }
 
-  async appendEvent(event: EventData): Promise<EventData> {
+  async appendEvent(event: EventLogAppendInput): Promise<EventData> {
+    const persisted = await appendEventWithEcsReplication(
+      this.toStorageEvent({
+        ...event,
+        timestamp: Date.now(),
+      }),
+      this.userId,
+    );
+    return this.fromStorageEvent(persisted);
+  }
+
+  async appendRawEvent(event: EventData): Promise<EventData> {
     const persisted = await appendEventWithEcsReplication(
       this.toStorageEvent(event),
       this.userId,
     );
     return this.fromStorageEvent(persisted);
+  }
+
+  async importEventsFromJson(
+    json: string,
+    strategy: "merge" | "overwrite",
+  ): Promise<EventLogImportResult> {
+    const payload = JSON.parse(json) as { events?: EventData[] };
+    const incoming = Array.isArray(payload.events) ? payload.events : [];
+    const existing = await this.listEvents();
+
+    let next: EventData[];
+    let imported = 0;
+    let skipped = 0;
+
+    if (strategy === "overwrite") {
+      next = incoming;
+      imported = incoming.length;
+    } else {
+      const existingIds = new Set(existing.map((event) => event.id));
+      imported = incoming.filter((event) => !existingIds.has(event.id)).length;
+      skipped = incoming.length - imported;
+      next = mergeEventsById(existing, incoming);
+    }
+
+    await this.clearEvents();
+    const sorted = [...next].sort((a, b) => a.timestamp - b.timestamp);
+    for (const event of sorted) {
+      await this.appendRawEvent(event);
+    }
+
+    return {
+      imported,
+      skipped,
+      total: next.length,
+    };
   }
 
   async getEvent(id: string): Promise<EventData | null> {

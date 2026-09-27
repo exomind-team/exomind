@@ -1,5 +1,8 @@
 import PouchDB from 'pouchdb';
-import type { IEventLogPort } from '../../../../src/lib/environment/interfaces/eventlog.port';
+import type {
+  EventLogAppendInput,
+  IEventLogPort,
+} from '../../../../src/lib/environment/interfaces/eventlog.port';
 import type { EventData, Tag } from '../../../../src/lib/types/event';
 
 interface StorageEventDoc {
@@ -75,7 +78,28 @@ export class RemoteEventLogPort implements IEventLogPort {
     return docs.map(fromDoc);
   }
 
-  async appendEvent(event: EventData): Promise<void> {
+  async appendEvent(event: EventLogAppendInput): Promise<EventData> {
+    const persistedEvent: EventData = {
+      ...event,
+      timestamp: Date.now(),
+    };
+    const doc = toDoc(persistedEvent);
+
+    try {
+      await this.db.put(doc);
+    } catch (error) {
+      // In case of conflict, fetch current rev and retry once.
+      if (error && typeof error === 'object' && 'status' in error && (error as { status?: number }).status === 409) {
+        const existing = await this.db.get(doc._id);
+        await this.db.put({ ...doc, _rev: existing._rev });
+        return persistedEvent;
+      }
+      throw error;
+    }
+    return persistedEvent;
+  }
+
+  async appendRawEvent(event: EventData): Promise<EventData> {
     const doc = toDoc(event);
 
     try {
@@ -85,10 +109,11 @@ export class RemoteEventLogPort implements IEventLogPort {
       if (error && typeof error === 'object' && 'status' in error && (error as { status?: number }).status === 409) {
         const existing = await this.db.get(doc._id);
         await this.db.put({ ...doc, _rev: existing._rev });
-        return;
+        return event;
       }
       throw error;
     }
+    return event;
   }
 
   async getEvent(id: string): Promise<EventData | null> {
@@ -120,4 +145,3 @@ export class RemoteEventLogPort implements IEventLogPort {
     }
   }
 }
-

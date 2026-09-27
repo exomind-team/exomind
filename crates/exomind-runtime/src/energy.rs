@@ -17,6 +17,9 @@ struct EnergyState {
 }
 
 impl AgentEnergy {
+    /// Default maximum energy for agents
+    pub const DEFAULT_MAX: u64 = 100;
+
     pub fn new(max: u64, tick_cost: u64) -> Self {
         Self {
             state: RwLock::new(EnergyState { current: max }),
@@ -64,6 +67,13 @@ impl AgentEnergy {
         let mut state = self.state.write().unwrap();
         state.current = (state.current + amount).min(self.max);
         state.current
+    }
+
+    /// Directly set the current energy level, capping at `max`.
+    /// Used for per-block dynamic initial energy.
+    pub fn set_current(&self, value: u64) {
+        let mut state = self.state.write().unwrap();
+        state.current = value.min(self.max);
     }
 
     /// Compute the tick interval (seconds) adjusted for the current energy ratio.

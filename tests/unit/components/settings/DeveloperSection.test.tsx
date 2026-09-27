@@ -10,7 +10,6 @@ import { getDeveloperModeEnabled } from '@/config/developer-mode';
 import { setApiAgentTabEnabled } from '@/config/api-agent-tab-enabled';
 import { setDevtoolsEnabled } from '@/config/devtools-mode';
 import { setCommandPaletteEnabled } from '@/config/command-palette-enabled';
-import { setMePageEnabled } from '@/config/me-page-enabled';
 import { setProposalInboxEnabled } from '@/config/proposal-inbox-enabled';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
@@ -22,7 +21,6 @@ beforeEach(() => {
 describe('SettingsPage - Developer Section (developerMode=true)', () => {
   it('renders inline feature toggles directly inside developer section（直接在开发者分组渲染功能开关）', () => {
     render(<SettingsPage />);
-    expect(screen.getByText('Me 页面')).toBeInTheDocument();
     expect(screen.getByText('网络页面')).toBeInTheDocument();
     expect(screen.getByText('API Agent Tab')).toBeInTheDocument();
     expect(screen.getByText('提案箱（任务域）')).toBeInTheDocument();
@@ -62,14 +60,6 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
     fireEvent.click(toggle);
 
     expect(vi.mocked(setApiAgentTabEnabled)).toHaveBeenCalledWith(true);
-  });
-
-  it('updates me page state inline in developer section（在开发者分组内联更新 Me 页面开关）', () => {
-    render(<SettingsPage />);
-    const toggle = screen.getByTestId('feature-toggle-me-page-switch');
-    fireEvent.click(toggle);
-
-    expect(vi.mocked(setMePageEnabled)).toHaveBeenCalledWith(true);
   });
 
   it('updates proposal inbox state inline（直接更新提案箱任务域开关）', () => {

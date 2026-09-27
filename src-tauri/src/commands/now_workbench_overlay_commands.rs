@@ -1,3 +1,4 @@
+use std::sync::{Mutex, OnceLock};
 use tauri::AppHandle;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -15,6 +16,31 @@ const NOW_WORKBENCH_OVERLAY_HEIGHT: f64 = 490.0;
 const NOW_WORKBENCH_OVERLAY_MARGIN: i32 = 24;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const WINDOWS_HIDDEN_WINDOW_COORDINATE_THRESHOLD: i32 = -30000;
+
+fn active_profile_slot() -> &'static Mutex<Option<String>> {
+    static ACTIVE_PROFILE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    ACTIVE_PROFILE.get_or_init(|| Mutex::new(None))
+}
+
+#[tauri::command]
+pub async fn now_workbench_overlay_profile_set(profile_id: Option<String>) -> Result<(), String> {
+    let normalized = profile_id.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    });
+    *active_profile_slot()
+        .lock()
+        .map_err(|_| "now workbench overlay profile state lock poisoned".to_owned())? = normalized;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn now_workbench_overlay_profile_get() -> Result<Option<String>, String> {
+    active_profile_slot()
+        .lock()
+        .map(|profile_id| profile_id.clone())
+        .map_err(|_| "now workbench overlay profile state lock poisoned".to_owned())
+}
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn ensure_now_workbench_overlay_window(app: &AppHandle) -> Result<(), String> {
@@ -42,6 +68,8 @@ pub fn ensure_now_workbench_overlay_window(app: &AppHandle) -> Result<(), String
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
 
+    // Dev-manager instances provide an explicit per-instance/per-window directory.
+    // Business scope still comes only from the main-window profile broker.
     let builder = if let Some(data_dir) =
         resolve_overlay_webview_data_dir(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL)
     {

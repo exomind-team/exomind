@@ -386,9 +386,9 @@ export interface IEventService {
 | 文档 | 路径 |
 |------|------|
 | v4 架构规范 | `docs/architecture/7-LAYER.md` |
-| SPEC-301 多设备同步 | `docs/specs/SPEC-301-多设备数据同步.md` |
-| SPEC-302 密码哈希 | `docs/specs/SPEC-302-密码哈希模块.md` |
-| SPEC-303 sync 模块 | `docs/specs/SPEC-303-sync模块架构.md` |
+| SPEC-301 多设备同步 | `docs/specs/sync.md` |
+| SPEC-302 密码哈希 | `docs/specs/auth.md` |
+| SPEC-303 sync 模块 | `docs/specs/sync.md` |
 
 ### B. 文件清单
 

@@ -13,6 +13,42 @@ import {
 } from '@/ui/app/pages/agents/agents-utils';
 import { getSelectedRuntimeTarget, formatHostForUrl } from '@/config/runtime-target';
 
+const SIGNAL_DETAIL_FETCH_TIMEOUT_MS = 3500;
+
+function runSignalDetailRequestWithTimeout<T>(
+  promise: Promise<T>,
+  controller: AbortController | null,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => {
+      controller?.abort();
+      reject(new Error('request timeout（请求超时）'));
+    }, SIGNAL_DETAIL_FETCH_TIMEOUT_MS);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  });
+}
+
+async function fetchJsonArrayWithTimeout<T>(url: string): Promise<T[]> {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const response = await runSignalDetailRequestWithTimeout(
+    fetch(url, { signal: controller?.signal }),
+    controller,
+  );
+  if (!response.ok) {
+    return [];
+  }
+  return runSignalDetailRequestWithTimeout(
+    response.json() as Promise<T[]>,
+    controller,
+  );
+}
+
 function SignalDetailHeader() {
   return (
     <header data-testid="signal-detail-header" className="mb-4">
@@ -88,15 +124,14 @@ export function SignalDetailPage() {
         const target = getSelectedRuntimeTarget();
         const baseUrl = `http://${formatHostForUrl(target.host)}:${target.port}`;
 
-        const [routesResponse, historyResponse] = await Promise.all([
-          fetch(`${baseUrl}/signal-routes`).then((r) => r.ok ? r.json() as Promise<SignalRoute[]> : []),
-          fetch(`${baseUrl}/signals/history`).then((r) => r.ok ? r.json() as Promise<SignalEvent[]> : []),
+        const [routesResponse, historyResponse] = await Promise.allSettled([
+          fetchJsonArrayWithTimeout<SignalRoute>(`${baseUrl}/signal-routes`),
+          fetchJsonArrayWithTimeout<SignalEvent>(`${baseUrl}/signals/history?limit=120`),
         ]);
-        const routes = routesResponse as SignalRoute[];
 
         if (!disposed) {
-          setSignalRoutes(routes);
-          setSignalHistory(historyResponse as SignalEvent[]);
+          setSignalRoutes(routesResponse.status === 'fulfilled' ? routesResponse.value : []);
+          setSignalHistory(historyResponse.status === 'fulfilled' ? historyResponse.value : []);
           setIsLoading(false);
         }
       } catch {

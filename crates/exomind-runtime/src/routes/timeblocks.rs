@@ -8,6 +8,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
+use crate::timeblock::BlockPhase;
+
 use super::tasks::transition_task_in_scope_with_context;
 use crate::AppState;
 use crate::auth::AuthenticatedPeerIdentity;
@@ -603,7 +605,7 @@ fn do_new_block_at(
         phase: if is_gap {
             None
         } else {
-            Some("running".to_string())
+            Some(BlockPhase::Running)
         },
         version: Some(1),
         actor_id: Some("rt:newblock".to_string()),
@@ -951,7 +953,7 @@ async fn stop_block(
     let mut updated = current;
     updated.action_ended_at = Some(now);
     updated.feedback_started_at = Some(now);
-    updated.phase = Some("feedback_in_progress".to_string());
+    updated.phase = Some(BlockPhase::FeedbackInProgress);
     updated.paused = false;
     updated.version = Some(updated.version.unwrap_or(0) + 1);
     updated.last_transition_at = Some(now);
@@ -976,6 +978,8 @@ async fn stop_block(
         .get_active_scoped(scope_key)
         .map_err(|e| internal_error(e.to_string()))?
     {
+        // Publish active signal — this creates a gap block for the "stopped" state
+        // The completed signal will be published when feedback is submitted (end API)
         publish_active_timeblock_replication_signal(&state, scope_key, &active);
     }
     write_timeblock_eventlog(&state, scope_key, "block_end", &name, &start_id, &task_ids).await;
@@ -1059,7 +1063,7 @@ async fn pause_block(
     updated.paused = true;
     updated.paused_at = Some(now);
     updated.accumulated_run_ms = Some(accumulated);
-    updated.phase = Some("paused".to_string());
+    updated.phase = Some(BlockPhase::Paused);
     updated.version = Some(updated.version.unwrap_or(0) + 1);
     updated.last_transition_at = Some(now);
     updated.updated_at = Some(now);
@@ -1205,7 +1209,7 @@ async fn resume_block(
     updated.paused_at = None;
     updated.last_resumed_at = Some(now);
     updated.pause_accumulated_ms = Some(pause_accumulated);
-    updated.phase = Some("running".to_string());
+    updated.phase = Some(BlockPhase::Running);
     updated.version = Some(updated.version.unwrap_or(0) + 1);
     updated.last_transition_at = Some(now);
     updated.updated_at = Some(now);
@@ -1814,7 +1818,7 @@ async fn write_timeblock_eventlog(
 ) {
     let content = match event_type {
         "block_start" => format!("时间块开始: {block_name}"),
-        "block_end" => format!("时间块结束: {block_name}"),
+        "block_end" => format!("时间块停止: {block_name}"),
         "block_pause" => format!("时间块暂停: {block_name}"),
         "block_resume" => format!("时间块恢复: {block_name}"),
         _ => format!("时间块事件: {block_name}"),
@@ -1836,12 +1840,13 @@ async fn write_timeblock_eventlog(
         })),
     };
 
-    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
+    if let Err(error) = state
+        .eventlog_appender()
+        .append_event(scope_key, event.clone())
+        .await
+    {
         tracing::warn!(error = %error, "failed to write timeblock eventlog");
-        return;
     }
-
-    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
 }
 
 fn format_feedback_duration(ms: u64) -> String {
@@ -1861,7 +1866,7 @@ fn format_feedback_clock(ts: u64) -> String {
     chrono::Local
         .timestamp_millis_opt(ts as i64)
         .single()
-        .map(|dt| dt.format("%H:%M:%S").to_string())
+        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
         .unwrap_or_else(|| "--:--:--".to_string())
 }
 
@@ -2096,6 +2101,7 @@ async fn write_timeblock_feedback_eventlog(
         })
         .collect::<std::collections::HashMap<_, _>>();
     let content = build_timeblock_feedback_report(current, completed, &task_titles);
+    let content_for_signal = content.clone();
     let event = crate::eventlog::EventRecord {
         id: uuid::Uuid::new_v4().to_string(),
         timestamp: submitted_at as i64,
@@ -2127,12 +2133,35 @@ async fn write_timeblock_feedback_eventlog(
         })),
     };
 
-    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
+    if let Err(error) = state
+        .eventlog_appender()
+        .append_event(scope_key, event.clone())
+        .await
+    {
         tracing::warn!(error = %error, "failed to write timeblock feedback eventlog");
         return;
     }
 
-    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
+    // Publish block_feedback.created signal so downstream agents (e.g. timeblock_summary)
+    // can react to user feedback submission without waiting for replication.completed.
+    state.signal_pool.publish(SignalEvent {
+        schema_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        topic: "timeblock.block_feedback.created".to_string(),
+        ts: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock error")
+            .as_millis() as u64,
+        source: "timeblock_summary".to_string(),
+        origin_host_id: state.host_id.clone(),
+        hop: 1,
+        trace_id: None,
+        payload: serde_json::json!({
+            "scopeKey": normalize_scope_key(scope_key),
+            "block": completed,
+            "feedback": content_for_signal,
+        }),
+    });
 }
 
 fn build_timeblocks_sqlite_snapshot_bytes(
@@ -2140,12 +2169,12 @@ fn build_timeblocks_sqlite_snapshot_bytes(
     scope_key: Option<&str>,
     time_blocks: &[TimeBlockData],
 ) -> Result<Vec<u8>, crate::timeblock::TimeBlockStoreError> {
-    let temp_root = std::env::temp_dir().join(format!(
-        "exomind-timeblocks-export-{}",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::create_dir_all(&temp_root)?;
-    let sqlite_path = temp_root.join("timeblocks-export.sqlite");
+    let exomind_temp = std::env::temp_dir().join("exomind");
+    let _ = std::fs::create_dir_all(&exomind_temp);
+    let temp_dir = tempfile::Builder::new()
+        .prefix("timeblocks-export-")
+        .tempdir_in(&exomind_temp)?;
+    let sqlite_path = temp_dir.path().join("timeblocks-export.sqlite");
     let store = crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path)?;
     store.replace_completed_scoped(scope_key, time_blocks)?;
     if let Some(active_block) = state.timeblock_store.get_active_scoped(scope_key)? {
@@ -2157,8 +2186,9 @@ fn build_timeblocks_sqlite_snapshot_bytes(
         ))
     })?;
     drop(store);
-    let _ = std::fs::remove_file(&sqlite_path);
-    let _ = std::fs::remove_dir_all(&temp_root);
+    if let Err(e) = temp_dir.close() {
+        tracing::warn!(error = %e, "failed to clean exomind temp dir");
+    }
     Ok(bytes)
 }
 
@@ -2166,18 +2196,20 @@ fn read_timeblocks_from_sqlite_snapshot(
     bytes: &[u8],
     scope_key: Option<&str>,
 ) -> Result<(Vec<TimeBlockData>, Option<ActiveBlockData>), crate::timeblock::TimeBlockStoreError> {
-    let temp_root = std::env::temp_dir().join(format!(
-        "exomind-timeblocks-import-{}",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::create_dir_all(&temp_root)?;
-    let sqlite_path = temp_root.join("timeblocks-import.sqlite");
+    let exomind_temp = std::env::temp_dir().join("exomind");
+    let _ = std::fs::create_dir_all(&exomind_temp);
+    let temp_dir = tempfile::Builder::new()
+        .prefix("timeblocks-import-")
+        .tempdir_in(&exomind_temp)?;
+    let sqlite_path = temp_dir.path().join("timeblocks-import.sqlite");
     std::fs::write(&sqlite_path, bytes)?;
     let store = crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path)?;
     let time_blocks = store.list_completed_scoped(scope_key)?;
     let active_block = store.get_active_scoped(scope_key)?;
-    let _ = std::fs::remove_file(&sqlite_path);
-    let _ = std::fs::remove_dir_all(&temp_root);
+    drop(store);
+    if let Err(e) = temp_dir.close() {
+        tracing::warn!(error = %e, "failed to clean exomind temp dir");
+    }
     Ok((time_blocks, active_block))
 }
 
@@ -2644,7 +2676,7 @@ mod tests {
                     target_minutes: None,
                     elapsed: 0,
                     updated_at: Some(2100),
-                    phase: Some("running".to_string()),
+                    phase: Some(BlockPhase::Running),
                     version: Some(1),
                     actor_id: Some("actor-a".to_string()),
                     last_transition_at: Some(2100),
@@ -2900,7 +2932,7 @@ mod tests {
                     target_minutes: Some(25),
                     elapsed: 30_000,
                     updated_at: Some(1_700_000_101_000),
-                    phase: Some("running".to_string()),
+                    phase: Some(BlockPhase::Running),
                     version: Some(1),
                     actor_id: Some("actor-a".to_string()),
                     last_transition_at: Some(1_700_000_101_000),
@@ -3040,7 +3072,7 @@ mod tests {
                     target_minutes: Some(25),
                     elapsed: 30_000,
                     updated_at: Some(1_700_000_101_000),
-                    phase: Some("running".to_string()),
+                    phase: Some(BlockPhase::Running),
                     version: Some(1),
                     actor_id: Some("actor-a".to_string()),
                     last_transition_at: Some(1_700_000_101_000),
@@ -3568,7 +3600,7 @@ mod tests {
                     target_minutes: Some(25),
                     elapsed: 0,
                     updated_at: Some(1_700_000_101_000),
-                    phase: Some("feedback_in_progress".to_string()),
+                    phase: Some(BlockPhase::FeedbackInProgress),
                     version: Some(2),
                     actor_id: Some("actor-a".to_string()),
                     last_transition_at: Some(1_700_000_130_000),
@@ -3945,7 +3977,7 @@ mod tests {
                     block_type: Some("active".to_string()),
                     elapsed: 0,
                     updated_at: Some(100),
-                    phase: Some("running".to_string()),
+                    phase: Some(BlockPhase::Running),
                     version: Some(1),
                     actor_id: Some("actor-a".to_string()),
                     last_transition_at: Some(100),
@@ -4144,7 +4176,7 @@ mod tests {
             block_type: Some("active".to_string()),
             elapsed: 0,
             updated_at: Some(3_000),
-            phase: Some("running".to_string()),
+            phase: Some(BlockPhase::Running),
             version: Some(3),
             actor_id: Some("actor-b".to_string()),
             last_transition_at: Some(3_000),
@@ -4175,7 +4207,7 @@ mod tests {
             block_type: Some("active".to_string()),
             elapsed: 0,
             updated_at: Some(2_000),
-            phase: Some("running".to_string()),
+            phase: Some(BlockPhase::Running),
             version: Some(2),
             actor_id: Some("actor-a".to_string()),
             last_transition_at: Some(2_000),
@@ -4228,7 +4260,7 @@ mod tests {
             block_type: Some("active".to_string()),
             elapsed: 0,
             updated_at: Some(3_000),
-            phase: Some("running".to_string()),
+            phase: Some(BlockPhase::Running),
             version: Some(3),
             actor_id: Some("actor-a".to_string()),
             last_transition_at: Some(3_000),
@@ -4259,7 +4291,7 @@ mod tests {
             block_type: Some("active".to_string()),
             elapsed: 0,
             updated_at: Some(3_000),
-            phase: Some("feedback_in_progress".to_string()),
+            phase: Some(BlockPhase::FeedbackInProgress),
             version: Some(3),
             actor_id: Some("actor-b".to_string()),
             last_transition_at: Some(3_500),

@@ -149,8 +149,8 @@ pub async fn get_topology(State(state): State<RuntimeState>) -> Json<TopologyRes
 
 fn build_static_info() -> TopologyStaticInfo {
     TopologyStaticInfo {
-        hostname: read_hostname(),
-        os: read_os(),
+        hostname: read_hostname_impl(),
+        os: read_os_impl(),
         arch: read_arch(),
         capabilities: detect_runtime_capabilities(),
     }
@@ -172,13 +172,23 @@ fn detect_runtime_capabilities() -> RuntimeCapabilitiesResponse {
     }
 }
 
-fn read_hostname() -> String {
+/// Public export for other modules that need the device hostname.
+pub fn read_hostname_export() -> String {
+    read_hostname_impl()
+}
+
+/// Public export for other modules that need the OS/platform string.
+pub fn read_os_export() -> String {
+    read_os_impl()
+}
+
+fn read_hostname_impl() -> String {
     System::host_name()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "unknown-host".to_string())
 }
 
-fn read_os() -> String {
+fn read_os_impl() -> String {
     System::long_os_version()
         .or_else(System::name)
         .filter(|value| !value.trim().is_empty())

@@ -18,11 +18,10 @@
 import type { ASRResult } from '../environment/interfaces/asr.port';
 import { VolcanoHTTPASRAdapter } from '../adapters/asr/volcano-http-asr';
 import { VolcanoEngineASRAdapter } from '../adapters/asr/volcano-engine-asr';
-import { MOSSASRAdapter } from '../adapters/asr/moss-asr';
 import { log } from '@/lib/logger';
 
 // Adapter 类型
-export type ASRAdapterType = 'http' | 'websocket' | 'moss';
+export type ASRAdapterType = 'http' | 'websocket';
 
 /**
  * VoiceChatService 接口
@@ -55,38 +54,26 @@ export class VoiceChatService implements IVoiceChatService {
   duration = 0;
   lastResult: ASRResult | null = null;
   isAvailable = false;
-  adapterType: ASRAdapterType = 'moss';
+  adapterType: ASRAdapterType = 'http';
 
   private httpAdapter: VolcanoHTTPASRAdapter;
   private wsAdapter: VolcanoEngineASRAdapter;
-  private mossAdapter: MOSSASRAdapter;
   private durationInterval: NodeJS.Timeout | null = null;
   private startTime = 0;
   private stream: MediaStream | null = null;
   private recordingStartTime = 0;
 
   constructor() {
-    // 初始化三种 Adapter
+    // 初始化两种火山 Adapter
     this.httpAdapter = new VolcanoHTTPASRAdapter();
     this.wsAdapter = new VolcanoEngineASRAdapter();
-    this.mossAdapter = new MOSSASRAdapter();
 
     // 检查可用性
     this.checkAvailability();
   }
 
   private async checkAvailability(): Promise<void> {
-    // 优先使用 MOSS 适配器（最简单，无需后端）
-    const mossAvailable = this.mossAdapter.isAvailable();
-
-    if (mossAvailable) {
-      this.isAvailable = true;
-      this.adapterType = 'moss';
-      log.info('[VoiceChatService] 使用 MOSS Adapter (推荐，最简单)');
-      return;
-    }
-
-    // MOSS 不可用时，尝试 HTTP Adapter（通过 Bun 后端）
+    // 优先使用 HTTP Adapter（通过 Bun 后端）
     const httpAvailable = await this.httpAdapter.isAvailable();
 
     if (httpAvailable) {
@@ -97,13 +84,9 @@ export class VoiceChatService implements IVoiceChatService {
       this.isAvailable = true;
       this.adapterType = 'websocket';
       log.info('[VoiceChatService] ⚠️ 使用 WebSocket Adapter (浏览器受限，可能失败)');
-      log.info('[VoiceChatService] 建议：配置 MOSS API Key 以获得最佳体验');
     } else {
       this.isAvailable = false;
       log.warn('[VoiceChatService] 所有 ASR 适配器都不可用');
-      log.warn('[VoiceChatService] 请配置 MOSS API Key:');
-      log.warn('[VoiceChatService]   1. 在 .env 文件中添加: VITE_MOSS_API_KEY=your_api_key');
-      log.warn('[VoiceChatService]   2. 申请地址: https://studio.mosi.cn/');
     }
   }
 
@@ -111,9 +94,6 @@ export class VoiceChatService implements IVoiceChatService {
    * 获取当前使用的适配器
    */
   private getCurrentAdapter() {
-    if (this.adapterType === 'moss') {
-      return this.mossAdapter;
-    }
     return this.adapterType === 'http' ? this.httpAdapter : this.wsAdapter;
   }
 
@@ -244,8 +224,6 @@ export function setASRAdapterType(type: ASRAdapterType): void {
 
   if (type === 'http') {
     log.info('[VoiceChatService] Switched to HTTP Adapter');
-  } else if (type === 'moss') {
-    log.info('[VoiceChatService] Switched to MOSS Adapter');
   } else {
     log.info('[VoiceChatService] Switched to WebSocket Adapter');
   }

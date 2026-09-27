@@ -34,10 +34,25 @@ describe('tauri-dev-instance-paths', () => {
     expect(desktop.webviewOverlayDataRoot).toBe(path.join(projectRoot, '.tmp', 'tauri-dev-state', 'desktop', 'webview', 'overlay'));
     expect(desktop.appDataDir).toBe(path.join(projectRoot, '.tmp', 'tauri-dev-state', 'desktop', 'app-data'));
     expect(desktop.runtimeDataDir).toBe(path.join(projectRoot, '.tmp', 'tauri-dev-state', 'desktop', 'app-data', 'runtime'));
-    expect(desktop.legacySharedAppDataDir).toBe(path.join('C:\\Users\\starlin\\AppData\\Roaming', 'com.exomind.app'));
-    expect(desktop.legacySharedWebviewMainDataDir).toBe(path.join('C:\\Users\\starlin\\AppData\\Local', 'com.exomind.app'));
-    expect(desktop.legacySharedRuntimeDir).toBe(path.join('C:\\Users\\starlin\\AppData\\Roaming', 'com.exomind.app', 'runtime'));
+    expect(desktop.legacySharedAppDataDir).toBeUndefined();
+    expect(desktop.legacySharedWebviewMainDataDir).toBeUndefined();
+    expect(desktop.legacySharedRuntimeDir).toBeUndefined();
     expect(desktop.mcpBridgeBasePort).toBe(9223);
     expect(issue773.mcpBridgeBasePort).toBe(9233);
+  });
+
+  it('passes through explicit legacy seed dirs only when provided（仅在显式提供时透传 legacy seed 目录）', () => {
+    const projectRoot = path.resolve('D:/project/exomind');
+    const resolved = resolveTauriDevInstancePaths(projectRoot, {
+      EXOMIND_TAURI_INSTANCE_NAME: 'desktop',
+      EXOMIND_WEB_PORT: '1420',
+      EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR: 'fixtures/app-data-copy',
+      EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR: 'fixtures/webview-copy',
+      EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR: 'D:\\fixtures\\runtime-copy',
+    });
+
+    expect(resolved.legacySharedAppDataDir).toBe(path.resolve(projectRoot, 'fixtures/app-data-copy'));
+    expect(resolved.legacySharedWebviewMainDataDir).toBe(path.resolve(projectRoot, 'fixtures/webview-copy'));
+    expect(resolved.legacySharedRuntimeDir).toBe(path.normalize('D:\\fixtures\\runtime-copy'));
   });
 });

@@ -15,5 +15,18 @@ describe('now workbench overlay capability（当下工作台悬浮窗权限）',
     expect(capability.permissions).toContain('core:window:allow-set-focus');
     expect(capability.permissions).toContain('core:window:allow-set-size');
     expect(capability.permissions).toContain('core:window:allow-get-all-windows');
+    expect(capability.permissions).toContain('log:default');
+  });
+
+  it('uses the dev-manager overlay data directory when available（开发实例显式隔离子 WebView 数据目录）', () => {
+    const commandPath = resolve(
+      process.cwd(),
+      'src-tauri/src/commands/now_workbench_overlay_commands.rs',
+    );
+    const source = readFileSync(commandPath, 'utf8');
+
+    expect(source).toContain('resolve_overlay_webview_data_dir');
+    expect(source).toContain('builder.data_directory(data_dir)');
+    expect(source).toContain('NOW_WORKBENCH_OVERLAY_WINDOW_LABEL');
   });
 });

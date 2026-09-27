@@ -44,10 +44,12 @@ import { PerfTrace, logPerfInfo, perfNow, waitForNextPaint } from "@/lib/utils/p
 import {
   getTaskService,
   getTaskTimerService,
+  getEventLogService,
   getTimeBlockService,
   type TimerConfig,
   type TimerMode,
 } from "@/lib/services";
+import { getEventSourceMetadata } from "@/lib/eventlog/source-metadata";
 import { appendTaskStatusChangeDescription } from "@/lib/task/task-status-change-description";
 import { resolveCountdownOverrunMs } from "@/lib/timeblock/countdown-overrun";
 import { resolveCountdownEndTimeDisplay } from "@/lib/timeblock/expected-end-time";
@@ -64,6 +66,7 @@ import {
 } from "@/ui/app/components/TaskStatusSelector";
 import { FocusKeepAwakeButton } from "@/ui/app/components/FocusKeepAwakeButton";
 import type { FocusKeepAwakeControl } from "@/ui/app/components/FocusKeepAwakeController";
+import { createUuidV4 } from "@/lib/utils/uuid";
 import {
   resolveFeedbackSubmitLabel,
   useFeedbackSubmitControls,
@@ -113,6 +116,36 @@ function isFeedbackStage(block: ActiveBlockData): boolean {
   );
 }
 
+function isRenderableActiveBlock(block: ActiveBlockData): boolean {
+  return (
+    block.blockType !== "gap" &&
+    !block.feedbackSubmittedAt &&
+    !(block.transitions ?? []).some((transition) => transition.type === "end")
+  );
+}
+
+function isQuickStartKeyEvent(event: KeyboardEvent<HTMLElement>): boolean {
+  return (
+    !event.nativeEvent.isComposing &&
+    event.key === "Enter" &&
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    !event.shiftKey
+  );
+}
+
+function parseCustomDurationMinutes(rawValue: string): number | null {
+  const parsedValue = Number.parseInt(rawValue.trim(), 10);
+  if (!Number.isFinite(parsedValue)) {
+    return null;
+  }
+  return Math.max(1, Math.min(MAX_CUSTOM_COUNTDOWN_MINUTES, parsedValue));
+}
+
+function formatRunningBlockName(name: string | null | undefined): string {
+  return name?.trim() || "未命名任务";
+}
+
 function formatClock(ms: number): string {
   const safe = Math.max(0, Math.floor(ms));
   const totalSeconds = Math.floor(safe / 1000);
@@ -135,6 +168,19 @@ function expectedOptionClass(active: boolean): string {
 
 const PRESET_COUNTDOWN_MINUTES = [15, 25, 45] as const;
 const MAX_CUSTOM_COUNTDOWN_MINUTES = 720;
+const DEFAULT_COUNTDOWN_MINUTES = 25;
+const FOCUS_CONFIG_DRAFT_STORAGE_KEY =
+  "exomind:focus-timer:config-draft:v1";
+const FOCUS_CONFIG_DRAFT_MAX_AGE_MS = 30 * 60 * 1000;
+
+interface FocusConfigDraftSnapshot {
+  taskNameDraft: string;
+  timerMode: TimerMode;
+  countdownMinutes: number;
+  selectedTaskIds: string[];
+  inputFocused: boolean;
+  updatedAt: number;
+}
 
 function isPresetCountdownMinutes(minutes: number): boolean {
   return PRESET_COUNTDOWN_MINUTES.includes(
@@ -152,6 +198,114 @@ function resolveExpectedOptionIndex(mode: TimerMode, minutes: number): number {
 
 function resolveActiveTaskIds(block: ActiveBlockData | null): string[] {
   return resolveActiveBlockTaskIds(block);
+}
+
+function getFocusConfigDraftStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeCountdownMinutes(value: unknown): number {
+  const parsed =
+    typeof value === "number" ? value : Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_COUNTDOWN_MINUTES;
+  return Math.max(1, Math.min(MAX_CUSTOM_COUNTDOWN_MINUTES, Math.round(parsed)));
+}
+
+function isFocusConfigDraftMeaningful(
+  snapshot: FocusConfigDraftSnapshot,
+): boolean {
+  return (
+    snapshot.inputFocused ||
+    snapshot.taskNameDraft.trim().length > 0 ||
+    snapshot.selectedTaskIds.length > 0 ||
+    snapshot.timerMode !== "countdown" ||
+    snapshot.countdownMinutes !== DEFAULT_COUNTDOWN_MINUTES
+  );
+}
+
+function normalizeFocusConfigDraftSnapshot(
+  value: unknown,
+): FocusConfigDraftSnapshot | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Record<string, unknown>;
+  const updatedAt =
+    typeof candidate.updatedAt === "number"
+      ? candidate.updatedAt
+      : Number(candidate.updatedAt);
+  if (!Number.isFinite(updatedAt)) return null;
+  if (Date.now() - updatedAt > FOCUS_CONFIG_DRAFT_MAX_AGE_MS) return null;
+
+  const timerMode: TimerMode =
+    candidate.timerMode === "countup" ? "countup" : "countdown";
+  const snapshot: FocusConfigDraftSnapshot = {
+    taskNameDraft:
+      typeof candidate.taskNameDraft === "string"
+        ? candidate.taskNameDraft
+        : "",
+    timerMode,
+    countdownMinutes: normalizeCountdownMinutes(candidate.countdownMinutes),
+    selectedTaskIds: normalizePreselectedTaskIds(
+      Array.isArray(candidate.selectedTaskIds)
+        ? candidate.selectedTaskIds.filter(
+            (taskId): taskId is string => typeof taskId === "string",
+          )
+        : [],
+    ),
+    inputFocused: candidate.inputFocused === true,
+    updatedAt,
+  };
+
+  return isFocusConfigDraftMeaningful(snapshot) ? snapshot : null;
+}
+
+function readFocusConfigDraftSnapshot(): FocusConfigDraftSnapshot | null {
+  const storage = getFocusConfigDraftStorage();
+  if (!storage) return null;
+
+  try {
+    const rawValue = storage.getItem(FOCUS_CONFIG_DRAFT_STORAGE_KEY);
+    if (!rawValue) return null;
+    const snapshot = normalizeFocusConfigDraftSnapshot(JSON.parse(rawValue));
+    if (!snapshot) {
+      storage.removeItem(FOCUS_CONFIG_DRAFT_STORAGE_KEY);
+    }
+    return snapshot;
+  } catch {
+    storage.removeItem(FOCUS_CONFIG_DRAFT_STORAGE_KEY);
+    return null;
+  }
+}
+
+function writeFocusConfigDraftSnapshot(
+  snapshot: FocusConfigDraftSnapshot,
+): void {
+  const storage = getFocusConfigDraftStorage();
+  if (!storage) return;
+
+  try {
+    if (!isFocusConfigDraftMeaningful(snapshot)) {
+      storage.removeItem(FOCUS_CONFIG_DRAFT_STORAGE_KEY);
+      return;
+    }
+    storage.setItem(FOCUS_CONFIG_DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Ignore storage quota / permission failures; in-memory state still wins.
+  }
+}
+
+function clearFocusConfigDraftSnapshot(): void {
+  const storage = getFocusConfigDraftStorage();
+  if (!storage) return;
+  try {
+    storage.removeItem(FOCUS_CONFIG_DRAFT_STORAGE_KEY);
+  } catch {
+    // Ignore storage permission failures.
+  }
 }
 
 function buildTaskStatusChoices(
@@ -197,22 +351,65 @@ export const FocusTimerWidget = forwardRef<
   const frameRef = useRef<number | null>(null);
   const taskInputRef = useRef<HTMLTextAreaElement | null>(null);
   const customDurationInputRef = useRef<HTMLInputElement | null>(null);
+  const runningNameInputRef = useRef<HTMLInputElement | null>(null);
   const countdownEndedRef = useRef(false);
   const countdownOverrunRef = useRef(false);
   const hardEndTriggeredRef = useRef(false);
   const linkedTasksLoadRequestRef = useRef(0);
+  const uiStateRef = useRef<FocusUiState>("idle");
+  const taskNameDraftRef = useRef("");
+  const timerModeRef = useRef<TimerMode>("countdown");
+  const countdownMinutesRef = useRef(DEFAULT_COUNTDOWN_MINUTES);
+  const selectedTaskIdsRef = useRef<string[]>([]);
+  const taskInputFocusIntentRef = useRef(false);
+  const localStartInFlightRef = useRef(false);
+  const locallyEndedStartIdsRef = useRef<Set<string>>(new Set());
+  const isRunningNameEditingRef = useRef(false);
+  const runningNameSaveInFlightRef = useRef(false);
+  const initialConfigDraftRef = useRef<
+    FocusConfigDraftSnapshot | null | undefined
+  >(undefined);
+  if (initialConfigDraftRef.current === undefined) {
+    const restoredDraft = readFocusConfigDraftSnapshot();
+    initialConfigDraftRef.current = restoredDraft;
+    taskInputFocusIntentRef.current = restoredDraft?.inputFocused ?? false;
+  }
+  const initialConfigDraft = initialConfigDraftRef.current;
 
-  const [uiState, setUiState] = useState<FocusUiState>("idle");
+  const [uiState, setUiState] = useState<FocusUiState>(
+    initialConfigDraft?.inputFocused ? "config" : "idle",
+  );
+  const setFocusUiState = useCallback((nextState: FocusUiState) => {
+    uiStateRef.current = nextState;
+    setUiState(nextState);
+  }, []);
   const [runningSubState, setRunningSubState] =
     useState<RunningSubState>("running");
 
-  const [taskNameDraft, setTaskNameDraft] = useState("");
+  const [taskNameDraft, setTaskNameDraft] = useState(
+    initialConfigDraft?.taskNameDraft ?? "",
+  );
   const [taskName, setTaskName] = useState("");
-  const [timerMode, setTimerMode] = useState<TimerMode>("countdown");
-  const [countdownMinutes, setCountdownMinutes] = useState(25);
-  const [customDurationDraft, setCustomDurationDraft] = useState("25");
+  const [runningNameDraft, setRunningNameDraft] = useState("");
+  const [isRunningNameEditing, setIsRunningNameEditingState] = useState(false);
+  const [isRunningNameSaving, setIsRunningNameSaving] = useState(false);
+  const [timerMode, setTimerMode] = useState<TimerMode>(
+    initialConfigDraft?.timerMode ?? "countdown",
+  );
+  const [countdownMinutes, setCountdownMinutes] = useState(
+    initialConfigDraft?.countdownMinutes ?? DEFAULT_COUNTDOWN_MINUTES,
+  );
+  const [customDurationDraft, setCustomDurationDraft] = useState(
+    String(initialConfigDraft?.countdownMinutes ?? DEFAULT_COUNTDOWN_MINUTES),
+  );
   const [isCustomDurationEditing, setIsCustomDurationEditing] = useState(false);
-  const [elapsedMs, setElapsedMs] = useState(25 * 60 * 1000);
+  const [elapsedMs, setElapsedMs] = useState(
+    (initialConfigDraft?.timerMode ?? "countdown") === "countdown"
+      ? (initialConfigDraft?.countdownMinutes ?? DEFAULT_COUNTDOWN_MINUTES) *
+          60 *
+          1000
+      : 0,
+  );
   const [countdownOvertimeMs, setCountdownOvertimeMs] = useState(0);
   const [timerPreferences, setTimerPreferences] = useState(() =>
     getTimerPreferences(),
@@ -229,7 +426,7 @@ export const FocusTimerWidget = forwardRef<
   const selectableTasks = usePrestartSelectableTasks();
   const [internalSelectedTaskIds, setInternalSelectedTaskIds] = useState<
     string[]
-  >([]);
+  >(initialConfigDraft?.selectedTaskIds ?? []);
   const {
     canSubmitFeedback,
     handleFeedbackKeyDown,
@@ -248,12 +445,19 @@ export const FocusTimerWidget = forwardRef<
   >({});
 
   const isRunningUi = uiState === "running";
+  uiStateRef.current = uiState;
   const isPaused = isRunningUi && runningSubState === "paused";
   const isCustomDurationSelected =
     timerMode === "countdown" && !isPresetCountdownMinutes(countdownMinutes);
   const customDurationTriggerText = isCustomDurationSelected
     ? `${countdownMinutes}m`
     : "自定义";
+  const runningNameDisplayText = formatRunningBlockName(taskName);
+
+  const setRunningNameEditing = useCallback((nextEditing: boolean) => {
+    isRunningNameEditingRef.current = nextEditing;
+    setIsRunningNameEditingState(nextEditing);
+  }, []);
   const activeExpectedIndex = resolveExpectedOptionIndex(
     timerMode,
     countdownMinutes,
@@ -275,6 +479,10 @@ export const FocusTimerWidget = forwardRef<
       })
     : null;
   const selectedTaskIds = prestartSelectedTaskIds ?? internalSelectedTaskIds;
+  taskNameDraftRef.current = taskNameDraft;
+  timerModeRef.current = timerMode;
+  countdownMinutesRef.current = countdownMinutes;
+  selectedTaskIdsRef.current = selectedTaskIds;
   const setSelectedTaskIds = useCallback(
     (nextValue: string[] | ((current: string[]) => string[])) => {
       const resolvedValue = normalizePreselectedTaskIds(
@@ -298,16 +506,162 @@ export const FocusTimerWidget = forwardRef<
   );
 
   const focusTaskInput = useCallback(() => {
+    taskInputFocusIntentRef.current = true;
     requestAnimationFrame(() => {
       taskInputRef.current?.focus();
     });
   }, []);
 
+  const buildCurrentConfigDraftSnapshot = useCallback(
+    (
+      overrides: Partial<
+        Omit<FocusConfigDraftSnapshot, "updatedAt">
+      > = {},
+    ): FocusConfigDraftSnapshot => ({
+      taskNameDraft: taskNameDraftRef.current,
+      timerMode: timerModeRef.current,
+      countdownMinutes: countdownMinutesRef.current,
+      selectedTaskIds: selectedTaskIdsRef.current,
+      inputFocused: taskInputFocusIntentRef.current,
+      ...overrides,
+      updatedAt: Date.now(),
+    }),
+    [],
+  );
+
+  const persistCurrentConfigDraft = useCallback(
+    (
+      overrides: Partial<
+        Omit<FocusConfigDraftSnapshot, "updatedAt">
+      > = {},
+    ) => {
+      writeFocusConfigDraftSnapshot(
+        buildCurrentConfigDraftSnapshot(overrides),
+      );
+    },
+    [buildCurrentConfigDraftSnapshot],
+  );
+
+  const restoreConfigDraftSnapshot = useCallback(
+    (snapshot: FocusConfigDraftSnapshot): void => {
+      const normalizedSnapshot: FocusConfigDraftSnapshot = {
+        taskNameDraft: snapshot.taskNameDraft,
+        timerMode: snapshot.timerMode,
+        countdownMinutes: normalizeCountdownMinutes(snapshot.countdownMinutes),
+        selectedTaskIds: normalizePreselectedTaskIds(snapshot.selectedTaskIds),
+        inputFocused: snapshot.inputFocused,
+        updatedAt: Date.now(),
+      };
+      activeBlockDataRef.current = null;
+      linkedTasksLoadRequestRef.current += 1;
+      taskStatusChoiceBlockRef.current = null;
+      setTaskName("");
+      setTaskNameDraft(normalizedSnapshot.taskNameDraft);
+      setTimerMode(normalizedSnapshot.timerMode);
+      setCountdownMinutes(normalizedSnapshot.countdownMinutes);
+      setCustomDurationDraft(String(normalizedSnapshot.countdownMinutes));
+      setSelectedTaskIds(normalizedSnapshot.selectedTaskIds);
+      setFeedbackOpen(false);
+      setFeedbackInProgress(false);
+      setFeedbackSubmitting(false);
+      resetSkipFeedbackConfirm();
+      countdownEndedRef.current = false;
+      countdownOverrunRef.current = false;
+      hardEndTriggeredRef.current = false;
+      setCountdownOvertimeMs(0);
+      syncIdleElapsedFromMode(
+        normalizedSnapshot.timerMode,
+        normalizedSnapshot.countdownMinutes,
+      );
+      setLinkedTasks([]);
+      setTaskStatusChoices({});
+      setRunningSubState("running");
+      setFocusUiState("config");
+      taskInputFocusIntentRef.current = normalizedSnapshot.inputFocused;
+      writeFocusConfigDraftSnapshot({
+        ...normalizedSnapshot,
+        updatedAt: Date.now(),
+      });
+      if (normalizedSnapshot.inputFocused) {
+        focusTaskInput();
+      }
+    },
+    [
+      focusTaskInput,
+      resetSkipFeedbackConfirm,
+      setFocusUiState,
+      setSelectedTaskIds,
+      syncIdleElapsedFromMode,
+    ],
+  );
+
+  const buildProtectedLocalConfigDraftSnapshot = useCallback(() => {
+    if (uiStateRef.current !== "config") return null;
+    const activeElement =
+      typeof document === "undefined" ? null : document.activeElement;
+    const inputFocused =
+      activeElement === taskInputRef.current || taskInputFocusIntentRef.current;
+    const snapshot = buildCurrentConfigDraftSnapshot({ inputFocused });
+    return isFocusConfigDraftMeaningful(snapshot) ? snapshot : null;
+  }, [buildCurrentConfigDraftSnapshot]);
+
+  const persistProtectedLocalConfigDraft = useCallback(() => {
+    const snapshot = buildProtectedLocalConfigDraftSnapshot();
+    if (!snapshot) return null;
+    taskInputFocusIntentRef.current = snapshot.inputFocused;
+    writeFocusConfigDraftSnapshot(snapshot);
+    return snapshot;
+  }, [buildProtectedLocalConfigDraftSnapshot]);
+
+  const preserveProtectedLocalConfigDraft = useCallback(() => {
+    const snapshot = persistProtectedLocalConfigDraft();
+    if (!snapshot) return null;
+    if (snapshot.inputFocused) {
+      focusTaskInput();
+    }
+    return snapshot;
+  }, [focusTaskInput, persistProtectedLocalConfigDraft]);
+
+  const rememberLocallyEndedStartId = useCallback((startId: string) => {
+    const nextStartIds = new Set(locallyEndedStartIdsRef.current);
+    nextStartIds.add(startId);
+    locallyEndedStartIdsRef.current = new Set(
+      Array.from(nextStartIds).slice(-20),
+    );
+  }, []);
+
   const enterConfigState = useCallback(() => {
     if (isRunningUi) return;
-    setUiState("config");
+    taskInputFocusIntentRef.current = true;
+    const storedDraft = readFocusConfigDraftSnapshot();
+    if (storedDraft) {
+      restoreConfigDraftSnapshot({ ...storedDraft, inputFocused: true });
+      return;
+    }
+    setFocusUiState("config");
     focusTaskInput();
-  }, [focusTaskInput, isRunningUi]);
+  }, [focusTaskInput, isRunningUi, restoreConfigDraftSnapshot, setFocusUiState]);
+
+  useEffect(() => {
+    const initialDraft = initialConfigDraftRef.current;
+    if (initialDraft?.inputFocused && uiStateRef.current === "config") {
+      focusTaskInput();
+    }
+  }, [focusTaskInput]);
+
+  useEffect(() => {
+    if (uiState === "running") return;
+    persistCurrentConfigDraft({
+      inputFocused: uiState === "config" && taskInputFocusIntentRef.current,
+    });
+  }, [
+    countdownMinutes,
+    persistCurrentConfigDraft,
+    selectedTaskIds,
+    taskNameDraft,
+    timerMode,
+    uiState,
+  ]);
 
   useEffect(() => {
     const selectableTaskIdSet = new Set(selectableTasks.map((task) => task.id));
@@ -360,15 +714,40 @@ export const FocusTimerWidget = forwardRef<
 
   const applyActiveBlock = useCallback(
     (block: ActiveBlockData | null) => {
-      activeBlockDataRef.current = block;
-      if (!block) {
+      const visibleBlock = block && isRenderableActiveBlock(block) ? block : null;
+      if (
+        visibleBlock &&
+        locallyEndedStartIdsRef.current.has(visibleBlock.startId)
+      ) {
+        return;
+      }
+
+      if (!visibleBlock) {
+        const preservedDraft = preserveProtectedLocalConfigDraft();
+        if (preservedDraft) {
+          return;
+        }
+        const storedDraft = readFocusConfigDraftSnapshot();
+        activeBlockDataRef.current = null;
+        taskInputFocusIntentRef.current = storedDraft?.inputFocused ?? false;
         linkedTasksLoadRequestRef.current += 1;
         taskStatusChoiceBlockRef.current = null;
-        setUiState("idle");
+        setFocusUiState(storedDraft?.inputFocused ? "config" : "idle");
         setRunningSubState("running");
         setTaskName("");
-        setTaskNameDraft("");
-        setSelectedTaskIds([]);
+        setRunningNameDraft("");
+        setRunningNameEditing(false);
+        setIsRunningNameSaving(false);
+        runningNameSaveInFlightRef.current = false;
+        setTaskNameDraft(storedDraft?.taskNameDraft ?? "");
+        if (storedDraft) {
+          setTimerMode(storedDraft.timerMode);
+          setCountdownMinutes(storedDraft.countdownMinutes);
+          setCustomDurationDraft(String(storedDraft.countdownMinutes));
+          setSelectedTaskIds(storedDraft.selectedTaskIds);
+        } else {
+          setSelectedTaskIds([]);
+        }
         setFeedbackOpen(false);
         setFeedbackInProgress(false);
         setFeedbackSubmitting(false);
@@ -377,13 +756,29 @@ export const FocusTimerWidget = forwardRef<
         countdownOverrunRef.current = false;
         hardEndTriggeredRef.current = false;
         setCountdownOvertimeMs(0);
-        syncIdleElapsedFromMode(timerMode, countdownMinutes);
+        syncIdleElapsedFromMode(
+          storedDraft?.timerMode ?? timerMode,
+          storedDraft?.countdownMinutes ?? countdownMinutes,
+        );
         setLinkedTasks([]);
         setTaskStatusChoices({});
+        if (storedDraft?.inputFocused) {
+          focusTaskInput();
+        }
         return;
       }
 
-      const resolvedTaskIds = resolveActiveTaskIds(block);
+      const protectedDraft = localStartInFlightRef.current
+        ? null
+        : persistProtectedLocalConfigDraft();
+      const storedDraft = protectedDraft ?? readFocusConfigDraftSnapshot();
+
+      if (!storedDraft) {
+        clearFocusConfigDraftSnapshot();
+      }
+      taskInputFocusIntentRef.current = false;
+      activeBlockDataRef.current = visibleBlock;
+      const resolvedTaskIds = resolveActiveTaskIds(visibleBlock);
       const taskLoadRequestId = linkedTasksLoadRequestRef.current + 1;
       linkedTasksLoadRequestRef.current = taskLoadRequestId;
 
@@ -409,37 +804,40 @@ export const FocusTimerWidget = forwardRef<
         setLinkedTasks([]);
       }
       setTaskStatusChoices((previousChoices) => {
-        if (taskStatusChoiceBlockRef.current !== block.startId) {
-          taskStatusChoiceBlockRef.current = block.startId;
+        if (taskStatusChoiceBlockRef.current !== visibleBlock.startId) {
+          taskStatusChoiceBlockRef.current = visibleBlock.startId;
           return buildTaskStatusChoices(resolvedTaskIds);
         }
         return buildTaskStatusChoices(resolvedTaskIds, previousChoices);
       });
 
-      setTaskName(block.name);
-      setTaskNameDraft(block.name);
-      setTimerMode(block.mode ?? "countup");
-      if (block.mode === "countdown" && block.targetMinutes) {
-        setCountdownMinutes(block.targetMinutes);
+      setTaskName(visibleBlock.name);
+      if (!isRunningNameEditingRef.current) {
+        setRunningNameDraft(visibleBlock.name);
+      }
+      setTaskNameDraft(visibleBlock.name);
+      setTimerMode(visibleBlock.mode ?? "countup");
+      if (visibleBlock.mode === "countdown" && visibleBlock.targetMinutes) {
+        setCountdownMinutes(visibleBlock.targetMinutes);
       }
       const restoredOverrunMs =
-        block.mode === "countdown" &&
+        visibleBlock.mode === "countdown" &&
         timerPreferences.countdownEndMode === "soft"
-          ? resolveCountdownOverrunMs(block)
+          ? resolveCountdownOverrunMs(visibleBlock)
           : 0;
       const hasRestoredOverrun = restoredOverrunMs > 0;
       setElapsedMs(
-        block.mode === "countdown" && hasRestoredOverrun
+        visibleBlock.mode === "countdown" && hasRestoredOverrun
           ? 0
-          : Math.max(0, block.elapsed ?? 0),
+          : Math.max(0, visibleBlock.elapsed ?? 0),
       );
-      const nextFeedbackInProgress = isFeedbackStage(block);
+      const nextFeedbackInProgress = isFeedbackStage(visibleBlock);
       setFeedbackInProgress(nextFeedbackInProgress);
       setFeedbackSubmitting(false);
       resetSkipFeedbackConfirm();
-      setUiState("running");
+      setFocusUiState("running");
       setRunningSubState(
-        nextFeedbackInProgress || block.paused ? "paused" : "running",
+        nextFeedbackInProgress || visibleBlock.paused ? "paused" : "running",
       );
       hardEndTriggeredRef.current = nextFeedbackInProgress;
       countdownEndedRef.current = hasRestoredOverrun;
@@ -448,7 +846,12 @@ export const FocusTimerWidget = forwardRef<
     },
     [
       countdownMinutes,
+      focusTaskInput,
+      persistProtectedLocalConfigDraft,
+      preserveProtectedLocalConfigDraft,
       resetSkipFeedbackConfirm,
+      setFocusUiState,
+      setRunningNameEditing,
       syncIdleElapsedFromMode,
       timerMode,
       timerPreferences.countdownEndMode,
@@ -457,22 +860,8 @@ export const FocusTimerWidget = forwardRef<
 
   useEffect(() => {
     let cancelled = false;
-    console.log("[FocusTimer] useEffect: subscribing to onBlockChange");
     const unsubscribe = timeBlockServiceRef.current.onBlockChange((block) => {
-      console.log(
-        "[FocusTimer] onBlockChange fired",
-        block
-          ? {
-              startId: block.startId,
-              mode: block.mode,
-              phase: block.phase,
-              paused: block.paused,
-              feedbackSubmittedAt: block.feedbackSubmittedAt,
-            }
-          : "NULL",
-      );
       if (cancelled) {
-        console.log("[FocusTimer] onBlockChange: cancelled, skipping");
         return;
       }
       applyActiveBlock(block);
@@ -480,12 +869,6 @@ export const FocusTimerWidget = forwardRef<
 
     const load = async () => {
       const block = await timeBlockServiceRef.current.loadActiveBlock();
-      console.log(
-        "[FocusTimer] loadActiveBlock on mount",
-        block
-          ? { startId: block.startId, mode: block.mode, phase: block.phase }
-          : "NULL",
-      );
       if (cancelled) return;
       if (block) {
         applyActiveBlock(block);
@@ -494,7 +877,6 @@ export const FocusTimerWidget = forwardRef<
 
     void load();
     return () => {
-      console.log("[FocusTimer] useEffect cleanup: unsubscribing");
       cancelled = true;
       unsubscribe();
     };
@@ -590,10 +972,16 @@ export const FocusTimerWidget = forwardRef<
     syncIdleElapsedFromMode(timerMode, countdownMinutes);
   }, [countdownMinutes, syncIdleElapsedFromMode, timerMode, uiState]);
 
-  const handleStart = useCallback(async () => {
+  const handleStart = useCallback(async (timerConfigOverride?: TimerConfig) => {
+    const config: TimerConfig =
+      timerConfigOverride ??
+      {
+        mode: timerMode,
+        minutes: timerMode === "countdown" ? countdownMinutes : undefined,
+      };
     const trace = new PerfTrace("TB-UI startBlock", {
       component: "FocusTimerWidget",
-      timerMode,
+      timerMode: config.mode,
       selectedTaskCount: selectedTaskIds.length,
     });
     const lines = taskNameDraft.split(/\r?\n/);
@@ -604,18 +992,13 @@ export const FocusTimerWidget = forwardRef<
       return;
     }
 
-    const config: TimerConfig = {
-      mode: timerMode,
-      minutes: timerMode === "countdown" ? countdownMinutes : undefined,
-    };
-
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;
     hardEndTriggeredRef.current = false;
     setCountdownOvertimeMs(0);
     trace.step("prepare-start", {
       hasDescription: description.length > 0,
-      countdownMinutes: timerMode === "countdown" ? countdownMinutes : null,
+      countdownMinutes: config.mode === "countdown" ? config.minutes : null,
     });
 
     const selectedTasks = selectedTaskIds
@@ -635,6 +1018,7 @@ export const FocusTimerWidget = forwardRef<
       skippedTaskCount: skippedTaskIds.length,
     });
 
+    localStartInFlightRef.current = true;
     try {
       let transitionedTaskCount = 0;
       for (const task of selectedTasks) {
@@ -674,13 +1058,15 @@ export const FocusTimerWidget = forwardRef<
       trace.step("service-start-block", {
         startId: block.startId,
       });
+      clearFocusConfigDraftSnapshot();
+      taskInputFocusIntentRef.current = false;
       activeBlockDataRef.current = block;
       setTaskName(name);
       setTaskNameDraft(name);
       setElapsedMs(Math.max(0, block.elapsed ?? 0));
       setFeedbackInProgress(false);
       setRunningSubState("running");
-      setUiState("running");
+      setFocusUiState("running");
       trace.step("apply-ui-running-state", {
         startId: block.startId,
       });
@@ -696,22 +1082,32 @@ export const FocusTimerWidget = forwardRef<
     } catch (error) {
       trace.fail(error);
       throw error;
+    } finally {
+      localStartInFlightRef.current = false;
     }
   }, [
     countdownMinutes,
     focusTaskInput,
     selectableTasks,
     selectedTaskIds,
+    setFocusUiState,
     taskNameDraft,
     timerMode,
   ]);
 
   const handleTaskInputKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (event.nativeEvent.isComposing) return;
-      if (event.key !== "Enter") return;
-      if (!(event.ctrlKey || event.metaKey)) return;
-      if (event.altKey || event.shiftKey) return;
+      if (!isQuickStartKeyEvent(event)) return;
+
+      event.preventDefault();
+      void handleStart();
+    },
+    [handleStart],
+  );
+
+  const handleExpectedTimeKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (!isQuickStartKeyEvent(event)) return;
 
       event.preventDefault();
       void handleStart();
@@ -721,9 +1117,11 @@ export const FocusTimerWidget = forwardRef<
 
   const handleCollapseToIdle = useCallback(() => {
     if (uiState !== "config") return;
+    taskInputFocusIntentRef.current = false;
+    persistCurrentConfigDraft({ inputFocused: false });
     setIsCustomDurationEditing(false);
-    setUiState("idle");
-  }, [uiState]);
+    setFocusUiState("idle");
+  }, [persistCurrentConfigDraft, setFocusUiState, uiState]);
 
   const handleOpenCustomDurationEditor = useCallback(() => {
     setIsCustomDurationEditing(true);
@@ -735,12 +1133,8 @@ export const FocusTimerWidget = forwardRef<
 
   const applyCustomDuration = useCallback(
     (rawValue: string) => {
-      const parsedValue = Number.parseInt(rawValue.trim(), 10);
-      if (Number.isFinite(parsedValue)) {
-        const safeMinutes = Math.max(
-          1,
-          Math.min(MAX_CUSTOM_COUNTDOWN_MINUTES, parsedValue),
-        );
+      const safeMinutes = parseCustomDurationMinutes(rawValue);
+      if (safeMinutes !== null) {
         setTimerMode("countdown");
         setCountdownMinutes(safeMinutes);
         setCustomDurationDraft(String(safeMinutes));
@@ -750,6 +1144,36 @@ export const FocusTimerWidget = forwardRef<
       setIsCustomDurationEditing(false);
     },
     [countdownMinutes],
+  );
+
+  const handleCustomDurationKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (isQuickStartKeyEvent(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        const safeMinutes =
+          parseCustomDurationMinutes(event.currentTarget.value) ??
+          countdownMinutes;
+        setTimerMode("countdown");
+        setCountdownMinutes(safeMinutes);
+        setCustomDurationDraft(String(safeMinutes));
+        setIsCustomDurationEditing(false);
+        void handleStart({ mode: "countdown", minutes: safeMinutes });
+        return;
+      }
+
+      if (event.nativeEvent.isComposing) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        applyCustomDuration(event.currentTarget.value);
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setCustomDurationDraft(String(countdownMinutes));
+        setIsCustomDurationEditing(false);
+      }
+    },
+    [applyCustomDuration, countdownMinutes, handleStart],
   );
 
   const enqueueServiceMutation = useCallback(
@@ -773,6 +1197,120 @@ export const FocusTimerWidget = forwardRef<
       });
     },
     [applyActiveBlock],
+  );
+
+  const handleBeginRunningNameEdit = useCallback(() => {
+    if (!isRunningUi || feedbackInProgress) return;
+    setRunningNameDraft(formatRunningBlockName(taskName));
+    setRunningNameEditing(true);
+    requestAnimationFrame(() => {
+      runningNameInputRef.current?.focus();
+      runningNameInputRef.current?.select();
+    });
+  }, [feedbackInProgress, isRunningUi, setRunningNameEditing, taskName]);
+
+  const handleCancelRunningNameEdit = useCallback(() => {
+    setRunningNameDraft(taskName);
+    setRunningNameEditing(false);
+  }, [setRunningNameEditing, taskName]);
+
+  const appendRunningNameRenameEvent = useCallback(
+    async (
+      block: ActiveBlockData,
+      previousName: string,
+      nextName: string,
+    ) => {
+      try {
+        await getEventLogService().appendEventData({
+          id: createUuidV4(),
+          timestamp: Date.now(),
+          content: `时间块改名：${formatRunningBlockName(previousName)} → ${formatRunningBlockName(nextName)}`,
+          tags: ["block_rename"],
+          metadata: {
+            source: getEventSourceMetadata(),
+            blockId: block.startId,
+            previousName,
+            nextName,
+            recordType: "timeblock_rename",
+          },
+        });
+      } catch (error) {
+        log.error(
+          `[TB-UI] append timeblock rename event failed ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+    [],
+  );
+
+  const handleSubmitRunningName = useCallback(async () => {
+    if (runningNameSaveInFlightRef.current) return;
+    const activeBlock = activeBlockDataRef.current;
+    if (!activeBlock) {
+      setRunningNameEditing(false);
+      return;
+    }
+
+    const previousName = activeBlock.name;
+    const nextName =
+      runningNameDraft.trim() || formatRunningBlockName(previousName);
+    setRunningNameDraft(nextName);
+    if (nextName === previousName) {
+      setRunningNameEditing(false);
+      return;
+    }
+
+    runningNameSaveInFlightRef.current = true;
+    setIsRunningNameSaving(true);
+    try {
+      await mutationQueueRef.current;
+      const updated = await timeBlockServiceRef.current.updateActiveBlock({
+        name: nextName,
+      });
+      if (!updated) {
+        throw new Error("updateActiveBlock returned null");
+      }
+      applyActiveBlock(updated);
+      setRunningNameEditing(false);
+      await appendRunningNameRenameEvent(updated, previousName, updated.name);
+    } catch (error) {
+      log.error(
+        `[TB-UI] rename active block failed ${error instanceof Error ? error.message : String(error)}`,
+      );
+      setRunningNameEditing(false);
+      try {
+        const block = await timeBlockServiceRef.current.loadActiveBlock();
+        applyActiveBlock(block);
+      } catch (reloadError) {
+        log.error(
+          `[TB-UI] rename active block recover failed ${reloadError instanceof Error ? reloadError.message : String(reloadError)}`,
+        );
+      }
+    } finally {
+      runningNameSaveInFlightRef.current = false;
+      setIsRunningNameSaving(false);
+    }
+  }, [
+    appendRunningNameRenameEvent,
+    applyActiveBlock,
+    runningNameDraft,
+    setRunningNameEditing,
+  ]);
+
+  const handleRunningNameKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.nativeEvent.isComposing) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleCancelRunningNameEdit();
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void handleSubmitRunningName();
+      }
+    },
+    [handleCancelRunningNameEdit, handleSubmitRunningName],
   );
 
   const handlePauseOrResume = useCallback(async () => {
@@ -909,6 +1447,9 @@ export const FocusTimerWidget = forwardRef<
           );
         }
         trace.step("service-end-block");
+        if (blockDataSnapshot?.startId) {
+          rememberLocallyEndedStartId(blockDataSnapshot.startId);
+        }
       } catch (error) {
         log.error(
           `[TB-UI] endBlock failed ${error instanceof Error ? error.message : String(error)}`,
@@ -958,14 +1499,28 @@ export const FocusTimerWidget = forwardRef<
       }
       trace.step("task-followups");
 
+      const storedDraft = readFocusConfigDraftSnapshot();
       setFeedback("");
       setFeedbackOpen(false);
       setFeedbackInProgress(false);
       setFeedbackSubmitting(false);
-      setUiState("idle");
+      setFocusUiState(storedDraft?.inputFocused ? "config" : "idle");
       setRunningSubState("running");
+      taskInputFocusIntentRef.current = storedDraft?.inputFocused ?? false;
       setTaskName("");
-      setTaskNameDraft("");
+      setRunningNameDraft("");
+      setRunningNameEditing(false);
+      setIsRunningNameSaving(false);
+      runningNameSaveInFlightRef.current = false;
+      setTaskNameDraft(storedDraft?.taskNameDraft ?? "");
+      if (storedDraft) {
+        setTimerMode(storedDraft.timerMode);
+        setCountdownMinutes(storedDraft.countdownMinutes);
+        setCustomDurationDraft(String(storedDraft.countdownMinutes));
+        setSelectedTaskIds(storedDraft.selectedTaskIds);
+      } else {
+        setSelectedTaskIds([]);
+      }
       setLinkedTasks([]);
       taskStatusChoiceBlockRef.current = null;
       setTaskStatusChoices({});
@@ -973,7 +1528,15 @@ export const FocusTimerWidget = forwardRef<
       countdownOverrunRef.current = false;
       hardEndTriggeredRef.current = false;
       setCountdownOvertimeMs(0);
-      syncIdleElapsedFromMode(timerMode, countdownMinutes);
+      syncIdleElapsedFromMode(
+        storedDraft?.timerMode ?? timerMode,
+        storedDraft?.countdownMinutes ?? countdownMinutes,
+      );
+      if (!storedDraft) {
+        clearFocusConfigDraftSnapshot();
+      } else if (storedDraft.inputFocused) {
+        focusTaskInput();
+      }
       trace.step("apply-ui-idle-state");
       // The feedback flow is only "done" once the idle state is painted back to screen.
       await waitForNextPaint();
@@ -990,8 +1553,12 @@ export const FocusTimerWidget = forwardRef<
       canSubmitFeedback,
       countdownMinutes,
       feedbackSubmitting,
+      focusTaskInput,
       syncIdleElapsedFromMode,
       linkedTasks,
+      rememberLocallyEndedStartId,
+      setFocusUiState,
+      setRunningNameEditing,
       taskStatusChoices,
       timerMode,
     ],
@@ -1009,8 +1576,8 @@ export const FocusTimerWidget = forwardRef<
   const isEndActionDisabled = feedbackInProgress && feedbackOpen;
   const endActionAriaLabel = feedbackInProgress
     ? "反馈中（Feedback in progress）"
-    : "结束（End）";
-  const endActionTitle = feedbackInProgress ? "反馈中" : "结束";
+    : "停止（Stop）";
+  const endActionTitle = feedbackInProgress ? "反馈中" : "停止";
   const endActionButtonClass = feedbackInProgress
     ? "h-11 w-11 rounded-[12px] bg-brand p-0 text-white hover:bg-brand/90 hover:text-white"
     : "h-11 w-11 rounded-[12px] bg-[#C75B3A] p-0 text-white hover:bg-[#B24D2F] hover:text-white";
@@ -1024,15 +1591,61 @@ export const FocusTimerWidget = forwardRef<
     isSubmitting: feedbackSubmitting,
     skipConfirmState: skipFeedbackConfirmState,
     skipConfirmCountdownSec: skipFeedbackCountdownSec,
-    defaultLabel: "确认结束",
+    defaultLabel: "确认停止",
   });
+
+  const renderRunningNameControl = (variant: "default" | "overlay") => {
+    const isOverlayVariant = variant === "overlay";
+    if (isRunningNameEditing) {
+      return (
+        <Input
+          ref={runningNameInputRef}
+          data-testid="new-focus-running-name-input"
+          value={runningNameDraft}
+          disabled={isRunningNameSaving}
+          onChange={(event) => setRunningNameDraft(event.target.value)}
+          onKeyDown={handleRunningNameKeyDown}
+          onBlur={() => {
+            if (isRunningNameEditingRef.current) {
+              void handleSubmitRunningName();
+            }
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+          aria-label="编辑时间块名称（Edit time block name）"
+          className={`h-8 w-full min-w-0 border-[#E7E5E4]/80 bg-white/70 px-2 text-left font-semibold shadow-none focus-visible:ring-1 focus-visible:ring-[#C75B3A] dark:border-[#FFFFFF20] dark:bg-[#FFFFFF12] ${
+            isOverlayVariant
+              ? "mt-0.5 text-[18px] leading-[1.25] text-[#F5EDE7]"
+              : "text-[20px] leading-[1.25] text-[#1C1917] dark:text-[#FAFAF9]"
+          }`}
+        />
+      );
+    }
+
+    return (
+      <button
+        type="button"
+        data-testid="new-focus-running-name-display"
+        onClick={handleBeginRunningNameEdit}
+        onMouseDown={(event) => event.stopPropagation()}
+        disabled={feedbackInProgress || isRunningNameSaving}
+        title="编辑时间块名称"
+        className={`block min-w-0 max-w-full truncate rounded-[8px] text-left font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C75B3A]/45 disabled:cursor-default disabled:opacity-100 ${
+          isOverlayVariant
+            ? "pt-0.5 text-[18px] leading-[1.35] text-[#F5EDE7] hover:text-white"
+            : `text-[20px] leading-[1.4] ${isOverlaySurface ? "text-[#F5EDE7]" : "text-[#1C1917] hover:text-[#B24D2F] dark:text-[#FAFAF9] dark:hover:text-[#F5B097]"}`
+        }`}
+      >
+        {runningNameDisplayText}
+      </button>
+    );
+  };
 
   useImperativeHandle(
     ref,
     () => ({
       expandAndFocusTaskName: () => {
         if (uiState === "running") return;
-        setUiState("config");
+        setFocusUiState("config");
         setSelectedTaskIds([]);
         focusTaskInput();
       },
@@ -1048,7 +1661,7 @@ export const FocusTimerWidget = forwardRef<
             : normalizePreselectedTaskIds(taskConfig.preselectedTaskIds);
         setTaskNameDraft(nextTitle);
         setSelectedTaskIds(nextPreselectedTaskIds);
-        setUiState("config");
+        setFocusUiState("config");
         focusTaskInput();
       },
       getTimerState: () => {
@@ -1067,6 +1680,7 @@ export const FocusTimerWidget = forwardRef<
       handleOpenEndDialog,
       handlePauseOrResume,
       runningSubState,
+      setFocusUiState,
       uiState,
     ],
   );
@@ -1231,7 +1845,25 @@ export const FocusTimerWidget = forwardRef<
                   ref={taskInputRef}
                   data-testid="new-focus-task-input"
                   value={taskNameDraft}
-                  onChange={(event) => setTaskNameDraft(event.target.value)}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    taskNameDraftRef.current = nextValue;
+                    taskInputFocusIntentRef.current = true;
+                    setTaskNameDraft(nextValue);
+                    persistCurrentConfigDraft({
+                      taskNameDraft: nextValue,
+                      inputFocused: true,
+                    });
+                  }}
+                  onFocus={() => {
+                    taskInputFocusIntentRef.current = true;
+                    persistCurrentConfigDraft({ inputFocused: true });
+                  }}
+                  onBlur={() => {
+                    if (uiStateRef.current === "running") return;
+                    taskInputFocusIntentRef.current = false;
+                    persistCurrentConfigDraft({ inputFocused: false });
+                  }}
                   onKeyDown={handleTaskInputKeyDown}
                   placeholder="输入时间块名称..."
                   rows={1}
@@ -1248,6 +1880,7 @@ export const FocusTimerWidget = forwardRef<
                 <div
                   className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
                   data-testid="new-focus-expected-time-row"
+                  onKeyDown={handleExpectedTimeKeyDown}
                 >
                   <div
                     data-testid="new-focus-expected-active-indicator"
@@ -1299,17 +1932,7 @@ export const FocusTimerWidget = forwardRef<
                           );
                         }}
                         onBlur={() => applyCustomDuration(customDurationDraft)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            applyCustomDuration(customDurationDraft);
-                          }
-                          if (event.key === "Escape") {
-                            event.preventDefault();
-                            setCustomDurationDraft(String(countdownMinutes));
-                            setIsCustomDurationEditing(false);
-                          }
-                        }}
+                        onKeyDown={handleCustomDurationKeyDown}
                         aria-label="自定义倒计时分钟（Custom countdown minutes）"
                         placeholder="分钟"
                         className="relative z-10 h-8 w-full border-transparent bg-transparent px-[6px] text-center text-[12px] font-semibold leading-none text-[#1C1917] shadow-none outline-none ring-0 focus-visible:ring-0 dark:text-[#FAFAF9]"
@@ -1399,12 +2022,7 @@ export const FocusTimerWidget = forwardRef<
                     >
                       {overlayChrome.statusLabel}
                     </p>
-                    <p
-                      className="truncate pt-0.5 text-[18px] font-semibold leading-[1.35] text-[#F5EDE7]"
-                      data-tauri-drag-region
-                    >
-                      {taskName || "未命名任务"}
-                    </p>
+                    {renderRunningNameControl("overlay")}
                   </div>
                   <div className="ml-auto flex shrink-0 items-center gap-1.5">
                     {hasFocusBgmConfigured ? (
@@ -1451,11 +2069,7 @@ export const FocusTimerWidget = forwardRef<
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] dark:bg-[#2A1510] text-[#C75B3A] dark:text-[#E8734E]">
                       <Target size={20} />
                     </div>
-                    <p
-                      className={`truncate text-[20px] font-semibold leading-[1.4] ${isOverlaySurface ? "text-[#F5EDE7]" : "text-[#1C1917] dark:text-[#FAFAF9]"}`}
-                    >
-                      {taskName || "未命名任务"}
-                    </p>
+                    {renderRunningNameControl("default")}
                   </div>
                   <div className="ml-auto flex shrink-0 items-center gap-2">
                     {showKeepAwakeButton && keepAwakeControl ? (
@@ -1575,7 +2189,7 @@ export const FocusTimerWidget = forwardRef<
       <TimeBlockFeedbackDialog
         open={feedbackOpen}
         onOpenChange={handleFeedbackDialogOpenChange}
-        title="结束专注并记录反馈"
+        title="停止专注并记录反馈"
         description="记录本次专注反馈后将结束当前时间块"
         feedback={feedback}
         onFeedbackChange={(value) => {

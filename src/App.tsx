@@ -9,6 +9,7 @@ import { RtDomainBackfillCoordinator } from "@/ui/app/components/RtDomainBackfil
 import { FocusBgmCoordinator } from "@/ui/app/components/FocusBgmCoordinator";
 import { MigrationDialogController } from "@/ui/components/MigrationDialogController";
 import { RuntimeInteractionPolicyController } from "@/ui/app/components/RuntimeInteractionPolicyController";
+import { WindowsAppBarController } from "@/ui/app/components/WindowsAppBarController";
 import {
   initUpdateChecker,
   destroyUpdateChecker,
@@ -18,10 +19,6 @@ import {
   initVoiceShortcutService,
   getVoiceShortcutService,
 } from "@/services/voice-shortcut.service";
-import {
-  destroyVoiceAssistantRuntimeService,
-  initVoiceAssistantRuntimeService,
-} from "@/services/voice-assistant-runtime.service";
 import {
   getMainWindowShortcutService,
   initMainWindowShortcutService,
@@ -33,24 +30,24 @@ function App() {
   useEffect(() => {
     initUpdateChecker();
     initVoiceShortcutService();
-    void initVoiceAssistantRuntimeService();
     initMainWindowShortcutService();
     void getNowWorkbenchOverlayService().init();
     return () => {
       destroyUpdateChecker();
       getVoiceShortcutService().destroy();
-      void destroyVoiceAssistantRuntimeService();
       getMainWindowShortcutService().destroy();
       getNowWorkbenchOverlayService().destroy();
     };
   }, []);
 
-  // 连接 RT SSE 信号流，接收 Agent 反馈
-  useSignalStream();
+  // Active-block transitions are infrequent and user-visible across windows.
+  // Keep them responsive without reintroducing timer-driven data reloads.
+  useSignalStream({ activeBlockThrottleMs: 250 });
 
   return (
     <>
       <RuntimeInteractionPolicyController />
+      <WindowsAppBarController />
       <DevInstanceTitleSync />
       <ThemeController />
       <TimeBlockSyncCoordinator />

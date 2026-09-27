@@ -22,7 +22,6 @@ pub async fn start_test_runtime(host_id: &str) -> RuntimeHandle {
         port: 0,
         host_id: host_id.to_string(),
         spawn_builtin_actors: false,
-        spawn_ts_agents: false,
         mesh_state_path: None,
         auth_secret: None,
         ..Default::default()
@@ -48,7 +47,6 @@ pub async fn start_test_runtime_with_secret_and_lan(
         port: 0,
         host_id: host_id.to_string(),
         spawn_builtin_actors: false,
-        spawn_ts_agents: false,
         mesh_state_path: None,
         auth_secret: secret,
         allow_lan_without_auth,
@@ -64,7 +62,6 @@ pub async fn start_test_runtime_with_mdns(host_id: &str) -> RuntimeHandle {
         port: 0,
         host_id: host_id.to_string(),
         spawn_builtin_actors: false,
-        spawn_ts_agents: false,
         mesh_state_path: None,
         auth_secret: None,
         enable_mdns: true,

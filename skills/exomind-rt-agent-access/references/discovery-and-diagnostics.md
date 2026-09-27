@@ -1,4 +1,4 @@
-> 最后更新：`2026-04-16` | 更新者：`Codex` | 更新内容概要：`拆分健康检查、版本、profiles、鉴权边界与 PowerShell curl 约定。`
+> 最后更新：`2026-05-18` | 更新者：`Claude Code` | 更新内容概要：`去硬编码；拆分健康检查、版本、profiles、鉴权边界与 PowerShell curl 约定。`
 
 # Discovery And Diagnostics
 
@@ -10,8 +10,8 @@
 |------|------|------|
 | `displayName` | `Argon` | UI 显示名 |
 | `slug` | `argon` | 归一化标识 |
-| `profileId` | `profile-argon` | 存储键 |
-| `scopeKey` / `user_id` | `profile-argon` | 当前 raw RT 查询参数 |
+| `profileId` | `profile-<slug>` | 存储键，以 `/profiles` 实际返回为准 |
+| `scopeKey` / `user_id` | `profile-<slug>` | 当前 raw RT 查询参数，以 `/profiles` 实际返回为准 |
 
 当前 `profileId` 与 `user_id` 在实现里恰好相同，但这是当前实现，不应当把它当成永远不会变的契约。
 
@@ -61,7 +61,7 @@ $enc = New-Object System.Text.UTF8Encoding($false)
 $tmp = Join-Path $env:TEMP "exo-sample.json"
 [System.IO.File]::WriteAllText($tmp, '{"title":"示例任务"}', $enc)
 
-curl.exe -sS -X POST "http://127.0.0.1:9124/tasks?user_id=profile-argon" `
+curl.exe -sS -X POST "http://<RT>/tasks?user_id=<PROFILE>" `
   -H "Content-Type: application/json" `
   --data-binary "@$tmp"
 ```
@@ -71,10 +71,10 @@ curl.exe -sS -X POST "http://127.0.0.1:9124/tasks?user_id=profile-argon" `
 ### 基础可用性
 
 ```bash
-curl -sS http://127.0.0.1:9124/health
-curl -sS http://127.0.0.1:9124/version
-curl -sS http://127.0.0.1:9124/topology
-curl -sS http://127.0.0.1:9124/profiles
+curl -sS http://<RT>/health
+curl -sS http://<RT>/version
+curl -sS http://<RT>/topology
+curl -sS http://<RT>/profiles
 ```
 
 当前 live 返回形态示例：
@@ -89,22 +89,22 @@ curl -sS http://127.0.0.1:9124/profiles
 
 ### 选定档案
 
-如果你知道显示名是 `Argon`，通常会先回读：
+如果你知道显示名，通常会先回读 `/profiles`：
 
 ```bash
-curl -sS http://127.0.0.1:9124/profiles
+curl -sS http://<RT>/profiles
 ```
 
-然后确认有：
+然后确认有对应条目，例如：
 
 ```json
-{"id":"profile-argon","slug":"argon","displayName":"Argon"}
+{"id":"profile-<slug>","slug":"<slug>","displayName":"<DisplayName>"}
 ```
 
-之后统一使用：
+之后统一使用返回的 `id` 作为 `user_id`：
 
 ```text
-user_id=profile-argon
+user_id=<PROFILE>
 ```
 
 ## 诊断 / 发现类端点
@@ -120,7 +120,7 @@ user_id=profile-argon
 ### `/topology`
 
 ```bash
-curl -sS http://127.0.0.1:9124/topology
+curl -sS http://<RT>/topology
 ```
 
 当前返回既包含 legacy flat fields，也包含 nested foundation fields，例如：
@@ -136,10 +136,10 @@ curl -sS http://127.0.0.1:9124/topology
 ### `/signals/history`
 
 ```bash
-curl -sS "http://127.0.0.1:9124/signals/history?limit=20"
-curl -sS "http://127.0.0.1:9124/signals/history?limit=20&topic_prefix=task."
-curl -sS "http://127.0.0.1:9124/signals/history?limit=20&exclude_topic_prefix=system.link_proof."
-curl -sS "http://127.0.0.1:9124/signals/history?limit=20&after_event_id=<signal-id>"
+curl -sS "http://<RT>/signals/history?limit=20"
+curl -sS "http://<RT>/signals/history?limit=20&topic_prefix=task."
+curl -sS "http://<RT>/signals/history?limit=20&exclude_topic_prefix=system.link_proof."
+curl -sS "http://<RT>/signals/history?limit=20&after_event_id=<signal-id>"
 ```
 
 查询参数：

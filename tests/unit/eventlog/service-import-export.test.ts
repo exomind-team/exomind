@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { EventData } from '@/lib/types/event';
 import { EventLogServiceImpl } from '@/lib/services/eventlog.service';
+import type {
+  EventLogAppendInput,
+  EventLogImportResult,
+} from '@/lib/environment/interfaces/eventlog.port';
 
 type EventLogPortShape = {
   listEvents: () => Promise<EventData[]>;
@@ -9,7 +13,9 @@ type EventLogPortShape = {
     semantics: 'full_snapshot' | 'incremental_batch';
     snapshotRevision?: string;
   }>;
-  appendEvent: (event: EventData) => Promise<EventData>;
+  appendEvent: (event: EventLogAppendInput) => Promise<EventData>;
+  appendRawEvent: (event: EventData) => Promise<EventData>;
+  importEventsFromJson?: (json: string, strategy: 'merge' | 'overwrite') => Promise<EventLogImportResult>;
   getEvent: (id: string) => Promise<EventData | null>;
   clearEvents: () => Promise<void>;
 };
@@ -22,7 +28,15 @@ function createMockPort(initialEvents: EventData[] = []): EventLogPortShape {
       events: [...current],
       semantics: 'full_snapshot',
     })),
-    appendEvent: vi.fn(async (event: EventData) => {
+    appendEvent: vi.fn(async (event: EventLogAppendInput) => {
+      const persisted: EventData = {
+        ...event,
+        timestamp: 9_999,
+      };
+      current = [persisted, ...current];
+      return persisted;
+    }),
+    appendRawEvent: vi.fn(async (event: EventData) => {
       current = [event, ...current];
       return event;
     }),
@@ -71,6 +85,27 @@ describe('EventLogService import/export', () => {
     expect(onEvent).toHaveBeenCalledTimes(1);
   });
 
+  it('prefers port import when adapter provides native import capability', async () => {
+    port.importEventsFromJson = vi.fn(async () => ({
+      imported: 2,
+      skipped: 0,
+      total: 4,
+    }));
+    const service = new EventLogServiceImpl({ port });
+
+    const result = await service.importEventsFromJson(JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      events: [
+        { id: 'e4', timestamp: 5000, content: 'new-4', tags: ['note'] },
+      ],
+    }), 'overwrite');
+
+    expect(port.importEventsFromJson).toHaveBeenCalledTimes(1);
+    expect(port.clearEvents).not.toHaveBeenCalled();
+    expect(result).toEqual({ imported: 2, skipped: 0, total: 4 });
+  });
+
   it('appends raw event data without regenerating timestamp or tags', async () => {
     const service = new EventLogServiceImpl({ port });
 
@@ -92,7 +127,7 @@ describe('EventLogService import/export', () => {
       ],
     });
 
-    expect(port.appendEvent).toHaveBeenCalledWith({
+    expect(port.appendRawEvent).toHaveBeenCalledWith({
       id: 'evt-block-start',
       timestamp: 1700000000000,
       content: 'Deep Work started',

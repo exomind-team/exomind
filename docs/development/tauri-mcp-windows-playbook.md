@@ -12,6 +12,51 @@
 - 记录“当前 app 实际状态”和“持久化配置状态”不一致时的判定方法。
 - 记录哪些目标可以直接依赖 Tauri MCP，哪些场景需要退回到 RT HTTP、日志、SQLite 与本地文件。
 
+## 通用硬规则：测试档案与日用档案隔离
+
+所有桌面开发实例、Tauri MCP 验收和会写业务数据的自动化脚本，默认不得读取或写入用户正在日用的档案。尤其不得让 `0.5.x` 测试实例复用仍由 `0.4.22` 使用的数据目录或档案。
+
+1. 使用 `tauri-dev-manager` 和唯一实例名启动；确认 app-data、runtime、main WebView、overlay WebView 都落在 `.tmp/tauri-dev-state/<instance>/` 下。
+2. 分配专用 Web/HMR/RT/bridge 端口。脚本在第一次 EventLog/Task/TimeBlock 写入前，必须核对当前 URL、RT endpoint 和监听进程属于该实例。
+3. 创建可识别的一次性测试档案。涉及多 WebView 时，同时断言主窗口 profile owner、Rust profile broker 和子窗口 session 使用同一测试档案。
+4. 任一隔离断言失败时立即停止，不得 fallback 到 legacy/current/anonymous 日用 scope，也不得通过清空真实档案来“恢复干净环境”。
+5. 结束后只按实例名停止，并确认该实例的 Web/HMR/RT/bridge 端口释放；禁止按 `exomind.exe` 或 WebView 进程名全局结束。
+
+验收报告必须记录实例名、四类端口、测试档案 ID/前缀与隔离守卫结果。没有这些证据的写入型桌面测试，不算有效验收。
+
+## 通用硬规则：Windows 资源预算与串行验证
+
+Windows 真机验证不得把 Rust 编译、Web 构建、Vitest 全量/聚焦测试和 Tauri 实例启动并行执行。2026-08-24 曾因并行验证造成宿主机蓝屏；即使各条命令本身正确，也不能把这种执行方式视为有效工程流程。
+
+1. 每次启动内存密集操作前读取 `Win32_OperatingSystem` 的可用物理内存，并列出工作集最大的进程；记录 `TotalGB`、`FreeGB`、`FreePercent`。
+2. 默认严格串行：一次只运行一个 Rust 编译、Web 构建、测试进程或 Tauri 启动链路。Tauri 已运行时，不再同时发起全仓测试或独立 Rust 构建。
+3. 可用物理内存低于 `8 GiB` 或低于总内存 `25%` 时，不启动新的内存密集操作；先等待现有步骤结束或停止本任务的隔离实例。该阈值是当前 Windows 开发机的保守门禁，不是应用运行需求。
+4. 大型验证按“轻量静态检查 → 聚焦测试 → Web 构建 → Rust 检查 → 单实例真窗验收”的顺序执行；已取得可信通过证据的步骤，不因会话刷新或机器重启无意义地重复。
+5. 蓝屏、重启或异常中止后，不相信实例元数据中的 PID/status；重新核对进程命令行和四类监听端口，再决定恢复或清理。
+
+验收报告必须同时记录启动真窗验收前的内存快照。未经过资源门禁的并行重操作禁止作为后续默认方案。
+
+### 通用硬规则：链接阶段低内存模式（2026-08-24）
+
+2026-08-24 21:35:43，Windows 最终链接进程启动后，可用物理内存在一秒内下降约 `1.1 GiB`；21:35:44 宿主机随即蓝屏，且转储创建失败。崩溃前仍有约 `18 GiB` 可用内存，因此不能把原因简化成普通 OOM；但最终链接的瞬时分配与 IO 压力是目前最接近故障时刻的触发条件。
+
+在完成驱动、硬件或内核级根因定位前，本机 Tauri MCP 桌面构建必须使用显式低内存模式：
+
+```powershell
+bun run tauri:manager start --name <instance> --web-port <port> --hmr-port <port> --rt-port <port> --low-memory
+```
+
+该模式固定执行以下约束：
+
+1. `CARGO_BUILD_JOBS=1`，Cargo 一次只调度一个编译单元。
+2. 开发 profile 使用 `debug=0`，关闭 incremental，并把 codegen units 从默认增量构建的高并发值压到 `16`。
+3. Windows MSVC target 改用 Rust 工具链自带的 `rust-lld`，传入 `/threads:1`，让最终链接主动降速换取更低并发峰值；同时在 rustc 默认 `/DEBUG` 之后追加 `/DEBUG:NONE`，明确禁止生成完整 PDB。
+4. 所有低内存实例串行复用 `tauri-dev/low-memory-shared` 构建缓存；低内存实例运行期间禁止启动另一个受管 Tauri 实例。
+5. 该模式不改变 `.tmp/tauri-dev-state/<instance>/` 的应用数据隔离；共享的只有编译产物缓存，不是用户档案。
+6. 正式 release 全平台构建优先交给 GitHub Actions。除非正在专门验证本机链接稳定性，不在这台 Windows 主机重复完整 release link。
+
+`/DEBUG:FASTLINK` 已被微软弃用，不能作为长期方案；`/INCREMENTAL` 主要改善后续链接，不能消除第一次完整链接的峰值。若低内存模式仍触发系统异常，立即停止本机完整链接，后续只保留 Web/Rust check 与远端 CI 证据。
+
 ### 阶段补记：桌面标题 / 设置版本真窗验收（2026-04-16）
 
 #### 本轮阶段目标

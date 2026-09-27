@@ -75,8 +75,6 @@ export {
 } from './reminder-scheduler.service';
 export type { ReminderSchedulerService } from './reminder-scheduler.service';
 
-export { MeServiceImpl, getMeService } from './me.service';
-export type { MeService } from './me.service';
 export { AgentHubServiceImpl, getAgentHubService } from './agent-hub.service';
 export type { AgentHubService } from './agent-hub.service';
 export { ClipboardServiceImpl, getClipboardService } from './clipboard.service';

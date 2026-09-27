@@ -3,6 +3,7 @@ import { isTauri } from '@tauri-apps/api/core';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ArrowUpRight, Expand, Shrink } from 'lucide-react';
+import { useSignalStream } from '@/ui/hooks/useSignalStream';
 import { Button } from '@/components/ui/button';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { FocusTimerWidget, type FocusTimerWidgetHandle } from '@/ui/app/components/FocusTimerWidget';
@@ -14,12 +15,18 @@ import {
 import { resolveCountdownEndTimeDisplay } from '@/lib/timeblock/expected-end-time';
 import { resolveCountdownTiming } from '@/lib/timeblock/countdown-progress';
 import { setNowWorkbenchOverlayPosition } from '@/config/now-workbench-overlay-preferences';
+import {
+  getRuntimeTargetMode,
+  isTauriWindow,
+  rememberEmbeddedRuntimeStatus,
+} from '@/config/runtime-target';
 import type { TaskNode } from '@/lib/types/task';
 import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-overlay-model';
 import type { ActiveBlockData } from '@/lib/types/event';
 import { useNowWorkbenchOverlayController } from '@/ui/app/overlay/use-now-workbench-overlay-controller';
 import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
 import { PerfTrace } from '@/lib/utils/perf-trace';
+import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 
 interface NowWorkbenchOverlayPageProps {
   model?: NowWorkbenchOverlayModel;
@@ -66,6 +73,13 @@ const NOW_WORKBENCH_OVERLAY_IDLE_COLLAPSED_SIZE = { width: 276, height: 156 };
 const NOW_WORKBENCH_OVERLAY_IDLE_EXPANDED_SIZE = { width: 428, height: 360 };
 const ACTIVE_VISIBLE_SURFACE_CLASS = 'ring-1 ring-inset ring-[#FDE4DE]/60';
 const VISIBLE_SURFACE_DRAG_GLOW_IDLE_MS = 180;
+const OVERLAY_POSITION_PERSIST_DEBOUNCE_MS = 250;
+const OVERLAY_RUNTIME_READY_RETRY_MS = 500;
+
+interface NowWorkbenchOverlayRuntimeReadiness {
+  ready: boolean;
+  detail: string;
+}
 
 interface VisibleSurfaceMeasurement {
   key: string;
@@ -252,6 +266,92 @@ function renderEmptyState(): JSX.Element {
   );
 }
 
+function shouldGateEmbeddedRuntime(): boolean {
+  return isTauriWindow() && getRuntimeTargetMode() === 'embedded';
+}
+
+function useNowWorkbenchOverlayRuntimeReadiness(): NowWorkbenchOverlayRuntimeReadiness {
+  const [readiness, setReadiness] = useState<NowWorkbenchOverlayRuntimeReadiness>(() => {
+    if (!shouldGateEmbeddedRuntime()) {
+      return { ready: true, detail: '' };
+    }
+    return {
+      ready: false,
+      detail: '等待内嵌 RT 启动并返回真实端口',
+    };
+  });
+
+  useEffect(() => {
+    if (!shouldGateEmbeddedRuntime()) {
+      setReadiness({ ready: true, detail: '' });
+      return;
+    }
+
+    let disposed = false;
+    let retryTimer: number | null = null;
+
+    const pollRuntimeStatus = async () => {
+      try {
+        const status = await getRuntimeControlService().getStatus();
+        if (disposed) {
+          return;
+        }
+
+        if (status.running && status.port > 0) {
+          rememberEmbeddedRuntimeStatus({
+            host: status.host,
+            port: status.port,
+            hostId: status.hostId,
+          });
+          setReadiness({ ready: true, detail: '' });
+          return;
+        }
+
+        setReadiness({
+          ready: false,
+          detail: status.error || 'RT 正在启动，等待真实端口',
+        });
+      } catch (error) {
+        if (!disposed) {
+          setReadiness({
+            ready: false,
+            detail: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      if (!disposed) {
+        retryTimer = window.setTimeout(pollRuntimeStatus, OVERLAY_RUNTIME_READY_RETRY_MS);
+      }
+    };
+
+    void pollRuntimeStatus();
+
+    return () => {
+      disposed = true;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+      }
+    };
+  }, []);
+
+  return readiness;
+}
+
+function renderRuntimeStarting(readiness: NowWorkbenchOverlayRuntimeReadiness): JSX.Element {
+  return (
+    <section
+      data-testid="now-overlay-runtime-starting"
+      className="rounded-[24px] border border-[#E7E5E4] bg-white/85 px-5 py-4 text-[#1C1917] shadow-[0_16px_40px_-24px_rgba(0,0,0,0.45)] backdrop-blur-[24px] dark:border-[#292524] dark:bg-[#1C1917]/85 dark:text-[#FAFAF9]"
+    >
+      <p className="text-[14px] font-semibold">RT 启动中</p>
+      <p className="mt-1 text-[12px] text-[#78716C] dark:text-[#A8A29E]">
+        {readiness.detail}
+      </p>
+    </section>
+  );
+}
+
 export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
   if (props.model) {
     return (
@@ -284,7 +384,27 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
     );
   }
 
+  const runtimeReadiness = useNowWorkbenchOverlayRuntimeReadiness();
+  if (!runtimeReadiness.ready) {
+    return renderRuntimeStarting(runtimeReadiness);
+  }
+
+  return <NowWorkbenchOverlayRuntimePage props={props} />;
+}
+
+function NowWorkbenchOverlayRuntimePage({ props }: { props: NowWorkbenchOverlayPageProps }) {
   const controller = useNowWorkbenchOverlayController();
+  // 订阅 RT SSE 信号流，接收时间块暂停等实时更新
+  useSignalStream({
+    activeBlockThrottleMs: 250,
+    enabled: controller.profileReady,
+  });
+  if (!controller.profileReady) {
+    return renderRuntimeStarting({
+      ready: false,
+      detail: '正在等待主窗口同步隔离档案…',
+    });
+  }
   const onHide = props.onHide ?? (() => {
     void controller.handleHide();
   });
@@ -487,6 +607,18 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
 
     let disposed = false;
     let unlisten: (() => void) | null = null;
+    let pendingPosition: { x: number; y: number } | null = null;
+    let persistTimer: number | null = null;
+
+    const persistPendingPosition = () => {
+      persistTimer = null;
+      if (!pendingPosition) {
+        return;
+      }
+      const position = pendingPosition;
+      pendingPosition = null;
+      setNowWorkbenchOverlayPosition(position);
+    };
 
     void getCurrentWindow().onMoved((event) => {
       if (disposed) {
@@ -497,10 +629,17 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
         setIsVisibleSurfaceDragging(true);
         scheduleVisibleSurfaceDragGlowClear();
       }
-      setNowWorkbenchOverlayPosition({
+      pendingPosition = {
         x: position.x,
         y: position.y,
-      });
+      };
+      if (persistTimer !== null) {
+        window.clearTimeout(persistTimer);
+      }
+      persistTimer = window.setTimeout(
+        persistPendingPosition,
+        OVERLAY_POSITION_PERSIST_DEBOUNCE_MS,
+      );
     }).then((cleanup) => {
       if (disposed) {
         cleanup();
@@ -512,6 +651,10 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     return () => {
       disposed = true;
       clearVisibleSurfaceDragGlowTimeout();
+      if (persistTimer !== null) {
+        window.clearTimeout(persistTimer);
+      }
+      persistPendingPosition();
       unlisten?.();
     };
   }, [clearVisibleSurfaceDragGlowTimeout, scheduleVisibleSurfaceDragGlowClear]);

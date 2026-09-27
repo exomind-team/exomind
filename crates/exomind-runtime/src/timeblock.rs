@@ -7,6 +7,41 @@ use thiserror::Error;
 
 use crate::timeblock_sqlite::SqliteTimeBlockStore;
 
+/// Timeblock lifecycle phase.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockPhase {
+    /// Timeblock is running (active focus)
+    Running,
+    /// Timeblock is paused (user stepped away)
+    Paused,
+    /// Timeblock stopped, waiting for user feedback
+    FeedbackInProgress,
+    /// User submitted feedback, timeblock ending
+    FeedbackSubmitted,
+}
+
+impl BlockPhase {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BlockPhase::Running => "running",
+            BlockPhase::Paused => "paused",
+            BlockPhase::FeedbackInProgress => "feedback_in_progress",
+            BlockPhase::FeedbackSubmitted => "feedback_submitted",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "running" => Some(BlockPhase::Running),
+            "paused" => Some(BlockPhase::Paused),
+            "feedback_in_progress" => Some(BlockPhase::FeedbackInProgress),
+            "feedback_submitted" => Some(BlockPhase::FeedbackSubmitted),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TimeBlockData {
@@ -205,7 +240,7 @@ pub struct ActiveBlockData {
     pub block_type: Option<String>,
     pub elapsed: u64,
     pub updated_at: Option<u64>,
-    pub phase: Option<String>,
+    pub phase: Option<BlockPhase>,
     pub version: Option<u64>,
     pub actor_id: Option<String>,
     pub last_transition_at: Option<u64>,
@@ -271,7 +306,7 @@ impl ActiveBlockData {
         }
 
         if self.feedback_submitted_at.is_some()
-            || matches!(self.phase.as_deref(), Some("feedback_submitted"))
+            || matches!(self.phase.as_ref(), Some(BlockPhase::FeedbackSubmitted))
         {
             return Some("feedback_submitted");
         }
@@ -279,18 +314,18 @@ impl ActiveBlockData {
         if self.action_ended_at.is_some()
             || self.feedback_started_at.is_some()
             || matches!(
-                self.phase.as_deref(),
-                Some("feedback_in_progress" | "action_ended")
+                self.phase.as_ref(),
+                Some(BlockPhase::FeedbackInProgress)
             )
         {
             return Some("feedback_in_progress");
         }
 
-        if self.paused || matches!(self.phase.as_deref(), Some("paused")) {
+        if self.paused || matches!(self.phase.as_ref(), Some(BlockPhase::Paused)) {
             return Some("paused");
         }
 
-        if matches!(self.phase.as_deref(), Some("running")) {
+        if matches!(self.phase.as_ref(), Some(BlockPhase::Running)) {
             return Some("running");
         }
 
@@ -1179,7 +1214,7 @@ mod tests {
                     target_minutes: None,
                     elapsed: 100,
                     updated_at: None,
-                    phase: Some("running".to_string()),
+                    phase: Some(BlockPhase::Running),
                     version: Some(1),
                     actor_id: None,
                     last_transition_at: None,
@@ -1264,7 +1299,7 @@ mod tests {
                 block_type: Some("active".to_string()),
                 elapsed: 0,
                 updated_at: Some(100),
-                phase: Some("running".to_string()),
+                phase: Some(BlockPhase::Running),
                 version: Some(1),
                 actor_id: Some("rt:test".to_string()),
                 last_transition_at: Some(100),

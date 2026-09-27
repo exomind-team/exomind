@@ -1,10 +1,14 @@
 import type { EventData } from "../../types/event";
 
+export type EventLogAppendInput = Omit<EventData, "timestamp">;
+
 export interface EventLogListOptions {
   limit?: number;
   sinceId?: string;
   sinceTimestamp?: number;
   untilTimestamp?: number;
+  /** 与 untilTimestamp 搭配，按 (untilTimestamp, untilId) 复合游标向更早分页（滚动回溯）。 */
+  untilId?: string;
 }
 
 export type EventLogListSemantics = "full_snapshot" | "incremental_batch";
@@ -13,6 +17,12 @@ export interface EventLogListResult {
   events: EventData[];
   semantics: EventLogListSemantics;
   snapshotRevision?: string | null;
+}
+
+export interface EventLogImportResult {
+  imported: number;
+  skipped: number;
+  total: number;
 }
 
 /**
@@ -37,7 +47,20 @@ export interface IEventLogPort {
   /**
    * 追加一条事件
    */
-  appendEvent(event: EventData): Promise<EventData>;
+  appendEvent(event: EventLogAppendInput): Promise<EventData>;
+
+  /**
+   * 追加原始事件（保留外部 timestamp）
+   */
+  appendRawEvent(event: EventData): Promise<EventData>;
+
+  /**
+   * 从 JSON 批量导入事件
+   */
+  importEventsFromJson?(
+    json: string,
+    strategy: "merge" | "overwrite",
+  ): Promise<EventLogImportResult>;
 
   /**
    * 读取单条事件

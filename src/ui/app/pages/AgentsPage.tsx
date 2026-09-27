@@ -1607,7 +1607,7 @@ export function AgentsPage() {
     if (!supportsInlineRightPanel) {
       const runtimeEntityId = resolveRuntimeEntityId(nodeId);
       navigateToSecondaryPage(
-        `/agents/chat/${encodeURIComponent(runtimeEntityId)}`,
+        `/agents/agent/${encodeURIComponent(runtimeEntityId)}`,
       );
       return;
     }
@@ -6306,27 +6306,29 @@ export function AgentsPage() {
     history: SignalEvent[];
   } | null> => {
     try {
-      const routeService = new SignalRouteService({ host });
       const runtimeClient = new RuntimeClient();
       const runtimeBaseUrl = resolveRuntimeHostBaseUrl(host);
       const runtimeHeaders = buildRuntimeAuthHeaders(host.authToken);
       const [
         routes,
         agentsResult,
-        businessHistoryResponse,
-        proofHistoryResponse,
+        businessHistory,
+        proofHistory,
         energyResult,
       ] = await Promise.all([
-        routeService.listRoutes(),
+        fetchRuntimeJsonWithTimeout<SignalRoute[]>(
+          `${runtimeBaseUrl}/signal-routes`,
+          { headers: runtimeHeaders },
+        ),
         runtimeClient.getAgents(host),
-        fetch(
+        fetchRuntimeJsonWithTimeout<SignalEvent[]>(
           `${runtimeBaseUrl}/signals/history?limit=120&exclude_topic_prefix=${encodeURIComponent(LINK_PROOF_TOPIC_PREFIX)}`,
           { headers: runtimeHeaders },
-        ).catch(() => null),
-        fetch(
+        ).catch(() => []),
+        fetchRuntimeJsonWithTimeout<SignalEvent[]>(
           `${runtimeBaseUrl}/signals/history?limit=120&topic_prefix=${encodeURIComponent(LINK_PROOF_TOPIC_PREFIX)}`,
           { headers: runtimeHeaders },
-        ).catch(() => null),
+        ).catch(() => []),
         runtimeClient
           .getAllEnergy(host)
           .catch(() => ({
@@ -6348,12 +6350,6 @@ export function AgentsPage() {
             ...agent,
             energy: energyMap.get(agent.id),
           }))
-        : [];
-      const businessHistory = businessHistoryResponse?.ok
-        ? ((await businessHistoryResponse.json()) as SignalEvent[])
-        : [];
-      const proofHistory = proofHistoryResponse?.ok
-        ? ((await proofHistoryResponse.json()) as SignalEvent[])
         : [];
       const history = mergeSignalHistoryEvents(businessHistory, proofHistory);
       return {
@@ -6387,9 +6383,21 @@ export function AgentsPage() {
     }
 
     const snapshotAgents = snapshot.hosts.flatMap((item) => item.agents);
-    const configuredHosts = sortRouteHostsByPriority(snapshot.hosts).map(
+    const snapshotHosts = sortRouteHostsByPriority(snapshot.hosts).map(
       (item) => item.host,
     );
+
+    // 优先使用从 IPC / getStatus() 获取的正确端口构造 host，
+    // 避免 snapshot 中缓存的旧端口导致请求失败。
+    const ipcTarget = getSelectedRuntimeTarget();
+    const ipcHost = createDirectRuntimeHost(
+      resolveLocalServiceHost(ipcTarget.host),
+      ipcTarget.port,
+    );
+    const configuredHosts = [ipcHost, ...snapshotHosts.filter(
+      (h) => !(h.host === ipcHost.host && h.port === ipcHost.port),
+    )];
+
     for (const host of configuredHosts) {
       const result = await tryLoadRoutesFromHost(host);
       if (!result) continue;
@@ -8985,6 +8993,7 @@ export function AgentsPage() {
       );
     }
     if (viewMode === "list") {
+      const isConnecting = !runtimeServiceStatus?.running;
       return (
         <ListTabView
           sections={listSections}
@@ -8997,6 +9006,7 @@ export function AgentsPage() {
           }}
           signalRouteRows={signalRouteRows}
           onOpenRoute={openRouteEdit}
+          isConnecting={isConnecting}
         />
       );
     }
@@ -9010,6 +9020,7 @@ export function AgentsPage() {
       );
     }
     if (viewMode === "routes") {
+      const isConnecting = !runtimeServiceStatus?.running;
       return (
         <RoutesTabView
           routes={signalRoutes}
@@ -9018,6 +9029,7 @@ export function AgentsPage() {
           onDelete={handleRouteDelete}
           onEdit={(routeId) => openRouteEdit(routeId)}
           onAdd={() => openRouteEdit(null)}
+          isConnecting={isConnecting}
         />
       );
     }
@@ -9129,7 +9141,6 @@ export function AgentsPage() {
           if (node?.type === "agent") openAgentDetail(nodeId);
           else if (node?.type === "actor") openActorDetail(nodeId);
           else openSignalDetail(nodeId);
-          // TODO(issue-354-mobile-sheet): <lg 视口点击节点后改为底部详情 Sheet。
         }}
         onClearSelection={() => {
           closeRightPanel();

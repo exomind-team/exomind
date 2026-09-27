@@ -97,24 +97,14 @@ export const settingsPagePreferenceState = {
   syncAutomationEnabled: true,
   apiAgentTabEnabled: false,
   agentPageEnabled: false,
-  mePageEnabled: false,
   proposalInboxEnabled: true,
   desktopAdaptiveEnabled: true,
   embeddedRuntimeAllowLanWithoutAuth: false,
   isTauriWindow: false,
   isDesktopOperatingSystem: false,
-  voiceShortcutAsrProvider: 'moss' as string,
+  voiceShortcutAsrProvider: 'volcano' as string,
   voiceShortcutEnabled: true,
-  voiceOmniProfileId: '',
-  voiceOmniModelId: 'qwen3-omni-flash',
-  voiceOmniOptimizeEnabled: false,
   voiceAutoRecordEnabled: true,
-  voiceRuntimeEnabled: false,
-  voiceRuntimeMode: 'push-to-talk',
-  voiceRuntimeProvider: 'doubao-o2-realtime',
-  voiceRuntimeCloudSessionPolicy: 'on-demand',
-  voiceRuntimeAutoSpeakEnabled: true,
-  voiceRuntimeLabNavEnabled: false,
   mainWindowShortcutSelection: ['Ctrl', 'E'] as string[],
   mainWindowShortcutQuickFocusEnabled: false,
 };
@@ -210,12 +200,6 @@ vi.mock('@/config/api-agent-tab-enabled', () => ({
   getApiAgentTabEnabled: vi.fn(() => settingsPagePreferenceState.apiAgentTabEnabled),
   setApiAgentTabEnabled: vi.fn(),
   subscribeApiAgentTabEnabledChanges: vi.fn(() => () => {}),
-}));
-
-vi.mock('@/config/me-page-enabled', () => ({
-  getMePageEnabled: vi.fn(() => settingsPagePreferenceState.mePageEnabled),
-  setMePageEnabled: vi.fn(),
-  subscribeMePageEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/proposal-inbox-enabled', () => ({
@@ -484,123 +468,6 @@ vi.mock('@/config/voice-shortcut-enabled', () => {
     }),
   };
 });
-
-vi.mock('@/config/voice-runtime-settings', () => {
-  const providerListeners = new Set<(value: string) => void>();
-  const enabledListeners = new Set<(value: boolean) => void>();
-  const policyListeners = new Set<(value: string) => void>();
-  const autoSpeakListeners = new Set<(value: boolean) => void>();
-  const labListeners = new Set<(value: boolean) => void>();
-  return {
-    VOICE_RUNTIME_OMNI_PROVIDER: 'qwen-omni-realtime',
-    VOICE_RUNTIME_OMNI_COMPATIBLE_PROVIDER: 'qwen-omni-compatible',
-    getVoiceRuntimeEnabled: vi.fn(() => settingsPagePreferenceState.voiceRuntimeEnabled),
-    setVoiceRuntimeEnabled: vi.fn((value: boolean) => {
-      settingsPagePreferenceState.voiceRuntimeEnabled = value;
-      enabledListeners.forEach((listener) => listener(value));
-      return value;
-    }),
-    subscribeVoiceRuntimeEnabledChanges: vi.fn((listener: (value: boolean) => void) => {
-      enabledListeners.add(listener);
-      return () => { enabledListeners.delete(listener); };
-    }),
-    getVoiceRuntimeProvider: vi.fn(() => settingsPagePreferenceState.voiceRuntimeProvider),
-    setVoiceRuntimeProvider: vi.fn((value: string) => {
-      settingsPagePreferenceState.voiceRuntimeProvider = value;
-      providerListeners.forEach((listener) => listener(value));
-      return value;
-    }),
-    subscribeVoiceRuntimeProviderChanges: vi.fn((listener: (value: string) => void) => {
-      providerListeners.add(listener);
-      return () => { providerListeners.delete(listener); };
-    }),
-    getVoiceRuntimeCloudSessionPolicy: vi.fn(() => settingsPagePreferenceState.voiceRuntimeCloudSessionPolicy),
-    setVoiceRuntimeCloudSessionPolicy: vi.fn((value: string) => {
-      settingsPagePreferenceState.voiceRuntimeCloudSessionPolicy = value;
-      policyListeners.forEach((listener) => listener(value));
-      return value;
-    }),
-    subscribeVoiceRuntimeCloudSessionPolicyChanges: vi.fn((listener: (value: string) => void) => {
-      policyListeners.add(listener);
-      return () => { policyListeners.delete(listener); };
-    }),
-    getVoiceRuntimeAutoSpeakEnabled: vi.fn(() => settingsPagePreferenceState.voiceRuntimeAutoSpeakEnabled),
-    setVoiceRuntimeAutoSpeakEnabled: vi.fn((value: boolean) => {
-      settingsPagePreferenceState.voiceRuntimeAutoSpeakEnabled = value;
-      autoSpeakListeners.forEach((listener) => listener(value));
-      return value;
-    }),
-    subscribeVoiceRuntimeAutoSpeakEnabledChanges: vi.fn((listener: (value: boolean) => void) => {
-      autoSpeakListeners.add(listener);
-      return () => { autoSpeakListeners.delete(listener); };
-    }),
-    getVoiceRuntimeLabNavEnabled: vi.fn(() => settingsPagePreferenceState.voiceRuntimeLabNavEnabled),
-    setVoiceRuntimeLabNavEnabled: vi.fn((value: boolean) => {
-      settingsPagePreferenceState.voiceRuntimeLabNavEnabled = value;
-      labListeners.forEach((listener) => listener(value));
-      return value;
-    }),
-    subscribeVoiceRuntimeLabNavEnabledChanges: vi.fn((listener: (value: boolean) => void) => {
-      labListeners.add(listener);
-      return () => { labListeners.delete(listener); };
-    }),
-  };
-});
-
-vi.mock('@/config/voice-runtime-mode', () => {
-  const listeners = new Set<(value: string) => void>();
-  return {
-    getVoiceRuntimeMode: vi.fn(() => settingsPagePreferenceState.voiceRuntimeMode),
-    setVoiceRuntimeMode: vi.fn((value: string) => {
-      settingsPagePreferenceState.voiceRuntimeMode = value;
-      listeners.forEach((listener) => listener(value));
-      return value;
-    }),
-    subscribeVoiceRuntimeModeChanges: vi.fn((listener: (value: string) => void) => {
-      listeners.add(listener);
-      return () => { listeners.delete(listener); };
-    }),
-  };
-});
-
-vi.mock('@/config/voice-omni-settings', () => ({
-  getVoiceOmniProfileId: vi.fn(() => settingsPagePreferenceState.voiceOmniProfileId),
-  setVoiceOmniProfileId: vi.fn((value: string) => {
-    settingsPagePreferenceState.voiceOmniProfileId = value;
-    return value;
-  }),
-  subscribeVoiceOmniProfileIdChanges: vi.fn(() => () => {}),
-  getVoiceOmniModelId: vi.fn(() => settingsPagePreferenceState.voiceOmniModelId),
-  setVoiceOmniModelId: vi.fn((value: string) => {
-    settingsPagePreferenceState.voiceOmniModelId = value;
-    return value;
-  }),
-  subscribeVoiceOmniModelIdChanges: vi.fn(() => () => {}),
-  getVoiceOmniOptimizeEnabled: vi.fn(() => settingsPagePreferenceState.voiceOmniOptimizeEnabled),
-  setVoiceOmniOptimizeEnabled: vi.fn((value: boolean) => {
-    settingsPagePreferenceState.voiceOmniOptimizeEnabled = value;
-    return value;
-  }),
-  subscribeVoiceOmniOptimizeEnabledChanges: vi.fn(() => () => {}),
-}));
-
-vi.mock('@/config/voice-omni-prompts', () => ({
-  getVoiceOmniPromptDocs: vi.fn(() => ({
-    agent: 'agent prompt',
-    rules: 'rules prompt',
-    vocabulary: 'vocabulary prompt',
-    textOptimize: 'text optimize prompt',
-  })),
-  setVoiceOmniPromptDocs: vi.fn((value: Record<string, string>) => value),
-  updateVoiceOmniPromptDocs: vi.fn((patch: Record<string, string>) => patch),
-  resetVoiceOmniPromptDocs: vi.fn(() => ({
-    agent: 'agent prompt',
-    rules: 'rules prompt',
-    vocabulary: 'vocabulary prompt',
-    textOptimize: 'text optimize prompt',
-  })),
-  subscribeVoiceOmniPromptDocsChanges: vi.fn(() => () => {}),
-}));
 
 vi.mock('@/lib/agent-provider/provider-profile-storage', () => ({
   listProviderProfiles: vi.fn(() => [

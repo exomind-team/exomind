@@ -628,7 +628,7 @@ async fn write_timeblock_eventlog(
 ) {
     let content = match event_type {
         "block_start" => format!("时间块开始: {block_name}"),
-        "block_end" => format!("时间块结束: {block_name}"),
+        "block_end" => format!("时间块停止: {block_name}"),
         "block_pause" => format!("时间块暂停: {block_name}"),
         "block_resume" => format!("时间块恢复: {block_name}"),
         _ => format!("时间块事件: {block_name}"),
@@ -650,12 +650,13 @@ async fn write_timeblock_eventlog(
         })),
     };
 
-    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
+    if let Err(error) = state
+        .eventlog_appender()
+        .append_event(scope_key, event.clone())
+        .await
+    {
         tracing::warn!(error = %error, "failed to write today planner eventlog");
-        return;
     }
-
-    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
 }
 
 pub fn router() -> Router<AppState> {

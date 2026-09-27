@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
-
-const openMock = vi.fn();
 
 describe('issue-198 settings about merge（设置关于合并）', () => {
   beforeEach(() => {
@@ -22,28 +20,12 @@ describe('issue-198 settings about merge（设置关于合并）', () => {
         dispatchEvent: vi.fn(),
       })),
     });
-
-    Object.defineProperty(window, 'open', {
-      writable: true,
-      value: openMock,
-    });
   });
 
-  it('keeps a single about section and merges sponsor with developer（单一关于并合并赞助与开发者）', () => {
+  it('keeps a single about section（单一关于分组）', () => {
     render(<SettingsPage />);
 
     expect(screen.getAllByText('关于').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('赞助开发者（Starlin）')).toBeInTheDocument();
-  });
-
-  it('opens sponsor link on sponsor row click（点击赞助条目打开链接）', async () => {
-    render(<SettingsPage />);
-
-    fireEvent.click(screen.getByRole('button', { name: '赞助开发者（Starlin）' }));
-
-    await waitFor(() => {
-      expect(openMock).toHaveBeenCalledWith('https://exo-mind.ai/', '_blank', 'noopener,noreferrer');
-    });
   });
 
   it('places danger section after about section（危险区域放在关于之后）', () => {

@@ -39,6 +39,8 @@ const onBlockChangeMock = vi.fn();
 const listTasksMock = vi.fn();
 const transitionTaskMock = vi.fn();
 const addEventMock = vi.fn();
+const loadEventsMock = vi.fn();
+const loadEventsProfileIds: string[] = [];
 const appendEventDataMock = vi.fn();
 const endBlockMock = vi.fn();
 const markEndingMock = vi.fn();
@@ -51,6 +53,9 @@ const getEventStorageByUserMock = vi.fn();
 const taskStorageOnChangeMock = vi.fn();
 const eventStorageOnChangeMock = vi.fn();
 let blockListener: ((block: unknown) => void) | null = null;
+let taskServiceListener: (() => void) | null = null;
+let eventServiceListener: (() => void) | null = null;
+let profileSyncListener: ((event: { payload: { profileId: string } }) => void) | null = null;
 let taskStorageListener: (() => void) | null = null;
 let eventStorageListener: (() => void) | null = null;
 let movedListener: ((event: { payload: { x: number; y: number } }) => void) | null = null;
@@ -58,9 +63,38 @@ let focusChangedListener: ((event: { payload: boolean }) => void) | null = null;
 const overlayHideMock = vi.fn();
 const focusMainWindowMock = vi.fn();
 const overlaySetSizeMock = vi.fn();
+const setOverlayPositionMock = vi.fn();
+const useSignalStreamMock = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({
   isTauri: () => true,
+  invoke: vi.fn(async (command: string) => (
+    command === "now_workbench_overlay_profile_get" ? currentUserState.userId : undefined
+  )),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (eventName: string, listener: (event: { payload: { profileId: string } }) => void) => {
+    if (eventName === "main-window-profile-sync") {
+      profileSyncListener = listener;
+    }
+    return () => {
+      if (profileSyncListener === listener) profileSyncListener = null;
+    };
+  }),
+  emit: vi.fn(async (eventName: string) => {
+    if (eventName === "overlay-request-profile") {
+      profileSyncListener?.({ payload: { profileId: currentUserState.userId } });
+    }
+  }),
+}));
+
+vi.mock("@/ui/hooks/useSignalStream", () => ({
+  useSignalStream: (...args: unknown[]) => useSignalStreamMock(...args),
+}));
+
+vi.mock("@/config/now-workbench-overlay-preferences", () => ({
+  setNowWorkbenchOverlayPosition: (...args: unknown[]) => setOverlayPositionMock(...args),
 }));
 
 vi.mock("@/services/now-workbench-overlay.service", () => ({
@@ -224,6 +258,12 @@ vi.mock("@/lib/services", () => ({
   getTaskService: () => ({
     listTasks: (...args: unknown[]) => listTasksMock(...args),
     transitionTask: (...args: unknown[]) => transitionTaskMock(...args),
+    onTaskChange: (listener: () => void) => {
+      taskServiceListener = listener;
+      return () => {
+        if (taskServiceListener === listener) taskServiceListener = null;
+      };
+    },
   }),
   getTaskTimerService: () => ({
     startBlockForTask: (...args: unknown[]) => startBlockForTaskMock(...args),
@@ -235,6 +275,13 @@ vi.mock("@/lib/services", () => ({
   getEventLogService: () => ({
     addEvent: (...args: unknown[]) => addEventMock(...args),
     appendEventData: (...args: unknown[]) => appendEventDataMock(...args),
+    loadEvents: (...args: unknown[]) => loadEventsMock(...args),
+    onEvent: (listener: () => void) => {
+      eventServiceListener = listener;
+      return () => {
+        if (eventServiceListener === listener) eventServiceListener = null;
+      };
+    },
   }),
 }));
 
@@ -301,10 +348,14 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     vi.resetModules();
     setInputSendMode("ctrl-enter-send");
     blockListener = null;
+    taskServiceListener = null;
+    eventServiceListener = null;
+    profileSyncListener = null;
     taskStorageListener = null;
     eventStorageListener = null;
     movedListener = null;
     focusChangedListener = null;
+    useSignalStreamMock.mockReset();
     currentUserState.userId = "overlay-test-user";
     runtimeStateByUser["overlay-test-user"] = {
       activeBlock: null,
@@ -335,6 +386,16 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     addEventMock.mockResolvedValue(undefined);
     appendEventDataMock.mockReset();
     appendEventDataMock.mockResolvedValue(undefined);
+    loadEventsMock.mockReset();
+    loadEventsProfileIds.length = 0;
+    loadEventsMock.mockImplementation(async () => {
+      loadEventsProfileIds.push(currentUserState.userId);
+      return runtimeStateByUser[currentUserState.userId].events.map((event) => ({
+        ...event,
+        timestamp: Date.parse(String(event.createdAt)),
+        tags: new Set<string>(),
+      }));
+    });
     markEndingMock.mockReset();
     markEndingMock.mockResolvedValue(undefined);
     endBlockMock.mockReset();
@@ -392,11 +453,15 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     focusMainWindowMock.mockResolvedValue(undefined);
     overlaySetSizeMock.mockReset();
     overlaySetSizeMock.mockResolvedValue(undefined);
+    setOverlayPositionMock.mockReset();
   });
 
   afterEach(() => {
     cleanup();
     blockListener = null;
+    taskServiceListener = null;
+    eventServiceListener = null;
+    profileSyncListener = null;
     taskStorageListener = null;
     eventStorageListener = null;
     movedListener = null;
@@ -482,6 +547,10 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       expect(screen.getByTestId("new-focus-running-clock")).toHaveTextContent(
         "20:00",
       );
+      expect(useSignalStreamMock).toHaveBeenCalledWith({
+        activeBlockThrottleMs: 250,
+        enabled: true,
+      });
     },
   );
 
@@ -780,6 +849,35 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     });
   });
 
+  it("debounces continuous native move events before persisting position（连续拖动只持久化最终位置）", async () => {
+    const { NowWorkbenchOverlayPage } =
+      await import("@/pages/NowWorkbenchOverlayPage");
+    render(<NowWorkbenchOverlayPage />);
+
+    await waitFor(() => {
+      expect(movedListener).not.toBeNull();
+    });
+    vi.useFakeTimers();
+
+    act(() => {
+      movedListener?.({ payload: { x: 10, y: 20 } });
+      movedListener?.({ payload: { x: 30, y: 40 } });
+      movedListener?.({ payload: { x: 50, y: 60 } });
+    });
+    expect(setOverlayPositionMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(249);
+    });
+    expect(setOverlayPositionMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(setOverlayPositionMock).toHaveBeenCalledTimes(1);
+    expect(setOverlayPositionMock).toHaveBeenCalledWith({ x: 50, y: 60 });
+  });
+
   it("collapses live running overlay into a mini pill and can restore it（运行态隐藏浮窗改为折叠小窗并可恢复）", async () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 2, 11, 9, 5, 0));
     runtimeStateByUser["overlay-test-user"].activeBlock = {
@@ -1018,8 +1116,8 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     expect(
       await screen.findByTestId("now-overlay-idle-pill"),
     ).toBeInTheDocument();
-    expect(screen.getByText("待办 (4)")).toBeInTheDocument();
-    expect(screen.getByText(/· ……/)).toBeInTheDocument();
+    expect(await screen.findByText("待办 (4)")).toBeInTheDocument();
+    expect(await screen.findByText(/· ……/)).toBeInTheDocument();
   });
 
   it("keeps idle task panel expanded while input is focused（任务态输入获焦时锁定展开）", async () => {
@@ -1220,7 +1318,41 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
   });
 
   it(
-    "refreshes against the latest current user context after prewarm（预热窗口后刷新会重新读取当前用户）",
+    "keeps the one-second timer visual-only without polling domain services（每秒计时只刷新视觉，不轮询领域数据）",
+    { timeout: 20000 },
+    async () => {
+      runtimeStateByUser["overlay-test-user"].activeBlock = {
+        startId: "visual-clock-only",
+        name: "只更新视觉时钟",
+        mode: "countup",
+        startTime: Date.now(),
+        elapsed: 0,
+        paused: false,
+        phase: "running",
+      };
+
+      const { NowWorkbenchOverlayPage } =
+        await import("@/pages/NowWorkbenchOverlayPage");
+      render(<NowWorkbenchOverlayPage />);
+
+      expect(await screen.findByText("只更新视觉时钟")).toBeInTheDocument();
+      loadActiveBlockMock.mockClear();
+      listTasksMock.mockClear();
+      loadEventsMock.mockClear();
+
+      vi.useFakeTimers();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_100);
+      });
+
+      expect(loadActiveBlockMock).not.toHaveBeenCalled();
+      expect(listTasksMock).not.toHaveBeenCalled();
+      expect(loadEventsMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it(
+    "refreshes against the latest profile broadcast by the main-window owner（主窗口切换档案后刷新唯一作用域）",
     { timeout: 30000 },
     async () => {
       currentUserState.userId = "overlay-test-user";
@@ -1253,21 +1385,78 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       render(<NowWorkbenchOverlayPage />);
 
       await waitFor(() => {
-        expect(getEventStorageByUserMock).toHaveBeenCalledWith(
-          "overlay-test-user",
-        );
-        expect(focusChangedListener).not.toBeNull();
+        expect(loadEventsMock).toHaveBeenCalled();
       });
 
       currentUserState.userId = "profile-live";
       await act(async () => {
-        focusChangedListener?.({ payload: true });
+        profileSyncListener?.({ payload: { profileId: "profile-live" } });
         await Promise.resolve();
       });
 
       await waitFor(() => {
-        expect(getEventStorageByUserMock).toHaveBeenCalledWith("profile-live");
+        expect(screen.getByText("真实当前时间块")).toBeInTheDocument();
+        expect(loadEventsProfileIds).toContain("profile-live");
       });
+
+      const { useSyncStore } = await import("@/ui/stores/sync-store");
+      const { appendRuntimeProfileScope } = await import("@/lib/adapters/runtime-profile-scope");
+      expect(useSyncStore.getState().activeProfileId).toBe("profile-live");
+      expect(appendRuntimeProfileScope("/eventlog")).toBe(
+        "/eventlog?user_id=profile-live",
+      );
+    },
+  );
+
+  it(
+    "drops late data from the previous profile after a switch（切档案后丢弃旧档案迟到结果）",
+    { timeout: 30000 },
+    async () => {
+      let resolveOldTasks!: (tasks: Array<Record<string, unknown>>) => void;
+      listTasksMock.mockImplementationOnce(() => new Promise((resolve) => {
+        resolveOldTasks = resolve;
+      }));
+      runtimeStateByUser["profile-live"].tasks = [{
+        id: "profile-live-task",
+        title: "新档案任务",
+        status: "pending",
+        priority: "medium",
+        dependsOn: [],
+        tags: [],
+        createdAt: Date.UTC(2026, 2, 11, 9, 20, 0),
+        updatedAt: Date.UTC(2026, 2, 11, 9, 20, 0),
+      }];
+
+      const { NowWorkbenchOverlayPage } =
+        await import("@/pages/NowWorkbenchOverlayPage");
+      render(<NowWorkbenchOverlayPage />);
+      await waitFor(() => {
+        expect(listTasksMock).toHaveBeenCalledTimes(1);
+      });
+
+      currentUserState.userId = "profile-live";
+      await act(async () => {
+        profileSyncListener?.({ payload: { profileId: "profile-live" } });
+        await Promise.resolve();
+      });
+      expect(await screen.findByText(/新档案任务/)).toBeInTheDocument();
+
+      await act(async () => {
+        resolveOldTasks([{
+          id: "late-old-task",
+          title: "旧档案迟到任务",
+          status: "pending",
+          priority: "medium",
+          dependsOn: [],
+          tags: [],
+          createdAt: Date.UTC(2026, 2, 11, 9, 10, 0),
+          updatedAt: Date.UTC(2026, 2, 11, 9, 10, 0),
+        }]);
+        await Promise.resolve();
+      });
+
+      expect(screen.queryByText(/旧档案迟到任务/)).toBeNull();
+      expect(screen.getByText(/新档案任务/)).toBeInTheDocument();
     },
   );
 });

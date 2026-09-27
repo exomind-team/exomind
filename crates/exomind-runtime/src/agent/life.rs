@@ -264,8 +264,11 @@ impl CognitiveLifeAgent {
                         assistant_turn: AssistantTurn {
                             content: String::new(),
                             tool_calls: Vec::new(),
+                            content_blocks: Vec::new(),
                         },
                         tool_calls: Vec::new(),
+                        content_blocks: None,
+                        action_log: Vec::new(),
                         status: "failed".to_string(),
                         error_message: Some(error.to_string()),
                         created_at,
@@ -298,6 +301,8 @@ impl CognitiveLifeAgent {
                     content: assistant_turn.content.clone(),
                     assistant_turn,
                     tool_calls: Vec::new(),
+                    content_blocks: None,
+                    action_log: Vec::new(),
                     status: "completed".to_string(),
                     error_message: None,
                     created_at,
@@ -350,6 +355,8 @@ impl CognitiveLifeAgent {
                                 .iter()
                                 .map(|(record, _)| record.clone())
                                 .collect(),
+                            content_blocks: None,
+                        action_log: Vec::new(),
                             status: "completed".to_string(),
                             error_message: None,
                             created_at,
@@ -379,6 +386,8 @@ impl CognitiveLifeAgent {
                                     output: None,
                                 }))
                                 .collect(),
+                            content_blocks: None,
+                        action_log: Vec::new(),
                             status: "needs_tool_calls".to_string(),
                             error_message: None,
                             created_at,
@@ -406,6 +415,8 @@ impl CognitiveLifeAgent {
                                     .iter()
                                     .map(|(record, _)| record.clone())
                                     .collect(),
+                                content_blocks: None,
+                        action_log: Vec::new(),
                                 status: "failed".to_string(),
                                 error_message: Some(error.to_string()),
                                 created_at,
@@ -434,8 +445,11 @@ impl CognitiveLifeAgent {
                         assistant_turn: AssistantTurn {
                             content: String::new(),
                             tool_calls: Vec::new(),
+                            content_blocks: Vec::new(),
                         },
                         tool_calls: Vec::new(),
+                        content_blocks: None,
+                        action_log: Vec::new(),
                         status: "failed".to_string(),
                         error_message: Some(error.to_string()),
                         created_at,

@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use crate::AppState;
 use crate::auth::AuthenticatedPeerIdentity;
+use crate::eventlog::EventListFilter;
 use crate::signal::types::SignalEvent;
 use crate::task::store::{
     TaskStoreError, append_task_status_transition, build_initial_task_status_transition,
@@ -752,17 +753,20 @@ fn ensure_legacy_task_status_history_repaired(state: &AppState, scope_key: Optio
         return;
     }
 
-    let tasks = state.task_store.list_scoped(scope_key);
-    let candidates = tasks
-        .into_iter()
-        .filter(|task| task.status_transitions.is_empty())
-        .collect::<Vec<_>>();
+    let candidates = state.task_store.list_scoped_empty_transitions(scope_key);
 
     let mut can_mark_complete = true;
     let mut repaired_count = 0usize;
 
     if !candidates.is_empty() {
-        let mut events = match state.eventlog_store.list_events(scope_key) {
+        let candidate_ids: Vec<String> = candidates.iter().map(|t| t.id.clone()).collect();
+        let mut events = match state.eventlog_store.list_events_filtered(
+            scope_key,
+            &EventListFilter {
+                task_ids: candidate_ids,
+                ..Default::default()
+            },
+        ) {
             Ok(events) => events,
             Err(error) => {
                 tracing::warn!(
@@ -1528,12 +1532,13 @@ async fn write_task_transition_eventlog(
         })),
     };
 
-    if let Err(error) = state.eventlog_store.append_event(scope_key, event.clone()) {
+    if let Err(error) = state
+        .eventlog_appender()
+        .append_event(scope_key, event.clone())
+        .await
+    {
         tracing::warn!(error = %error, "failed to write task transition eventlog");
-        return;
     }
-
-    crate::routes::eventlog::publish_eventlog_replication_append(state, scope_key, &event).await;
 }
 
 fn task_transition_event_content(tag: &str) -> &'static str {
@@ -1667,15 +1672,23 @@ fn build_task_sqlite_snapshot_bytes(
     scope_key: Option<&str>,
     tasks: &[Task],
 ) -> Result<Vec<u8>, (StatusCode, String)> {
-    let temp_root =
-        std::env::temp_dir().join(format!("exomind-task-export-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&temp_root).map_err(|error| {
+    let exomind_temp = std::env::temp_dir().join("exomind");
+    std::fs::create_dir_all(&exomind_temp).map_err(|error| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to create task export temp dir: {error}"),
+            format!("failed to create exomind temp dir: {error}"),
         )
     })?;
-    let sqlite_path = temp_root.join("tasks-export.sqlite");
+    let temp_dir = tempfile::Builder::new()
+        .prefix("task-export-")
+        .tempdir_in(&exomind_temp)
+        .map_err(|error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to create task export temp dir: {error}"),
+            )
+        })?;
+    let sqlite_path = temp_dir.path().join("tasks-export.sqlite");
     let store = crate::task::TaskStore::with_sqlite_path(&sqlite_path)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     store
@@ -1691,8 +1704,9 @@ fn build_task_sqlite_snapshot_bytes(
             )
         })?;
     drop(store);
-    let _ = std::fs::remove_file(&sqlite_path);
-    let _ = std::fs::remove_dir_all(&temp_root);
+    if let Err(e) = temp_dir.close() {
+        tracing::warn!(error = %e, "failed to clean exomind temp dir");
+    }
     Ok(bytes)
 }
 
@@ -1700,18 +1714,33 @@ fn read_tasks_from_sqlite_snapshot(
     bytes: &[u8],
     scope_key: Option<&str>,
 ) -> Result<Vec<Task>, (StatusCode, String)> {
-    let temp_path = std::env::temp_dir().join(format!(
-        "exomind-task-import-{}.sqlite",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::write(&temp_path, bytes)
+    let exomind_temp = std::env::temp_dir().join("exomind");
+    std::fs::create_dir_all(&exomind_temp).map_err(|error| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to create exomind temp dir: {error}"),
+        )
+    })?;
+    let temp_dir = tempfile::Builder::new()
+        .prefix("task-import-")
+        .tempdir_in(&exomind_temp)
+        .map_err(|error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to create task import temp dir: {error}"),
+            )
+        })?;
+    let sqlite_path = temp_dir.path().join("tasks-import.sqlite");
+    std::fs::write(&sqlite_path, bytes)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
-    let store = crate::task::TaskStore::with_sqlite_path(&temp_path)
+    let store = crate::task::TaskStore::with_sqlite_path(&sqlite_path)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     let tasks = store.list_scoped(scope_key);
-
-    let _ = std::fs::remove_file(&temp_path);
+    drop(store);
+    if let Err(e) = temp_dir.close() {
+        tracing::warn!(error = %e, "failed to clean exomind temp dir");
+    }
     Ok(tasks)
 }
 

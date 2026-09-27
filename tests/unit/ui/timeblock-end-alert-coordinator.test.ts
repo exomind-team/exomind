@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isFocusPageCountdownOwner,
+  isTimeblockEndAlertRequestOverdue,
   resolveTimeblockEndAlertSyncDecision,
   shouldAutoOpenFocusOnTimeblockEnd,
 } from '@/ui/app/components/TimeblockEndAlertCoordinator';
@@ -42,6 +43,47 @@ describe('TimeblockEndAlertCoordinator helpers', () => {
 
   it('schedules when support, hydration, and a desired alert are all present', () => {
     expect(resolveTimeblockEndAlertSyncDecision(true, true, REQUEST)).toEqual({
+      kind: 'schedule',
+      request: REQUEST,
+    });
+  });
+
+  it('does not treat an armed future request as fired yet', () => {
+    const armedStartIds = new Set([REQUEST.startId]);
+
+    expect(isTimeblockEndAlertRequestOverdue(
+      REQUEST,
+      Date.UTC(2026, 3, 16, 2, 24, 59),
+    )).toBe(false);
+    expect(resolveTimeblockEndAlertSyncDecision(true, true, REQUEST, {
+      armedStartIds,
+      now: Date.UTC(2026, 3, 16, 2, 24, 59),
+    })).toEqual({
+      kind: 'schedule',
+      request: REQUEST,
+    });
+  });
+
+  it('suppresses an already armed overdue request for the same time block', () => {
+    const armedStartIds = new Set([REQUEST.startId]);
+
+    expect(isTimeblockEndAlertRequestOverdue(
+      REQUEST,
+      Date.UTC(2026, 3, 16, 2, 25, 0),
+    )).toBe(true);
+    expect(resolveTimeblockEndAlertSyncDecision(true, true, REQUEST, {
+      armedStartIds,
+      now: Date.UTC(2026, 3, 16, 2, 25, 0),
+    })).toEqual({
+      kind: 'skip',
+    });
+  });
+
+  it('still schedules the first overdue request when it has not been armed before', () => {
+    expect(resolveTimeblockEndAlertSyncDecision(true, true, REQUEST, {
+      armedStartIds: new Set(),
+      now: Date.UTC(2026, 3, 16, 2, 26, 0),
+    })).toEqual({
       kind: 'schedule',
       request: REQUEST,
     });

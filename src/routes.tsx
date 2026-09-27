@@ -1,18 +1,12 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, Orbit, FlaskConical, Mic, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, SquareCheckBig, Brain, PanelLeftClose, PanelLeftOpen, Orbit, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
-import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
 import { getGoalsPageEnabled, subscribeGoalsPageEnabledChanges } from '@/config/goals-page-enabled';
-import { getWorkbenchLegacyShimEnabled } from '@/config/workbench-legacy-shim-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
-import {
-  getVoiceRuntimeLabNavEnabled,
-  subscribeVoiceRuntimeLabNavEnabledChanges,
-} from '@/config/voice-runtime-settings';
 import {
   getDesktopSidebarCollapsed as getPersistedDesktopSidebarCollapsed,
   setDesktopSidebarCollapsed as setPersistedDesktopSidebarCollapsed,
@@ -52,10 +46,6 @@ const SettingsPage = lazy(async () => {
   return { default: module.SettingsPage };
 });
 
-const LegalSupportPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/LegalSupportPage');
-  return { default: module.LegalSupportPage };
-});
 
 const TasksPage = lazy(async () => {
   const module = await import('@/ui/app/pages/TasksPage');
@@ -97,44 +87,14 @@ const TimeBlockDetailPage = lazy(async () => {
   return { default: module.TimeBlockDetailPage };
 });
 
-const MePage = lazy(async () => {
-  const module = await import('@/ui/app/pages/MePage');
-  return { default: module.MePage };
-});
-
 const UserManagePage = lazy(async () => {
   const module = await import('@/ui/pages/UserManagePage');
   return { default: module.UserManagePage };
 });
 
-const SyncTestPage = lazy(async () => {
-  const module = await import('@/ui/pages/SyncTestPage');
-  return { default: module.SyncTestPage };
-});
-
-const MOSSASRTestPage = lazy(async () => {
-  const module = await import('@/pages/MOSSASRTestPage');
-  return { default: module.MOSSASRTestPage };
-});
-
-const VolcanoASRTestPage = lazy(async () => {
-  const module = await import('@/pages/VolcanoASRTestPage');
-  return { default: module.VolcanoASRTestPage };
-});
-
 const AgentsPage = lazy(async () => {
   const module = await import('@/ui/app/pages/AgentsPage');
   return { default: module.AgentsPage };
-});
-
-const WorkbenchPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/workbench/WorkbenchPage');
-  return { default: module.WorkbenchPage };
-});
-
-const VoiceRuntimeLabPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/voice-runtime/VoiceRuntimeLabPage');
-  return { default: module.VoiceRuntimeLabPage };
 });
 
 const GoalsPage = lazy(async () => {
@@ -187,41 +147,6 @@ function PageFallback() {
 
 function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
-}
-
-function LegacyWorkbenchShim({
-  enabled,
-  search,
-  children,
-}: {
-  enabled: boolean;
-  search: Record<string, string>;
-  children: React.ReactNode;
-}) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const bypassWorkbenchShim = useMemo(
-    () => new URLSearchParams(location.searchStr ?? '').get('workbenchBypass') === 'true',
-    [location.searchStr],
-  );
-
-  useEffect(() => {
-    if (!enabled || bypassWorkbenchShim) {
-      return;
-    }
-
-    void navigate({
-      to: '/workbench',
-      search,
-      replace: true,
-    });
-  }, [bypassWorkbenchShim, enabled, navigate, search]);
-
-  if (enabled && !bypassWorkbenchShim) {
-    return null;
-  }
-
-  return <>{children}</>;
 }
 
 function resolveRuntimePlatform(): 'web' | 'tauri' | 'unknown' {
@@ -298,10 +223,8 @@ function MobileShell({
                 const active = locationPath === item.path
                   || (item.path === '/eventlog' && locationPath.startsWith('/eventlog'))
                   || (item.path === '/tasks' && (locationPath.startsWith('/tasks') || locationPath === '/proposals' || locationPath.startsWith('/proposals/')))
-                  || (item.path === '/me' && locationPath.startsWith('/me'))
                   || (item.path === '/goals' && locationPath.startsWith('/goals'))
                   || (item.path === '/agents' && locationPath.startsWith('/agents'))
-                  || (item.path === '/workbench' && locationPath.startsWith('/workbench'))
                   || (item.path === '/settings' && locationPath.startsWith('/settings'));
                 return (
                   <Link
@@ -328,19 +251,13 @@ function MobileShell({
 function DesktopSidebar({
   activePath,
   agentPageEnabled,
-  mePageEnabled,
   goalsPageEnabled,
-  developerModeEnabled,
-  voiceRuntimeLabNavEnabled,
   collapsed,
   onToggleCollapsed,
 }: {
   activePath: string;
   agentPageEnabled: boolean;
-  mePageEnabled: boolean;
   goalsPageEnabled: boolean;
-  developerModeEnabled: boolean;
-  voiceRuntimeLabNavEnabled: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
@@ -354,33 +271,12 @@ function DesktopSidebar({
       icon: Orbit,
       match: (path: string) => path === '/goals' || path.startsWith('/goals/'),
     }] : []),
-    ...(mePageEnabled ? [{
-      key: 'me',
-      title: 'Me',
-      path: '/me',
-      icon: UserRound,
-      match: (path: string) => path === '/me' || path.startsWith('/me/'),
-    }] : []),
     ...(agentPageEnabled ? [{
       key: 'agents',
       title: '网络',
       path: '/agents',
       icon: Waypoints,
       match: (path: string) => path === '/agents' || path.startsWith('/agents/'),
-    }] : []),
-    {
-      key: 'workbench-test',
-      title: '工作台测试',
-      path: '/workbench',
-      icon: FlaskConical,
-      match: (path: string) => path === '/workbench' || path.startsWith('/workbench/'),
-    },
-    ...(developerModeEnabled && voiceRuntimeLabNavEnabled ? [{
-      key: 'voice-runtime-lab',
-      title: '语音实验',
-      path: '/voice-runtime',
-      icon: Mic,
-      match: (path: string) => path === '/voice-runtime' || path.startsWith('/voice-runtime/'),
     }] : []),
     { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
@@ -474,19 +370,13 @@ function DesktopSidebar({
 function DesktopLayout({
   activePath,
   agentPageEnabled,
-  mePageEnabled,
   goalsPageEnabled,
-  developerModeEnabled,
-  voiceRuntimeLabNavEnabled,
   collapsed,
   onToggleCollapsed,
 }: {
   activePath: string;
   agentPageEnabled: boolean;
-  mePageEnabled: boolean;
   goalsPageEnabled: boolean;
-  developerModeEnabled: boolean;
-  voiceRuntimeLabNavEnabled: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
@@ -496,10 +386,7 @@ function DesktopLayout({
         <DesktopSidebar
           activePath={activePath}
           agentPageEnabled={agentPageEnabled}
-          mePageEnabled={mePageEnabled}
           goalsPageEnabled={goalsPageEnabled}
-          developerModeEnabled={developerModeEnabled}
-          voiceRuntimeLabNavEnabled={voiceRuntimeLabNavEnabled}
           collapsed={collapsed}
           onToggleCollapsed={onToggleCollapsed}
         />
@@ -508,31 +395,6 @@ function DesktopLayout({
         </main>
       </div>
     </div>
-  );
-}
-
-function MeRouteGate() {
-  const navigate = useNavigate();
-  const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
-
-  useEffect(() => {
-    return subscribeMePageEnabledChanges(setMePageEnabled);
-  }, []);
-
-  useEffect(() => {
-    if (!mePageEnabled) {
-      void navigate({ to: '/settings', replace: true });
-    }
-  }, [mePageEnabled, navigate]);
-
-  if (!mePageEnabled) {
-    return <PageFallback />;
-  }
-
-  return (
-    <LazyPage>
-      <MePage />
-    </LazyPage>
   );
 }
 
@@ -568,22 +430,17 @@ function NewLayout() {
   const isDesktop = useIsDesktop();
 
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
-  const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
   const [goalsPageEnabled, setGoalsPageEnabled] = useState(() => getGoalsPageEnabled());
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => getPersistedDesktopSidebarCollapsed());
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
   const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
-  const [voiceRuntimeLabNavEnabled, setVoiceRuntimeLabNavEnabled] = useState(() => getVoiceRuntimeLabNavEnabled());
   const commandPaletteActive = developerModeEnabled && commandPaletteEnabled;
   const registryService = useMemo(() => getCommandRegistryService(), []);
   const paletteService = useMemo(() => getCommandPaletteService(), []);
 
   useEffect(() => {
     return subscribeAgentPageEnabledChanges(setAgentPageEnabled);
-  }, []);
-  useEffect(() => {
-    return subscribeMePageEnabledChanges(setMePageEnabled);
   }, []);
   useEffect(() => {
     return subscribeGoalsPageEnabledChanges(setGoalsPageEnabled);
@@ -598,9 +455,6 @@ function NewLayout() {
     return subscribeCommandPaletteEnabledChanges(setCommandPaletteEnabled);
   }, []);
   useEffect(() => {
-    return subscribeVoiceRuntimeLabNavEnabledChanges(setVoiceRuntimeLabNavEnabled);
-  }, []);
-  useEffect(() => {
     setPersistedDesktopSidebarCollapsed(desktopSidebarCollapsed);
   }, [desktopSidebarCollapsed]);
 
@@ -612,15 +466,12 @@ function NewLayout() {
     registryService.setCommands('core-navigation', createCoreNavigationCommands({
       navigate: navigateTo,
       openReminderComposer: requestReminderCompose,
-      featureFlags: {
-        mePageEnabled,
-      },
     }));
 
     return () => {
       registryService.removeScope('core-navigation');
     };
-  }, [mePageEnabled, navigate, registryService]);
+  }, [navigate, registryService]);
 
   useEffect(() => {
     if (!commandPaletteActive) {
@@ -650,19 +501,16 @@ function NewLayout() {
     developerModeEnabled,
     commandPaletteEnabled: commandPaletteActive,
     featureFlags: {
-      mePageEnabled,
       agentPageEnabled,
       goalsV2Enabled: false,
     },
-  }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname, mePageEnabled]);
+  }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname]);
 
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
     { title: '任务', path: '/tasks', icon: SquareCheckBig },
     ...(goalsPageEnabled ? [{ title: '目标', path: '/goals', icon: Orbit }] : []),
-    ...(mePageEnabled ? [{ title: 'Me', path: '/me', icon: UserRound }] : []),
     ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
-    { title: '工作台测试', path: '/workbench', icon: FlaskConical },
     { title: '设置', path: '/settings', icon: Settings },
   ];
   const selectedShell = isDesktop && desktopAdaptiveEnabled ? 'desktop' : 'mobile';
@@ -673,10 +521,7 @@ function NewLayout() {
         <DesktopLayout
           activePath={location.pathname}
           agentPageEnabled={agentPageEnabled}
-          mePageEnabled={mePageEnabled}
           goalsPageEnabled={goalsPageEnabled}
-          developerModeEnabled={developerModeEnabled}
-          voiceRuntimeLabNavEnabled={voiceRuntimeLabNavEnabled}
           collapsed={desktopSidebarCollapsed}
           onToggleCollapsed={() => setDesktopSidebarCollapsed((current) => !current)}
         />
@@ -966,14 +811,6 @@ const newTimeblockDetailRoute = createRoute({
   },
 });
 
-const newMeRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/me',
-  component: function NewMe() {
-    return <MeRouteGate />;
-  },
-});
-
 const newGoalsRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/goals',
@@ -994,18 +831,6 @@ const newSettingsRoute = createRoute({
   },
 });
 
-const newLegalSupportRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/settings/legal-support',
-  component: function NewLegalSupport() {
-    return (
-      <LazyPage>
-        <LegalSupportPage />
-      </LazyPage>
-    );
-  },
-});
-
 const newUserManageRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/user-manage',
@@ -1018,78 +843,13 @@ const newUserManageRoute = createRoute({
   },
 });
 
-const newMossTestRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/moss-test',
-  component: function NewMossTest() {
-    return (
-      <LazyPage>
-        <MOSSASRTestPage />
-      </LazyPage>
-    );
-  },
-});
-
-const newVolcanoAsrTestRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/volcano-asr-test',
-  component: function NewVolcanoAsrTest() {
-    return (
-      <LazyPage>
-        <VolcanoASRTestPage />
-      </LazyPage>
-    );
-  },
-});
-
-const newSyncTestRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/sync-test',
-  component: function NewSyncTest() {
-    return (
-      <LazyPage>
-        <SyncTestPage />
-      </LazyPage>
-    );
-  },
-});
-
 const newAgentsRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/agents',
   component: function NewAgents() {
     return (
-      <LegacyWorkbenchShim
-        enabled={getWorkbenchLegacyShimEnabled()}
-        search={{ legacySource: 'agents-hub' }}
-      >
-        <LazyPage>
-          <AgentsPage />
-        </LazyPage>
-      </LegacyWorkbenchShim>
-    );
-  },
-});
-
-const newWorkbenchRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/workbench',
-  component: function NewWorkbench() {
-    return (
       <LazyPage>
-        <WorkbenchPage />
-      </LazyPage>
-    );
-  },
-});
-
-const newVoiceRuntimeLabRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/voice-runtime',
-  component: function NewVoiceRuntimeLab() {
-    return (
-      <LazyPage>
-        <VoiceRuntimeLabPage />
+        <AgentsPage />
       </LazyPage>
     );
   },
@@ -1150,19 +910,10 @@ const newAgentConversationRoute = createRoute({
   path: '/agents/chat/$agentId',
   component: function NewAgentConversation() {
     const { agentId } = useParams({ strict: false }) as { agentId?: string };
-    const legacyShimEnabled = getWorkbenchLegacyShimEnabled();
     return (
-      <LegacyWorkbenchShim
-        enabled={legacyShimEnabled && Boolean(agentId)}
-        search={{
-          legacySource: 'agent-chat',
-          agentId: agentId ?? '',
-        }}
-      >
-        <LazyPage>
-          <AgentConversationPage agentId={agentId} />
-        </LazyPage>
-      </LegacyWorkbenchShim>
+      <LazyPage>
+        <AgentConversationPage agentId={agentId} />
+      </LazyPage>
     );
   },
 });
@@ -1207,17 +958,10 @@ const newRouteTree = newRootRoute.addChildren([
   newRemindersRoute,
   newTimeblockDetailRoute,
   newTaskDetailRoute,
-  newMeRoute,
   newGoalsRoute,
   newSettingsRoute,
-  newLegalSupportRoute,
   newUserManageRoute,
-  newMossTestRoute,
-  newVolcanoAsrTestRoute,
-  newSyncTestRoute,
   newAgentsRoute,
-  newWorkbenchRoute,
-  newVoiceRuntimeLabRoute,
   newUpdateRoute,
   newAgentDetailRoute,
   newActorDetailRoute,

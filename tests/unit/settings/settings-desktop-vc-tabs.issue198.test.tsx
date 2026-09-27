@@ -43,7 +43,6 @@ describe('issue-198 settings desktop VC tabs（设置页桌面VC标签与跳转�
     expect(screen.getByRole('button', { name: '危险区域' })).toBeInTheDocument();
 
     expect(screen.getAllByText('快捷语音输入').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('常驻语音助手').length).toBeGreaterThan(0);
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
     expect(screen.queryByText('快捷语音引擎')).not.toBeInTheDocument();
 

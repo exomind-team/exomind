@@ -22,7 +22,7 @@ import React, {
 } from "react";
 import { Check, LoaderCircle, Mic, MicOff, Unlock } from "lucide-react";
 import type { IASRPort, IASRConfig } from "../lib/ports/asr-port";
-import { MOSSASRAdapter } from "../lib/adapters/asr/moss-asr";
+import { VolcanoRecognizeASRAdapter } from "../lib/adapters/asr/volcano-recognize-asr";
 import { cn } from "../lib/utils";
 import { toast } from "@/components/ui/toast-hook";
 import {
@@ -49,7 +49,7 @@ export interface VoiceInputButtonProps {
   /** 状态变化回调 */
   onStateChange?: (state: VoiceButtonState) => void;
 
-  /** ASR 适配器（可选，默认使用 MOSSAdapter） */
+  /** ASR 适配器（可选，默认使用火山一次性识别适配器） */
   adapter?: IASRPort;
   /** 适配器配置（API Key 等） */
   adapterConfig?: IASRConfig;
@@ -186,8 +186,8 @@ export const VoiceInputButton = React.forwardRef<
     if (adapter) {
       adapterRef.current = adapter;
     } else {
-      // 默认 MOSSAdapter
-      adapterRef.current = new MOSSASRAdapter(adapterConfig);
+      // 默认火山一次性识别适配器
+      adapterRef.current = new VolcanoRecognizeASRAdapter();
     }
   }, [adapter, adapterConfig]);
 

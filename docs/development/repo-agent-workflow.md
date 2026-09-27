@@ -96,19 +96,24 @@ curl -sS -D - -o /dev/null http://127.0.0.1:6984 | head -n 8
 
 ## 发布流程
 
+具体发布治理以 [skills/release-governance](../../skills/release-governance/SKILL.md) 为准。本节只保留源码工作目录里的操作入口提醒；如果这里和 release-governance 冲突，先按 release-governance 执行并回头修本文档。
+
 | Tag 格式 | 产出 | Release 类型 |
 |---------|------|-------------|
 | `v0.4.0` | GitHub Release assets + GitHub Pages `preview` 元数据 | Pre-release（预览版） |
 | `v0.4.0 promotion` | 同一 tag / 同一 commit，仅切换 GitHub Release `prerelease=false` 并刷新 GitHub Pages `release` 元数据 | 正式版 |
 
 ```bash
-# 创建单一发布 tag（会先校验 package.json / tauri.conf.json / Cargo.toml 版本一致）
+# 先对候选 ref 跑完整四平台构建；此模式不创建 Release
+gh workflow run release.yml --ref <candidate-ref> -f validate_release=true
+gh run watch <run-id> --exit-status
+
+# 验证全绿后，才进入默认预览发版入口
+bun run release:build --dry-run
+bun run release:build
+
+# 手动 fallback 仅在明确需要从已对齐版本文件推 tag 时使用
 bun run build:tag
-
-# 推送唯一 tag，触发 GitHub Release + GitHub Pages
-git push origin v0.4.0
-
-# 正式发版：在 GitHub Actions 手动执行 workflow_dispatch，并传入 promote_tag=v0.4.0
 ```
 
 版本号规范：
@@ -118,3 +123,13 @@ git push origin v0.4.0
 - `preview / release` 只作为 GitHub Release 状态与 GitHub Pages 元数据视图
 - 有功能 / 修复：bump patch
 - 纯资源变更（图标等）：不单独 bump，随下一个功能版本一起发
+- 四平台只构建预验证全绿后，必须下载该精确候选的 Windows 与 Android 产物，完成同版本 PC/Android 发布前实测：新装空状态和从上一日用版本升级两条路径都要覆盖发现、PIN 配对、EventLog live sync 与 snapshot/backfill。任何一项失败都不得推 tag。
+- 只有 tag 触发的 `Build & Release` 四个平台构建和 `create-release` 全绿，才算发版成功
+- 手工上传资产或单独通过 `Sync Release Pages` 不能覆盖失败的发布 CI；已公开 tag 不移动，修复后使用下一个 patch
+
+公开发布说明规范：
+
+1. 发布前先按 release-governance 产出 `给使用者看的摘要` 和第一段 `What Changed / 本次变化`。
+2. 官网和下载页优先使用“我们作为贡献者也在使用 ExoMind”的口吻，简体中文先行；英文提交标题、依赖名、CI 术语和内部模块名只放到 `Developer Notes / 工程证据`。
+3. 如果某版只是构建、下载、依赖或发布流水线修复，就诚实写成“发布/下载可靠性修复”，不要包装成产品功能。
+4. 正式发版是 promote 既有 tag：在 GitHub Actions 手动执行 `workflow_dispatch`，传入 `promote_tag=v0.x.y`，然后确认 GitHub Pages 的 `release` / `preview` 元数据和官网 changelog 都已同步。

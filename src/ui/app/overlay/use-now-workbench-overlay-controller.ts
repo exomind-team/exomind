@@ -1,18 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { isTauri } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  getCurrentUserId,
-  getEventStorage,
-  type Event as StoredEvent,
-} from "@/lib/storage/event-storage";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
+import { setProfileSession } from "@/lib/profile/profile-storage";
+
 import {
   getEventLogService,
   getTaskService,
   getTaskTimerService,
   getTimeBlockService,
 } from "@/lib/services";
-import { readEventRefsFromMetadata } from "@/lib/eventlog/event-refs";
 import { appendTaskStatusChangeDescription } from "@/lib/task/task-status-change-description";
 import {
   resolveActiveBlockTaskIds,
@@ -30,9 +26,11 @@ import {
   type NowWorkbenchOverlayMode,
 } from "./now-workbench-overlay-model";
 import { getNowWorkbenchOverlayService } from "@/services/now-workbench-overlay.service";
+import { useSyncStore } from "@/ui/stores/sync-store";
 
 interface NowWorkbenchOverlayController {
   model: ReturnType<typeof buildNowWorkbenchOverlayModel>;
+  profileReady: boolean;
   feedbackOpen: boolean;
   feedback: string;
   activeBlockTasks: TaskNode[];
@@ -67,17 +65,6 @@ interface NowWorkbenchOverlayDebugInfo {
   latestEventContent: string;
   lastReloadAt: string;
   lastAction: string;
-}
-
-function toUiEvent(event: StoredEvent): UiEvent {
-  return {
-    id: event.id,
-    content: event.content,
-    timestamp: Date.parse(event.createdAt),
-    tags: new Set(event.type ? [event.type] : []),
-    metadata: event.metadata,
-    refs: readEventRefsFromMetadata(event.metadata ?? null),
-  };
 }
 
 function isFeedbackStage(block: ActiveBlockData | null): boolean {
@@ -129,9 +116,14 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   const [taskStatusChoices, setTaskStatusChoices] = useState<
     Record<string, TaskStatusChoice>
   >({});
+  const [profileReady, setProfileReady] = useState(false);
+  const [profileId, setProfileId] = useState("");
+  const profileGenerationRef = useRef(0);
+  const activeProfileRef = useRef("");
+  const profileInitializedRef = useRef(false);
   const [debugInfo, setDebugInfo] = useState<NowWorkbenchOverlayDebugInfo>(
     () => ({
-      userId: getCurrentUserId(),
+      userId: "",
       mode: EMPTY_MODEL.mode,
       taskCount: 0,
       eventCount: 0,
@@ -153,119 +145,195 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   );
 
   const loadTasks = useCallback(async () => {
+    const requestGeneration = profileGenerationRef.current;
+    const requestProfileId = profileId;
     try {
       const nextTasks = await taskService.listTasks(true);
+      if (
+        requestGeneration !== profileGenerationRef.current
+        || requestProfileId !== activeProfileRef.current
+      ) {
+        return;
+      }
       setTasks(nextTasks);
       updateDebugInfo({
-        userId: getCurrentUserId(),
+        userId: profileId,
         taskCount: nextTasks.length,
       });
     } catch (error) {
+      if (
+        requestGeneration !== profileGenerationRef.current
+        || requestProfileId !== activeProfileRef.current
+      ) {
+        return;
+      }
       updateDebugInfo({
         lastAction: `load-tasks:error:${error instanceof Error ? error.message : String(error)}`,
       });
       throw error;
     }
-  }, [taskService]);
+  }, [profileId, taskService, updateDebugInfo]);
 
   const loadEvents = useCallback(async () => {
-    const userId = getCurrentUserId();
+    const requestGeneration = profileGenerationRef.current;
+    const requestProfileId = profileId;
     try {
-      const page = await getEventStorage(userId).getEventsPage({ limit: 2 });
-      const nextEvents = page.events.map(toUiEvent);
+      const nextEvents = await eventLogService.loadEvents({ limit: 2 });
+      if (
+        requestGeneration !== profileGenerationRef.current
+        || requestProfileId !== activeProfileRef.current
+      ) {
+        return;
+      }
       setEvents(nextEvents);
       updateDebugInfo({
-        userId,
+        userId: profileId,
         eventCount: nextEvents.length,
         latestEventContent: nextEvents[0]?.content ?? "",
       });
     } catch (error) {
+      if (
+        requestGeneration !== profileGenerationRef.current
+        || requestProfileId !== activeProfileRef.current
+      ) {
+        return;
+      }
       updateDebugInfo({
-        userId,
+        userId: profileId,
         lastAction: `load-events:error:${error instanceof Error ? error.message : String(error)}`,
       });
       throw error;
     }
-  }, []);
+  }, [eventLogService, profileId, updateDebugInfo]);
 
   const loadActiveBlock = useCallback(async () => {
+    const requestGeneration = profileGenerationRef.current;
+    const requestProfileId = profileId;
     try {
       const block = await timeBlockService.loadActiveBlock();
+      if (
+        requestGeneration !== profileGenerationRef.current
+        || requestProfileId !== activeProfileRef.current
+      ) {
+        return;
+      }
       setActiveBlock(block);
       setFeedbackOpen(isFeedbackStage(block));
       updateDebugInfo({
-        userId: getCurrentUserId(),
+        userId: profileId,
         activeBlockName: block?.name ?? "",
       });
     } catch (error) {
+      if (
+        requestGeneration !== profileGenerationRef.current
+        || requestProfileId !== activeProfileRef.current
+      ) {
+        return;
+      }
       updateDebugInfo({
         lastAction: `load-active-block:error:${error instanceof Error ? error.message : String(error)}`,
       });
       throw error;
     }
-  }, [timeBlockService]);
+  }, [profileId, timeBlockService, updateDebugInfo]);
 
-  const reloadAll = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     await Promise.all([loadActiveBlock(), loadTasks(), loadEvents()]);
   }, [loadActiveBlock, loadTasks, loadEvents]);
 
   useEffect(() => {
     let disposed = false;
+    let unlistenProfile: (() => void) | null = null;
 
-    void reloadAll();
+    const applyProfile = (nextProfileId: string | null | undefined) => {
+      if (disposed) return;
+      const normalizedProfileId = nextProfileId?.trim() ?? "";
+      if (
+        profileInitializedRef.current
+        && normalizedProfileId === activeProfileRef.current
+      ) {
+        return;
+      }
+
+      profileInitializedRef.current = true;
+      activeProfileRef.current = normalizedProfileId;
+      profileGenerationRef.current += 1;
+      setProfileSession({
+        version: 1,
+        activeProfileId: normalizedProfileId || null,
+        unlockedProfileIds: normalizedProfileId ? [normalizedProfileId] : [],
+      });
+      useSyncStore.setState({
+        activeProfileId: normalizedProfileId || null,
+      });
+      setActiveBlock(null);
+      setTasks([]);
+      setEvents([]);
+      setFeedback("");
+      setFeedbackOpen(false);
+      setTaskStatusChoices({});
+      setProfileId(normalizedProfileId);
+      setProfileReady(Boolean(normalizedProfileId));
+    };
+
+    void listen<{ profileId: string | null }>(
+      "main-window-profile-sync",
+      (event) => {
+        applyProfile(event.payload.profileId);
+      },
+    ).then((unlisten) => {
+      if (disposed) {
+        unlisten();
+        return;
+      }
+
+      unlistenProfile = unlisten;
+      return invoke<string | null>("now_workbench_overlay_profile_get")
+        .then(applyProfile)
+        .catch(() => {})
+        .then(() => emit("overlay-request-profile").catch(() => {}));
+    }).catch(() => {});
+
+    return () => {
+      disposed = true;
+      unlistenProfile?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!profileReady) {
+      return;
+    }
+
+    let disposed = false;
+    const subscriptionGeneration = profileGenerationRef.current;
+    void loadAll().catch(() => {});
 
     const unsubscribeBlock = timeBlockService.onBlockChange((block) => {
-      if (disposed) return;
+      if (disposed || subscriptionGeneration !== profileGenerationRef.current) return;
       setActiveBlock(block);
       setFeedbackOpen(isFeedbackStage(block));
       setNow(Date.now());
-      void loadTasks();
+      void Promise.all([loadTasks(), loadEvents()]).catch(() => {});
+    });
+    const unsubscribeTasks = taskService.onTaskChange(() => {
+      if (!disposed && subscriptionGeneration === profileGenerationRef.current) {
+        void loadTasks().catch(() => {});
+      }
+    });
+    const unsubscribeEvents = eventLogService.onEvent(() => {
+      if (!disposed && subscriptionGeneration === profileGenerationRef.current) {
+        void loadEvents().catch(() => {});
+      }
     });
 
     return () => {
       disposed = true;
       unsubscribeBlock();
+      unsubscribeTasks();
+      unsubscribeEvents();
     };
-  }, [loadTasks, reloadAll, timeBlockService]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      void reloadAll();
-    }, 1000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [reloadAll]);
-
-  useEffect(() => {
-    if (!isTauri()) {
-      return;
-    }
-
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-
-    void getCurrentWindow()
-      .onFocusChanged((event) => {
-        if (disposed || !event.payload) {
-          return;
-        }
-        void reloadAll();
-      })
-      .then((cleanup) => {
-        if (disposed) {
-          cleanup();
-          return;
-        }
-        unlisten = cleanup;
-      });
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [reloadAll]);
+  }, [eventLogService, loadAll, loadEvents, loadTasks, profileReady, taskService, timeBlockService]);
 
   useEffect(() => {
     if (!activeBlock || activeBlock.paused || isFeedbackStage(activeBlock)) {
@@ -307,7 +375,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
 
   useEffect(() => {
     updateDebugInfo({
-      userId: getCurrentUserId(),
+      userId: profileId,
       mode: model.mode,
       taskCount: model.visibleTasks.length,
       eventCount: model.recentEvents.length,
@@ -320,7 +388,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
         hour12: false,
       }),
     });
-  }, [model, updateDebugInfo]);
+  }, [model, profileId, updateDebugInfo]);
 
   useEffect(() => {
     setTaskStatusChoices((current) => {
@@ -359,14 +427,8 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   );
 
   const handleHide = useCallback(async () => {
-    if (!isTauri()) {
-      await overlayService.hideTemporarily();
-      updateDebugInfo({ lastAction: "hide:fallback-success" });
-      return;
-    }
-
     try {
-      await getCurrentWindow().hide();
+      await overlayService.hideTemporarily();
       updateDebugInfo({ lastAction: "hide:success" });
     } catch (error) {
       updateDebugInfo({
@@ -502,7 +564,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
       setFeedback("");
       setFeedbackOpen(false);
       setTaskStatusChoices({});
-      await reloadAll();
+      await loadAll();
       updateDebugInfo({ lastAction: "end-block:success" });
     } catch (error) {
       updateDebugInfo({
@@ -513,8 +575,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
     activeBlock,
     activeBlockTasks,
     feedback,
-    reloadAll,
-    taskService,
+    loadAll,
     taskStatusChoices,
     taskTimerService,
     timeBlockService,
@@ -545,7 +606,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
           );
           updateDebugInfo({ lastAction: `task-select:start-block:${task.id}` });
         }
-        await reloadAll();
+        await loadAll();
       } catch (error) {
         updateDebugInfo({
           lastAction: `task-select:error:${task.id}:${error instanceof Error ? error.message : String(error)}`,
@@ -553,7 +614,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
         throw error;
       }
     },
-    [activeBlock, reloadAll, taskTimerService, updateDebugInfo],
+    [activeBlock, loadAll, taskTimerService, updateDebugInfo],
   );
 
   const handleSend = useCallback(
@@ -579,6 +640,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
 
   return {
     model: model ?? EMPTY_MODEL,
+    profileReady,
     feedbackOpen,
     feedback,
     activeBlockTasks,

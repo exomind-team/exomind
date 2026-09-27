@@ -105,6 +105,7 @@ export function getProfileSession(): ProfileSessionState {
 
 export function setProfileSession(session: ProfileSessionState): void {
   writeJson(PROFILE_SESSION_KEY, session);
+  _cachedProfileId = session.activeProfileId;
 }
 
 function ensureUniqueProfileId(slug: string): string {
@@ -305,11 +306,19 @@ export function ensureProfileStorageMigrated(): void {
   }
 }
 
+// 模块级缓存，由 setProfileSession 更新，不从 localStorage 读
+let _cachedProfileId: string | null = null;
+
 export function getCurrentProfileOrLegacyId(): string {
+  // 优先使用缓存（由 setProfileSession 更新）
+  if (_cachedProfileId) return _cachedProfileId;
+
+  // fallback 到 localStorage（兼容主窗口首次加载）
   const activeProfile = getActiveProfile();
   if (activeProfile) {
-    return activeProfile.profileId;
+    _cachedProfileId = activeProfile.profileId;
+    return _cachedProfileId;
   }
 
-  return getLegacyActiveUser() || 'anonymous';
+  throw new Error('getCurrentProfileOrLegacyId: 无法获取当前档案，请确保已设置档案');
 }

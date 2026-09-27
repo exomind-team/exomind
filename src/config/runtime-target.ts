@@ -1,5 +1,6 @@
 import { createConfigModule } from './config-factory';
 import { resolveLocalServiceHost } from '@/config/local-service-host';
+import { invoke } from '@tauri-apps/api/core';
 
 export const RUNTIME_TARGET_MODE_STORAGE_KEY = 'exomind:runtimeTargetMode';
 export const RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY = 'exomind:runtimeExternalAddress';
@@ -209,11 +210,72 @@ function resolveEmbeddedHost(): string {
   return 'localhost';
 }
 
-function resolveEmbeddedPort(): number {
-  const cachedStatus = readEmbeddedRuntimeStatus();
-  if (cachedStatus?.port) return cachedStatus.port;
+// ── IPC 端口缓存 ──────────────────────────────────────────────
+// 从 Tauri 后端 IPC 获取真实 runtime 端口，缓存到模块变量。
+// resolveEmbeddedPort() 读此缓存，不再依赖可能过期的 localStorage。
+// 必须在 bootstrapApp() 中 await fetchEmbeddedPortFromIpc() 后再渲染组件。
 
+let _ipcPort: number | null = null;
+let _ipcPortReady: Promise<void> | null = null;
+
+export async function fetchEmbeddedPortFromIpc(): Promise<void> {
+  if (_ipcPort !== null) return;
+  if (_ipcPortReady) return _ipcPortReady;
+
+  _ipcPortReady = (async () => {
+    try {
+      // 直接调用 invoke，不依赖 isTauri() 检查。
+      const status = await invoke<{ running: boolean; host?: string; port: number; hostId?: string }>('runtime_service_status');
+      if (status.running && status.port > 0) {
+        if (status.host) {
+          rememberEmbeddedRuntimeStatus({
+            host: status.host,
+            port: status.port,
+            hostId: status.hostId,
+          });
+          return;
+        }
+        updateEmbeddedPortFromTransport(status.port);
+      }
+    } catch (error) {
+      // IPC 不可用时静默失败
+    }
+  })();
+
+  return _ipcPortReady;
+}
+
+function resolveEmbeddedPort(): number {
+  // 使用 IPC 获取的真实端口（由 fetchEmbeddedPortFromIpc / updateEmbeddedPortFromTransport 设置）。
+  if (_ipcPort !== null) {
+    console.log('[runtime-target] resolveEmbeddedPort: using IPC port', _ipcPort);
+    return _ipcPort;
+  }
+
+  // 非 Tauri 环境（Web 开发模式）允许 fallback 到默认端口。
+  if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
+    console.log('[runtime-target] resolveEmbeddedPort: non-Tauri, using default', DEFAULT_EMBEDDED_RUNTIME_PORT);
+    return DEFAULT_EMBEDDED_RUNTIME_PORT;
+  }
+
+  // Tauri 环境中 IPC 端口未设置——返回默认端口。
+  console.warn('[runtime-target] resolveEmbeddedPort: Tauri but _ipcPort is null, using default', DEFAULT_EMBEDDED_RUNTIME_PORT);
   return DEFAULT_EMBEDDED_RUNTIME_PORT;
+}
+
+/**
+ * 由 bootstrapRuntimeConfigTransport() 调用，在成功获取 runtime 端口后更新缓存。
+ * 这确保了 resolveEmbeddedPort() 在后续调用中返回正确端口。
+ */
+export function updateEmbeddedPortFromTransport(port: number): void {
+  if (port > 0) {
+    _ipcPort = port;
+  }
+}
+
+export function rememberEmbeddedRuntimeStatus(status: EmbeddedRuntimeStatusSnapshot): void {
+  updateEmbeddedPortFromTransport(status.port);
+  persistEmbeddedRuntimeStatus(status);
 }
 
 export function getPreferredEmbeddedRuntimePort(): number {

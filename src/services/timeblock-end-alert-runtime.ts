@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { isDesktopOperatingSystem, isTauriWindow } from '@/config/runtime-target';
 import type { TimeblockEndAlertRequest } from '@/lib/timeblock/end-alert-policy';
 
@@ -18,6 +19,8 @@ export type TimeblockEndAlertNotificationPermissionState =
   | 'prompt'
   | 'denied'
   | 'unavailable';
+
+const TIMEBLOCK_END_ALERT_INTENT_EVENT = 'timeblockEndAlertIntent';
 
 let lastScheduleSignature: string | null = null;
 let runtimeSyncKnown = false;
@@ -120,6 +123,17 @@ export async function takePendingTimeblockEndHandoffFromRuntime(): Promise<Pendi
   }
 
   return invoke<PendingTimeblockEndHandoff | null>('timeblock_end_alert_take_pending_handoff');
+}
+
+export async function subscribeTimeblockEndAlertIntentFromRuntime(
+  callback: () => void,
+): Promise<() => void> {
+  const support = getTimeblockEndAlertSupport();
+  if (!support.supported) {
+    return () => {};
+  }
+
+  return listen(TIMEBLOCK_END_ALERT_INTENT_EVENT, callback);
 }
 
 export async function getTimeblockEndAlertNotificationPermissionStateInRuntime(): Promise<TimeblockEndAlertNotificationPermissionState> {

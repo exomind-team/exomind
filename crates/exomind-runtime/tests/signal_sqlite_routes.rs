@@ -57,7 +57,6 @@ async fn runtime_reuses_signal_sqlite_path_between_restarts() {
         port: 0,
         host_id,
         spawn_builtin_actors: false,
-        spawn_ts_agents: false,
         signal_storage_path: Some(sqlite_path.clone()),
         ..Default::default()
     };

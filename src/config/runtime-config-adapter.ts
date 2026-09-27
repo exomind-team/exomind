@@ -1,6 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import {
-  persistEmbeddedRuntimeStatus,
+  rememberEmbeddedRuntimeStatus,
   toRuntimeBaseUrl,
 } from '@/config/runtime-target';
 import type { RuntimeServiceStatus } from '@/lib/types/agent-hub-runtime';
@@ -95,25 +95,10 @@ export const RUNTIME_CONFIG_FRONTEND_IMPORT_KEYS = [
   'exomind:ai-registry:snapshot',
   'exomind-update-settings',
   'agent_runtime_hosts_v1',
-  'exomind:voiceRuntimeDoubaoAppId',
-  'exomind:voiceRuntimeDoubaoAccessToken',
-  'exomind:voiceRuntimeDoubaoSecretKey',
-  'exomind:voiceRuntimeDoubaoModelVersion',
-  'exomind:voiceRuntimeDoubaoSpeaker',
-  'exomind:voiceRuntimeDoubaoConnectId',
-  'exomind:voiceRuntimeDoubaoWebsocketUrl',
-  'exomind:voiceRuntimeOmniApiKey',
-  'exomind:voiceRuntimeOmniModel',
-  'exomind:voiceRuntimeOmniVoice',
-  'exomind:voiceRuntimeOmniInstructions',
-  'exomind:voiceRuntimeOmniWebsocketUrl',
-  'exomind:voiceRuntimeOmniSearchEnabled',
-  'exomind:voiceRuntimeOmniFunctionCallingEnabled',
-  'exomind:voiceRuntimeOmniToolChoice',
-  'exomind:voiceRuntimeOmniToolsJson',
-  'exomind:voiceRuntimeOmniCompatibleModel',
-  'exomind:voiceRuntimeOmniCompatibleBaseUrl',
-  'exomind:voiceRuntimeOmniCompatibleAudioFormat',
+  'exomind:agentApiProvider',
+  'exomind:agentApiModel',
+  'exomind:agentApiBaseUrl',
+  'exomind:agentApiApiKey',
 ] as const;
 export const RUNTIME_CONFIG_FRONTEND_IMPORT_PREFIXES = [
   'exomind:ai-registry:energy-secret:',
@@ -122,10 +107,7 @@ const SENSITIVE_EXACT_KEYS = new Set<string>([
   'moss_api_key',
   'volcano_asr_app_key',
   'volcano_asr_access_key',
-  'exomind:voiceRuntimeDoubaoAppId',
-  'exomind:voiceRuntimeDoubaoAccessToken',
-  'exomind:voiceRuntimeDoubaoSecretKey',
-  'exomind:voiceRuntimeOmniApiKey',
+  'exomind:agentApiApiKey',
 ]);
 const SENSITIVE_PREFIXES = [
   'exomind:ai-registry:energy-secret:',
@@ -240,7 +222,7 @@ async function resolveRuntimeTransport(): Promise<RuntimeConfigTransport | null>
         );
       }
 
-      persistEmbeddedRuntimeStatus({
+      rememberEmbeddedRuntimeStatus({
         host: status.host,
         port: status.port,
         hostId: status.hostId,

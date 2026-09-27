@@ -392,12 +392,12 @@ impl SqliteTimeBlockStore {
     }
 
     pub fn snapshot_bytes(&self) -> Result<Vec<u8>, TimeBlockStoreError> {
-        let temp_root = std::env::temp_dir().join(format!(
-            "exomind-timeblocks-snapshot-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&temp_root)?;
-        let snapshot_path = temp_root.join("timeblocks-snapshot.sqlite");
+        let exomind_temp = std::env::temp_dir().join("exomind");
+        let _ = std::fs::create_dir_all(&exomind_temp);
+        let temp_dir = tempfile::Builder::new()
+            .prefix("timeblocks-snapshot-")
+            .tempdir_in(&exomind_temp)?;
+        let snapshot_path = temp_dir.path().join("timeblocks-snapshot.sqlite");
         let escaped_snapshot_path = snapshot_path.to_string_lossy().replace('\'', "''");
 
         {
@@ -406,8 +406,9 @@ impl SqliteTimeBlockStore {
         }
 
         let bytes = std::fs::read(&snapshot_path)?;
-        let _ = std::fs::remove_file(&snapshot_path);
-        let _ = std::fs::remove_dir_all(&temp_root);
+        if let Err(e) = temp_dir.close() {
+            tracing::warn!(error = %e, "failed to clean exomind temp dir");
+        }
         Ok(bytes)
     }
 

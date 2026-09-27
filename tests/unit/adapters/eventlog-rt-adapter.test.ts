@@ -236,7 +236,6 @@ describe("EventLogRtAdapter（RT 事件日志适配器）", () => {
 
     const appended = await adapter.appendEvent({
       id: "event-2",
-      timestamp: 1700000001000,
       content: "append me",
       tags: ["voice", "note"],
       metadata: {
@@ -261,7 +260,6 @@ describe("EventLogRtAdapter（RT 事件日志适配器）", () => {
     expect(requestInit?.method).toBe("POST");
     expect(JSON.parse(String(requestInit?.body))).toEqual({
       id: "event-2",
-      timestamp: 1700000001000,
       content: "append me",
       tags: ["voice", "note"],
       metadata: {
@@ -306,7 +304,6 @@ describe("EventLogRtAdapter（RT 事件日志适配器）", () => {
 
     await adapter.appendEvent({
       id: "event-auth-1",
-      timestamp: 1700000002000,
       content: "auth protected append",
       tags: ["note"],
     });

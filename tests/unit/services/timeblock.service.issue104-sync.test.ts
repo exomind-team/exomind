@@ -460,6 +460,45 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     });
   });
 
+  it('rejects null sync packets while a non-completed local active block is accepted', async () => {
+    const service = createLegacySyncService();
+    const onChange = vi.fn();
+    const unsubscribe = service.onBlockChange(onChange);
+    const base = Date.now();
+
+    loadActiveBlockMock.mockResolvedValueOnce({
+      startId: 'local-running-after-feedback',
+      name: 'local next focus',
+      startTime: base - 5_000,
+      mode: 'countdown',
+      targetMinutes: 45,
+      elapsed: 45 * 60 * 1000,
+      paused: false,
+      version: 1,
+      actorId: 'actor-local',
+      lastTransitionAt: base - 5_000,
+      lastResumedAt: base - 5_000,
+      accumulatedRunMs: 0,
+      pauseAccumulatedMs: 0,
+      updatedAt: base - 5_000,
+    });
+
+    await service.startSync('http://127.0.0.1:6984/test-user');
+    onChange.mockClear();
+    saveActiveBlockMock.mockClear();
+
+    emitStorageChange('test-user', null, 'sync');
+
+    expect(onChange).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(saveActiveBlockMock).toHaveBeenCalledWith(
+        expect.objectContaining({ startId: 'local-running-after-feedback' }),
+      );
+    });
+
+    unsubscribe();
+  });
+
   it('prefers newer transition time over actorId when phase and version tie', async () => {
     const service = createLegacySyncService();
     const onChange = vi.fn();

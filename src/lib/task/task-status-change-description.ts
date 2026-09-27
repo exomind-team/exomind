@@ -1,6 +1,6 @@
 import { getEventLogService } from '@/lib/services';
 import { getEventSourceMetadata } from '@/lib/eventlog/source-metadata';
-import { SYSTEM_TAGS, type EventData } from '@/lib/types/event';
+import { SYSTEM_TAGS } from '@/lib/types/event';
 import type { TaskStatus } from '@/lib/types/task';
 import { createUuidV4 } from '@/lib/utils/uuid';
 
@@ -23,9 +23,8 @@ export async function appendTaskStatusChangeDescription(params: {
     return;
   }
 
-  const eventData: EventData = {
+  await getEventLogService().appendEvent({
     id: createUuidV4(),
-    timestamp: Date.now(),
     content: `任务「${params.taskTitle}」状态变更说明：${description}`,
     tags: [SYSTEM_TAGS.NOTE, resolveTaskTransitionTag(params.toStatus)],
     metadata: {
@@ -37,7 +36,5 @@ export async function appendTaskStatusChangeDescription(params: {
       description,
       recordType: 'task_status_change_description',
     },
-  };
-
-  await getEventLogService().appendEventData(eventData);
+  });
 }

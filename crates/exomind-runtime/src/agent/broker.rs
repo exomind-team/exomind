@@ -3,7 +3,8 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::agent::api::{
-    ApiProviderProfile, ProviderCompletion, ProviderConversationTurn, complete_turn_with_tools,
+    ApiProviderProfile, ContentBlock, ProviderCompletion, ProviderConversationTurn,
+    complete_turn_with_tools,
 };
 use crate::agent::tools::{ToolDef as ProviderToolDef, ToolResult, ToolUse};
 
@@ -95,6 +96,9 @@ pub struct AssistantTurn {
     pub content: String,
     #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
+    /// All content blocks from the API response — includes thinking, redacted_thinking, etc.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content_blocks: Vec<ContentBlock>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -213,6 +217,7 @@ fn completion_to_result(completion: ProviderCompletion) -> AgentTurnResult {
             .iter()
             .map(tool_use_to_tool_call)
             .collect(),
+        content_blocks: completion.content_blocks,
     };
 
     if assistant_turn.tool_calls.is_empty() {
@@ -272,6 +277,7 @@ mod tests {
                 name: "get_weather".to_string(),
                 input: json!({ "date": "today" }),
             }],
+            content_blocks: Vec::new(),
         };
 
         assert_eq!(assistant_turn.tool_calls.len(), 1);
@@ -288,6 +294,7 @@ mod tests {
         let assistant_turn = AssistantTurn {
             content: String::new(),
             tool_calls: vec![tool_call.clone()],
+            content_blocks: Vec::new(),
         };
 
         let result = AgentTurnResult::NeedsToolCalls {

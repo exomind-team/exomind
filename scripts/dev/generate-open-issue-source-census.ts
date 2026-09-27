@@ -71,7 +71,6 @@ const DOMAINS: Domain[] = [
       { type: 'prefix', value: 'src/ui/app/pages/agents/' },
       { type: 'prefix', value: 'src/ui/app/components/Pty' },
       { type: 'prefix', value: 'tests/unit/ui/agent-hub/' },
-      { type: 'prefix', value: 'packages/ts-agent-cli/' },
       { type: 'prefix', value: 'crates/exomind-cli/' },
       { type: 'prefix', value: 'crates/exomind-runtime/src/pty/' },
       { type: 'prefix', value: 'crates/exomind-runtime/src/routes/pty' },

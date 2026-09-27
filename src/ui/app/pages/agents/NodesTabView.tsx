@@ -24,11 +24,13 @@ export function NodesTabView({
   filter,
   onFilterChange,
   onNodeClick,
+  isConnecting = false,
 }: {
   sections: AgentHubListSection[];
   filter: NodeFilterType;
   onFilterChange: (f: NodeFilterType) => void;
   onNodeClick: (item: AgentHubListItem) => void;
+  isConnecting?: boolean;
 }) {
   const filteredItems = useMemo(() => {
     const allItems = sections.flatMap((s) => s.items);
@@ -71,10 +73,19 @@ export function NodesTabView({
       {/* 节点列表 */}
       {filteredItems.length === 0 ? (
         <div className="flex flex-col items-center gap-2 py-12 text-center">
-          <Bot size={32} className="text-[#A8A29E]" />
-          <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">
-            {filter === 'all' ? '暂无节点' : `暂无${NODE_FILTER_ITEMS.find(f => f.id === filter)?.label}节点`}
-          </p>
+          {isConnecting ? (
+            <>
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#C75B3A] border-t-transparent" />
+              <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">连接建立中…</p>
+            </>
+          ) : (
+            <>
+              <Bot size={32} className="text-[#A8A29E]" />
+              <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">
+                {filter === 'all' ? '暂无节点' : `暂无${NODE_FILTER_ITEMS.find(f => f.id === filter)?.label}节点`}
+              </p>
+            </>
+          )}
         </div>
       ) : (
         <div className="flex flex-col divide-y divide-[#E7E3E0] overflow-hidden rounded-[10px] border border-[#E7E3E0] dark:divide-[#292524] dark:border-[#292524]">
@@ -193,6 +204,7 @@ export function ListTabView({
   onNodeClick,
   signalRouteRows,
   onOpenRoute,
+  isConnecting = false,
 }: {
   sections: AgentHubListSection[];
   filter: NodeFilterType;
@@ -200,6 +212,7 @@ export function ListTabView({
   onNodeClick: (item: AgentHubListItem) => void;
   signalRouteRows: SignalRouteRow[];
   onOpenRoute: (routeId: string) => void;
+  isConnecting?: boolean;
 }) {
   const routeHostLabel = signalRouteRows[0]?.hostLabel;
 
@@ -210,6 +223,7 @@ export function ListTabView({
         filter={filter}
         onFilterChange={onFilterChange}
         onNodeClick={onNodeClick}
+        isConnecting={isConnecting}
       />
 
       <section
@@ -229,7 +243,14 @@ export function ListTabView({
         </div>
 
         {signalRouteRows.length === 0 ? (
-          <p className="px-4 py-6 text-xs text-[#78716C] dark:text-[#A8A29E]">暂无信号路由</p>
+          isConnecting ? (
+            <div className="flex items-center gap-2 px-4 py-6">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#C75B3A] border-t-transparent" />
+              <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">连接建立中…</p>
+            </div>
+          ) : (
+            <p className="px-4 py-6 text-xs text-[#78716C] dark:text-[#A8A29E]">暂无信号路由</p>
+          )
         ) : (
           <div className="divide-y divide-[#E7E3E0] dark:divide-[#292524]">
             {signalRouteRows.map((row) => (

@@ -6,11 +6,7 @@
 //!
 //! Signal contract (topic -> payload):
 //!   user.input.text          -> { text: string }
-//!   input.classified         -> { type: "task"|"knowledge"|"chat", items: [...] }
-//!   task.auto-created        -> { title: string, note?: string, source_text: string }
 //!   eventlog.appended        -> { text: string, ts: number }
-//!   session.end              -> { events: [...] }
-//!   review.completed         -> { effective: string, stuck: string, improve: string, avoid: string }
 
 use exomind_runtime::signal::SignalPool;
 use exomind_runtime::signal::types::{SignalEvent, SignalRoute, TargetType};
@@ -55,109 +51,6 @@ fn add_route(pool: &SignalPool, id: &str, topic: &str, target_type: TargetType, 
 async fn yield_for_actor() {
     tokio::task::yield_now().await;
     tokio::task::yield_now().await;
-}
-
-// ─── Task Actor Tests ───────────────────────────────────────────
-
-/// Task Actor should transform an `input.classified` signal (with type=task)
-/// into a `task.auto-created` signal with extracted title and source_text.
-///
-/// Signal flow:
-///   input.classified { type: "task", items: [{title, note?, source_text}] }
-///     -> task_actor
-///       -> task.auto-created { title, note?, source_text }
-#[tokio::test]
-async fn task_actor_transforms_classified_task_to_auto_created() {
-    // 1. Create SignalPool with route for task actor
-    let pool = SignalPool::new(None);
-    add_route(
-        &pool,
-        "r-task",
-        "input.classified",
-        TargetType::Actor,
-        "task_actor",
-    );
-
-    // 2. Subscribe to pool to capture output signals
-    let mut rx = pool.subscribe();
-
-    // 3. Publish input.classified with type=task
-    let event = make_event(
-        "input.classified",
-        json!({
-            "type": "task",
-            "items": [
-                {
-                    "title": "完成 Phase 2 测试",
-                    "note": "需要覆盖所有 actor",
-                    "source_text": "我需要完成Phase 2的测试工作"
-                }
-            ]
-        }),
-    );
-    let _records = pool.publish(event);
-
-    // 4. Verify: when task_actor is implemented, it should produce
-    //    a task.auto-created signal. For now, verify the input signal
-    //    is received by the subscriber (actor not yet wired).
-    let received = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
-
-    assert!(
-        received.is_ok(),
-        "subscriber should receive the published event"
-    );
-    let received_event = received.unwrap().unwrap();
-    assert_eq!(received_event.topic, "input.classified");
-
-    // TODO(Phase 2): When task_actor is spawned as a subscriber that
-    // re-publishes, also assert:
-    //   - A second event with topic "task.auto-created" is received
-    //   - payload.title == "完成 Phase 2 测试"
-    //   - payload.source_text == "我需要完成Phase 2的测试工作"
-}
-
-/// Task Actor should ignore `input.classified` signals where type != "task".
-/// For example, type=knowledge or type=chat should NOT produce task.auto-created.
-#[tokio::test]
-async fn task_actor_ignores_non_task_classification() {
-    let pool = SignalPool::new(None);
-    add_route(
-        &pool,
-        "r-task",
-        "input.classified",
-        TargetType::Actor,
-        "task_actor",
-    );
-
-    let mut rx = pool.subscribe();
-
-    // Publish input.classified with type=knowledge (not task)
-    let event = make_event(
-        "input.classified",
-        json!({
-            "type": "knowledge",
-            "items": [
-                {
-                    "title": "Rust ownership rules",
-                    "source_text": "Rust的所有权规则很重要"
-                }
-            ]
-        }),
-    );
-    pool.publish(event);
-
-    // The input.classified event itself is broadcast
-    let received = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
-    assert!(received.is_ok());
-    assert_eq!(received.unwrap().unwrap().topic, "input.classified");
-
-    // TODO(Phase 2): When task_actor is wired, verify no task.auto-created
-    // signal is produced. Use a short timeout to confirm absence:
-    //   let timeout_result = tokio::time::timeout(
-    //       std::time::Duration::from_millis(200),
-    //       rx.recv(),
-    //   ).await;
-    //   assert!(timeout_result.is_err(), "no task.auto-created for type=knowledge");
 }
 
 // ─── EventLog Actor Tests ───────────────────────────────────────
@@ -241,71 +134,6 @@ async fn eventlog_actor_ignores_other_topics() {
             "eventlog_actor should not react to input.classified"
         );
     }
-}
-
-// ─── Full Chain Tests ───────────────────────────────────────────
-
-/// Full chain: both task_actor and eventlog_actor active simultaneously.
-///
-/// Scenario:
-///   1. Publish user.input.text -> eventlog_actor -> eventlog.appended
-///   2. Publish input.classified(type=task) -> task_actor -> task.auto-created
-///
-/// This tests that multiple actors can coexist without interference.
-#[tokio::test]
-async fn full_chain_input_to_task_and_eventlog() {
-    let pool = SignalPool::new(None);
-
-    // Wire both actors
-    add_route(
-        &pool,
-        "r-eventlog",
-        "user.input.text",
-        TargetType::Actor,
-        "eventlog_actor",
-    );
-    add_route(
-        &pool,
-        "r-task",
-        "input.classified",
-        TargetType::Actor,
-        "task_actor",
-    );
-
-    let mut rx = pool.subscribe();
-
-    // Step 1: user.input.text -> should trigger eventlog_actor
-    let input_event = make_event(
-        "user.input.text",
-        json!({ "text": "今天学了 Rust Actor 模型" }),
-    );
-    pool.publish(input_event);
-
-    let received1 = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
-    assert!(received1.is_ok(), "should receive user.input.text event");
-    assert_eq!(received1.unwrap().unwrap().topic, "user.input.text");
-
-    // Step 2: input.classified(type=task) -> should trigger task_actor
-    let classified_event = make_event(
-        "input.classified",
-        json!({
-            "type": "task",
-            "items": [{
-                "title": "学习 Actor 模型",
-                "source_text": "今天学了 Rust Actor 模型"
-            }]
-        }),
-    );
-    pool.publish(classified_event);
-
-    let received2 = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
-    assert!(received2.is_ok(), "should receive input.classified event");
-    assert_eq!(received2.unwrap().unwrap().topic, "input.classified");
-
-    // TODO(Phase 2): When both actors are wired, additionally verify:
-    //   - eventlog.appended follows user.input.text
-    //   - task.auto-created follows input.classified
-    //   - No cross-contamination between actors
 }
 
 #[tokio::test]
@@ -412,62 +240,23 @@ async fn external_input_is_normalized_before_eventlog_append() {
     assert!(topics.iter().any(|topic| topic == "eventlog.appended"));
 }
 
-/// Verify the session.end -> review.completed chain.
-/// This is driven by the Reviewer Agent (TypeScript side), but we test
-/// the signal routing infrastructure here.
-#[tokio::test]
-async fn session_end_routes_to_reviewer() {
-    let pool = SignalPool::new(None);
-    add_route(
-        &pool,
-        "r-reviewer",
-        "session.end",
-        TargetType::Agent,
-        "reviewer",
-    );
-
-    let mut rx = pool.subscribe();
-
-    let event = make_event(
-        "session.end",
-        json!({
-            "events": [
-                { "text": "完成架构设计", "ts": 1700000000000_u64 },
-                { "text": "编写测试用例", "ts": 1700000001000_u64 }
-            ]
-        }),
-    );
-    pool.publish(event);
-
-    let received = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
-    assert!(received.is_ok());
-    let evt = received.unwrap().unwrap();
-    assert_eq!(evt.topic, "session.end");
-
-    // Verify payload contains events array
-    let payload = evt.payload.as_object().unwrap();
-    assert!(payload.contains_key("events"));
-    let events = payload["events"].as_array().unwrap();
-    assert_eq!(events.len(), 2);
-}
-
 /// Verify at-most-once delivery: signals are not retried or duplicated.
 #[tokio::test]
 async fn at_most_once_no_duplicate_signals() {
     let pool = SignalPool::new(None);
     add_route(
         &pool,
-        "r-task",
-        "input.classified",
+        "r-eventlog",
+        "user.input.text",
         TargetType::Actor,
-        "task_actor",
+        "eventlog_actor",
     );
 
     let mut rx = pool.subscribe();
 
     let event = make_event(
-        "input.classified",
-        json!({ "type": "task", "items": [{ "title": "test" }] }),
+        "user.input.text",
+        json!({ "text": "test" }),
     );
     let event_id = event.id.clone();
     pool.publish(event);

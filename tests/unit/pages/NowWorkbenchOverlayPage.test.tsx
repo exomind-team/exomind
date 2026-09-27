@@ -1,5 +1,5 @@
 ﻿import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-overlay-model';
 
@@ -113,7 +113,9 @@ describe('NowWorkbenchOverlayPage', () => {
 
     movedListener?.({ payload: { x: 300, y: 420 } });
 
-    expect(setNowWorkbenchOverlayPositionMock).toHaveBeenCalledWith({ x: 300, y: 420 });
+    await waitFor(() => {
+      expect(setNowWorkbenchOverlayPositionMock).toHaveBeenCalledWith({ x: 300, y: 420 });
+    });
   });
 
   it('renders drag header plus hide / return actions in running mode（运行态渲染拖拽头部与窗口动作）', async () => {

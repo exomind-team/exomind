@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import './setup-settings-mocks.tsx';
 import {
   settingsPagePreferenceState,
@@ -8,13 +7,10 @@ import {
 } from './setup-settings-mocks.tsx';
 import { VoiceInputProviderSettings } from '@/ui/app/components/settings/voice-input-provider-settings';
 
-describe('VoiceInputProviderSettings（快捷语音输入 provider 设置）', () => {
+describe('VoiceInputProviderSettings（快捷语音输入 provider 设置，火山-only）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    settingsPagePreferenceState.voiceShortcutAsrProvider = 'moss';
-    settingsPagePreferenceState.voiceOmniProfileId = '';
-    settingsPagePreferenceState.voiceOmniModelId = 'qwen3-omni-flash';
-    settingsPagePreferenceState.voiceOmniOptimizeEnabled = false;
+    settingsPagePreferenceState.voiceShortcutAsrProvider = 'volcano';
     settingsPageVolcanoState.appKey = '';
     settingsPageVolcanoState.accessKey = '';
     settingsPageVolcanoState.resourceId = 'volc.seedasr.sauc.duration';
@@ -22,39 +18,28 @@ describe('VoiceInputProviderSettings（快捷语音输入 provider 设置）', (
     settingsPageVolcanoState.language = 'zh-CN';
   });
 
-  it('renders MOSS panel by default（默认渲染 MOSS 配置区）', () => {
+  it('renders the volcano panel as the only provider（火山是唯一 provider，直接渲染火山配置区）', () => {
     render(<VoiceInputProviderSettings />);
 
     expect(screen.getByText('快捷语音输入')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'MOSS' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('MOSS 本地识别配置区')).toBeInTheDocument();
+    expect(screen.getByText('Provider / 服务提供方：火山')).toBeInTheDocument();
+    expect(screen.getByText('火山 ASR 配置区')).toBeInTheDocument();
+    expect(screen.getByText('App Key / 应用密钥')).toBeInTheDocument();
+    expect(screen.getByText('Access Key / 访问密钥')).toBeInTheDocument();
+    // 未配置凭据时给出补齐诊断
     expect(
-      screen.getByText('本地默认链路，无需额外云端 Key，适合先验证快捷语音输入是否打通。'),
+      screen.getByText('诊断：缺少 AppKey / AccessKey，需要先补齐火山引擎凭据。'),
     ).toBeInTheDocument();
   });
 
-  it('switches provider panels and updates diagnostics（切换 provider 后更新配置区与诊断文案）', async () => {
-    const user = userEvent.setup();
+  it('shows ready diagnostic once volcano credentials are present（凭据补齐后给出就绪诊断）', () => {
+    settingsPageVolcanoState.appKey = 'app-key-xxx';
+    settingsPageVolcanoState.accessKey = 'access-key-xxx';
+
     render(<VoiceInputProviderSettings />);
 
-    await user.click(screen.getByRole('button', { name: '火山' }));
-    expect(screen.getByRole('button', { name: '火山' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('火山 ASR 配置区')).toBeInTheDocument();
-    expect(screen.getByText('App Key / 应用密钥')).toBeInTheDocument();
-    expect(screen.getAllByText('未配置').length).toBeGreaterThan(0);
     expect(
-      screen.getByText('诊断：缺少 AppKey / AccessKey，切到火山前需要先补齐火山引擎凭据。'),
+      screen.getByText('诊断：火山凭据已就绪，下一步重点验证 Resource ID 与语言参数是否匹配当前识别场景。'),
     ).toBeInTheDocument();
-    expect(screen.queryByText('MOSS 本地识别配置区')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Qwen Omni' }));
-    expect(screen.getByRole('button', { name: 'Qwen Omni' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('Qwen Omni 配置区')).toBeInTheDocument();
-    expect(screen.getByText('Provider Profile / 供应商档案')).toBeInTheDocument();
-    expect(screen.getByText('未绑定')).toBeInTheDocument();
-    expect(
-      screen.getByText('诊断：还没绑定 provider profile，建议先在 AI Registry 配 DashScope 兼容档案。'),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('火山 ASR 配置区')).not.toBeInTheDocument();
   });
 });

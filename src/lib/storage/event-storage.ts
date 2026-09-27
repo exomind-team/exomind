@@ -475,6 +475,10 @@ export class EventStorage {
     };
   }
 
+  get listenerCount(): number {
+    return this.changeListeners.length;
+  }
+
   /**
    * 通知所有变更监听器
    */

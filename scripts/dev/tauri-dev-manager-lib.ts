@@ -30,6 +30,16 @@ export type ManagedTauriInstanceRecord = {
   startedAt: string;
   enableWatch: boolean;
   target: TauriDevTarget;
+  lowMemory?: boolean;
+  targetDir?: string;
+};
+
+type EnvLike = Record<string, string | undefined>;
+
+export type BuildLowMemoryTauriEnvInput = {
+  baseEnv: EnvLike;
+  targetDir: string;
+  rustLldPath: string;
 };
 
 export type ManagedTauriLogSessionStart = {
@@ -69,6 +79,28 @@ export type BuildManagedTauriCommandInput = {
 
 function escapeForCmdDoubleQuotes(value: string): string {
   return value.replaceAll('"', '""');
+}
+
+export function buildLowMemoryTauriEnv(input: BuildLowMemoryTauriEnvInput): EnvLike {
+  const existingRustFlags = input.baseEnv.RUSTFLAGS?.trim();
+  const lowMemoryRustFlags = [
+    '-C linker-flavor=lld-link',
+    '-C link-arg=/threads:1',
+    '-C link-arg=/DEBUG:NONE',
+  ].join(' ');
+
+  return {
+    ...input.baseEnv,
+    CARGO_BUILD_JOBS: '1',
+    CARGO_PROFILE_DEV_DEBUG: '0',
+    CARGO_PROFILE_DEV_INCREMENTAL: 'false',
+    CARGO_PROFILE_DEV_CODEGEN_UNITS: '16',
+    CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: input.rustLldPath,
+    EXOMIND_TAURI_TARGET_DIR: input.targetDir,
+    RUSTFLAGS: existingRustFlags
+      ? `${existingRustFlags} ${lowMemoryRustFlags}`
+      : lowMemoryRustFlags,
+  };
 }
 
 export function resolveManagedTauriInstancePaths(

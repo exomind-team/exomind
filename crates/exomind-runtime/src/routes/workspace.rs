@@ -109,16 +109,30 @@ async fn get_soul(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> Result<Json<ContentResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let agent = get_life_agent(&state, &agent_id)?;
-    let content = agent.workspace().load_soul().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("failed to load SOUL.md: {e}"),
-            }),
-        )
-    })?;
-    Ok(Json(ContentResponse { content }))
+    // Try life agent workspace first
+    if let Ok(life_agent) = get_life_agent(&state, &agent_id) {
+        let content = life_agent.workspace().load_soul().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("failed to load SOUL.md: {e}"),
+                }),
+            )
+        })?;
+        return Ok(Json(ContentResponse { content }));
+    }
+    // Fallback: use Agent trait's soul() for built-in agents
+    if let Some(agent) = state.registry.get(&agent_id) {
+        return Ok(Json(ContentResponse {
+            content: agent.soul(),
+        }));
+    }
+    Err((
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: "agent not found".to_string(),
+        }),
+    ))
 }
 
 async fn list_knowledge(
@@ -186,23 +200,79 @@ async fn get_actions(
     Path(agent_id): Path<String>,
     Query(query): Query<ActionsQuery>,
 ) -> Result<Json<ActionsListResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let agent = get_life_agent(&state, &agent_id)?;
-    let all = agent.workspace().action_log().read_all().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("failed to read actions: {e}"),
-            }),
-        )
-    })?;
+    // Try life agent workspace first
+    if let Ok(life_agent) = get_life_agent(&state, &agent_id) {
+        let all = life_agent.workspace().action_log().read_all().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("failed to read actions: {e}"),
+                }),
+            )
+        })?;
+        let total = all.len() as u64;
+        let start = all.len().saturating_sub(query.limit);
+        return Ok(Json(ActionsListResponse {
+            actions: all[start..].to_vec(),
+            total,
+        }));
+    }
+    // Fallback: read from session store for built-in agents
+    if let Some(agent) = state.registry.get(&agent_id) {
+        let sessions = agent.list_sessions();
+        let mut actions: Vec<crate::agent::workspace::ActionEntry> = Vec::new();
 
-    let total = all.len() as u64;
-    // Return last N entries.
-    let start = all.len().saturating_sub(query.limit);
-    Ok(Json(ActionsListResponse {
-        actions: all[start..].to_vec(),
-        total,
-    }))
+        // Build actions from per-block action_log entries
+        for session in &sessions {
+            if let Some(ref action_log) = session.action_log {
+                for entry in action_log {
+                    actions.push(crate::agent::workspace::ActionEntry {
+                        timestamp: entry.timestamp.clone(),
+                        tick: entry.tick,
+                        action_type: entry.action_type.clone(),
+                        description: entry.description.clone(),
+                        energy_before: entry.energy_before,
+                        energy_after: entry.energy_after,
+                    });
+                }
+            } else {
+                // Fallback: create a single entry from session metadata
+                let description = {
+                    let trigger = session.trigger_source.as_deref().unwrap_or("unknown");
+                    let display_content = session.content.as_ref()
+                        .filter(|c| !c.is_empty())
+                        .or(session.prompt.as_ref())
+                        .cloned()
+                        .unwrap_or_else(|| format!("session {}", session.session_id));
+                    format!("{}: {}", trigger, display_content)
+                };
+                actions.push(crate::agent::workspace::ActionEntry {
+                    timestamp: session.created_at.clone(),
+                    tick: 1,
+                    action_type: "signal".to_string(),
+                    description,
+                    energy_before: 0,
+                    energy_after: 0,
+                });
+            }
+        }
+
+        // Sort by timestamp descending (newest first)
+        actions.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+        let total = actions.len() as u64;
+        let start = actions.len().saturating_sub(query.limit as usize);
+        return Ok(Json(ActionsListResponse {
+            actions: actions[start..].to_vec(),
+            total,
+        }));
+    }
+    Err((
+        StatusCode::NOT_FOUND,
+        Json(ErrorResponse {
+            error: "agent not found".to_string(),
+        }),
+    ))
 }
 
 async fn get_state(

@@ -11,9 +11,9 @@ export type TauriDevInstancePaths = {
   webviewOverlayDataRoot: string;
   appDataDir: string;
   runtimeDataDir: string;
-  legacySharedAppDataDir: string;
-  legacySharedWebviewMainDataDir: string;
-  legacySharedRuntimeDir: string;
+  legacySharedAppDataDir?: string;
+  legacySharedWebviewMainDataDir?: string;
+  legacySharedRuntimeDir?: string;
   mcpBridgeBasePort: number;
 };
 
@@ -51,6 +51,20 @@ function resolveMcpBridgeBasePort(env: EnvLike): number {
   return 9223;
 }
 
+function resolveOptionalSeedPath(
+  value: string | undefined,
+  projectRoot: string,
+): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return path.isAbsolute(trimmed)
+    ? path.normalize(trimmed)
+    : path.resolve(projectRoot, trimmed);
+}
+
 export function resolveTauriDevInstancePaths(
   projectRoot: string,
   env: EnvLike,
@@ -65,13 +79,17 @@ export function resolveTauriDevInstancePaths(
   );
   const appDataDir = path.join(stateRootDir, 'app-data');
   const runtimeDataDir = path.join(appDataDir, 'runtime');
-  const legacySharedAppDataDir = path.join(
-    env.APPDATA?.trim() || env.LOCALAPPDATA?.trim() || '',
-    'com.exomind.app',
+  const legacySharedAppDataDir = resolveOptionalSeedPath(
+    env.EXOMIND_DEV_LEGACY_SHARED_APP_DATA_DIR,
+    resolvedProjectRoot,
   );
-  const legacySharedWebviewMainDataDir = path.join(
-    env.LOCALAPPDATA?.trim() || env.APPDATA?.trim() || '',
-    'com.exomind.app',
+  const legacySharedWebviewMainDataDir = resolveOptionalSeedPath(
+    env.EXOMIND_DEV_LEGACY_SHARED_WEBVIEW_MAIN_DATA_DIR,
+    resolvedProjectRoot,
+  );
+  const legacySharedRuntimeDir = resolveOptionalSeedPath(
+    env.EXOMIND_DEV_LEGACY_SHARED_RUNTIME_DIR,
+    resolvedProjectRoot,
   );
 
   return {
@@ -83,7 +101,7 @@ export function resolveTauriDevInstancePaths(
     runtimeDataDir,
     legacySharedAppDataDir,
     legacySharedWebviewMainDataDir,
-    legacySharedRuntimeDir: path.join(legacySharedAppDataDir, 'runtime'),
+    legacySharedRuntimeDir,
     mcpBridgeBasePort: resolveMcpBridgeBasePort(env),
   };
 }

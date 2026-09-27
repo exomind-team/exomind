@@ -100,6 +100,10 @@ export class SignalStreamService {
     return this.running && this.abortController !== null;
   }
 
+  get listenerCount(): number {
+    return this.listeners.length;
+  }
+
   // ── 内部 ────────────────────────────────────────────────────
 
   private async runLoop(): Promise<void> {

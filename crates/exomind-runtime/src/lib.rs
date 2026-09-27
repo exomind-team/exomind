@@ -4,10 +4,8 @@ use serde::Serialize;
 use std::env;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
@@ -23,6 +21,7 @@ pub mod config;
 pub mod discovery;
 pub mod energy;
 pub mod eventlog;
+pub mod eventlog_appender;
 pub mod eventlog_sqlite;
 pub mod mesh;
 pub mod pairing;
@@ -35,6 +34,7 @@ pub mod routes;
 pub mod session;
 pub mod signal;
 mod sqlite_json_bridge;
+pub mod sqlite_util;
 pub mod task;
 pub mod tick;
 pub mod timeblock;
@@ -248,12 +248,6 @@ pub struct RuntimeStartOptions {
     pub device_id: String,
     /// spawn built-in rust actors（是否拉起内置 Rust Actor）.
     pub spawn_builtin_actors: bool,
-    /// spawn ts agents (reviewer/classifier)（是否拉起 TS Agent）.
-    pub spawn_ts_agents: bool,
-    /// command to run TS agents（启动 TS Agent 的命令）.
-    pub ts_agent_command: String,
-    /// project root used for spawning TS agents（TS Agent 工作目录）.
-    pub ts_agent_workdir: Option<PathBuf>,
     /// optional mesh state path（可选 peer/interest 持久化路径）.
     pub mesh_state_path: Option<PathBuf>,
     /// optional signal sqlite path（可选 SignalPool SQLite 路径）.
@@ -270,10 +264,6 @@ pub struct RuntimeStartOptions {
 
 impl Default for RuntimeStartOptions {
     fn default() -> Self {
-        let spawn_ts_agents = spawn_ts_agents_default_for_platform(
-            cfg!(any(target_os = "android", target_os = "ios")),
-            env::var("EXOMIND_RT_DISABLE_TS_AGENTS").ok().as_deref(),
-        );
         let data_dir = env::var("EXOMIND_RT_DATA_DIR").ok().map(PathBuf::from);
 
         let enable_mdns = env::var("EXOMIND_RT_MDNS")
@@ -289,10 +279,6 @@ impl Default for RuntimeStartOptions {
             host_id: configured_host_id_from_env(),
             device_id: configured_device_id_from_env(),
             spawn_builtin_actors: true,
-            spawn_ts_agents,
-            ts_agent_command: env::var("EXOMIND_RT_AGENT_CMD")
-                .unwrap_or_else(|_| "bun".to_string()),
-            ts_agent_workdir: env::var("EXOMIND_RT_AGENT_WORKDIR").ok().map(PathBuf::from),
             mesh_state_path: configured_mesh_state_path_from_env(data_dir.as_deref()),
             signal_storage_path: env::var("EXOMIND_RT_SIGNAL_SQLITE_PATH")
                 .ok()
@@ -303,26 +289,6 @@ impl Default for RuntimeStartOptions {
             data_dir,
         }
     }
-}
-
-/// Resolve TS agent default by platform + env（按平台 + 环境变量决定 TS Agent 默认值）.
-/// Mobile defaults to disabled because packaged Android/iOS runtimes usually have no Bun/tooling.
-/// （移动端默认关闭，因为打包后的 Android/iOS 运行时通常没有 Bun/tooling）
-pub fn spawn_ts_agents_default_for_platform(
-    is_mobile_platform: bool,
-    disable_env: Option<&str>,
-) -> bool {
-    if let Some(value) = disable_env {
-        let normalized = value.trim().to_ascii_lowercase();
-        if normalized == "1" || normalized == "true" || normalized == "yes" {
-            return false;
-        }
-        if normalized == "0" || normalized == "false" || normalized == "no" {
-            return true;
-        }
-    }
-
-    !is_mobile_platform
 }
 
 #[derive(Debug, Error)]
@@ -349,18 +315,6 @@ pub enum RuntimeStopError {
     JoinServerTask(#[source] tokio::task::JoinError),
     #[error("runtime server returned IO error: {0}")]
     ServerIo(#[source] std::io::Error),
-    #[error("failed to stop ts agent `{agent}`: {source}")]
-    KillTsAgent {
-        agent: String,
-        #[source]
-        source: std::io::Error,
-    },
-}
-
-#[derive(Debug)]
-struct TsAgentProcess {
-    name: String,
-    child: Child,
 }
 
 /// Runtime handle（运行句柄）.
@@ -375,7 +329,6 @@ pub struct RuntimeHandle {
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_task: Option<JoinHandle<std::io::Result<()>>>,
     actor_tasks: Vec<JoinHandle<()>>,
-    ts_agents: Vec<TsAgentProcess>,
     #[cfg(not(target_os = "android"))]
     pty_manager: Arc<pty::PtyManager>,
     tick_manager: Arc<tick::TickManager>,
@@ -487,30 +440,6 @@ impl RuntimeHandle {
             let _ = task.await;
         }
 
-        for agent in &mut self.ts_agents {
-            match agent.child.try_wait() {
-                Ok(Some(_)) => {}
-                Ok(None) => {
-                    agent
-                        .child
-                        .kill()
-                        .await
-                        .map_err(|source| RuntimeStopError::KillTsAgent {
-                            agent: agent.name.clone(),
-                            source,
-                        })?;
-                    let _ = agent.child.wait().await;
-                }
-                Err(source) => {
-                    return Err(RuntimeStopError::KillTsAgent {
-                        agent: agent.name.clone(),
-                        source,
-                    });
-                }
-            }
-        }
-        self.ts_agents.clear();
-
         #[cfg(not(target_os = "android"))]
         self.pty_manager.shutdown().await;
 
@@ -556,9 +485,6 @@ impl Drop for RuntimeHandle {
         self.tick_manager.abort_all();
         for task in self.actor_tasks.drain(..) {
             task.abort();
-        }
-        for agent in &mut self.ts_agents {
-            let _ = agent.child.start_kill();
         }
         if let Some(server_task) = self.server_task.take() {
             server_task.abort();
@@ -661,9 +587,6 @@ pub async fn start_with_options(
                 signal::actors::external_source_actor::ExternalSourceConfig::default(),
             ),
         );
-        actor_tasks.push(signal::actors::task_classifier_actor::spawn_task_actor(
-            Arc::clone(&state.signal_pool),
-        ));
         actor_tasks.push(signal::actors::eventlog_actor::spawn_eventlog_actor(
             Arc::clone(&state.signal_pool),
         ));
@@ -684,12 +607,6 @@ pub async fn start_with_options(
             Arc::clone(&state.task_store),
         ));
     }
-
-    let ts_agents = if options.spawn_ts_agents {
-        spawn_default_ts_agents(local_addr.port(), &options)
-    } else {
-        Vec::new()
-    };
 
     // Register heartbeat demo agent + energy
     if options.spawn_builtin_actors {
@@ -738,6 +655,71 @@ pub async fn start_with_options(
         }
     }
 
+    // Register timeblock_summary built-in agent service
+    {
+        agent::timeblock_summary::init_config_defaults(&state.config_store);
+        let session_runtime = agent::session::AgentSessionRuntime::from_state(&state);
+        let tb_summary = Arc::new(agent::timeblock_summary::TimeblockSummaryAgentService::new(
+            Arc::clone(&state.signal_pool),
+            Arc::clone(&state.config_store),
+            Arc::clone(&state.eventlog_store),
+            state.eventlog_appender(),
+            session_runtime,
+            Arc::new(state.energy_registry.clone()),
+        ));
+        state
+            .registry
+            .register(tb_summary.clone() as Arc<dyn agent::Agent>);
+        state.energy_registry.register(
+            "timeblock_summary",
+            crate::energy::AgentEnergy::new(crate::energy::AgentEnergy::DEFAULT_MAX, 1),
+        );
+        tb_summary.spawn();
+
+        // Register signal routes for UI topology (clean duplicates first)
+        let now = chrono::Utc::now().to_rfc3339();
+        let target_topics = [
+            "timeblock.replication.active_upserted",
+            "timeblock.replication.completed",
+            "timeblock_summary.start",
+            "timeblock_summary.tick",
+            "timeblock_summary.end",
+        ];
+
+        // Remove duplicate routes for target topics
+        {
+            let mut existing_routes = state.signal_pool.routes().get_all();
+            for topic in &target_topics {
+                let duplicates: Vec<_> = existing_routes
+                    .iter()
+                    .filter(|r| r.topic == *topic)
+                    .skip(1) // Keep first, remove rest
+                    .map(|r| r.id.clone())
+                    .collect();
+                for id in duplicates {
+                    let _ = state.signal_pool.routes().delete(&id);
+                }
+            }
+        }
+
+        // Add routes if not already registered
+        let existing_routes = state.signal_pool.routes().get_all();
+        for topic in &target_topics {
+            if existing_routes.iter().any(|r| r.topic == *topic) {
+                continue;
+            }
+            let _ = state.signal_pool.routes().add(crate::signal::SignalRoute {
+                id: uuid::Uuid::new_v4().to_string(),
+                enabled: true,
+                topic: topic.to_string(),
+                target_type: crate::signal::TargetType::Agent,
+                target_ref: "timeblock_summary".to_string(),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            });
+        }
+    }
+
     // Start tick scheduler for all agents with tick_interval_secs > 0.
     // 启动所有启用 tick 的 agent 生命周期循环。
     let tick_manager = Arc::clone(&state.tick_manager);
@@ -774,77 +756,10 @@ pub async fn start_with_options(
         shutdown_tx: Some(shutdown_tx),
         server_task: Some(server_task),
         actor_tasks,
-        ts_agents,
         #[cfg(not(target_os = "android"))]
         pty_manager,
         tick_manager,
     })
-}
-
-fn spawn_default_ts_agents(port: u16, options: &RuntimeStartOptions) -> Vec<TsAgentProcess> {
-    const REVIEWER_ENTRY: &str = "packages/ts-agent-cli/agents/reviewer/index.ts";
-    const CLASSIFIER_ENTRY: &str = "packages/ts-agent-cli/agents/classifier/index.ts";
-    let project_root = resolve_project_root(options);
-    let rt_url = format!("http://127.0.0.1:{port}");
-
-    let mut out = Vec::new();
-    if let Some(proc) = try_spawn_ts_agent(
-        "reviewer",
-        REVIEWER_ENTRY,
-        &project_root,
-        &options.ts_agent_command,
-        &rt_url,
-    ) {
-        out.push(proc);
-    }
-    if let Some(proc) = try_spawn_ts_agent(
-        "classifier",
-        CLASSIFIER_ENTRY,
-        &project_root,
-        &options.ts_agent_command,
-        &rt_url,
-    ) {
-        out.push(proc);
-    }
-    out
-}
-
-fn resolve_project_root(options: &RuntimeStartOptions) -> PathBuf {
-    let current_dir = env::current_dir().ok();
-    resolve_project_root_from(options.ts_agent_workdir.as_deref(), current_dir.as_deref())
-}
-
-fn resolve_project_root_from(
-    ts_agent_workdir: Option<&Path>,
-    current_dir: Option<&Path>,
-) -> PathBuf {
-    const REVIEWER_ENTRY: &str = "packages/ts-agent-cli/agents/reviewer/index.ts";
-    const CLASSIFIER_ENTRY: &str = "packages/ts-agent-cli/agents/classifier/index.ts";
-
-    fn has_default_ts_agent_entries(root: &Path) -> bool {
-        root.join(REVIEWER_ENTRY).is_file() && root.join(CLASSIFIER_ENTRY).is_file()
-    }
-
-    if let Some(path) = ts_agent_workdir {
-        return path.to_path_buf();
-    }
-
-    if let Some(cwd) = current_dir
-        && has_default_ts_agent_entries(cwd)
-    {
-        return cwd.to_path_buf();
-    }
-
-    if let Some(workspace_root) = workspace_root_from_manifest()
-        && has_default_ts_agent_entries(&workspace_root)
-    {
-        return workspace_root;
-    }
-
-    current_dir
-        .map(Path::to_path_buf)
-        .or_else(workspace_root_from_manifest)
-        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn workspace_root_from_manifest() -> Option<PathBuf> {
@@ -855,39 +770,38 @@ fn workspace_root_from_manifest() -> Option<PathBuf> {
         .map(|path| path.to_path_buf())
 }
 
-fn try_spawn_ts_agent(
-    name: &str,
-    entry: &str,
-    project_root: &PathBuf,
-    cmd: &str,
-    rt_url: &str,
-) -> Option<TsAgentProcess> {
-    let mut command = Command::new(cmd);
-    command
-        .arg("run")
-        .arg(entry)
-        .current_dir(project_root)
-        .env("EXOMIND_RT_URL", rt_url)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+/// Resolve the project root used as a base directory (e.g. for spawning PTY
+/// terminals）. Prefers an explicit override, then the current working
+/// directory if it looks like the project root, then the cargo workspace root.
+/// （解析项目根目录，作为 PTY 等场景的默认工作目录基准）
+pub(crate) fn resolve_project_root_from(
+    workdir_override: Option<&Path>,
+    current_dir: Option<&Path>,
+) -> PathBuf {
+    fn is_project_root(root: &Path) -> bool {
+        root.join("package.json").is_file() && root.join("Cargo.toml").is_file()
+    }
 
-    #[cfg(target_os = "windows")]
+    if let Some(path) = workdir_override {
+        return path.to_path_buf();
+    }
+
+    if let Some(cwd) = current_dir
+        && is_project_root(cwd)
     {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
+        return cwd.to_path_buf();
     }
 
-    match command.spawn() {
-        Ok(child) => Some(TsAgentProcess {
-            name: name.to_string(),
-            child,
-        }),
-        Err(error) => {
-            eprintln!("exomind-rt: failed to spawn ts agent `{name}`: {error}");
-            None
-        }
+    if let Some(workspace_root) = workspace_root_from_manifest()
+        && is_project_root(&workspace_root)
+    {
+        return workspace_root;
     }
+
+    current_dir
+        .map(Path::to_path_buf)
+        .or_else(workspace_root_from_manifest)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Build HTTP router (HTTP 路由构建入口).
@@ -1046,6 +960,15 @@ fn runtime_storage_paths_for_persistent_start(data_dir: Option<PathBuf>) -> Runt
 }
 
 impl AppState {
+    pub fn eventlog_appender(&self) -> eventlog_appender::EventLogAppender {
+        eventlog_appender::EventLogAppender::new(
+            Arc::clone(&self.eventlog_store),
+            self.host_id.clone(),
+            Arc::clone(&self.signal_pool),
+            self.mesh_relay.clone(),
+        )
+    }
+
     pub fn new(port: u16) -> Self {
         Self::new_runtime(port, default_runtime_host_id(port), None, None, false, None)
     }
@@ -1491,6 +1414,7 @@ mod tests {
                 last_active: "2026-02-28T10:35:00Z".to_string(),
                 message_count: 3,
                 uptime_secs: 300,
+                ..Default::default()
             };
 
             let mut sessions = HashMap::new();
@@ -2271,28 +2195,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn resolve_project_root_falls_back_to_workspace_when_cwd_has_no_agent_entries() {
-        let fake_cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/non-existent-cwd");
-        let resolved = resolve_project_root_from(None, Some(fake_cwd.as_path()));
-
-        let workspace_root = workspace_root_from_manifest().expect("workspace root should resolve");
-        assert_eq!(resolved, workspace_root);
-        assert!(
-            resolved
-                .join("packages/ts-agent-cli/agents/reviewer/index.ts")
-                .is_file(),
-            "resolved project root must contain reviewer agent entry: {}",
-            resolved.display()
-        );
-        assert!(
-            resolved
-                .join("packages/ts-agent-cli/agents/classifier/index.ts")
-                .is_file(),
-            "resolved project root must contain classifier agent entry: {}",
-            resolved.display()
-        );
-    }
 
     #[test]
     fn persisted_runtime_host_id_reuses_device_scope_config_entry() {
@@ -2417,7 +2319,6 @@ mod tests {
                 port: 0,
                 host_id: "publish-outside-reactor".to_string(),
                 spawn_builtin_actors: false,
-                spawn_ts_agents: false,
                 enable_mdns: false,
                 ..RuntimeStartOptions::default()
             }))

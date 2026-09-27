@@ -591,6 +591,24 @@ describe("TimeBlockServiceImpl", () => {
     expect(restarted.startId).not.toBe(first.startId);
   });
 
+  it("notifies subscribers with null instead of exposing the persisted gap block", async () => {
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+    const onChange = vi.fn();
+    service.onBlockChange(onChange);
+
+    await service.startBlock("gap-visible-guard", { mode: "countup" });
+    await service.markEnding();
+    onChange.mockClear();
+
+    await service.endBlock("done");
+
+    expect(onChange).toHaveBeenCalledWith(null);
+    expect(onChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ blockType: "gap" }),
+    );
+  });
+
   it("stubs fetch by default so endBlock tests never hit live runtime（默认拦截网络避免污染真实 RT）", async () => {
     expect(vi.isMockFunction(globalThis.fetch)).toBe(true);
 

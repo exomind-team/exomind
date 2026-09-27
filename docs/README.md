@@ -62,11 +62,12 @@
 - [RT curl / Agent 接入 Skill](../skills/exomind-rt-agent-access/SKILL.md) -- raw RT curl/HTTP 联调唯一真源
 - [Git 规范](development/git-spec.md) -- Git 工作流规范（权威版）
 - [Runtime Agent API](development/exomind-runtime-agents-api.md) -- Runtime Agent HTTP/SSE 接口说明
+- [悬浮工作台 release/debug 诊断](development/now-workbench-overlay-release-debug-diagnosis.md) -- 0.4.16 overlay 端口、RT readiness、release smoke 证据、已止血边界与后续根治计划
 - [Issue 追踪罗盘](development/issue-tracking-compass.md) -- Issue 去重/决策/新建/追加流程
 - [Playwright E2E](development/playwright-e2e-runtime.md) -- Playwright E2E 测试运行指南
 - [端口环境配置](development/port-env-configuration.md) -- 多 Worktree 端口配置指南
 - [PR 审核证据模板](development/pr-review-evidence-template.md) -- 每轮提交后 PR 评论模板
-- [信号池时间块反馈](development/signal-pool-timeblock-feedback.md) -- 时间块结束 Agent 自动反馈
+- [信号池时间块反馈](development/signal-pool-timeblock-feedback.md) -- 时间块停止/结束 Agent 自动反馈
 - [团队协作规范](development/team-collaboration.md) -- 多角色团队协作流程
 - [团队调度经验](development/team-scheduling.md) -- 多 Agent 团队调度实践
 - [Termux 环境](development/termux-environment.md) -- ExoMind 所需的通用 Android/Termux 平台基线；完整通用知识见 [sys_manage_termux](https://github.com/ARCJ137442/sys_manage_termux)

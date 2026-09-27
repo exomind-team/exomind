@@ -1,29 +1,38 @@
-# 时间块结束 → Agent 自动反馈
+# 时间块停止/结束 → Agent 自动反馈
 
-> Issue #323 | PR #324 | 2026-03-04
+> Issue #323 | PR #324 | 2026-03-04（2026-06-06 重构为 timeblock_summary Agent）
 
 ## 概述
 
-用户结束时间块后，系统自动触发 AI 反馈：分析专注情况，给出鼓励和改进建议。
+用户停止或结束时间块后，系统自动触发 AI 反馈：分析专注情况，给出鼓励和改进建议。
+
+### 时间块生命周期
+
+```
+时间块开始 → 时间块暂停 → 时间块继续/恢复 → 时间块停止 → 用户发反馈 → 时间块结束
+```
+
+- **时间块停止**：在「用户反馈」之前，代表专注过程本身结束，进入复盘总结反馈的环节
+- **时间块结束**：在「用户反馈」结束，正式标记一个时间块的范围终止
 
 ## 信号流
 
 ```
-用户点击「结束时间块」
+用户点击「停止时间块」
     ↓
-endBlock() → HTTP POST timeblock.completed → RT (port 1949)
+markEnding() → HTTP POST /timeblocks/stop → RT
     ↓
-RT 路由 → Reviewer Agent (SSE 订阅)
+RT 发布 timeblock.replication.completed 信号
     ↓
-Reviewer Agent → Claude CLI → 生成 JSON 反馈
+timeblock_summary Agent 收到信号 → 生成结束总结
     ↓
-Reviewer Agent → HTTP POST review.completed → RT
+用户填写反馈 → 点击「提交」
     ↓
-RT → SSE → 前端 useSignalStream hook
+endBlock() → HTTP POST /timeblocks/end → RT
     ↓
-hook → EventStorage.addEvent(type: "agent_feedback")
+RT 发布 timeblock.block_feedback.created 信号
     ↓
-ChatPage 自动刷新 → 紫色 AI 反馈气泡
+timeblock_summary Agent 收到信号 → 生成用户反馈核验
 ```
 
 ## 启动步骤（可复现）

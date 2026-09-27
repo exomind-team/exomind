@@ -236,6 +236,10 @@ export class ReminderStorage {
     };
   }
 
+  get listenerCount(): number {
+    return this.changeListeners.length;
+  }
+
   getSyncStatus(): { active: boolean; paused: boolean; error: unknown } {
     return {
       active: this.syncReplication !== null,

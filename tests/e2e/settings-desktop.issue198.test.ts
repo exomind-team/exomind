@@ -5,7 +5,6 @@ async function setupIssue198Flags(page: Page) {
     localStorage.setItem('exomind:uiMode', 'new');
     localStorage.setItem('exomind:developerMode', 'true');
     localStorage.setItem('exomind:agentPageEnabled', 'true');
-    localStorage.setItem('exomind:mePageEnabled', 'true');
     localStorage.setItem('exomind:desktopAdaptiveEnabled', 'true');
   });
 }
@@ -101,26 +100,27 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(aboutTab).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('new-settings-desktop-vc-section-about')).toBeVisible();
     await expect(page.getByText('官网')).toBeVisible();
-    await expect(page.getByText('赞助开发者（Starlin）')).toBeVisible();
-    await expect(page.getByText('法律与支持')).toBeVisible();
     await expect(page.getByText('版本')).toBeVisible();
     await expect(page.getByText('构建')).toBeVisible();
     await expect(page.getByText('隐私政策')).toHaveCount(0);
     await expect(page.getByText('用户协议')).toHaveCount(0);
     await expect(page.getByText('开源软件使用声明')).toHaveCount(0);
+    // 赞助开发者 / 法律与支持已随精简移除。
+    await expect(page.getByText('赞助开发者（Starlin）')).toHaveCount(0);
+    await expect(page.getByText('法律与支持')).toHaveCount(0);
     await page.getByRole('button', { name: '数据', exact: true }).click();
     await expect(page.getByTestId('new-settings-desktop-vc-section-data')).toBeVisible();
     await expect(page.getByRole('button', { name: '导出数据' })).toBeVisible();
     await expect(page.getByRole('button', { name: '导入数据' })).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-now')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-tasks')).toBeVisible();
-    await expect(page.getByTestId('desktop-sidebar-item-me')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-agents')).toBeVisible();
-    await expect(page.getByTestId('desktop-sidebar-item-workbench-test')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-settings')).toBeVisible();
+    // Me 页与工作台测试入口已随精简移除。
+    await expect(page.getByTestId('desktop-sidebar-item-me')).toHaveCount(0);
+    await expect(page.getByTestId('desktop-sidebar-item-workbench-test')).toHaveCount(0);
     await expect(page.getByTestId('desktop-sidebar-item-proposals')).toHaveCount(0);
     await expect(page.getByTestId('desktop-sidebar-item-dashboard')).toHaveCount(0);
-    await expect(page.locator('[data-testid^="desktop-sidebar-item-"]')).toHaveCount(5);
     await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
   });
 
@@ -196,15 +196,12 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('new-settings-voice-overlay-diagnostics-row')).toBeVisible();
     await expect(page.getByTestId('new-settings-voice-overlay-transcript-lines-row')).toBeVisible();
     await expect(page.getByTestId('new-settings-voice-overlay-bottom-offset-row')).toBeVisible();
-    await expect(page.getByTestId('new-settings-now-overlay-enabled-row')).toBeVisible();
 
     await setRangeValue(page, 'new-settings-voice-overlay-opacity-slider', 82);
     await page.getByTestId('new-settings-voice-overlay-diagnostics-switch').click();
-    await page.getByTestId('new-settings-now-overlay-enabled-switch').click();
 
     await expect.poll(() => readLocalStorageValue(page, 'exomind:voiceOverlayOpacity')).toBe('82');
     await expect.poll(() => readLocalStorageValue(page, 'exomind:voiceOverlayShowDiagnostics')).toBe('true');
-    await expect.poll(() => readLocalStorageValue(page, 'exomind:nowWorkbenchOverlayEnabled')).toBe('false');
   });
 
   test('mobile input section can update overlay preferences（移动端输入分组可修改悬浮窗偏好）', async ({ page }) => {
@@ -214,31 +211,10 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     const bottomOffsetRow = page.getByTestId('new-settings-voice-overlay-bottom-offset-row');
     await bottomOffsetRow.scrollIntoViewIfNeeded();
     await expect(page.getByTestId('new-settings-voice-overlay-opacity-row')).toBeVisible();
-    await expect(page.getByTestId('new-settings-now-overlay-enabled-row')).toBeVisible();
 
     await setRangeValue(page, 'new-settings-voice-overlay-bottom-offset-slider', 96);
-    await page.getByTestId('new-settings-now-overlay-enabled-switch').click();
 
     await expect.poll(() => readLocalStorageValue(page, 'exomind:voiceOverlayBottomOffset')).toBe('96');
-    await expect.poll(() => readLocalStorageValue(page, 'exomind:nowWorkbenchOverlayEnabled')).toBe('false');
-  });
-
-  test('legal-support page contains only legal three items（法律与支持页仅法务三项）', async ({ page }) => {
-    await page.goto('/settings');
-    await expect(page.getByRole('button', { name: '关于', exact: true })).toBeVisible();
-
-    const aboutTab = page.getByRole('button', { name: '关于', exact: true });
-    await aboutTab.click();
-    await page.getByText('法律与支持').click();
-
-    await expect(page).toHaveURL(/\/settings\/legal-support$/);
-    await expect(page.getByText('隐私政策')).toBeVisible();
-    await expect(page.getByText('用户协议')).toBeVisible();
-    await expect(page.getByText('开源软件使用声明')).toBeVisible();
-    await expect(page.getByText('帮助中心')).toHaveCount(0);
-    await expect(page.getByText('反馈建议')).toHaveCount(0);
-    await expect(page.getByText('官网')).toHaveCount(0);
-    await expect(page.getByText('赞助开发者')).toHaveCount(0);
   });
 
   test('desktop adaptive switch can fallback to mobile shell（桌面适配开关可回退移动壳层）', async ({ page }) => {
@@ -264,14 +240,9 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
   });
 
-  test('desktop tasks and me routes use desktop shell（桌面端任务与Me页面走桌面壳层）', async ({ page }) => {
+  test('desktop tasks route uses desktop shell（桌面端任务页面走桌面壳层）', async ({ page }) => {
     await page.goto('/tasks');
     await expect(page.getByTestId('new-tasks-page')).toBeVisible();
-    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
-    await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
-
-    await page.goto('/me');
-    await expect(page.getByTestId('new-me-page')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
     await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
   });

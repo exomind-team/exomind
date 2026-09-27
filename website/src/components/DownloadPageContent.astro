@@ -248,6 +248,34 @@ const config = {
         </div>
       </div>
     )}
+
+    <div class="mx-auto mt-10 max-w-3xl rounded-2xl border border-stone-200 bg-stone-50/60 p-6 text-sm dark:border-stone-700 dark:bg-stone-900/40">
+      <h3 class="mb-2 flex items-center gap-2 font-semibold text-stone-800 dark:text-stone-100">
+        <LucideIcon icon={Apple} class="h-4 w-4" />
+        {isZh ? 'macOS 首次启动（未签名版）' : 'macOS first launch (unsigned build)'}
+      </h3>
+      <p class="mb-3 text-stone-600 dark:text-stone-300">
+        {isZh
+          ? 'macOS 包暂未签名（无 Apple Developer 账号）。首次打开提示「已损坏」是 Gatekeeper 拦截，不是文件真的损坏。'
+          : 'The macOS build is currently unsigned (no Apple Developer account). A "damaged" prompt on first launch is Gatekeeper — not a corrupted file.'}
+      </p>
+      <p class="mb-2 text-stone-600 dark:text-stone-300">
+        {isZh
+          ? 'Apple Silicon（M1–M4）若仍提示「已损坏」，在终端做一次 ad-hoc 自签（免费、无需 Apple 账号；arm64 强制要求带签名）：'
+          : 'On Apple Silicon (M1–M4), if it still says "damaged", ad-hoc self-sign it in Terminal (free, no Apple account — arm64 requires a signature):'}
+      </p>
+      <pre class="overflow-x-auto rounded-lg bg-stone-900 p-4 text-xs leading-relaxed text-stone-100 dark:bg-black/50"><code>sudo codesign --force --deep --sign - "/Applications/ExoMind.app"
+sudo xattr -cr "/Applications/ExoMind.app"
+open "/Applications/ExoMind.app"</code></pre>
+      <p class="mt-3 text-stone-500 dark:text-stone-400">
+        {isZh ? 'Intel Mac 或想先试简单办法：右键 App →「打开」，或仅 ' : 'Intel Mac, or a simpler first try: right-click the app → Open, or just '}
+        <code class="rounded bg-stone-200 px-1 py-0.5 text-[0.7rem] dark:bg-stone-700">sudo xattr -cr "/Applications/ExoMind.app"</code>
+      </p>
+      <p class="mt-2 text-stone-500 dark:text-stone-400">
+        {isZh ? '完整说明（含右键打开 / 系统设置放行 / 排障）：' : 'Full guide (right-click open / system settings / troubleshooting): '}
+        <a href="https://github.com/exomind-team/exomind/blob/dev/docs/macos-install.md" target="_blank" rel="noopener noreferrer" class="text-brand underline underline-offset-2 hover:text-brand-600">docs/macos-install.md</a>
+      </p>
+    </div>
   </div>
 </section>
 

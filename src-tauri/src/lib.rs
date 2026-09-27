@@ -1,7 +1,9 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
+mod appbar;
 mod commands;
 mod dev_instance_paths;
+mod windows_appbar;
 
 use commands::asr_commands::{
     volcano_asr_check_config, volcano_asr_recognize, volcano_asr_stream_cancel,
@@ -10,13 +12,9 @@ use commands::asr_commands::{
 };
 use commands::dev_commands::dev_instance_runtime_info;
 use commands::device_commands::get_device_id;
-use commands::doubao_realtime_commands::{
-    doubao_realtime_session_cancel, doubao_realtime_session_finish, doubao_realtime_session_push,
-    doubao_realtime_session_start, DoubaoRealtimeSessionState,
-};
 use commands::eventlog_commands::{
-    eventlog_append, eventlog_clear, eventlog_get, eventlog_list, eventlog_mirror_status,
-    eventlog_rebuild_markdown,
+    eventlog_append, eventlog_append_raw, eventlog_clear, eventlog_get, eventlog_list,
+    eventlog_mirror_status, eventlog_rebuild_markdown,
 };
 use commands::file_commands::{
     append_file, append_to_markdown, delete_file, export_messages_to_markdown, file_exists,
@@ -25,13 +23,9 @@ use commands::file_commands::{
 };
 use commands::keep_awake_commands::focus_keep_awake_set;
 use commands::now_workbench_overlay_commands::{
-    ensure_now_workbench_overlay_window, now_workbench_overlay_ensure,
-    now_workbench_overlay_focus_main, now_workbench_overlay_hide, now_workbench_overlay_restore,
-    now_workbench_overlay_set_position, now_workbench_overlay_show,
-};
-use commands::qwen_omni_realtime_commands::{
-    omni_realtime_session_cancel, omni_realtime_session_finish, omni_realtime_session_push,
-    omni_realtime_session_start, QwenOmniRealtimeSessionState,
+    now_workbench_overlay_ensure, now_workbench_overlay_focus_main, now_workbench_overlay_hide,
+    now_workbench_overlay_profile_get, now_workbench_overlay_profile_set,
+    now_workbench_overlay_restore, now_workbench_overlay_set_position, now_workbench_overlay_show,
 };
 use commands::runtime_commands::{
     ensure_runtime_started, load_persisted_runtime_network_mode,
@@ -71,6 +65,10 @@ use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
 use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
 use tauri::Manager;
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+use windows_appbar::{
+    ensure_action_dock_window, windows_appbar_attach_right, windows_appbar_detach,
+    windows_appbar_resize,
+};
 
 const DEFAULT_SIGNAL_ROUTES_FILE_NAME: &str = "signal-routes.default.json";
 const DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON: &str =
@@ -240,9 +238,6 @@ pub fn run() {
     let voice_shortcut_state = VoiceShortcutState::new();
     let main_window_shortcut_state = MainWindowShortcutState::new();
     let volcano_asr_stream_state = std::sync::Arc::new(VolcanoAsrStreamState::default());
-    let doubao_realtime_session_state = std::sync::Arc::new(DoubaoRealtimeSessionState::default());
-    let qwen_omni_realtime_session_state =
-        std::sync::Arc::new(QwenOmniRealtimeSessionState::default());
     let mut context = tauri::generate_context!();
 
     #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
@@ -301,8 +296,6 @@ pub fn run() {
         .manage(voice_shortcut_state)
         .manage(main_window_shortcut_state)
         .manage(volcano_asr_stream_state)
-        .manage(doubao_realtime_session_state)
-        .manage(qwen_omni_realtime_session_state)
         .setup(move |app| {
             #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
             if let Some((main_window_config, main_data_dir)) = main_window_override.as_ref() {
@@ -346,8 +339,8 @@ pub fn run() {
             if let Err(error) = ensure_voice_overlay_window(app.handle()) {
                 log::warn!("failed to prewarm voice overlay window: {error}");
             }
-            if let Err(error) = ensure_now_workbench_overlay_window(app.handle()) {
-                log::warn!("failed to prewarm now overlay window: {error}");
+            if let Err(error) = ensure_action_dock_window(app.handle()) {
+                log::warn!("failed to prewarm action-dock window: {error}");
             }
 
             if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none()
@@ -489,6 +482,7 @@ pub fn run() {
             get_device_id,
             eventlog_list,
             eventlog_append,
+            eventlog_append_raw,
             eventlog_get,
             eventlog_clear,
             eventlog_mirror_status,
@@ -520,6 +514,8 @@ pub fn run() {
             now_workbench_overlay_hide,
             now_workbench_overlay_focus_main,
             now_workbench_overlay_set_position,
+            now_workbench_overlay_profile_get,
+            now_workbench_overlay_profile_set,
             voice_shortcut_set,
             voice_shortcut_get,
             main_window_shortcut_set,
@@ -527,6 +523,10 @@ pub fn run() {
             main_window_shortcut_take_pending_activation,
             voice_recording_set_active,
             foreground_window_get,
+            // Windows 桌面停靠 / Windows AppBar
+            windows_appbar_attach_right,
+            windows_appbar_resize,
+            windows_appbar_detach,
             timeblock_end_alert_schedule,
             timeblock_end_alert_cancel,
             timeblock_end_alert_take_pending_handoff,
@@ -540,14 +540,6 @@ pub fn run() {
             volcano_asr_stream_finish,
             volcano_asr_stream_cancel,
             volcano_asr_stream_session_exists,
-            doubao_realtime_session_start,
-            doubao_realtime_session_push,
-            doubao_realtime_session_finish,
-            doubao_realtime_session_cancel,
-            omni_realtime_session_start,
-            omni_realtime_session_push,
-            omni_realtime_session_finish,
-            omni_realtime_session_cancel,
             // Workspace 认知生命体命令
             get_agent_workspace_soul,
             get_agent_workspace_knowledge_list,
@@ -576,6 +568,7 @@ pub fn run() {
             // so that overlay windows (now-workbench-overlay, voice-overlay) don't linger.
             if window.label() == "main" {
                 if let tauri::WindowEvent::Destroyed = event {
+                    windows_appbar::detach_on_shutdown(window.app_handle());
                     std::process::exit(0);
                 }
             }
