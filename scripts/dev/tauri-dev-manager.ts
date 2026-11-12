@@ -219,6 +219,15 @@ function runPowerShellJson<T>(script: string): T[] {
   return normalizeJsonArray(JSON.parse(raw) as T | T[] | null);
 }
 
+function readManagedWindowsProcess(pid: number): ManagedWindowsProcessInfo | null {
+  const rows = runPowerShellJson<ManagedWindowsProcessInfo>([
+    `Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"`,
+    'Select-Object ProcessId, ParentProcessId, Name, CommandLine, ExecutablePath, CreationDate',
+    'ConvertTo-Json -Compress',
+  ].join(' | '));
+  return rows.find((processInfo) => processInfo.ProcessId === pid) ?? null;
+}
+
 async function resolveDesktopProcessBaseName(projectRoot: string): Promise<string | null> {
   const cached = desktopProcessNameCache.get(projectRoot);
   if (cached) {
@@ -272,7 +281,7 @@ async function collectManagedTauriHealthSnapshot(
   }
 
   const processes = runPowerShellJson<ManagedWindowsProcessInfo>(
-    'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine | ConvertTo-Json -Compress',
+    'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, ExecutablePath, CreationDate | ConvertTo-Json -Compress',
   );
 
   if (!rootPidAlive) {
@@ -303,6 +312,7 @@ async function collectManagedTauriHealthSnapshot(
     rootPid: record.rootPid,
     expectedBaseName: expectedDesktopProcess,
     expectedExecutablePath,
+    allowPathOnlyMatch: !record.lowMemory,
   });
 
   return {
@@ -460,7 +470,6 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     lowMemory,
     targetDir,
   };
-  await writeInstanceRecord(record);
 
   await Bun.sleep(1200);
   if (!isPidAlive(record.rootPid)) {
@@ -468,6 +477,11 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     await rm(paths.metaPath, { force: true });
     throw new Error(`instance exited too early: ${paths.name}\n${logHint}`);
   }
+
+  const rootProcess = readManagedWindowsProcess(record.rootPid);
+  record.rootExecutablePath = rootProcess?.ExecutablePath ?? process.execPath;
+  record.rootCreationDate = rootProcess?.CreationDate ?? null;
+  await writeInstanceRecord(record);
 
   console.log(`started: ${paths.name}`);
   console.log(`target: ${target}`);

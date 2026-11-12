@@ -2941,6 +2941,9 @@ Invoke-WebRequest http://127.0.0.1:<rt>/health -TimeoutSec 2 -UseBasicParsing
   - `taskkill /IM exomind.exe /F`
   - `taskkill /IM msedgewebview2.exe /F`
 - 这类全局杀法会把别的桌面实例、别的验证现场，甚至别的非 ExoMind WebView 一起带掉。
+- 任何脚本、Agent 或手工清理都不得按镜像名终止 `exomind.exe` / `msedgewebview2.exe`。
+- 端口监听 PID 不能单独作为 ownership。只有根 PID 的创建时间/可执行路径匹配记录，或进程命令行明确落在该实例 `targetDir` 且属于其已确认进程链时，才允许终止。
+- `taskkill /PID <pid> /T /F` 也只能用于上述已确认 PID；PID 不存在或身份不匹配时停手并保留现场，不要扩大为全进程匹配。
 - 只有当：
   - manager 已失真
   - 正常 `stop --name` 已经失效

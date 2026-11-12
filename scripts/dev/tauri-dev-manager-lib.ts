@@ -14,6 +14,8 @@ export type ManagedWindowsProcessInfo = {
   ParentProcessId: number;
   Name: string;
   CommandLine?: string | null;
+  ExecutablePath?: string | null;
+  CreationDate?: string | null;
 };
 
 export type TauriDevTarget = 'desktop' | 'android';
@@ -32,6 +34,8 @@ export type ManagedTauriInstanceRecord = {
   target: TauriDevTarget;
   lowMemory?: boolean;
   targetDir?: string;
+  rootExecutablePath?: string | null;
+  rootCreationDate?: string | null;
 };
 
 type EnvLike = Record<string, string | undefined>;
@@ -211,17 +215,43 @@ export function collectManagedDesktopAppPids(input: {
   rootPid: number;
   expectedBaseName: string | null;
   expectedExecutablePath?: string | null;
+  allowPathOnlyMatch?: boolean;
 }): number[] {
   const descendants = getDescendantProcesses(input.processes, input.rootPid);
   const descendantPids = descendants
     .filter((processInfo) => matchesDesktopProcessName(processInfo.Name, input.expectedBaseName))
     .map((processInfo) => processInfo.ProcessId);
 
-  const pathMatchedPids = input.processes
-    .filter((processInfo) => matchesExpectedExecutablePath(processInfo.CommandLine, input.expectedExecutablePath))
-    .map((processInfo) => processInfo.ProcessId);
+  const pathMatchedPids = input.allowPathOnlyMatch === false
+    ? []
+    : input.processes
+      .filter((processInfo) => matchesExpectedExecutablePath(processInfo.CommandLine, input.expectedExecutablePath))
+      .map((processInfo) => processInfo.ProcessId);
 
   return uniquePositivePids([...descendantPids, ...pathMatchedPids]);
+}
+
+function normalizeProcessIdentityValue(value: string | null | undefined): string {
+  return value?.trim().replace(/^"+|"+$/g, '').toLowerCase() ?? '';
+}
+
+function processMatchesRecordedRootIdentity(
+  record: ManagedTauriInstanceRecord,
+  processInfo: ManagedWindowsProcessInfo | undefined,
+): boolean {
+  if (!processInfo) {
+    return false;
+  }
+
+  const recordedCreationDate = normalizeProcessIdentityValue(record.rootCreationDate);
+  const processCreationDate = normalizeProcessIdentityValue(processInfo.CreationDate);
+  if (recordedCreationDate) {
+    return processCreationDate === recordedCreationDate;
+  }
+
+  const recordedExecutablePath = normalizeProcessIdentityValue(record.rootExecutablePath);
+  const processExecutablePath = normalizeProcessIdentityValue(processInfo.ExecutablePath);
+  return Boolean(recordedExecutablePath && processExecutablePath === recordedExecutablePath);
 }
 
 const DESKTOP_APP_STARTUP_GRACE_MS = 90_000;
@@ -327,20 +357,31 @@ export function collectManagedTauriCleanupPids(
   record: ManagedTauriInstanceRecord,
   snapshot: ManagedTauriInstanceHealthSnapshot,
 ): number[] {
-  const rootPids = uniquePositivePids([
-    ...(snapshot.rootPidAlive ? [record.rootPid] : []),
+  const processes = snapshot.processes ?? [];
+  const rootProcess = processes.find((processInfo) => processInfo.ProcessId === record.rootPid);
+  const rootOwned = snapshot.rootPidAlive
+    && processMatchesRecordedRootIdentity(record, rootProcess);
+  const listenerPids = uniquePositivePids([
     ...(snapshot.webPortPids ?? []),
     ...(snapshot.hmrPortPids ?? []),
-    ...(snapshot.appPids ?? []),
   ]);
+  const targetDir = normalizeProcessIdentityValue(record.targetDir);
+  const targetMatchedListenerPids = processes
+    .filter((processInfo) => listenerPids.includes(processInfo.ProcessId))
+    .filter((processInfo) => {
+      const commandLine = normalizeProcessIdentityValue(processInfo.CommandLine);
+      return Boolean(targetDir && commandLine.includes(targetDir));
+    })
+    .map((processInfo) => processInfo.ProcessId);
 
-  if (!snapshot.processes || snapshot.processes.length === 0 || rootPids.length === 0) {
-    return rootPids;
-  }
-
-  const descendantPids = rootPids.flatMap((pid) =>
-    getDescendantProcesses(snapshot.processes ?? [], pid).map((processInfo) => processInfo.ProcessId),
+  const ownedRootPids = uniquePositivePids([
+    ...(rootOwned ? [record.rootPid] : []),
+    ...(snapshot.appPids ?? []),
+    ...targetMatchedListenerPids,
+  ]);
+  const descendantPids = ownedRootPids.flatMap((pid) =>
+    getDescendantProcesses(processes, pid).map((processInfo) => processInfo.ProcessId),
   );
 
-  return uniquePositivePids([...rootPids, ...descendantPids]);
+  return uniquePositivePids([...ownedRootPids, ...descendantPids]);
 }
