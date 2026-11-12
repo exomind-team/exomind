@@ -702,7 +702,7 @@ async function main() {
     checks,
     stages,
     passed: checks.every((item) => item.passed),
-    remaining: ["A0.3 synthetic old 0.5 behavior baseline", "A3.1 old-vs-Alpha baseline comparison"],
+    remaining: ["A1.2 strict release installation directory isolation"],
   };
   writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf8");
   console.log(JSON.stringify({ passed: report.passed, runId, reportPath, checks: checks.length }, null, 2));
