@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   ensureMdnsMulticastLockInMainActivityFile,
   ensureRequiredAudioPermissionsInManifestFile,
+  findMainActivityPath,
 } from './android-manifest-permission-lib';
 import { resolveTauriExecutable } from './tauri-cli-lib';
 
@@ -23,7 +24,7 @@ function getAndroidLifecycleCommand(args: string[]): AndroidLifecycleCommand | n
 
 function ensureAndroidNetworkDiscoveryPrerequisites(projectRoot: string): void {
   const manifestPath = join(projectRoot, 'src-tauri', 'gen', 'android', 'app', 'src', 'main', 'AndroidManifest.xml');
-  const mainActivityPath = join(
+  const javaRoot = join(
     projectRoot,
     'src-tauri',
     'gen',
@@ -32,6 +33,9 @@ function ensureAndroidNetworkDiscoveryPrerequisites(projectRoot: string): void {
     'src',
     'main',
     'java',
+  );
+  const mainActivityPath = findMainActivityPath(javaRoot) ?? join(
+    javaRoot,
     'com',
     'exomind',
     'app',

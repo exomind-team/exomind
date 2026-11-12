@@ -97,6 +97,36 @@ export function resolveInstalledNdkVersion(env: NodeJS.ProcessEnv = process.env)
   return normalizeNdkVersion(pathSegments[pathSegments.length - 1] ?? null);
 }
 
+export function findMainActivityPath(javaRoot: string): string | null {
+  const visit = (directory: string): string | null => {
+    let entries;
+    try {
+      entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+        left.name.localeCompare(right.name),
+      );
+    } catch {
+      return null;
+    }
+
+    const directMatch = entries.find(
+      (entry) => entry.isFile() && entry.name === 'MainActivity.kt',
+    );
+    if (directMatch) {
+      return join(directory, directMatch.name);
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const nested = visit(join(directory, entry.name));
+      if (nested) return nested;
+    }
+
+    return null;
+  };
+
+  return visit(javaRoot);
+}
+
 const MDNS_MULTICAST_LOCK_MARKER = 'createMulticastLock("exomind-mdns-lock")';
 
 function detectNewline(value: string): string {

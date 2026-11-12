@@ -5,6 +5,7 @@ import {
   ensureMdnsMulticastLockInMainActivityFile,
   ensureReleaseCleartextTrafficInGradleFile,
   ensureRequiredAudioPermissionsInManifestFile,
+  findMainActivityPath,
   resolveInstalledNdkVersion,
 } from './android-manifest-permission-lib';
 
@@ -31,7 +32,7 @@ function resolveMainActivityPath(cliArgs: string[]): string {
     return cliArgs[2];
   }
 
-  return join(
+  const javaRoot = join(
     process.cwd(),
     'src-tauri',
     'gen',
@@ -40,6 +41,9 @@ function resolveMainActivityPath(cliArgs: string[]): string {
     'src',
     'main',
     'java',
+  );
+  return findMainActivityPath(javaRoot) ?? join(
+    javaRoot,
     'com',
     'exomind',
     'app',

@@ -394,11 +394,12 @@ jobs:
             throw 'Missing android:usesCleartextTraffic="true" in AndroidManifest.xml'
           }
 
-          $mainActivityPath = "src-tauri/gen/android/app/src/main/java/com/exomind/app/MainActivity.kt"
-          if (-not (Test-Path $mainActivityPath)) {
-            throw "MainActivity not found: $mainActivityPath"
+          $javaRoot = "src-tauri/gen/android/app/src/main/java"
+          $mainActivityFile = Get-ChildItem -Path $javaRoot -Filter "MainActivity.kt" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $mainActivityFile) {
+            throw "MainActivity.kt not found under $javaRoot"
           }
-          $mainActivityContent = Get-Content -Path $mainActivityPath -Raw -Encoding UTF8
+          $mainActivityContent = Get-Content -Path $mainActivityFile.FullName -Raw -Encoding UTF8
           foreach ($pattern in @(
             'WifiManager\.MulticastLock',
             'acquireMulticastLock\(\)',

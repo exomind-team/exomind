@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -17,8 +17,36 @@ import {
   ensureMdnsMulticastLockInMainActivity,
   ensureReleaseCleartextTrafficInGradle,
   ensureRequiredAudioPermissionsInManifest,
+  findMainActivityPath,
   resolveInstalledNdkVersion,
 } from '../../../scripts/dev/android-manifest-permission-lib';
+
+describe('findMainActivityPath', () => {
+  it('finds the generated activity in a versioned package path（支持带版本段的 Android 包路径）', () => {
+    const javaRoot = mkdtempSync(join(tmpdir(), 'android-main-activity-'));
+    const packageDirectory = join(javaRoot, 'com', 'exomind', 'app', 'v06');
+
+    try {
+      mkdirSync(packageDirectory, { recursive: true });
+      const expected = join(packageDirectory, 'MainActivity.kt');
+      writeFileSync(expected, 'package com.exomind.app.v06\n', 'utf8');
+
+      expect(findMainActivityPath(javaRoot)).toBe(expected);
+    } finally {
+      rmSync(javaRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('returns null when the generated activity is absent（缺失时返回 null）', () => {
+    const javaRoot = mkdtempSync(join(tmpdir(), 'android-main-activity-'));
+
+    try {
+      expect(findMainActivityPath(javaRoot)).toBeNull();
+    } finally {
+      rmSync(javaRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('ensureRequiredAudioPermissionsInManifest', () => {
   it('injects audio permissions when missing（缺失时自动注入双权限）', () => {
