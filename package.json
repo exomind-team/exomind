@@ -34,6 +34,7 @@
     "preview": "vite preview",
     "tauri": "powershell -ExecutionPolicy Bypass -File scripts/dev/tauri-wrapper.ps1",
     "test": "vitest",
+    "verify:alpha04:auto": "bun scripts/dev/alpha04-automated-acceptance.ts",
     "mcp:exomind": "bun run ./scripts/dev/run-exomind-mcp.ts",
     "mcp:tauri": "bun x mcp-server-tauri",
     "playwright:install": "bun x playwright install",
