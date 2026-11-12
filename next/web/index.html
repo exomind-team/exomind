@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+ <head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width,initial-scale=1" name="viewport"/>
+  <title>
+   外心 · 上下文缓冲区
+  </title>
+  <link href="/style.css" rel="stylesheet"/>
+  <script src="/app.mjs" type="module">
+  </script>
+ </head>
+ <body>
+  <section class="login" id="login">
+   <div class="brand">
+    <span aria-hidden="true" class="brand-mark">
+    </span>
+    <strong>
+     外心
+    </strong>
+    <span class="muted">
+     重构候选
+    </span>
+   </div>
+   <h1>
+    连接本机的外心
+   </h1>
+   <p>
+    从启动器打开，或输入私有连接文件中的访问令牌。令牌仅保存在此标签页会话中。
+   </p>
+   <form id="login-form">
+    <label for="token">
+     访问令牌
+    </label>
+    <input autocomplete="off" id="token" required="" type="password"/>
+    <button class="primary" type="submit">
+     连接
+    </button>
+   </form>
+   <p id="login-error" role="alert">
+   </p>
+  </section>
+  <div class="shell" hidden="" id="shell">
+   <aside class="rail">
+    <div class="brand">
+     <span aria-hidden="true" class="brand-mark">
+     </span>
+     <strong>
+      外心
+     </strong>
+    </div>
+    <span class="version" id="version">
+    </span>
+    <nav aria-label="主导航">
+     <button class="nav active" data-view="buffer">
+      缓冲区
+     </button>
+     <button class="nav" data-view="devices">
+      设备连接
+     </button>
+     <button class="nav" data-view="summaries">
+      时间块回顾
+     </button>
+     <button class="nav" data-view="access">
+      外部接入
+     </button>
+    </nav>
+    <div class="rail-bottom">
+     <span id="device-name">
+     </span>
+     <small id="connection">
+      连接中
+     </small>
+     <button class="text-button" id="logout">
+      断开此页面
+     </button>
+    </div>
+   </aside>
+   <main>
+    <header class="page-header">
+     <div>
+      <p class="eyebrow">
+       EXOMIND / LOCAL FIRST
+      </p>
+      <h1 id="page-title">
+       上下文缓冲区
+      </h1>
+     </div>
+     <span class="pill" id="space-state">
+      本机空间
+     </span>
+    </header>
+    <p aria-live="polite" class="notice" hidden="" id="notice" role="status">
+    </p>
+    <section class="view" id="view-buffer">
+     <div class="active-blocks" id="active-blocks">
+     </div>
+     <div class="composer">
+      <label class="sr-only" for="capture-text">
+       记下一句话，粘贴图片，或添加文件
+      </label>
+      <textarea id="capture-text" maxlength="32768" placeholder="记下一句话，或把此刻的素材放在这里…" rows="4"></textarea>
+      <div class="file-list" id="file-list">
+      </div>
+      <div class="composer-bar">
+       <div class="composer-tools">
+        <label class="file-button" for="file-input">
+         <svg aria-hidden="true" fill="none" height="18" stroke="currentColor" stroke-width="1.7" viewbox="0 0 24 24" width="18">
+          <path d="m8 12 6-6a4 4 0 0 1 6 6l-9 9a6 6 0 0 1-8-8l9-9M6 15l9-9a1.5 1.5 0 0 1 2 2l-9 9">
+          </path>
+         </svg>
+         添加素材
+        </label>
+        <input hidden="" id="file-input" multiple="" type="file"/>
+        <button class="text-button" id="start-block">
+         开始时间块
+        </button>
+       </div>
+       <div class="send-group">
+        <small class="muted">
+         Ctrl / ⌘ + Enter
+        </small>
+        <button class="primary" id="send">
+         记下
+        </button>
+       </div>
+      </div>
+      <p class="save-state" id="save-state">
+       原始内容保留到你主动清理；本版不自动删除。
+      </p>
+     </div>
+     <div class="stream-header">
+      <h2>
+       最近记录
+      </h2>
+      <button class="text-button" hidden="" id="return-latest">
+       返回最新
+      </button>
+      <label class="search">
+       <span class="sr-only">
+        检索记录
+       </span>
+       <input id="search" placeholder="检索内容…" type="search"/>
+      </label>
+     </div>
+     <div class="timeline" id="timeline">
+     </div>
+     <button class="load-more" hidden="" id="load-more">
+      更早的记录
+     </button>
+    </section>
+    <section class="view" hidden="" id="view-devices">
+     <p class="intro">
+      配对关系与在线状态分开保存。离线不会被自动移除；文字先补齐，附件继续传输。
+     </p>
+     <div class="peers" id="peers">
+     </div>
+     <details class="panel">
+      <summary>
+       连接另一台同版本设备
+      </summary>
+      <div class="pair-grid">
+       <section>
+        <h2>
+         在这台设备生成邀请
+        </h2>
+        <label for="advertise">
+         其他设备能访问的本机 Runtime 地址
+        </label>
+        <input id="advertise" placeholder="https://设备地址:端口"/>
+        <p class="muted">
+         局域网或 EasyTier 地址均可。HTTP 远程实验需要启动时显式允许；不自动配置 VPN。
+        </p>
+        <button id="make-invite">
+         生成十分钟邀请
+        </button>
+        <textarea aria-label="配对邀请" class="code" id="invite-output" readonly="" rows="5"></textarea>
+        <button class="text-button" id="copy-invite">
+         复制邀请
+        </button>
+       </section>
+       <section>
+        <h2>
+         在另一台设备加入
+        </h2>
+        <label for="invite-input">
+         粘贴完整邀请
+        </label>
+        <textarea class="code" id="invite-input" rows="5"></textarea>
+        <label for="return-endpoint">
+         对方能访问的本机 Runtime 地址
+        </label>
+        <input id="return-endpoint" placeholder="https://本机地址:端口"/>
+        <button class="primary" id="join">
+         加入这个空间
+        </button>
+        <p class="muted">
+         不同空间只允许空白实例加入；现有记录不会被覆盖。邀请含临时密钥，不要公开。
+        </p>
+       </section>
+      </div>
+     </details>
+     <details class="panel">
+      <summary>
+       诊断信息
+      </summary>
+      <p class="muted">
+       包含设备标识和地址。交接前请自行脱敏，不包含访问令牌或记录正文。
+      </p>
+      <button id="diagnostics">
+       读取诊断
+      </button>
+      <pre id="diagnostics-output"></pre>
+     </details>
+    </section>
+    <section class="view" hidden="" id="view-summaries">
+     <p class="intro">
+      结束时间块后生成回顾。休息与生活同样值得记录，不强求成果。模型只读取有界证据快照，附件暂不自动解析。
+     </p>
+     <p class="panel" id="provider-status">
+     </p>
+     <div class="jobs" id="jobs">
+     </div>
+    </section>
+    <section class="view" hidden="" id="view-access">
+     <div class="panel">
+      <h2>
+       把状态交给其他软件
+      </h2>
+      <p>
+       WinCraft 可通过只读令牌读取当前时间块。Agent 使用写入令牌可记录素材、开始或结束时间块，但不能管理配对与权限。
+      </p>
+      <form id="access-form">
+       <label for="access-name">
+        接入名称
+       </label>
+       <input id="access-name" maxlength="100" required="" value="WinCraft"/>
+       <label for="access-role">
+        权限
+       </label>
+       <select id="access-role">
+        <option value="observer">
+         只读 observer
+        </option>
+        <option value="writer">
+         记录与时间块 writer
+        </option>
+       </select>
+       <button type="submit">
+        创建独立令牌
+       </button>
+      </form>
+      <pre id="access-result"></pre>
+      <p class="muted">
+       令牌只在创建时返回，请保存到私有配置。原生悬浮窗由 WinCraft 承担，本页面不是原生窗口验收。
+      </p>
+     </div>
+    </section>
+   </main>
+   <aside class="detail" hidden="" id="detail">
+    <button class="text-button" id="close-detail">
+     关闭详情
+    </button>
+    <div id="detail-content">
+    </div>
+   </aside>
+  </div>
+  <dialog id="block-dialog">
+   <form id="block-form">
+    <header>
+     <h2 id="block-dialog-title">
+      开始时间块
+     </h2>
+     <button class="text-button" id="cancel-block" type="button">
+      取消
+     </button>
+    </header>
+    <label for="block-name" id="block-name-label">
+     名称
+    </label>
+    <input id="block-name" maxlength="200" placeholder="工作、阅读、休息，或者此刻的状态"/>
+    <label for="block-note" id="block-note-label">
+     备注
+    </label>
+    <textarea id="block-note" maxlength="32768" rows="5"></textarea>
+    <p id="block-error" role="alert">
+    </p>
+    <button class="primary" id="block-submit" type="submit">
+     开始
+    </button>
+   </form>
+  </dialog>
+ </body>
+</html>

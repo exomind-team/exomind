@@ -1,0 +1,16 @@
+{
+  "name": "@exomind/rebuild",
+  "version": "0.6.0-rebuild.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "description": "隔离的 Web-first 搬迁候选：上下文缓冲区、时间块、证据化总结",
+  "scripts": {
+    "start": "node runtime/cli.mjs",
+    "test": "node tools/test.mjs",
+    "check": "node tools/check.mjs",
+    "verify": "npm run check && npm test"
+  }
+}

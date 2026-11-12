@@ -1,0 +1,29 @@
+{
+  "version": "0.6.0-rebuild.1",
+  "protocol": "exomind-buffer/1",
+  "deliveryKind": "isolated-web-first-source-candidate",
+  "sourceRepository": "exomind-team/exomind",
+  "sourceRef": "dev",
+  "sourceCommit": "ddb1ba1a6c1e0760af77b55d5659df44ad253b34",
+  "targetPath": "next/",
+  "rootFilesModified": false,
+  "remotePushed": false,
+  "userDataIncluded": false,
+  "oldDataAutoImported": false,
+  "nativeBuildVerified": false,
+  "browserE2eVerified": false,
+  "requires": "Node >=22.16; tested 22.16.0 Linux x64",
+  "goals": [
+    "context buffer",
+    "timeblocks",
+    "automatic bounded summaries",
+    "same-version peer sync",
+    "WinCraft read-only projection"
+  ],
+  "notGoals": [
+    "task management",
+    "generic plugin platform",
+    "legacy live compatibility",
+    "production release"
+  ]
+}

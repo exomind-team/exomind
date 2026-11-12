@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { app, temp, note } from './helpers.mjs';
+import { exportPortable, inspectPortable, restorePortable } from '../runtime/portable.mjs';
+import { digest } from '../runtime/contracts.mjs';
+import { Store } from '../runtime/store.mjs';
+test('有限快照完整导出、校验、全新身份恢复；不携带配对密钥', async (t) => {
+    const a = await app(t), root = temp();
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    for (let i = 0; i < 85; i++)
+        await note(a, `记录-${i}`);
+    const data = Buffer.from('attachment'), hash = digest(data);
+    a.blobs.begin({ hash, size: data.length });
+    a.blobs.write({ hash, offset: 0, bytes: data });
+    await a.blobs.commit(hash);
+    a.store.capture({ id: randomUUID(), text: '文件', files: [{ hash, size: data.length, name: '证据.txt', mime: 'text/plain' }] }, (h, z) => a.blobs.has(h, z));
+    const destination = join(root, 'bundle'), connection = { url: a.origin, token: a.token };
+    const manifest = await exportPortable({ connection, destination });
+    assert.equal(manifest.operationCount, 86);
+    assert.equal((await inspectPortable(destination)).operations.length, 86);
+    assert.equal(readFileSync(join(destination, 'manifest.json'), 'utf8').includes(a.token), false);
+    const restored = await restorePortable({ bundle: destination, destination: join(root, 'restored') });
+    assert.equal(restored.operations, 86);
+    assert.notEqual(restored.newDeviceId, a.store.identity.deviceId);
+    const s = new Store(join(root, 'restored'));
+    assert.equal(s.peers().length, 0);
+    s.close();
+    await assert.rejects(restorePortable({ bundle: destination, destination: join(root, 'restored') }), /新目录/);
+});
+test('损坏清单或附件不能当作成功恢复', async (t) => { const a = await app(t), root = temp(); t.after(() => rmSync(root, { recursive: true, force: true })); await note(a); const destination = join(root, 'bundle'); await exportPortable({ connection: { url: a.origin, token: a.token }, destination }); writeFileSync(join(destination, 'operations.jsonl'), '{}\n'); await assert.rejects(inspectPortable(destination), /校验失败/); await assert.rejects(restorePortable({ bundle: destination, destination: join(root, 'no-create') })); assert.equal(existsSync(join(root, 'no-create')), false); });
