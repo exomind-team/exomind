@@ -18,23 +18,24 @@ vi.mock('@/config/proposal-inbox-enabled', () => ({
 
 describe('TaskDomainTabs（任务域顶部导航）', () => {
   it('renders task domain links with the active item highlighted（渲染任务域导航并标记当前路由）', () => {
-    render(<TaskDomainTabs active="proposals" />);
+    render(<TaskDomainTabs active="timeline" />);
 
     expect(screen.getByRole('navigation', { name: '任务域导航' })).toBeInTheDocument();
     expect(screen.getByTestId('task-domain-tab-list')).toHaveTextContent('列表');
     expect(screen.getByTestId('task-domain-tab-list')).toHaveAttribute('to', '/tasks');
     expect(screen.getByTestId('task-domain-tab-timeline')).toHaveAttribute('to', '/tasks/timeline');
     expect(screen.getByTestId('task-domain-tab-dag')).toHaveAttribute('to', '/tasks/dag');
-    expect(screen.getByTestId('task-domain-tab-proposals')).toHaveAttribute('to', '/proposals');
-    expect(screen.getByTestId('task-domain-tab-proposals')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByTestId('task-domain-tab-proposals')).not.toHaveAttribute('role', 'tab');
+    expect(screen.getByTestId('task-domain-tab-timeline')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('task-domain-tab-timeline')).not.toHaveAttribute('role', 'tab');
+    expect(screen.queryByTestId('task-domain-tab-proposals')).not.toBeInTheDocument();
   });
 
-  it('hides proposals tab outside the proposals page when proposal inbox flag is off（提案箱开关关闭时在非提案箱页隐藏任务域入口）', () => {
-    getProposalInboxEnabledMock.mockReturnValue(false);
+  it.each([false, true])('keeps the proposal tab disabled when the stored flag is %s（旧开关不能恢复提案入口）', (enabled) => {
+    getProposalInboxEnabledMock.mockReturnValue(enabled);
 
     render(<TaskDomainTabs active="list" />);
 
     expect(screen.queryByTestId('task-domain-tab-proposals')).toBeNull();
+    expect(subscribeProposalInboxEnabledChangesMock).not.toHaveBeenCalled();
   });
 });

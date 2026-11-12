@@ -13,7 +13,7 @@ use super::broker::{
     BrokerError as AgentBrokerError, ToolCall as BrokerToolCall, ToolDef as BrokerToolDef,
     TurnItem,
 };
-use super::proposal_tools::proposal_tool_defs;
+use super::proposal_tools::is_proposal_tool_name;
 use super::tools::eventlog::get_recent_events_tool;
 use crate::AppState;
 use crate::config::types::USER_CONFIG_SCOPE;
@@ -479,6 +479,7 @@ pub fn resolve_agent_tools_for_runtime(
     presets: &[String],
     scope_key: Option<String>,
 ) -> Result<Vec<BrokerToolDef>, SessionError> {
+    reject_disabled_proposal_tools(&explicit_tools)?;
     let mut seen_presets = HashSet::new();
     let mut resolved_tools = explicit_tools;
     for preset in presets {
@@ -499,17 +500,24 @@ pub fn resolve_agent_tools_for_runtime(
     Ok(resolved_tools)
 }
 
+fn reject_disabled_proposal_tools(tools: &[BrokerToolDef]) -> Result<(), SessionError> {
+    if tools.iter().any(|tool| is_proposal_tool_name(&tool.name)) {
+        return Err(SessionError::UnsupportedTool(
+            "proposal inbox tools are disabled in the 0.6 Alpha runtime".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn expand_tool_preset(
     runtime: &AgentSessionRuntime,
     preset: &str,
     scope_key: Option<String>,
 ) -> Result<Vec<BrokerToolDef>, SessionError> {
     match preset {
-        TOOL_PRESET_PROPOSAL_TOOLS => {
-            let scope_key = require_scope_key(preset, scope_key)?;
-            let _ = scope_key;
-            Ok(proposal_tool_defs())
-        }
+        TOOL_PRESET_PROPOSAL_TOOLS => Err(SessionError::UnsupportedTool(
+            "proposal inbox tools are disabled in the 0.6 Alpha runtime".to_string(),
+        )),
         TOOL_PRESET_RECENT_EVENTS => {
             let scope_key = require_scope_key(preset, scope_key)?;
             Ok(vec![recent_events_tool_def(runtime, scope_key)])
@@ -825,6 +833,7 @@ pub async fn run_broker_agent_session_with_runtime(
     trigger: AgentTrigger,
     runtime: &AgentSessionRuntime,
 ) -> Result<AgentSessionRecord, SessionError> {
+    reject_disabled_proposal_tools(&tools)?;
     let profile = normalize_provider_profile(profile)?;
     let session_id = uuid::Uuid::new_v4().to_string();
     let created_at = chrono::Utc::now().to_rfc3339();
@@ -964,6 +973,43 @@ mod tests {
                 .to_string()
                 .contains("scope_key is required for preset")
         );
+    }
+
+    #[test]
+    fn alpha_disables_proposal_preset_and_explicit_tools() {
+        let dir = tempdir().unwrap();
+        let runtime = AgentSessionRuntime::new(
+            Arc::new(crate::config::ConfigStore::new()),
+            Arc::new(EventLogStore::new(dir.path().to_path_buf())),
+            Arc::new(crate::proposal::ProposalStore::new()),
+            Arc::new(AgentSessionStore::new()),
+        );
+
+        let preset_error = resolve_agent_tools_for_runtime(
+            &runtime,
+            Vec::new(),
+            &[TOOL_PRESET_PROPOSAL_TOOLS.to_string()],
+            Some("profile-alpha".to_string()),
+        )
+        .unwrap_err();
+        assert!(matches!(preset_error, SessionError::UnsupportedTool(_)));
+
+        let explicit_error = resolve_agent_tools_for_runtime(
+            &runtime,
+            vec![BrokerToolDef {
+                name: "add_task_proposal".to_string(),
+                description: "legacy proposal tool".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+            }],
+            &[],
+            Some("profile-alpha".to_string()),
+        )
+        .unwrap_err();
+        assert!(matches!(explicit_error, SessionError::UnsupportedTool(_)));
     }
 
     #[test]

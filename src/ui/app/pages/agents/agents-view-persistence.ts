@@ -1,14 +1,12 @@
-import {
-  AGENT_HUB_VIEW_MODES,
-  type AgentHubViewMode,
-} from '@/lib/types/agent-hub';
+import type { AgentHubViewMode } from '@/lib/types/agent-hub';
+import { VIEW_ITEMS } from './agents-utils';
 
 export const AGENTS_VIEW_PERSISTENCE_STORAGE_KEY = 'exomind:agentHubViewMode';
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
-const DEFAULT_AGENT_HUB_VIEW_MODE: AgentHubViewMode = 'topology';
-const VALID_VIEW_MODES = new Set<AgentHubViewMode>(AGENT_HUB_VIEW_MODES);
+const DEFAULT_AGENT_HUB_VIEW_MODE: AgentHubViewMode = 'device';
+const VALID_VIEW_MODES = new Set<AgentHubViewMode>(VIEW_ITEMS.map((item) => item.id));
 
 function getDefaultStorage(): StorageLike | null {
   if (typeof window === 'undefined') {

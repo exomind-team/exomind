@@ -8,6 +8,7 @@ use std::sync::{Arc, RwLock};
 
 use futures_util::stream::{self, BoxStream, StreamExt};
 use tokio::sync::{Mutex, broadcast};
+use tokio::task::{JoinError, JoinHandle};
 
 use crate::timeblock::BlockPhase;
 
@@ -28,7 +29,10 @@ use context::collect_context;
 use templates::{
     build_end_prompt, build_feedback_review_prompt, build_start_prompt, system_prompt,
 };
-use tools::{AgentSourceMetadata, SUBMIT_TIMEBLOCK_SUMMARY_TOOL, submit_timeblock_summary_tool};
+use tools::{
+    AgentSourceMetadata, SUBMIT_TIMEBLOCK_SUMMARY_TOOL, SummaryEventWriter,
+    submit_timeblock_summary_tool,
+};
 
 const CONFIG_KEY_ENABLED: &str = "builtin.timeblock_summary.enabled";
 const CONFIG_KEY_SUBSCRIPTIONS: &str = "builtin.timeblock_summary.subscriptions";
@@ -169,7 +173,7 @@ pub struct TimeblockSummaryAgentService {
     signal_pool: Arc<SignalPool>,
     config_store: Arc<ConfigStore>,
     eventlog_store: Arc<EventLogStore>,
-    eventlog_appender: EventLogAppender,
+    event_writer: SummaryEventWriter,
     session_runtime: AgentSessionRuntime,
     energy_registry: Arc<EnergyRegistry>,
     sessions: Arc<RwLock<Vec<AgentSessionRecord>>>,
@@ -179,6 +183,49 @@ pub struct TimeblockSummaryAgentService {
     signal_queue: Arc<Mutex<VecDeque<SignalEvent>>>,
     /// Whether the queue processor loop is currently running.
     processing: Arc<AtomicBool>,
+}
+
+/// Owns the summary listener, startup check, and the model turns they await.
+#[must_use = "retain this handle; dropping it cancels the summary service"]
+pub struct TimeblockSummaryTasks {
+    event_writer: SummaryEventWriter,
+    tasks: Vec<JoinHandle<()>>,
+}
+
+impl TimeblockSummaryTasks {
+    /// Closes intake and output, cancels pending work, and joins every service task.
+    pub async fn stop(&mut self) -> Result<(), JoinError> {
+        self.abort();
+        let mut join_error = None;
+        while let Some(task) = self.tasks.pop() {
+            if let Err(error) = task.await {
+                if !error.is_cancelled() {
+                    tracing::warn!("timeblock_summary: task join failed: {error}");
+                    if join_error.is_none() {
+                        join_error = Some(error);
+                    }
+                }
+            }
+        }
+        match join_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) fn abort(&self) {
+        self.event_writer.close();
+        for task in &self.tasks {
+            task.abort();
+        }
+    }
+}
+
+impl Drop for TimeblockSummaryTasks {
+    fn drop(&mut self) {
+        // Drop cannot join; callers needing a completed shutdown must await stop().
+        self.abort();
+    }
 }
 
 impl TimeblockSummaryAgentService {
@@ -203,7 +250,7 @@ impl TimeblockSummaryAgentService {
             signal_pool,
             config_store,
             eventlog_store,
-            eventlog_appender,
+            event_writer: SummaryEventWriter::new(eventlog_appender),
             session_runtime,
             energy_registry,
             sessions: Arc::new(RwLock::new(Vec::new())),
@@ -224,19 +271,19 @@ impl TimeblockSummaryAgentService {
             .unwrap_or_default()
     }
 
-    /// Spawn the signal listener as a background tokio task.
-    pub fn spawn(self: &Arc<Self>) {
+    /// Starts the service and returns ownership of all its background work.
+    pub fn spawn(self: &Arc<Self>) -> TimeblockSummaryTasks {
         let service = Arc::clone(self);
         let mut rx = self.signal_pool.subscribe();
 
         // On startup, check if there's an active timeblock that needs processing
         let service_clone = Arc::clone(&service);
-        tokio::spawn(async move {
+        let startup_task = tokio::spawn(async move {
             service_clone.check_active_timeblock_on_startup().await;
         });
 
-        tokio::spawn(async move {
-            loop {
+        let listener_task = tokio::spawn(async move {
+            while !service.event_writer.is_closed() {
                 match rx.recv().await {
                     Ok(event) => {
                         if let Err(e) = service.handle_signal(&event).await {
@@ -261,6 +308,11 @@ impl TimeblockSummaryAgentService {
                 }
             }
         });
+
+        TimeblockSummaryTasks {
+            event_writer: self.event_writer.clone(),
+            tasks: vec![startup_task, listener_task],
+        }
     }
 
     /// Check if there's an active timeblock on startup and process if needed
@@ -269,7 +321,7 @@ impl TimeblockSummaryAgentService {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         // Check if agent is enabled
-        if !self.enabled.load(Ordering::Relaxed) {
+        if self.event_writer.is_closed() || !self.enabled.load(Ordering::Relaxed) {
             return;
         }
 
@@ -285,6 +337,10 @@ impl TimeblockSummaryAgentService {
     }
 
     async fn handle_signal(&self, event: &SignalEvent) -> Result<(), String> {
+        if self.event_writer.is_closed() {
+            return Ok(());
+        }
+
         // Re-read config in case it changed at runtime (must be BEFORE AtomicBool check)
         if let Ok(Some(entry)) = self.config_store.get("user", CONFIG_KEY_ENABLED) {
             let new_enabled = entry.value.parse::<bool>().unwrap_or(false);
@@ -715,6 +771,10 @@ impl TimeblockSummaryAgentService {
         gap_context: Option<TimeBlockData>,
         user_id: &str,
     ) -> Result<(), String> {
+        if self.event_writer.is_closed() {
+            return Ok(());
+        }
+
         // 1. Auto-collect context
 
         // Set dynamic initial energy based on block transitions
@@ -747,6 +807,10 @@ impl TimeblockSummaryAgentService {
         )
         .await;
 
+        if self.event_writer.is_closed() {
+            return Ok(());
+        }
+
         // 2. Load provider profile
         let provider = match crate::agent::session::resolve_provider_profile_from_runtime(
             &self.session_runtime,
@@ -761,7 +825,7 @@ impl TimeblockSummaryAgentService {
                     Some(user_id)
                 };
                 let _ = self
-                    .eventlog_appender
+                    .event_writer
                     .append_event(
                         opt_uid,
                         EventRecord {
@@ -800,7 +864,7 @@ impl TimeblockSummaryAgentService {
         let (tool_def, tool_fn) = submit_timeblock_summary_tool(
             block.clone(),
             kind.clone(),
-            self.eventlog_appender.clone(),
+            self.event_writer.clone(),
             Arc::clone(&source_meta),
             user_id.to_string(),
         );
@@ -944,6 +1008,10 @@ impl TimeblockSummaryAgentService {
 
         // 5. Energy-driven broker loop
         loop {
+            if self.event_writer.is_closed() {
+                return Ok(());
+            }
+
             // Check energy
             let current_energy = self
                 .energy_registry
@@ -996,7 +1064,11 @@ impl TimeblockSummaryAgentService {
                 new_user_message: None,
             };
 
-            match AgentTurnBroker.run(request).await {
+            let result = AgentTurnBroker.run(request).await;
+            if self.event_writer.is_closed() {
+                return Ok(());
+            }
+            match result {
                 Ok(AgentTurnResult::Final { assistant_turn }) => {
                     // Content-based energy consumption
                     let turn_cost = calculate_turn_cost(&assistant_turn.content_blocks);
@@ -1419,7 +1491,7 @@ impl TimeblockSummaryAgentService {
             Some(user_id)
         };
         let _ = self
-            .eventlog_appender
+            .event_writer
             .append_event(
                 opt_uid,
                 EventRecord {
@@ -1468,7 +1540,7 @@ impl TimeblockSummaryAgentService {
             Some(user_id)
         };
         let _ = self
-            .eventlog_appender
+            .event_writer
             .append_event(
                 opt_uid,
                 EventRecord {

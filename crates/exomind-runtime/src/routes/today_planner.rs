@@ -529,7 +529,9 @@ async fn start_segment(
             name: Some(segment.title.clone()),
             mode: Some("countdown".to_string()),
             target_minutes: Some(duration_minutes_from_segment(&segment)),
-            task_ids: Some(segment.linked_task_ids.clone()),
+            // Alpha keeps scheduling and timing but retires task-domain writes.
+            // Stored legacy associations remain as reference data only.
+            task_ids: Some(Vec::new()),
             source_planned_block_id: Some(segment.id.clone()),
             feedback: None,
             task_status_outcomes: None,

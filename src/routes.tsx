@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Waypoints, SquareCheckBig, Brain, PanelLeftClose, PanelLeftOpen, Orbit, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, Brain, PanelLeftClose, PanelLeftOpen, Orbit, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getGoalsPageEnabled, subscribeGoalsPageEnabledChanges } from '@/config/goals-page-enabled';
@@ -18,18 +18,11 @@ import { useTauriFullscreenShortcut } from '@/ui/app/hooks/useTauriFullscreenSho
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
-import { ProposalNotificationBadge } from '@/ui/app/components/ProposalNotificationBadge';
-import { ProposalNotificationCoordinator } from '@/ui/app/components/ProposalNotificationCoordinator';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
 import { TimeblockEndAlertCoordinator } from '@/ui/app/components/TimeblockEndAlertCoordinator';
 import { UpdateToast } from '@/ui/components/UpdateToast';
 import { requestReminderCompose } from '@/ui/stores/reminder-ui-store';
 import type { CommandContext } from '@/lib/types/command-palette';
-import {
-  TASKS_LAST_PATH_KEY,
-  resolveTasksRestorePath,
-  shouldForceTasksMain,
-} from '@/ui/app/pages/task-route-memory';
 import {
   getEventlogPathForTab,
   resolveEventlogRestoreTab,
@@ -47,39 +40,9 @@ const SettingsPage = lazy(async () => {
 });
 
 
-const TasksPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/TasksPage');
-  return { default: module.TasksPage };
-});
-
-const TaskDagPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/TaskDagPage');
-  return { default: module.TaskDagPage };
-});
-
-const TaskTimeblocksPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/TaskTimeblocksPage');
-  return { default: module.TaskTimeblocksPage };
-});
-
-const TaskTimelinePage = lazy(async () => {
-  const module = await import('@/ui/app/pages/TaskTimelinePage');
-  return { default: module.TaskTimelinePage };
-});
-
 const RemindersPage = lazy(async () => {
   const module = await import('@/ui/app/pages/RemindersPage');
   return { default: module.RemindersPage };
-});
-
-const ProposalInboxPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/proposals/ProposalInboxPage');
-  return { default: module.ProposalInboxPage };
-});
-
-const TaskDetailPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/TaskDetailPage');
-  return { default: module.TaskDetailPage };
 });
 
 const TimeBlockDetailPage = lazy(async () => {
@@ -107,11 +70,6 @@ const UpdatePage = lazy(async () => {
   return { default: module.UpdatePage };
 });
 
-const AgentDetailPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/agents/AgentDetailPage');
-  return { default: module.AgentDetailPage };
-});
-
 const ActorDetailPage = lazy(async () => {
   const module = await import('@/ui/app/pages/agents/ActorDetailPage');
   return { default: module.ActorDetailPage };
@@ -120,21 +78,6 @@ const ActorDetailPage = lazy(async () => {
 const SignalDetailPage = lazy(async () => {
   const module = await import('@/ui/app/pages/agents/SignalDetailPage');
   return { default: module.SignalDetailPage };
-});
-
-const AgentConversationPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/agents/AgentConversationPage');
-  return { default: module.AgentConversationPage };
-});
-
-const AgentMarketPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/agents/AgentMarketPage');
-  return { default: module.AgentMarketPage };
-});
-
-const PtyTerminalPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/agents/PtyTerminalPage');
-  return { default: module.PtyTerminalPage };
 });
 
 function PageFallback() {
@@ -161,10 +104,7 @@ type ShellNavItem = {
 };
 
 function isMobileFullscreenRoute(pathname: string): boolean {
-  return pathname.startsWith('/agents/chat/')
-    || pathname.startsWith('/agents/agent/')
-    || pathname.startsWith('/agents/actor/')
-    || pathname.startsWith('/agents/pty/');
+  return pathname.startsWith('/agents/actor/');
 }
 
 function MobileShell({
@@ -210,8 +150,6 @@ function MobileShell({
           <CommandPalette context={commandContext} />
         ) : null}
 
-        {!fullscreenRoute ? <ProposalNotificationBadge placement="mobile-floating" /> : null}
-
         {!fullscreenRoute ? (
           <nav
             data-testid="mobile-bottom-tab"
@@ -222,7 +160,6 @@ function MobileShell({
                 const Icon = item.icon;
                 const active = locationPath === item.path
                   || (item.path === '/eventlog' && locationPath.startsWith('/eventlog'))
-                  || (item.path === '/tasks' && (locationPath.startsWith('/tasks') || locationPath === '/proposals' || locationPath.startsWith('/proposals/')))
                   || (item.path === '/goals' && locationPath.startsWith('/goals'))
                   || (item.path === '/agents' && locationPath.startsWith('/agents'))
                   || (item.path === '/settings' && locationPath.startsWith('/settings'));
@@ -263,7 +200,6 @@ function DesktopSidebar({
 }) {
   const desktopNavItems = [
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/' || path.startsWith('/eventlog') },
-    { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') || path === '/proposals' || path.startsWith('/proposals/') },
     ...(goalsPageEnabled ? [{
       key: 'goals',
       title: '目标',
@@ -352,9 +288,6 @@ function DesktopSidebar({
             >
               <Icon size={16} />
               {collapsed ? <span className="sr-only">{item.title}</span> : <span>{item.title}</span>}
-              {item.key === 'tasks' ? (
-                <ProposalNotificationBadge placement={collapsed ? 'desktop-compact' : 'desktop'} />
-              ) : null}
             </Link>
           );
         })}
@@ -508,7 +441,6 @@ function NewLayout() {
 
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
-    { title: '任务', path: '/tasks', icon: SquareCheckBig },
     ...(goalsPageEnabled ? [{ title: '目标', path: '/goals', icon: Orbit }] : []),
     ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
     { title: '设置', path: '/settings', icon: Settings },
@@ -527,7 +459,6 @@ function NewLayout() {
         />
         {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
         <TimeblockEndAlertCoordinator />
-        <ProposalNotificationCoordinator />
         <ReminderNotifier />
         <UpdateToast />
       </>
@@ -544,7 +475,6 @@ function NewLayout() {
         commandContext={commandContext}
       />
       <TimeblockEndAlertCoordinator />
-      <ProposalNotificationCoordinator />
       <ReminderNotifier />
       <UpdateToast />
     </>
@@ -688,48 +618,63 @@ const newEventlogTimeblockDetailRoute = createRoute({
   },
 });
 
-const newTasksRoute = createRoute({
+const removedTasksRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/tasks',
-  component: function NewTasks() {
+  component: function RemovedTasks() {
     const navigate = useNavigate();
-    const location = useLocation();
-
-    // Redirect to the last visited tasks sub-path (e.g. /tasks/dag, /tasks/:id)
     useEffect(() => {
-      const currentSearch = location.searchStr ?? '';
-      const saved = sessionStorage.getItem(TASKS_LAST_PATH_KEY);
-
-      if (shouldForceTasksMain(currentSearch)) {
-        sessionStorage.removeItem(TASKS_LAST_PATH_KEY);
-        void navigate({ to: '/tasks', replace: true });
-        return;
-      }
-
-      const restorePath = resolveTasksRestorePath(saved, currentSearch);
-      if (restorePath) {
-        void navigate({ to: restorePath, replace: true });
-        return;
-      }
-    }, [location.searchStr, navigate]);
-
-    return (
-      <LazyPage>
-        <TasksPage />
-      </LazyPage>
-    );
+      void navigate({ to: '/eventlog', replace: true });
+    }, [navigate]);
+    return null;
   },
 });
 
-const newProposalsRoute = createRoute({
+const removedTaskSubroute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/$legacyTaskId',
+  component: function RemovedTaskSubroute() {
+    const navigate = useNavigate();
+    useEffect(() => {
+      void navigate({ to: '/eventlog', replace: true });
+    }, [navigate]);
+    return null;
+  },
+});
+
+const removedTaskTimeblockRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/block/$legacyBlockId',
+  component: function RemovedTaskTimeblock() {
+    const navigate = useNavigate();
+    useEffect(() => {
+      void navigate({ to: '/eventlog', replace: true });
+    }, [navigate]);
+    return null;
+  },
+});
+
+const removedProposalsRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/proposals',
-  component: function NewProposals() {
-    return (
-      <LazyPage>
-        <ProposalInboxPage />
-      </LazyPage>
-    );
+  component: function RemovedProposals() {
+    const navigate = useNavigate();
+    useEffect(() => {
+      void navigate({ to: '/eventlog', replace: true });
+    }, [navigate]);
+    return null;
+  },
+});
+
+const removedProposalSubroute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/proposals/$legacyProposalId',
+  component: function RemovedProposalSubroute() {
+    const navigate = useNavigate();
+    useEffect(() => {
+      void navigate({ to: '/eventlog', replace: true });
+    }, [navigate]);
+    return null;
   },
 });
 
@@ -740,72 +685,6 @@ const newRemindersRoute = createRoute({
     return (
       <LazyPage>
         <RemindersPage />
-      </LazyPage>
-    );
-  },
-});
-
-const newTaskDagRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/tasks/dag',
-  component: function NewTaskDag() {
-    return (
-      <LazyPage>
-        <TaskDagPage />
-      </LazyPage>
-    );
-  },
-});
-
-const newTaskTimeblocksRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/tasks/timeblocks',
-  component: function NewTaskTimeblocks() {
-    const navigate = useNavigate();
-
-    useEffect(() => {
-      void navigate({ to: '/tasks/timeline', replace: true });
-    }, [navigate]);
-
-    return (
-      <LazyPage>
-        <TaskTimeblocksPage />
-      </LazyPage>
-    );
-  },
-});
-
-const newTaskTimelineRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/tasks/timeline',
-  component: function NewTaskTimeline() {
-    return (
-      <LazyPage>
-        <TaskTimelinePage />
-      </LazyPage>
-    );
-  },
-});
-
-const newTaskDetailRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/tasks/$taskId',
-  component: function NewTaskDetail() {
-    return (
-      <LazyPage>
-        <TaskDetailPage />
-      </LazyPage>
-    );
-  },
-});
-
-const newTimeblockDetailRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/tasks/block/$blockId',
-  component: function NewTimeblockDetail() {
-    return (
-      <LazyPage>
-        <TimeBlockDetailPage />
       </LazyPage>
     );
   },
@@ -867,17 +746,18 @@ const newUpdateRoute = createRoute({
   },
 });
 
-const newAgentDetailRoute = createRoute({
+function RemovedAgentManagementPage() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    void navigate({ to: '/agents', replace: true });
+  }, [navigate]);
+  return null;
+}
+
+const removedAgentDetailRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/agents/agent/$agentId',
-  component: function NewAgentDetail() {
-    const { agentId } = useParams({ strict: false }) as { agentId?: string };
-    return (
-      <LazyPage>
-        <AgentDetailPage agentId={agentId} />
-      </LazyPage>
-    );
-  },
+  component: RemovedAgentManagementPage,
 });
 
 const newActorDetailRoute = createRoute({
@@ -905,42 +785,22 @@ const newSignalDetailRoute = createRoute({
   },
 });
 
-const newAgentConversationRoute = createRoute({
+const removedAgentConversationRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/agents/chat/$agentId',
-  component: function NewAgentConversation() {
-    const { agentId } = useParams({ strict: false }) as { agentId?: string };
-    return (
-      <LazyPage>
-        <AgentConversationPage agentId={agentId} />
-      </LazyPage>
-    );
-  },
+  component: RemovedAgentManagementPage,
 });
 
-const newPtyTerminalRoute = createRoute({
+const removedPtyTerminalRoute = createRoute({
   getParentRoute: () => newRootRoute,
-  path: '/agents/pty/$ptyId',
-  component: function NewPtyTerminal() {
-    const { ptyId } = useParams({ strict: false }) as { ptyId?: string };
-    return (
-      <LazyPage>
-        <PtyTerminalPage ptyId={ptyId} />
-      </LazyPage>
-    );
-  },
+  path: '/agents/pty/$legacyPtyId',
+  component: RemovedAgentManagementPage,
 });
 
-const newAgentMarketRoute = createRoute({
+const removedAgentMarketRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/agents/market',
-  component: function NewAgentMarket() {
-    return (
-      <LazyPage>
-        <AgentMarketPage />
-      </LazyPage>
-    );
-  },
+  component: RemovedAgentManagementPage,
 });
 
 const newRouteTree = newRootRoute.addChildren([
@@ -950,25 +810,23 @@ const newRouteTree = newRootRoute.addChildren([
   newEventlogRecordRoute,
   newEventlogTodayRoute,
   newEventlogTimeblockDetailRoute,
-  newTasksRoute,
-  newProposalsRoute,
-  newTaskDagRoute,
-  newTaskTimeblocksRoute,
-  newTaskTimelineRoute,
+  removedTasksRoute,
+  removedTaskSubroute,
+  removedTaskTimeblockRoute,
+  removedProposalsRoute,
+  removedProposalSubroute,
   newRemindersRoute,
-  newTimeblockDetailRoute,
-  newTaskDetailRoute,
   newGoalsRoute,
   newSettingsRoute,
   newUserManageRoute,
   newAgentsRoute,
   newUpdateRoute,
-  newAgentDetailRoute,
+  removedAgentDetailRoute,
   newActorDetailRoute,
   newSignalDetailRoute,
-  newAgentConversationRoute,
-  newPtyTerminalRoute,
-  newAgentMarketRoute,
+  removedAgentConversationRoute,
+  removedPtyTerminalRoute,
+  removedAgentMarketRoute,
 ]);
 
 const appRouter = createRouter({ routeTree: newRouteTree });

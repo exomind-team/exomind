@@ -1,6 +1,6 @@
 [package]
 name = "exomind"
-version = "0.5.1"
+version = "0.6.0-alpha04"
 description = "ExoMind - Your Life Update Assistant"
 authors = ["exo-mind.ai"]
 edition = "2021"
@@ -24,7 +24,7 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"

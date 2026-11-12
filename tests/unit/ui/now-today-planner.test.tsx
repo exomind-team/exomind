@@ -4,11 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NowTodayTab } from '@/ui/app/components/NowTodayTab';
 import type {
-  ActiveBlockData,
   TodayPlannerSegment,
   TodayPlannerWindow,
 } from '@/lib/types/event';
-import type { TaskNode } from '@/lib/types/task';
 
 const getTaskMock = vi.fn();
 const listTasksMock = vi.fn();
@@ -54,28 +52,6 @@ function plannerTs(clock: string): number {
 
 function plannerTsOn(dateKey: string, clock: string): number {
   return new Date(`${dateKey}T${clock}:00+08:00`).getTime();
-}
-
-function makeTask(input: Partial<TaskNode> & Pick<TaskNode, 'id' | 'title'>): TaskNode {
-  const now = plannerTs('08:00');
-  return {
-    id: input.id,
-    title: input.title,
-    status: input.status ?? 'pending',
-    priority: input.priority ?? 'medium',
-    dependsOn: input.dependsOn ?? [],
-    tags: input.tags ?? [],
-    createdAt: input.createdAt ?? now,
-    updatedAt: input.updatedAt ?? now,
-    description: input.description,
-    estimatedMinutes: input.estimatedMinutes,
-    completedAt: input.completedAt,
-    dueAt: input.dueAt,
-    source: input.source,
-    parentId: input.parentId,
-    doneCondition: input.doneCondition,
-    timeBlockIds: input.timeBlockIds,
-  };
 }
 
 function makeSegment(
@@ -229,7 +205,7 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
     expect(screen.getByText('Short Break')).toBeInTheDocument();
   });
 
-  it('can link tasks to a work segment and start it（工作片段可关联任务并开始执行）', async () => {
+  it('starts a work segment without exposing or writing task associations（UI 不展示或编辑任务关联；RT 合同另验）', async () => {
     const snapshotWindow = makeWindow({
       id: 'window-2',
       title: '下午推进',
@@ -244,6 +220,7 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
           plannedStartAt: plannerTs('13:00'),
           plannedEndAt: plannerTs('13:45'),
           order: 0,
+          linkedTaskIds: ['task-a'],
         }),
         makeSegment({
           id: 'segment-break-3',
@@ -257,7 +234,8 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
         }),
       ],
     });
-    const activeBlock: ActiveBlockData = {
+    getTodayPlannerMock.mockResolvedValue({ date: '2026-03-27', windows: [snapshotWindow] });
+    startWorkSegmentMock.mockResolvedValue({
       startId: 'active-segment-work-3',
       name: 'Deep Work A',
       mode: 'countdown',
@@ -271,19 +249,7 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
       taskAssociationLog: [],
       targetMinutes: 45,
       sourcePlannedBlockId: 'segment-work-3',
-    };
-
-    getTodayPlannerMock.mockResolvedValue({ date: '2026-03-27', windows: [snapshotWindow] });
-    updatePlannedSegmentMock.mockResolvedValue({
-      ...snapshotWindow.segments[0],
-      linkedTaskIds: ['task-a'],
-      status: 'pending',
     });
-    startWorkSegmentMock.mockResolvedValue(activeBlock);
-    listTasksMock.mockResolvedValue([
-      makeTask({ id: 'task-a', title: '任务甲', status: 'pending' }),
-      makeTask({ id: 'task-b', title: '任务乙', status: 'in_progress' }),
-    ]);
 
     render(<NowTodayTab />);
 
@@ -291,27 +257,23 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
 
     expect(await screen.findByTestId('planner-segment-inspector')).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByTestId('planner-segment-task-task-a'));
-    fireEvent.click(screen.getByRole('button', { name: '保存工作片段' }));
-
-    await waitFor(() => {
-      expect(updatePlannedSegmentMock).toHaveBeenCalledWith('segment-work-3', {
-        linkedTaskIds: ['task-a'],
-      });
-    });
+    expect(screen.queryByTestId('planner-segment-task-list')).not.toBeInTheDocument();
+    expect(screen.queryByText(/任务/)).not.toBeInTheDocument();
+    expect(listTasksMock).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '开始这个工作片段' }));
 
     await waitFor(() => {
       expect(startWorkSegmentMock).toHaveBeenCalledWith('segment-work-3');
     });
+    expect(updatePlannedSegmentMock).not.toHaveBeenCalled();
+    expect(getTaskMock).not.toHaveBeenCalled();
   });
 
-  it('shows only the first 10 task chips and uses a dropdown for overflow tasks（任务过多时只平铺前 10 个，其余走下拉）', async () => {
-    const user = userEvent.setup();
+  it('hides stored task associations from the Alpha planner（Alpha 计划视图不显示任务关联）', async () => {
     const snapshotWindow = makeWindow({
       id: 'window-overflow',
-      title: '任务太多测试',
+      title: '计划区间测试',
       plannedStartAt: plannerTs('15:00'),
       plannedEndAt: plannerTs('16:00'),
       segments: [
@@ -323,6 +285,7 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
           plannedStartAt: plannerTs('15:00'),
           plannedEndAt: plannerTs('15:45'),
           order: 0,
+          linkedTaskIds: Array.from({ length: 12 }, (_, index) => `task-${index + 1}`),
         }),
         makeSegment({
           id: 'segment-break-overflow',
@@ -338,18 +301,6 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
     });
 
     getTodayPlannerMock.mockResolvedValue({ date: '2026-03-27', windows: [snapshotWindow] });
-    listTasksMock.mockResolvedValue(
-      Array.from({ length: 12 }, (_, index) => makeTask({
-        id: `task-${index + 1}`,
-        title: `任务 ${index + 1}`,
-        status: 'pending',
-      })),
-    );
-    updatePlannedSegmentMock.mockResolvedValue({
-      ...snapshotWindow.segments[0],
-      linkedTaskIds: ['task-11'],
-      status: 'pending',
-    });
 
     render(<NowTodayTab />);
 
@@ -357,21 +308,10 @@ describe('NowTodayTab Today Planner timeline（时间线版今日计划器）', 
 
     expect(await screen.findByTestId('planner-segment-inspector')).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(screen.getAllByTestId(/planner-segment-task-task-/)).toHaveLength(10);
-    });
-    expect(screen.getByTestId('planner-segment-task-task-10')).toBeInTheDocument();
-    expect(screen.queryByTestId('planner-segment-task-task-11')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('combobox', { name: '更多任务' }));
-    await user.click(await screen.findByRole('option', { name: '任务 11 · 待办' }));
-    fireEvent.click(screen.getByRole('button', { name: '保存工作片段' }));
-
-    await waitFor(() => {
-      expect(updatePlannedSegmentMock).toHaveBeenCalledWith('segment-work-overflow', {
-        linkedTaskIds: ['task-11'],
-      });
-    });
+    expect(screen.queryByTestId('planner-segment-task-list')).not.toBeInTheDocument();
+    expect(screen.queryByText(/个任务|关联任务/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: '更多任务' })).not.toBeInTheDocument();
+    expect(listTasksMock).not.toHaveBeenCalled();
   });
 
   it('reflows a work segment ending at midnight using the next-day timestamp（跨午夜重算会把 00:00 解释为次日）', async () => {

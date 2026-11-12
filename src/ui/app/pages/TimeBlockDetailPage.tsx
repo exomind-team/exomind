@@ -1,10 +1,9 @@
 import {
   Link,
   useLocation,
-  useNavigate,
   useParams,
 } from "@tanstack/react-router";
-import { ArrowLeft, Waypoints } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -15,13 +14,10 @@ import {
 } from "@/config/desktop-adaptive";
 import {
   getEventLogService,
-  getTaskService,
   getTimeBlockService,
 } from "@/lib/services";
 import type { EventLogListOptions } from "@/lib/environment/interfaces/eventlog.port";
 import {
-  resolveActiveBlockTaskIds,
-  resolveTimeBlockRelatedTaskIds,
   type ActiveBlockData,
   type Event,
   type TimeBlock,
@@ -31,11 +27,6 @@ import { PerfTrace } from "@/lib/utils/perf-trace";
 import { buildTimeBlockDetailView } from "./timeblock-detail-view";
 import { TaskBreadcrumb } from "@/ui/app/components/TaskBreadcrumb";
 import { useIsDesktop } from "@/ui/app/hooks/useIsDesktop";
-import { buildTaskDomainBackLink } from "./task-domain-routing";
-
-function resolveActiveTaskIds(block: ActiveBlockData): string[] {
-  return resolveActiveBlockTaskIds(block);
-}
 
 function toneDotClassName(
   tone: "neutral" | "success" | "warning" | "danger",
@@ -91,8 +82,8 @@ function buildRunningTimeBlock(block: ActiveBlockData, now: number): TimeBlock {
     tags: new Set(["block_feedback"]),
     startTime: block.startTime,
     endTime: now,
-    taskIds: resolveActiveTaskIds(block),
-    taskAssociationLog: block.taskAssociationLog ?? [],
+    taskIds: [],
+    taskAssociationLog: [],
   };
 }
 
@@ -129,7 +120,7 @@ function TimeBlockDetailHeader({
         className="sticky top-0 z-10 -mx-8 mb-4 border-b border-[#F0ECE8] bg-[#FAF7F5]/95 px-8 py-4 backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/95"
       >
         <div className="mx-auto max-w-7xl">
-          <TaskBreadcrumb segments={[backLink]} current={{ label: "任务" }} />
+          <TaskBreadcrumb segments={[backLink]} current={{ label: "时间块" }} />
         </div>
       </header>
     );
@@ -149,7 +140,7 @@ function TimeBlockDetailHeader({
       </Link>
       <div className="min-w-0 flex-1 pt-0.5">
         <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
-          任务
+          时间块
         </h1>
       </div>
       <div className="h-8 w-8 shrink-0" aria-hidden="true" />
@@ -285,44 +276,16 @@ function TimeBlockDetailLoadingState({
 export function TimeBlockDetailPage() {
   const { blockId } = useParams({ strict: false }) as { blockId?: string };
   const location = useLocation();
-  const navigate = useNavigate();
   const isDesktop = useIsDesktop();
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabled] = useState(() =>
     getDesktopAdaptiveEnabled(),
   );
   const [block, setBlock] = useState<TimeBlock | null>(null);
-  const [tasksById, setTasksById] = useState<Map<string, TaskNode>>(new Map());
+  const tasksById = useMemo(() => new Map<string, TaskNode>(), []);
   const [eventLogs, setEventLogs] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
-  const isNowDomain = location.pathname.startsWith("/eventlog/");
-  const taskDomainBackLink = buildTaskDomainBackLink(null, "list");
-  const backLink = isNowDomain
-    ? { label: "当下", to: "/eventlog" }
-    : {
-        label: taskDomainBackLink.sourceLabel,
-        to: taskDomainBackLink.to,
-        search: { main: "1" },
-      };
-  const returnTo = block
-    ? isNowDomain
-      ? `/eventlog/timeblocks/${block.startId}`
-      : `/tasks/block/${block.startId}`
-    : undefined;
+  const backLink = { label: "当下", to: "/eventlog" };
   const useDesktopPresentation = isDesktop && desktopAdaptiveEnabled;
-
-  const openTaskDetail = (taskId: string) => {
-    void navigate({
-      to: "/tasks/$taskId",
-      params: { taskId },
-      search: returnTo
-        ? ({
-            blockId: block?.startId ?? "",
-            returnTo,
-            returnLabel: "时间块详情",
-          } as never)
-        : undefined,
-    });
-  };
 
   useEffect(() => {
     return subscribeDesktopAdaptiveChanges(setDesktopAdaptiveEnabled);
@@ -338,7 +301,6 @@ export function TimeBlockDetailPage() {
       setLoading(true);
       try {
         const timeBlockService = getTimeBlockService();
-        const taskService = getTaskService();
         const [blocks, activeBlock] = await Promise.all([
           timeBlockService.loadTimeBlocks(),
           timeBlockService.loadActiveBlock(),
@@ -356,51 +318,34 @@ export function TimeBlockDetailPage() {
           matchedBlock = buildRunningTimeBlock(activeBlock, Date.now());
         }
 
-        const taskIds = matchedBlock
-          ? resolveTimeBlockRelatedTaskIds(matchedBlock)
-          : [];
         const eventQuery = buildTimeBlockEventLogQuery(matchedBlock);
         trace.step("resolve-target-block", {
           found: Boolean(matchedBlock),
-          taskCount: taskIds.length,
           sinceTimestamp: eventQuery?.sinceTimestamp ?? null,
           untilTimestamp: eventQuery?.untilTimestamp ?? null,
         });
 
-        const [tasks, events] = await Promise.all([
-          Promise.all(taskIds.map((taskId) => taskService.getTask(taskId))),
-          eventQuery
-            ? getEventLogService().loadEvents(eventQuery)
-            : Promise.resolve([] as Event[]),
-        ]);
+        const events = eventQuery
+          ? await getEventLogService().loadEvents(eventQuery)
+          : [];
         trace.step("load-related-data", {
           eventCount: events.length,
-          taskCount: tasks.length,
         });
 
         if (disposed) {
           trace.finish({
             eventCount: events.length,
             outcome: "disposed",
-            taskCount: tasks.length,
           });
           return;
         }
         setBlock(matchedBlock);
-        setTasksById(
-          new Map(
-            tasks
-              .filter((task): task is TaskNode => Boolean(task))
-              .map((task) => [task.id, task]),
-          ),
-        );
         setEventLogs(events);
         setLoading(false);
         trace.finish({
           eventCount: events.length,
           matchedBlockId: matchedBlock?.startId ?? null,
           outcome: "applied",
-          taskCount: tasks.length,
         });
       } catch (error) {
         trace.fail(error);
@@ -512,68 +457,6 @@ export function TimeBlockDetailPage() {
             ) : null}
           </section>
 
-          <section className="rounded-2xl border border-[#E7E5E4] bg-white p-5 dark:border-[#292524] dark:bg-[#1C1917]">
-            <h2 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
-              关联任务
-            </h2>
-            <div className="mt-3 space-y-2">
-              {view.linkedTasks.length > 0 ? (
-                view.linkedTasks.map((task) => (
-                  <div
-                    key={task.taskId}
-                    role="link"
-                    tabIndex={0}
-                    aria-label={`打开任务详情：${task.title}`}
-                    onClick={() => {
-                      openTaskDetail(task.taskId);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") {
-                        return;
-                      }
-                      event.preventDefault();
-                      openTaskDetail(task.taskId);
-                    }}
-                    className="group relative cursor-pointer overflow-hidden rounded-xl border border-[#E7E5E4] px-3 py-2 transition-colors hover:bg-[#F8F5F2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C75B3A]/40 dark:border-[#3F3F46] dark:hover:bg-[#292524]"
-                  >
-                    <div className="relative flex items-center justify-between gap-3">
-                      <div
-                        aria-hidden="true"
-                        className="pointer-events-none min-w-0 flex-1 rounded-lg px-1 py-0.5"
-                      >
-                        <p className="truncate text-sm text-[#1C1917] dark:text-[#FAFAF9]">
-                          {task.title}
-                        </p>
-                        <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                          {task.outcome ?? "未记录结果"}
-                        </p>
-                      </div>
-                      <div className="relative z-10 flex shrink-0 items-center self-center pointer-events-auto">
-                        <Link
-                          to="/tasks/dag"
-                          search={{ focus: task.taskId, locate: "1" } as never}
-                          aria-label={`在任务依赖图中定位：${task.title}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                          }}
-                          onKeyDown={(event) => {
-                            event.stopPropagation();
-                          }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#57534E] transition-colors hover:bg-[#E7E3E0] dark:bg-[#292524] dark:text-[#D6D3D1] dark:hover:bg-[#3C3836]"
-                        >
-                          <Waypoints size={14} />
-                        </Link>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">
-                  这个时间块没有关联任务。
-                </p>
-              )}
-            </div>
-          </section>
         </div>
 
         <section className="rounded-2xl border border-[#E7E5E4] bg-white p-5 dark:border-[#292524] dark:bg-[#1C1917]">

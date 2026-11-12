@@ -62,6 +62,8 @@ vi.mock('@/ui/app/pages/agents/ApiAgentTabView', () => ({
 
 describe('agents page api agent tab（网络页 API Agent 页签）', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
     apiAgentTabFlagState.enabled = false;
     serviceMocks.getTopology.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.topology);
     serviceMocks.getDeviceView.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.deviceGroups);
@@ -91,17 +93,18 @@ describe('agents page api agent tab（网络页 API Agent 页签）', () => {
     expect(screen.queryByRole('tab', { name: 'API Agent' })).not.toBeInTheDocument();
   });
 
-  it('shows the API Agent tab and opens the dedicated view when the flag is on（开关开启时显示 API Agent 页签并进入独立页面）', async () => {
+  it('keeps API Agent disabled and restores the device view when the old flag is on（旧开关不能恢复 API Agent）', async () => {
     apiAgentTabFlagState.enabled = true;
+    localStorage.setItem('exomind:agentHubViewMode', 'api-agent');
 
     render(<AgentsPage />);
     await waitFor(() => {
-      expect(screen.getByRole('tab', { name: 'API Agent' })).toBeInTheDocument();
+      expect(screen.getByTestId('agent-device-view')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('tab', { name: 'API Agent' }));
-
-    expect(await screen.findByTestId('mock-api-agent-tab-view')).toBeInTheDocument();
-    expect(screen.getByText('API Agent View')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'API Agent' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mock-api-agent-tab-view')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '信号拓扑' }));
+    expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
   });
 });

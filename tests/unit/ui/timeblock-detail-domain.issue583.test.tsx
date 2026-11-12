@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { TimeBlockDetailPage } from "@/ui/app/pages/TimeBlockDetailPage";
 import type { EventLogListOptions } from "@/lib/environment/interfaces/eventlog.port";
 import type { ActiveBlockData, TimeBlock } from "@/lib/types/event";
@@ -154,10 +154,11 @@ describe("TimeBlockDetailPage issue #583 domain routing", () => {
       "href",
       "/eventlog",
     );
-    expect(screen.getByText("任务")).toBeInTheDocument();
+    expect(screen.queryByText("任务")).not.toBeInTheDocument();
+    expect(getTaskMock).not.toHaveBeenCalled();
   });
 
-  it("keeps 任务 breadcrumb when entered from tasks domain", async () => {
+  it("returns to 当下 even when mounted with a legacy task URL", async () => {
     useIsDesktopMock.mockReturnValue(true);
     getDesktopAdaptiveEnabledMock.mockReturnValue(true);
     window.history.replaceState({}, "", "/tasks/block/block-1");
@@ -168,11 +169,11 @@ describe("TimeBlockDetailPage issue #583 domain routing", () => {
       expect(loadTimeBlocksMock).toHaveBeenCalled();
     });
 
-    expect(screen.getAllByText("任务")[0]?.closest("a")).toHaveAttribute(
+    expect(screen.getByText("当下").closest("a")).toHaveAttribute(
       "href",
-      "/tasks?main=1",
+      "/eventlog",
     );
-    expect(screen.getAllByText("任务").length).toBeGreaterThan(0);
+    expect(screen.queryByText("任务")).not.toBeInTheDocument();
   });
 
   it("keeps timeblock detail shell visible while loading（加载中也应保留时间块详情页壳层）", () => {
@@ -193,7 +194,7 @@ describe("TimeBlockDetailPage issue #583 domain routing", () => {
     );
   });
 
-  it("builds related-task detail and dag links with timeblock return context", async () => {
+  it("retains event logs without loading or linking stored task associations", async () => {
     loadTimeBlocksMock.mockResolvedValue([
       makeBlock({
         taskIds: ["task-1"],
@@ -218,38 +219,17 @@ describe("TimeBlockDetailPage issue #583 domain routing", () => {
     ]);
     getTaskMock.mockResolvedValue({
       id: "task-1",
-      title: "2026-03-22 洗澡",
+      title: "合成关联任务",
       status: "completed",
     });
     window.history.replaceState({}, "", "/tasks/block/block-1");
 
     render(<TimeBlockDetailPage />);
 
-    const detailLink = await screen.findByRole("link", {
-      name: "打开任务详情：2026-03-22 洗澡",
-    });
-    const dagLink = screen.getByRole("link", {
-      name: "在任务依赖图中定位：2026-03-22 洗澡",
-    });
-
-    fireEvent.click(detailLink);
-    expect(navigateMock).toHaveBeenCalledWith({
-      to: "/tasks/$taskId",
-      params: { taskId: "task-1" },
-      search: {
-        blockId: "block-1",
-        returnTo: "/tasks/block/block-1",
-        returnLabel: "时间块详情",
-      },
-    });
-
-    const dagUrl = new URL(
-      dagLink.getAttribute("href") ?? "",
-      "http://localhost",
-    );
-    expect(dagUrl.pathname).toBe("/tasks/dag");
-    expect(dagUrl.searchParams.get("focus")).toBe("task-1");
-    expect(dagUrl.searchParams.get("locate")).toBe("1");
+    expect(await screen.findByText("联调记录")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /任务详情|任务依赖图/ })).not.toBeInTheDocument();
+    expect(getTaskMock).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
 
     expect(screen.getByText("关联日志")).toBeInTheDocument();
     expect(screen.getByText("联调记录")).toBeInTheDocument();
@@ -262,7 +242,7 @@ describe("TimeBlockDetailPage issue #583 domain routing", () => {
     });
   });
 
-  it("loads historically related tasks from association log instead of only the final taskIds snapshot", async () => {
+  it("ignores historical task association changes while preserving the timeblock view", async () => {
     loadTimeBlocksMock.mockResolvedValue([
       makeBlock({
         taskIds: ["task-1"],
@@ -304,11 +284,9 @@ describe("TimeBlockDetailPage issue #583 domain routing", () => {
 
     render(<TimeBlockDetailPage />);
 
-    expect(
-      await screen.findByRole("link", { name: "打开任务详情：主任务" }),
-    ).toBeInTheDocument();
-    expect(
-      await screen.findByRole("link", { name: "打开任务详情：临时任务" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("时间块详情域测试")).toBeInTheDocument();
+    expect(screen.queryByText("主任务")).not.toBeInTheDocument();
+    expect(screen.queryByText("临时任务")).not.toBeInTheDocument();
+    expect(getTaskMock).not.toHaveBeenCalled();
   });
 });

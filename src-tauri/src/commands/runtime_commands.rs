@@ -1,7 +1,7 @@
 //! Runtime 服务命令（embedded mode，内嵌模式）
 //! 提供桌面端 Runtime 的启动、停止与状态查询。
 
-use crate::dev_instance_paths::resolve_instance_app_data_dir;
+use crate::dev_instance_paths::{resolve_instance_app_data_dir, resolve_instance_runtime_dir};
 use chrono::Utc;
 use exomind_android_keepalive::AndroidRuntimeKeepaliveExt;
 use exomind_runtime::{
@@ -9,13 +9,15 @@ use exomind_runtime::{
     RuntimeStartOptions, DEFAULT_RT_PORT,
 };
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::net::{IpAddr, TcpListener as StdTcpListener, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::{sleep, timeout, Duration};
+use tokio::time::{timeout, Duration};
 
 struct RuntimeInner {
     handle: Option<RuntimeHandle>,
@@ -30,6 +32,9 @@ struct RuntimeInner {
 
 pub struct RuntimeProcessState {
     inner: Mutex<RuntimeInner>,
+    // Start, restart and stop share one owner even while awaiting native I/O.
+    lifecycle: tokio::sync::Mutex<()>,
+    shutdown_requested: AtomicBool,
 }
 
 impl RuntimeProcessState {
@@ -45,7 +50,18 @@ impl RuntimeProcessState {
                 last_error: None,
                 external_runtime: false,
             }),
+            lifecycle: tokio::sync::Mutex::new(()),
+            shutdown_requested: AtomicBool::new(false),
         }
+    }
+
+    /// Prevent new embedded starts once the app begins shutting down.
+    pub fn request_shutdown(&self) {
+        self.shutdown_requested.store(true, Ordering::SeqCst);
+    }
+
+    pub fn shutdown_requested(&self) -> bool {
+        self.shutdown_requested.load(Ordering::SeqCst)
     }
 
     /// Return the HTTP base URL for the embedded runtime (e.g. `http://127.0.0.1:7234`).
@@ -54,7 +70,12 @@ impl RuntimeProcessState {
             .inner
             .lock()
             .map_err(|_| "failed to lock runtime state".to_string())?;
-        Ok(format!("http://{}:{}", inner.host, inner.port))
+        let handle = inner
+            .handle
+            .as_ref()
+            .filter(|handle| handle.is_running())
+            .ok_or_else(|| "embedded runtime is not running".to_string())?;
+        Ok(format!("http://{}:{}", handle.host(), handle.port()))
     }
 }
 
@@ -470,11 +491,11 @@ fn host_changed(current_host: &str, requested_host: &str) -> bool {
     current_host != requested_host
 }
 
-fn should_fallback_to_random_port(
-    requested_port: u16,
-    healthy_runtime_on_requested_port: bool,
-) -> bool {
-    requested_port > 0 && !healthy_runtime_on_requested_port
+fn should_fallback_to_random_port(requested_port: u16, error: &std::io::Error) -> bool {
+    requested_port > 0
+        && (error.kind() == std::io::ErrorKind::AddrInUse
+            || (cfg!(target_os = "windows")
+                && error.kind() == std::io::ErrorKind::PermissionDenied))
 }
 
 fn should_enable_mdns_for_bind_host(host: &str) -> bool {
@@ -713,23 +734,30 @@ async fn probe_runtime_health(host: &str, port: u16) -> bool {
     }
 }
 
-fn mark_external_runtime_running(
-    state: &Arc<RuntimeProcessState>,
-    host: &str,
-    port: u16,
-) -> Result<RuntimeServiceStatus, String> {
-    let mut inner = lock_or_error(state)?;
-    inner.host = host.to_string();
-    inner.port = port;
-    inner.host_id = None;
-    inner.auth_secret = std::env::var("EXOMIND_RT_SECRET").ok();
-    inner.started_at = None;
-    inner.last_error = None;
-    inner.external_runtime = true;
-    Ok(compose_status(&inner, true, None))
+async fn probe_runtime_listener(bind_host: &str, port: u16) -> bool {
+    // Wildcard addresses are not dial targets. A TCP connection detects a
+    // foreign wildcard listener even where a concrete bind appears available.
+    let normalized_host = bind_host.trim().trim_matches(['[', ']']);
+    let probe_host = match normalized_host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) if ip.is_unspecified() => "127.0.0.1",
+        Ok(IpAddr::V6(ip)) if ip.is_unspecified() => "::1",
+        _ => normalized_host,
+    };
+    matches!(
+        timeout(
+            Duration::from_millis(250),
+            tokio::net::TcpStream::connect((probe_host, port)),
+        )
+        .await,
+        Ok(Ok(_))
+    )
 }
 
 pub fn sync_android_runtime_keepalive(app: &AppHandle, enabled: bool, host: &str, port: u16) {
+    let enabled = enabled
+        && !app
+            .try_state::<Arc<RuntimeProcessState>>()
+            .is_some_and(|state| state.shutdown_requested());
     let title = enabled.then_some("ExoMind RT 正在后台运行".to_string());
     let text = enabled.then_some(format!(
         "后台保持 RT 可连接：{}:{}。返回应用后会自动隐藏常驻通知。",
@@ -750,10 +778,15 @@ pub async fn ensure_runtime_started(
     host: Option<String>,
     port: Option<u16>,
 ) -> Result<RuntimeServiceStatus, String> {
-    let mut options = RuntimeStartOptions::default();
+    let _lifecycle = state.lifecycle.lock().await;
+    if state.shutdown_requested() {
+        return Err(
+            "application shutdown is in progress; embedded runtime cannot start".to_string(),
+        );
+    }
     let runtime_host = host
         .map(|value| value.trim().to_string())
-        .unwrap_or_else(|| options.bind_host.clone());
+        .unwrap_or_else(exomind_runtime::configured_bind_host_from_env);
 
     if runtime_host.is_empty() {
         return Err("runtime host is required".to_string());
@@ -762,14 +795,23 @@ pub async fn ensure_runtime_started(
         return Err("invalid host format: must be a valid IP address or hostname".to_string());
     }
 
+    let runtime_dir = resolve_instance_runtime_dir(app)?;
+    // Default reads legacy identity/storage environment paths before its flags
+    // can be changed. Isolated construction has no such side effects.
+    let mut options = RuntimeStartOptions::isolated(runtime_dir.clone());
+    let config_store =
+        exomind_runtime::config::ConfigStore::with_sqlite_path(&runtime_dir.join("config.sqlite"))
+            .map_err(|error| format!("failed to open isolated runtime identity store: {error}"))?;
+    options.host_id = crate::resolve_or_create_runtime_host_id(&config_store)
+        .map_err(|error| format!("failed to resolve isolated runtime host id: {error}"))?;
+    options.device_id = crate::commands::device_commands::get_device_id(app.clone())?;
+    options.auth_secret = std::env::var("EXOMIND_RT_SECRET").ok();
     options.bind_host = runtime_host;
     // Tauri embedded runtime follows UI network mode directly:
     // LAN bind => enable mDNS discovery, loopback bind => disable mDNS.
     //（桌面/移动端内嵌 RT：局域网监听开启 mDNS，本机监听关闭 mDNS）
     options.enable_mdns = should_enable_mdns_for_bind_host(&options.bind_host);
-    if let Some(runtime_port) = port {
-        options.port = runtime_port;
-    }
+    options.port = port.unwrap_or_else(crate::resolve_embedded_runtime_port);
     options.allow_lan_without_auth =
         load_persisted_runtime_lan_no_auth(app).unwrap_or_else(|error| {
             log::warn!(
@@ -777,15 +819,43 @@ pub async fn ensure_runtime_started(
         );
             false
         });
+
+    start_embedded_runtime(&state, options).await
+}
+
+/// The caller holds the lifecycle lock through preparation, startup and commit.
+async fn start_embedded_runtime(
+    state: &Arc<RuntimeProcessState>,
+    options: RuntimeStartOptions,
+) -> Result<RuntimeServiceStatus, String> {
+    start_embedded_runtime_with(state, options, start_with_options).await
+}
+
+// A controlled starter lets tests occupy the port after the probe and exercise
+// the real listener bind conflict, rather than simulating a fabricated error.
+async fn start_embedded_runtime_with<Start, StartFuture>(
+    state: &Arc<RuntimeProcessState>,
+    mut options: RuntimeStartOptions,
+    mut start_runtime: Start,
+) -> Result<RuntimeServiceStatus, String>
+where
+    Start: FnMut(RuntimeStartOptions) -> StartFuture,
+    StartFuture: Future<Output = Result<RuntimeHandle, RuntimeStartError>>,
+{
+    if state.shutdown_requested() {
+        return Err(
+            "application shutdown is in progress; embedded runtime cannot start".to_string(),
+        );
+    }
+
     let requested_host = options.bind_host.clone();
     let requested_port = options.port;
     let requested_auth_secret = options.auth_secret.clone();
-    let mut should_restart_embedded_runtime = false;
 
     // Fast path: already running（快速路径：已在运行）
     // 先在锁内提取 running snapshot，释放锁后再做 async 健康检查。
     let running_snapshot = {
-        let mut inner = lock_or_error(&state)?;
+        let mut inner = lock_or_error(state)?;
         let snapshot = inner
             .handle
             .as_ref()
@@ -814,101 +884,70 @@ pub async fn ensure_runtime_started(
             host, port, is_healthy, host_mismatch, requested_host, requested_port,
         );
         if is_healthy && !host_mismatch {
-            let inner = lock_or_error(&state)?;
-            return Ok(compose_status(&inner, true, None));
+            let inner = lock_or_error(state)?;
+            if state.shutdown_requested() {
+                return Err("application shutdown is in progress".to_string());
+            }
+            if inner
+                .handle
+                .as_ref()
+                .is_some_and(|handle| handle.is_running())
+            {
+                return Ok(compose_status(&inner, true, None));
+            }
         }
         log::warn!(
             "ensure_runtime_started: deciding to restart — healthy={}, host_mismatch={}",
-            is_healthy, host_mismatch,
+            is_healthy,
+            host_mismatch,
         );
-        should_restart_embedded_runtime = true;
     }
 
-    if should_restart_embedded_runtime {
-        ensure_runtime_stopped(state.clone()).await?;
+    let has_handle = lock_or_error(state)?.handle.is_some();
+    if has_handle {
+        stop_embedded_runtime(state).await?;
     }
 
     if requested_port > 0 {
-        // 等待端口可用（处理热重载时旧端口 TIME_WAIT 延迟，最多等 2s）
-        let addr = format!("{}:{}", options.bind_host, options.port);
-        let mut requested_port_available = false;
-        for i in 0..20u8 {
-            if StdTcpListener::bind(&addr).is_ok() {
-                requested_port_available = true;
-                break;
-            }
-            if probe_runtime_health(&options.bind_host, options.port).await {
-                return mark_external_runtime_running(&state, &options.bind_host, options.port);
-            }
-            if i == 0 {
-                log::warn!(
-                    "embedded runtime requested port {} on {} is busy; waiting for release or healthy runtime reuse",
-                    requested_port,
-                    requested_host
-                );
-            }
-            sleep(Duration::from_millis(100)).await;
-        }
-
-        if !requested_port_available {
+        // Probe without HTTP. Only the actual exclusive bind can grant ownership
+        // and close the race between this check and startup.
+        if probe_runtime_listener(&requested_host, requested_port).await {
             log::warn!(
-                "embedded runtime requested port {} on {} remained occupied by a non-runtime listener; retrying on a random available port",
+                "embedded runtime requested port {} on {} has a listener; selecting a port owned by this process",
                 requested_port,
                 requested_host
             );
             options.port = 0;
         } else {
             log::info!(
-                "ensure_runtime_started: requested port {} on {} is available, will bind directly",
-                requested_port,
+                "ensure_runtime_started: no listener reached on requested {}:{}; attempting the owned bind",
                 requested_host,
+                requested_port,
             );
         }
     }
 
     let handle = loop {
-        match start_with_options(options.clone()).await {
+        if state.shutdown_requested() {
+            return Err("application shutdown is in progress".to_string());
+        }
+        match start_runtime(options.clone()).await {
             Ok(handle) => break handle,
             Err(error) => {
                 if let RuntimeStartError::BindListener { source, .. } = &error {
-                    if source.kind() == std::io::ErrorKind::AddrInUse {
-                        let healthy_runtime_on_requested_port =
-                            probe_runtime_health(&requested_host, requested_port).await;
-                        if healthy_runtime_on_requested_port {
-                            return mark_external_runtime_running(
-                                &state,
-                                &requested_host,
-                                requested_port,
-                            );
-                        }
-                        if should_fallback_to_random_port(
+                    if should_fallback_to_random_port(options.port, source) {
+                        log::warn!(
+                            "embedded runtime requested port {} on {} cannot be bound exclusively ({source}); retrying on a random available port",
                             requested_port,
-                            healthy_runtime_on_requested_port,
-                        ) && options.port != 0
-                        {
-                            log::warn!(
-                                "embedded runtime requested port {} on {} became busy during startup; retrying on a random available port",
-                                requested_port,
-                                requested_host
-                            );
-                            options.port = 0;
-                            continue;
-                        }
+                            requested_host
+                        );
+                        options.port = 0;
+                        continue;
                     }
-                }
-
-                // Handle startup race gracefully（处理并发启动竞争）.
-                for _ in 0..10 {
-                    if let Ok(status) = runtime_status_snapshot(state.clone()) {
-                        if status.running {
-                            return Ok(status);
-                        }
-                    }
-                    sleep(Duration::from_millis(25)).await;
                 }
 
                 let message = format!("failed to start embedded runtime: {error}");
-                let mut inner = lock_or_error(&state)?;
+                let mut inner = lock_or_error(state)?;
                 inner.last_error = Some(message.clone());
                 inner.external_runtime = false;
                 return Err(message);
@@ -919,7 +958,10 @@ pub async fn ensure_runtime_started(
     let started_port = handle.port();
     log::info!(
         "ensure_runtime_started: runtime started on {}:{} (requested was {}:{})",
-        started_host, started_port, requested_host, requested_port,
+        started_host,
+        started_port,
+        requested_host,
+        requested_port,
     );
 
     if requested_port == 0 {
@@ -938,7 +980,7 @@ pub async fn ensure_runtime_started(
         );
     }
 
-    let mut inner = lock_or_error(&state)?;
+    let mut inner = lock_or_error(state)?;
     inner.host = started_host;
     inner.port = started_port;
     inner.host_id = Some(handle.host_id().to_string());
@@ -947,14 +989,27 @@ pub async fn ensure_runtime_started(
     inner.last_error = None;
     inner.external_runtime = false;
     inner.handle = Some(handle);
+    if state.shutdown_requested() {
+        // The queued app stop owns this handle; a late startup cannot publish a
+        // usable target after the shutdown request.
+        return Err("application shutdown is in progress".to_string());
+    }
     Ok(compose_status(&inner, true, None))
 }
 
 pub async fn ensure_runtime_stopped(
     state: Arc<RuntimeProcessState>,
 ) -> Result<RuntimeServiceStatus, String> {
+    let _lifecycle = state.lifecycle.lock().await;
+    stop_embedded_runtime(&state).await
+}
+
+/// Called only while the runtime lifecycle lock is held.
+async fn stop_embedded_runtime(
+    state: &Arc<RuntimeProcessState>,
+) -> Result<RuntimeServiceStatus, String> {
     let (mut handle, external_snapshot) = {
-        let mut inner = lock_or_error(&state)?;
+        let mut inner = lock_or_error(state)?;
         (
             inner.handle.take(),
             (inner.external_runtime, inner.host.clone(), inner.port),
@@ -964,7 +1019,7 @@ pub async fn ensure_runtime_stopped(
     if let Some(runtime) = handle.as_mut() {
         if let Err(error) = runtime.stop().await {
             let message = format!("failed to stop embedded runtime: {error}");
-            let mut inner = lock_or_error(&state)?;
+            let mut inner = lock_or_error(state)?;
             inner.handle = handle;
             inner.last_error = Some(message.clone());
             inner.external_runtime = false;
@@ -972,22 +1027,19 @@ pub async fn ensure_runtime_stopped(
         }
     }
 
-    if handle.is_none()
-        && external_snapshot.0
-        && probe_runtime_health(&external_snapshot.1, external_snapshot.2).await
-    {
+    if handle.is_none() && external_snapshot.0 {
         let message = format!(
             "embedded runtime is managed by another process at {}:{}; stop request skipped",
             external_snapshot.1, external_snapshot.2
         );
-        let mut inner = lock_or_error(&state)?;
+        let mut inner = lock_or_error(state)?;
         inner.started_at = None;
         inner.last_error = Some(message.clone());
         inner.external_runtime = true;
         return Ok(compose_status(&inner, true, Some(message)));
     }
 
-    let mut inner = lock_or_error(&state)?;
+    let mut inner = lock_or_error(state)?;
     inner.started_at = None;
     inner.last_error = None;
     inner.external_runtime = false;
@@ -1171,6 +1223,243 @@ pub fn signal_publish_fast(
 mod tests {
     use std::sync::Arc;
 
+    struct IsolatedRuntimeFixture {
+        root: std::path::PathBuf,
+    }
+
+    impl IsolatedRuntimeFixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "exomind-native-runtime-test-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            Self { root }
+        }
+
+        fn options(&self, port: u16) -> exomind_runtime::RuntimeStartOptions {
+            let mut options = exomind_runtime::RuntimeStartOptions::isolated(self.root.clone());
+            options.port = port;
+            options.spawn_builtin_actors = false;
+            options
+        }
+    }
+
+    impl Drop for IsolatedRuntimeFixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.root).ok();
+        }
+    }
+
+    async fn start_fixture_runtime(
+        state: Arc<super::RuntimeProcessState>,
+        options: exomind_runtime::RuntimeStartOptions,
+    ) -> Result<super::RuntimeServiceStatus, String> {
+        let _lifecycle = state.lifecycle.lock().await;
+        super::start_embedded_runtime(&state, options).await
+    }
+
+    async fn assert_foreign_health_listener_is_not_the_embedded_runtime(bind_host: &str) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind((bind_host, 0)).await.unwrap();
+        let foreign_port = listener.local_addr().unwrap().port();
+        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let requests_for_server = requests.clone();
+        let server = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut request = [0u8; 256];
+                if !matches!(stream.read(&mut request).await, Ok(size) if size > 0) {
+                    continue;
+                }
+                requests_for_server.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
+                    .await;
+            }
+        });
+        assert!(super::probe_runtime_health("127.0.0.1", foreign_port).await);
+        let requests_before_start = requests.load(std::sync::atomic::Ordering::SeqCst);
+        let fixture = IsolatedRuntimeFixture::new();
+        let state = Arc::new(super::RuntimeProcessState::new());
+
+        let status = start_fixture_runtime(state.clone(), fixture.options(foreign_port))
+            .await
+            .unwrap();
+
+        assert!(!status.external_runtime);
+        assert_ne!(status.port, foreign_port);
+        assert_eq!(status.pid, Some(std::process::id()));
+        assert!(status.host_id.is_some());
+        assert_eq!(
+            requests.load(std::sync::atomic::Ordering::SeqCst),
+            requests_before_start
+        );
+        super::ensure_runtime_stopped(state).await.unwrap();
+        assert!(super::probe_runtime_health("127.0.0.1", foreign_port).await);
+        assert!(std::net::TcpListener::bind(("127.0.0.1", status.port)).is_ok());
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn healthy_foreign_listener_never_becomes_the_embedded_runtime() {
+        assert_foreign_health_listener_is_not_the_embedded_runtime("127.0.0.1").await;
+    }
+
+    #[tokio::test]
+    async fn foreign_wildcard_health_listener_cannot_share_the_requested_loopback_port() {
+        assert_foreign_health_listener_is_not_the_embedded_runtime("0.0.0.0").await;
+    }
+
+    #[tokio::test]
+    async fn wildcard_bind_probe_checks_a_concrete_loopback_listener_without_http() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        assert!(super::probe_runtime_listener("0.0.0.0", port).await);
+    }
+
+    #[tokio::test]
+    async fn wildcard_listener_appearing_after_probe_falls_back_on_the_real_core_bind() {
+        let reservation = tokio::net::TcpSocket::new_v4().unwrap();
+        reservation
+            .bind(std::net::SocketAddr::from(([127, 0, 0, 1], 0)))
+            .unwrap();
+        let port = reservation.local_addr().unwrap().port();
+        // Keep the port reserved without listening while the TCP probe runs.
+        let reservation = Arc::new(std::sync::Mutex::new(Some(reservation)));
+        let fixture = IsolatedRuntimeFixture::new();
+        let state = Arc::new(super::RuntimeProcessState::new());
+        let foreign_listener = Arc::new(std::sync::Mutex::new(None));
+        let attempted_ports = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let foreign_for_start = foreign_listener.clone();
+        let attempts_for_start = attempted_ports.clone();
+        let reservation_for_start = reservation.clone();
+        let lifecycle = state.lifecycle.lock().await;
+
+        let status =
+            super::start_embedded_runtime_with(&state, fixture.options(port), move |options| {
+                let foreign = foreign_for_start.clone();
+                let attempts = attempts_for_start.clone();
+                let reservation = reservation_for_start.clone();
+                async move {
+                    attempts.lock().unwrap().push(options.port);
+                    if options.port == port {
+                        // The native TCP probe has already completed. Compete
+                        // with the real exclusive bind, not a mocked error.
+                        drop(reservation.lock().unwrap().take());
+                        let listener = std::net::TcpListener::bind(("0.0.0.0", port)).unwrap();
+                        *foreign.lock().unwrap() = Some(listener);
+                    }
+                    exomind_runtime::start_with_options(options).await
+                }
+            })
+            .await
+            .unwrap();
+        drop(lifecycle);
+
+        assert_eq!(&*attempted_ports.lock().unwrap(), &[port, 0]);
+        assert_ne!(status.port, port);
+        assert!(!status.external_runtime);
+        super::ensure_runtime_stopped(state).await.unwrap();
+        assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_ok());
+        assert!(std::net::TcpListener::bind(("127.0.0.1", status.port)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn another_runtime_owner_on_the_requested_port_gets_a_separate_instance() {
+        let first_fixture = IsolatedRuntimeFixture::new();
+        let first_state = Arc::new(super::RuntimeProcessState::new());
+        let first = start_fixture_runtime(first_state.clone(), first_fixture.options(0))
+            .await
+            .unwrap();
+        let second_fixture = IsolatedRuntimeFixture::new();
+        let second_state = Arc::new(super::RuntimeProcessState::new());
+
+        let second =
+            start_fixture_runtime(second_state.clone(), second_fixture.options(first.port))
+                .await
+                .unwrap();
+
+        assert_ne!(second.port, first.port);
+        assert_ne!(second.host_id, first.host_id);
+        assert!(!second.external_runtime);
+        super::ensure_runtime_stopped(second_state).await.unwrap();
+        assert!(super::probe_runtime_health("127.0.0.1", first.port).await);
+        super::ensure_runtime_stopped(first_state).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn concurrent_embedded_starts_share_one_owned_runtime_handle() {
+        let fixture = IsolatedRuntimeFixture::new();
+        let state = Arc::new(super::RuntimeProcessState::new());
+        let (first, second) = tokio::join!(
+            start_fixture_runtime(state.clone(), fixture.options(0)),
+            start_fixture_runtime(state.clone(), fixture.options(0)),
+        );
+        let first = first.unwrap();
+        let second = second.unwrap();
+
+        assert_eq!((first.port, first.host_id), (second.port, second.host_id));
+        assert_eq!(
+            super::runtime_status_snapshot(state.clone()).unwrap().port,
+            first.port
+        );
+        super::ensure_runtime_stopped(state.clone()).await.unwrap();
+        assert!(state.runtime_base_url().is_err());
+        assert!(std::net::TcpListener::bind(("127.0.0.1", first.port)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_the_lifecycle_owner_and_rejects_queued_startup() {
+        let fixture = IsolatedRuntimeFixture::new();
+        let state = Arc::new(super::RuntimeProcessState::new());
+        let started = start_fixture_runtime(state.clone(), fixture.options(0))
+            .await
+            .unwrap();
+        let lifecycle = state.lifecycle.lock().await;
+        state.request_shutdown();
+        let mut stop = Box::pin(super::ensure_runtime_stopped(state.clone()));
+        let mut start = Box::pin(start_fixture_runtime(state.clone(), fixture.options(0)));
+        assert!(futures::poll!(&mut stop).is_pending());
+        assert!(futures::poll!(&mut start).is_pending());
+
+        drop(lifecycle);
+        assert!(!stop.await.unwrap().running);
+        assert!(start.await.unwrap_err().contains("shutdown"));
+        assert!(state.runtime_base_url().is_err());
+        assert!(std::net::TcpListener::bind(("127.0.0.1", started.port)).is_ok());
+    }
+
+    #[test]
+    fn embedded_base_url_is_unavailable_before_an_owned_start() {
+        assert!(super::RuntimeProcessState::new()
+            .runtime_base_url()
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn stopping_an_external_target_does_not_close_the_foreign_listener() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let state = Arc::new(super::RuntimeProcessState::new());
+        {
+            let mut inner = super::lock_or_error(&state).unwrap();
+            inner.external_runtime = true;
+            inner.port = port;
+        }
+
+        let status = super::ensure_runtime_stopped(state.clone()).await.unwrap();
+
+        assert!(status.external_runtime && status.running);
+        assert!(state.runtime_base_url().is_err());
+        assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_err());
+        drop(listener);
+    }
+
     #[test]
     fn is_valid_host_accepts_ipv4() {
         assert!(super::is_valid_host("127.0.0.1"));
@@ -1225,10 +1514,24 @@ mod tests {
     }
 
     #[test]
-    fn fixed_requested_port_without_healthy_runtime_falls_back_to_random_port() {
-        assert!(super::should_fallback_to_random_port(9124, false));
-        assert!(!super::should_fallback_to_random_port(9124, true));
-        assert!(!super::should_fallback_to_random_port(0, false));
+    fn occupied_fixed_requested_port_falls_back_to_random_port() {
+        let error = std::io::Error::from(std::io::ErrorKind::AddrInUse);
+        assert!(super::should_fallback_to_random_port(9124, &error));
+        assert!(!super::should_fallback_to_random_port(0, &error));
+    }
+
+    #[test]
+    fn unavailable_bind_address_does_not_retry_with_a_random_port() {
+        let error = std::io::Error::from(std::io::ErrorKind::AddrNotAvailable);
+        assert!(!super::should_fallback_to_random_port(9124, &error));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn denied_windows_fixed_bind_can_retry_once_with_a_random_port() {
+        let error = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert!(super::should_fallback_to_random_port(9124, &error));
+        assert!(!super::should_fallback_to_random_port(0, &error));
     }
 
     #[test]

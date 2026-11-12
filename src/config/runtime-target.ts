@@ -217,16 +217,18 @@ function resolveEmbeddedHost(): string {
 
 let _ipcPort: number | null = null;
 let _ipcPortReady: Promise<void> | null = null;
+let _ipcGeneration = 0;
 
 export async function fetchEmbeddedPortFromIpc(): Promise<void> {
   if (_ipcPort !== null) return;
   if (_ipcPortReady) return _ipcPortReady;
 
-  _ipcPortReady = (async () => {
+  const generation = _ipcGeneration;
+  const task = (async () => {
     try {
       // 直接调用 invoke，不依赖 isTauri() 检查。
-      const status = await invoke<{ running: boolean; host?: string; port: number; hostId?: string }>('runtime_service_status');
-      if (status.running && status.port > 0) {
+      const status = await invoke<{ running: boolean; host?: string; port: number; hostId?: string; externalRuntime?: boolean }>('runtime_service_status');
+      if (generation === _ipcGeneration && status.running && !status.externalRuntime && status.port > 0) {
         if (status.host) {
           rememberEmbeddedRuntimeStatus({
             host: status.host,
@@ -240,7 +242,10 @@ export async function fetchEmbeddedPortFromIpc(): Promise<void> {
     } catch (error) {
       // IPC 不可用时静默失败
     }
-  })();
+  })().finally(() => {
+    if (_ipcPortReady === task) _ipcPortReady = null;
+  });
+  _ipcPortReady = task;
 
   return _ipcPortReady;
 }
@@ -258,9 +263,8 @@ function resolveEmbeddedPort(): number {
     return DEFAULT_EMBEDDED_RUNTIME_PORT;
   }
 
-  // Tauri 环境中 IPC 端口未设置——返回默认端口。
-  console.warn('[runtime-target] resolveEmbeddedPort: Tauri but _ipcPort is null, using default', DEFAULT_EMBEDDED_RUNTIME_PORT);
-  return DEFAULT_EMBEDDED_RUNTIME_PORT;
+  // Native business requests must not fall through to a service at the default port.
+  return 0;
 }
 
 /**
@@ -279,7 +283,8 @@ export function rememberEmbeddedRuntimeStatus(status: EmbeddedRuntimeStatusSnaps
 }
 
 export function getPreferredEmbeddedRuntimePort(): number {
-  return resolveEmbeddedPort();
+  // A startup hint is different from an owned business target.
+  return _ipcPort ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
 }
 
 export function resolveEmbeddedRuntimeBindHost(
@@ -513,6 +518,11 @@ export function buildRuntimeAuthHeaders(
 }
 
 export function persistEmbeddedRuntimeStatus(status: EmbeddedRuntimeStatusSnapshot | null): void {
+  if (!status) {
+    ++_ipcGeneration;
+    _ipcPort = null;
+    _ipcPortReady = null;
+  }
   if (typeof window === 'undefined') {
     return;
   }
@@ -539,6 +549,9 @@ export function formatRuntimeTargetAddress(target: Pick<RuntimeTarget, 'host' | 
 }
 
 export function toRuntimeBaseUrl(target: Pick<RuntimeTarget, 'host' | 'port'>): string {
+  if (!Number.isInteger(target.port) || target.port <= 0 || target.port > 65535) {
+    throw new Error('Runtime 尚未就绪：没有已确认的实例端口');
+  }
   return `http://${formatHostForUrl(target.host)}:${target.port}`;
 }
 

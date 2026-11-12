@@ -1,11 +1,10 @@
-export type TaskDomainView = 'list' | 'timeline' | 'dag' | 'proposals';
+export type TaskDomainView = 'list' | 'timeline' | 'dag';
 export type TaskDomainSource = 'dag' | 'timeline' | 'timeblocks';
 
 const TASK_DOMAIN_VIEW_PATHS: Record<TaskDomainView, string> = {
   list: '/tasks',
   timeline: '/tasks/timeline',
   dag: '/tasks/dag',
-  proposals: '/proposals',
 };
 
 const TASK_DOMAIN_SOURCE_CONFIG: Record<TaskDomainSource, { label: string; to: string }> = {

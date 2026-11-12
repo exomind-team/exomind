@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
-import { createProviderProfile } from '@/lib/agent-provider/provider-profile-storage';
+
 import type { SignalRoute } from '@/lib/types/signal-pool';
 
 const serviceMocks = vi.hoisted(() => ({
@@ -10,6 +10,12 @@ const serviceMocks = vi.hoisted(() => ({
   getActorDetail: vi.fn(),
   getConversation: vi.fn(),
   streamConversation: vi.fn(),
+}));
+
+const layoutState = vi.hoisted(() => ({ isDesktop: true }));
+
+vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
+  useIsDesktop: () => layoutState.isDesktop,
 }));
 
 const runtimeManagerMocks = vi.hoisted(() => ({
@@ -29,6 +35,8 @@ const runtimeControlMocks = vi.hoisted(() => ({
 const runtimeClientMocks = vi.hoisted(() => ({
   streamAgentConversation: vi.fn(),
   getTopology: vi.fn(),
+  getAgents: vi.fn(),
+  getAllEnergy: vi.fn(),
   createAgent: vi.fn(),
   deleteAgent: vi.fn(),
   getAgentEnergy: vi.fn(),
@@ -96,6 +104,10 @@ vi.mock('@/services/runtime-client', async (importOriginal) => {
     streamAgentConversation = runtimeClientMocks.streamAgentConversation;
 
     getTopology = runtimeClientMocks.getTopology;
+
+    getAgents = runtimeClientMocks.getAgents;
+
+    getAllEnergy = runtimeClientMocks.getAllEnergy;
 
     createAgent = runtimeClientMocks.createAgent;
 
@@ -183,7 +195,7 @@ function buildRuntimeSnapshot() {
   };
 }
 
-describe('agents page create flow issue-385（Agent Hub 创建流）', () => {
+describe('Alpha device connection flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
@@ -228,6 +240,8 @@ describe('agents page create flow issue-385（Agent Hub 创建流）', () => {
       },
     });
     runtimeClientMocks.getAgentEnergy.mockResolvedValue(null);
+    runtimeClientMocks.getAgents.mockResolvedValue({ ok: true, data: [] });
+    runtimeClientMocks.getAllEnergy.mockResolvedValue({ ok: true, data: [] });
     runtimeClientMocks.getTopology.mockResolvedValue({
       ok: true,
       data: buildRuntimeSnapshot().hosts[0].topology,
@@ -253,272 +267,26 @@ describe('agents page create flow issue-385（Agent Hub 创建流）', () => {
     vi.stubGlobal('fetch', fetchMock);
   });
 
-  it('shows Claude CLI / Codex CLI / API Agent and auto-directs single target（展示新节点类型并在单目标时自动直达）', async () => {
+  it.each([false, true])('retains device connection and closes Agent creation with desktop=%s', async (isDesktop) => {
+    layoutState.isDesktop = isDesktop;
+    localStorage.setItem('exomind:apiAgentTabEnabled', 'true');
+    localStorage.setItem('exomind:developerMode', 'true');
     render(<AgentsPage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
-    });
-
+    await screen.findByTestId('agent-device-view');
     fireEvent.click(screen.getByTestId('agent-add-node-button'));
 
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
-    });
+    expect(screen.getAllByTestId(/agent-add-node-option-/)).toHaveLength(1);
+    expect(screen.queryByText('Claude CLI')).not.toBeInTheDocument();
+    expect(screen.queryByText('Codex CLI')).not.toBeInTheDocument();
+    expect(screen.queryByText('API Agent')).not.toBeInTheDocument();
+    expect(screen.queryByText('Echo Agent')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('agent-add-node-option-device'));
 
-    expect(screen.getByText('Claude CLI')).toBeInTheDocument();
-    expect(screen.getByText('Codex CLI')).toBeInTheDocument();
-    expect(screen.getByText('API Agent')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId('agent-add-node-option-claude_cli'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-create-sheet')).toBeInTheDocument();
-      expect(screen.getByText('单目标自动直达：Embedded Runtime')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('agent-create-submit'));
-
-    await waitFor(() => {
-      expect(runtimeClientMocks.createAgent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'host-embedded',
-          host: '127.0.0.1',
-          port: 1949,
-        }),
-        expect.objectContaining({
-          kind: 'claude_cli',
-        }),
-      );
-    });
-  });
-
-  it('uses runtime_host.capabilities when legacy flat capabilities are absent（缺少旧 capabilities 时仍读取 runtime_host.capabilities）', async () => {
-    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
-      updatedAt: '2026-03-07T10:10:00.000Z',
-      agents: [],
-      hosts: [
-        {
-          host: {
-            id: 'host-claude-nested',
-            name: 'Claude Nested Runtime',
-            host: '127.0.0.1',
-            port: 1949,
-            status: 'unknown',
-            createdAt: '2026-03-07T00:00:00.000Z',
-            updatedAt: '2026-03-07T00:00:00.000Z',
-          },
-          connectionState: 'online' as const,
-          agents: [],
-          topology: {
-            runtime_host: {
-              host_id: 'claude-runtime-host',
-              hostname: 'claude-runtime',
-              os: 'Windows 11',
-              arch: 'x64',
-              uptime_secs: 90,
-              version: '0.3.6',
-              port: 1949,
-              capabilities: {
-                agent_kinds: ['claude_cli', 'api'],
-                api_providers: ['openai'],
-              },
-            },
-            device: {
-              id: 'claude-runtime-host',
-              name: 'Hope Desktop',
-              kind: 'desktop',
-              primary_runtime_host_id: 'claude-runtime-host',
-            },
-            device_components: [],
-            device_links: [],
-          },
-        },
-        {
-          host: {
-            id: 'host-api-nested',
-            name: 'API Only Runtime',
-            host: '192.168.1.90',
-            port: 1950,
-            status: 'unknown',
-            createdAt: '2026-03-07T00:00:00.000Z',
-            updatedAt: '2026-03-07T00:00:00.000Z',
-          },
-          connectionState: 'online' as const,
-          agents: [],
-          topology: {
-            runtime_host: {
-              host_id: 'api-runtime-host',
-              hostname: 'api-runtime',
-              os: 'Android',
-              arch: 'aarch64',
-              uptime_secs: 240,
-              version: '0.3.6',
-              port: 1950,
-              capabilities: {
-                agent_kinds: ['api'],
-                api_providers: ['openai', 'anthropic'],
-              },
-            },
-            device: {
-              id: 'api-runtime-host',
-              name: 'Pocket Device',
-              kind: 'phone',
-              primary_runtime_host_id: 'api-runtime-host',
-            },
-            device_components: [],
-            device_links: [],
-          },
-        },
-      ],
-    });
-
-    render(<AgentsPage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('agent-add-node-button'));
-    fireEvent.click(await screen.findByTestId('agent-add-node-option-claude_cli'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-create-sheet')).toBeInTheDocument();
-      expect(screen.getByText('单目标自动直达：Claude Nested Runtime')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('agent-create-submit'));
-
-    await waitFor(() => {
-      expect(runtimeClientMocks.createAgent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'host-claude-nested',
-          host: '127.0.0.1',
-          port: 1949,
-        }),
-        expect.objectContaining({
-          kind: 'claude_cli',
-        }),
-      );
-    });
-  });
-
-  it('requires explicit runtime target for multi-target API agent and reuses saved profile（多目标 API Agent 需显式选 Runtime 并复用已保存 Profile）', async () => {
-    const profile = createProviderProfile({
-      name: 'OpenAI GPT-5',
-      provider: 'openai',
-      model: 'gpt-5',
-      apiKey: 'sk-test',
-      baseUrl: 'https://api.openai.com/v1',
-    });
-
-    render(<AgentsPage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('agent-add-node-button'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('agent-add-node-option-api'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-create-sheet')).toBeInTheDocument();
-      expect(screen.getByTestId('agent-create-provider-profile-select')).toBeInTheDocument();
-    });
-
-    expect(screen.getByDisplayValue('OpenAI GPT-5 · openai / gpt-5')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-create-provider-select')).toBeDisabled();
-    expect(screen.getByTestId('agent-create-model-input')).toBeDisabled();
-    expect(screen.getByTestId('agent-create-api-key-input')).toBeDisabled();
-
-    fireEvent.click(screen.getByTestId('agent-create-submit'));
-
-    await waitFor(() => {
-      expect(screen.getByText('存在多个可用 Runtime，请先显式选择一个目标')).toBeInTheDocument();
-    });
-
+    expect(screen.getByTestId('agent-host-manager-sheet')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-add-node-sheet')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('agent-create-sheet')).not.toBeInTheDocument();
     expect(runtimeClientMocks.createAgent).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByTestId('agent-create-runtime-host-host-termux'));
-    fireEvent.click(screen.getByTestId('agent-create-submit'));
-
-    await waitFor(() => {
-      expect(runtimeClientMocks.createAgent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'host-termux',
-          host: '192.168.1.88',
-          port: 1950,
-        }),
-        expect.objectContaining({
-          kind: 'api',
-          providerProfile: expect.objectContaining({
-            profileId: profile.profileId,
-            provider: 'openai',
-            model: 'gpt-5',
-            apiKey: 'sk-test',
-          }),
-        }),
-      );
-    });
-  });
-
-  it('blocks fallback target that does not support requested kind（fallback 目标不支持时前端应先拦截）', async () => {
-    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
-      updatedAt: '2026-03-07T10:30:00.000Z',
-      agents: [],
-      hosts: [],
-    });
-    runtimeManagerMocks.addHostFromAddress.mockResolvedValue({
-      id: 'host-fallback',
-      name: 'Selected Runtime',
-      host: '127.0.0.1',
-      port: 1949,
-      status: 'unknown',
-      createdAt: '2026-03-07T00:00:00.000Z',
-      updatedAt: '2026-03-07T00:00:00.000Z',
-    });
-    runtimeClientMocks.getTopology.mockResolvedValue({
-      ok: true,
-      data: {
-        host_id: 'fallback-host',
-        hostname: 'fallback-runtime',
-        os: 'Windows 11',
-        arch: 'x64',
-        uptime_secs: 33,
-        version: '0.3.6',
-        port: 1949,
-        capabilities: {
-          agent_kinds: ['api'],
-          api_providers: ['openai'],
-        },
-      },
-    });
-
-    render(<AgentsPage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('agent-add-node-button'));
-    fireEvent.click(await screen.findByTestId('agent-add-node-option-claude_cli'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-create-sheet')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('agent-create-submit'));
-
-    await waitFor(() => {
-      expect(screen.getByText('当前 Runtime 不支持所选 Agent 类型')).toBeInTheDocument();
-    });
-
-    expect(runtimeClientMocks.getTopology).toHaveBeenCalled();
-    expect(runtimeClientMocks.createAgent).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('agent-host-manager-close'));
+    expect(screen.getByTestId('agent-device-view')).toBeInTheDocument();
   });
 });

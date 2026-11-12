@@ -9,6 +9,7 @@ import type { RuntimeServiceStatus } from '@/lib/types/agent-hub';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   rememberEmbeddedRuntimeStatus,
+  persistEmbeddedRuntimeStatus,
 } from '@/config/runtime-target';
 
 const DEFAULT_RUNTIME_STATUS: RuntimeServiceStatus = {
@@ -19,12 +20,14 @@ const DEFAULT_RUNTIME_STATUS: RuntimeServiceStatus = {
 };
 
 function rememberRunningEmbeddedRuntimeStatus(status: RuntimeServiceStatus): RuntimeServiceStatus {
-  if (status.running) {
+  if (status.running && !status.externalRuntime) {
     rememberEmbeddedRuntimeStatus({
       host: status.host,
       port: status.port,
       hostId: status.hostId,
     });
+  } else {
+    persistEmbeddedRuntimeStatus(null);
   }
   return status;
 }

@@ -100,6 +100,8 @@ const EMPTY_MODEL = buildNowWorkbenchOverlayModel({
   events: [],
   now: Date.now(),
 });
+// Alpha keeps the desktop workbench shell, timer, and quick record surface; task management is removed.
+const ALPHA_TASK_MANAGEMENT_ENABLED = false;
 
 export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayController {
   const timeBlockService = useMemo(() => getTimeBlockService(), []);
@@ -238,7 +240,11 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   }, [profileId, timeBlockService, updateDebugInfo]);
 
   const loadAll = useCallback(async () => {
-    await Promise.all([loadActiveBlock(), loadTasks(), loadEvents()]);
+    await Promise.all([
+      loadActiveBlock(),
+      ...(ALPHA_TASK_MANAGEMENT_ENABLED ? [loadTasks()] : []),
+      loadEvents(),
+    ]);
   }, [loadActiveBlock, loadTasks, loadEvents]);
 
   useEffect(() => {
@@ -314,13 +320,18 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
       setActiveBlock(block);
       setFeedbackOpen(isFeedbackStage(block));
       setNow(Date.now());
-      void Promise.all([loadTasks(), loadEvents()]).catch(() => {});
+      void Promise.all([
+        ...(ALPHA_TASK_MANAGEMENT_ENABLED ? [loadTasks()] : []),
+        loadEvents(),
+      ]).catch(() => {});
     });
-    const unsubscribeTasks = taskService.onTaskChange(() => {
-      if (!disposed && subscriptionGeneration === profileGenerationRef.current) {
-        void loadTasks().catch(() => {});
-      }
-    });
+    const unsubscribeTasks = ALPHA_TASK_MANAGEMENT_ENABLED
+      ? taskService.onTaskChange(() => {
+          if (!disposed && subscriptionGeneration === profileGenerationRef.current) {
+            void loadTasks().catch(() => {});
+          }
+        })
+      : () => {};
     const unsubscribeEvents = eventLogService.onEvent(() => {
       if (!disposed && subscriptionGeneration === profileGenerationRef.current) {
         void loadEvents().catch(() => {});
@@ -353,14 +364,14 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
     () =>
       buildNowWorkbenchOverlayModel({
         activeBlock,
-        tasks,
+        tasks: ALPHA_TASK_MANAGEMENT_ENABLED ? tasks : [],
         events,
         now,
       }),
     [activeBlock, events, now, tasks],
   );
   const activeBlockTaskIds = useMemo(
-    () => resolveActiveBlockTaskIds(activeBlock),
+    () => ALPHA_TASK_MANAGEMENT_ENABLED ? resolveActiveBlockTaskIds(activeBlock) : [],
     [activeBlock],
   );
   const activeBlockTasks = useMemo(() => {
@@ -473,7 +484,9 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
     try {
       const block = await timeBlockService.loadActiveBlock();
       if (!block) return;
-      const nextTaskIds = resolveActiveBlockTaskIds(block);
+      const nextTaskIds = ALPHA_TASK_MANAGEMENT_ENABLED
+        ? resolveActiveBlockTaskIds(block)
+        : [];
       if (!isFeedbackStage(block)) {
         await timeBlockService.markEnding();
       }
@@ -499,7 +512,9 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   const handleConfirmEnd = useCallback(async () => {
     try {
       const blockBeforeEnd = activeBlock;
-      const taskIdsSnapshot = resolveActiveBlockTaskIds(blockBeforeEnd);
+      const taskIdsSnapshot = ALPHA_TASK_MANAGEMENT_ENABLED
+        ? resolveActiveBlockTaskIds(blockBeforeEnd)
+        : [];
       const taskTitles = activeBlockTasks.reduce<Record<string, string>>(
         (titles, task) => {
           titles[task.id] = task.title;
@@ -584,6 +599,9 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
 
   const handleStartTask = useCallback(
     async (task: TaskNode) => {
+      if (!ALPHA_TASK_MANAGEMENT_ENABLED) {
+        return;
+      }
       if (isTerminalTask(task)) {
         updateDebugInfo({ lastAction: `task-select:skip-terminal:${task.id}` });
         return;

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getTodayPlannerService } from '@/lib/services';
 import type { RhythmPresetKey, TodayPlannerSegment, TodayPlannerSnapshot, TodayPlannerWindow } from '@/lib/types/event';
-import { PrestartTaskSelectionList, usePrestartSelectableTasks } from './prestart-task-selection';
 
 const SLOT_MINUTES = 15;
 const SLOT_MS = SLOT_MINUTES * 60_000;
@@ -143,11 +142,9 @@ export function NowTodayPlannerTimeline({
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [editorTitle, setEditorTitle] = useState('');
-  const [editorTaskIds, setEditorTaskIds] = useState<string[]>([]);
   const [actualEndTime, setActualEndTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
-  const selectableTasks = usePrestartSelectableTasks();
 
   useEffect(() => {
     if (!dragRange) return;
@@ -204,12 +201,10 @@ export function NowTodayPlannerTimeline({
   useEffect(() => {
     if (!selectedWork) {
       setEditorTitle('');
-      setEditorTaskIds([]);
       setActualEndTime('');
       return;
     }
     setEditorTitle(selectedWork.segment.title);
-    setEditorTaskIds(selectedWork.segment.linkedTaskIds);
     setActualEndTime(timeValue(selectedWork.segment.plannedEndAt));
   }, [selectedWork]);
 
@@ -251,7 +246,6 @@ export function NowTodayPlannerTimeline({
     try {
       await getTodayPlannerService().updatePlannedSegment(selectedWork.segment.id, {
         ...(editorTitle.trim() && editorTitle.trim() !== selectedWork.segment.title ? { title: editorTitle.trim() } : {}),
-        linkedTaskIds: editorTaskIds,
       });
       await refreshPlanner();
     } catch (cause) {
@@ -381,7 +375,6 @@ export function NowTodayPlannerTimeline({
                           <span className="text-[11px] font-semibold leading-tight">{segment.title}</span>
                           <span className="mt-1 text-[10px] opacity-80">
                             {clock(segment.plannedStartAt)} - {clock(segment.plannedEndAt)}
-                            {segment.linkedTaskIds.length > 0 ? ` · ${segment.linkedTaskIds.length} 个任务` : ''}
                           </span>
                         </button>
                       ) : (
@@ -475,22 +468,6 @@ export function NowTodayPlannerTimeline({
                   className="w-full rounded-2xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm outline-none focus:border-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917]"
                 />
               </label>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">Tasks / 关联任务</p>
-                  <span className="text-[11px] text-[#78716C] dark:text-[#A8A29E]">只有工作片段可以挂任务</span>
-                </div>
-                <PrestartTaskSelectionList
-                  tasks={selectableTasks}
-                  selectedTaskIds={editorTaskIds}
-                  onSelectedTaskIdsChange={setEditorTaskIds}
-                  listTestId="planner-segment-task-list"
-                  itemTestIdPrefix="planner-segment-task-"
-                  emptyLabel="当前没有可关联的任务。"
-                  maxVisibleTasks={10}
-                  overflowSelectLabel="更多任务"
-                />
-              </div>
               <div className="space-y-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">Reflow / 当前区间重算</p>
                 <div className="flex gap-2">

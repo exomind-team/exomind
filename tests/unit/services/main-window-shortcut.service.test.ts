@@ -106,7 +106,7 @@ describe('MainWindowShortcutService', () => {
     service.destroy();
   });
 
-  it('focuses tasks quick-add on exact tasks page', async () => {
+  it('redirects a retired tasks page to record input', async () => {
     const { MainWindowShortcutService } = await import('@/services/main-window-shortcut.service');
     const { appRouter } = await import('@/routes');
     appRouter.state.location.pathname = '/tasks';
@@ -118,13 +118,13 @@ describe('MainWindowShortcutService', () => {
 
     await listeners.get('main-window-shortcut')?.({ payload: 'activate' });
 
-    expect(navigateMock).not.toHaveBeenCalled();
-    expect(requestFocusTargetMock).toHaveBeenCalledWith('tasks-quick-add-input');
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog/record' });
+    expect(requestFocusTargetMock).toHaveBeenCalledWith('eventlog-record-input');
 
     service.destroy();
   });
 
-  it('returns to tasks main page before focusing quick-add from tasks sub-routes', async () => {
+  it('redirects retired tasks sub-routes to record input', async () => {
     const { MainWindowShortcutService } = await import('@/services/main-window-shortcut.service');
     const { appRouter } = await import('@/routes');
     appRouter.state.location.pathname = '/tasks/dag';
@@ -137,15 +137,14 @@ describe('MainWindowShortcutService', () => {
     await listeners.get('main-window-shortcut')?.({ payload: 'activate' });
 
     expect(navigateMock).toHaveBeenCalledWith({
-      to: '/tasks',
-      search: { main: '1' },
+      to: '/eventlog/record',
     });
-    expect(requestFocusTargetMock).toHaveBeenCalledWith('tasks-quick-add-input');
+    expect(requestFocusTargetMock).toHaveBeenCalledWith('eventlog-record-input');
 
     service.destroy();
   });
 
-  it('does nothing on unsupported routes or when quick-focus is disabled', async () => {
+  it('quick-focus works from settings and is disabled by its existing preference', async () => {
     const { MainWindowShortcutService } = await import('@/services/main-window-shortcut.service');
     const { appRouter } = await import('@/routes');
     appRouter.state.location.pathname = '/settings';
@@ -156,8 +155,10 @@ describe('MainWindowShortcutService', () => {
 
     takePendingActivationMock.mockResolvedValueOnce(true);
     await listeners.get('main-window-shortcut')?.({ payload: 'activate' });
-    expect(navigateMock).not.toHaveBeenCalled();
-    expect(requestFocusTargetMock).not.toHaveBeenCalled();
+    expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog/record' });
+    expect(requestFocusTargetMock).toHaveBeenCalledWith('eventlog-record-input');
+    navigateMock.mockClear();
+    requestFocusTargetMock.mockClear();
 
     runtimeFlags.quickFocusEnabled = false;
     appRouter.state.location.pathname = '/eventlog';
@@ -183,10 +184,9 @@ describe('MainWindowShortcutService', () => {
     await service.init();
 
     expect(navigateMock).toHaveBeenCalledWith({
-      to: '/tasks',
-      search: { main: '1' },
+      to: '/eventlog/record',
     });
-    expect(requestFocusTargetMock).toHaveBeenCalledWith('tasks-quick-add-input');
+    expect(requestFocusTargetMock).toHaveBeenCalledWith('eventlog-record-input');
 
     service.destroy();
   });
@@ -239,6 +239,44 @@ describe('MainWindowShortcutService', () => {
 
     expect(syncRuntimeMock).toHaveBeenCalledTimes(1);
 
+    service.destroy();
+  });
+
+  it('removes a listener that arrives after destroy without consuming activation', async () => {
+    const { listen } = await import('@tauri-apps/api/event');
+    const { MainWindowShortcutService } = await import('@/services/main-window-shortcut.service');
+    let completeListen!: (unlisten: () => void) => void;
+    vi.mocked(listen).mockImplementationOnce(() => new Promise((resolve) => { completeListen = resolve; }));
+    const service = new MainWindowShortcutService();
+    const init = service.init();
+    await vi.waitFor(() => expect(completeListen).toBeTypeOf('function'));
+    service.destroy();
+    const unlisten = vi.fn();
+    completeListen(unlisten);
+    await init;
+    expect(unlisten).toHaveBeenCalledOnce();
+    expect(takePendingActivationMock).not.toHaveBeenCalled();
+  });
+
+  it('shares an in-flight initialization and ignores late activation after destroy', async () => {
+    const { listen } = await import('@tauri-apps/api/event');
+    const { MainWindowShortcutService } = await import('@/services/main-window-shortcut.service');
+    let completeActivation!: (pending: boolean) => void;
+    takePendingActivationMock.mockImplementationOnce(() => new Promise((resolve) => { completeActivation = resolve; }));
+    const service = new MainWindowShortcutService();
+    const first = service.init();
+    const second = service.init();
+    expect(second).toBe(first);
+    await vi.waitFor(() => expect(completeActivation).toBeTypeOf('function'));
+    const registrations = vi.mocked(listen).mock.calls.length;
+    service.destroy();
+    completeActivation(true);
+    await first;
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(requestFocusTargetMock).not.toHaveBeenCalled();
+    expect(vi.mocked(listen).mock.calls.length).toBe(registrations);
+    await service.init();
+    expect(vi.mocked(listen).mock.calls.length).toBe(registrations + 1);
     service.destroy();
   });
 });

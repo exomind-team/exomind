@@ -41,6 +41,9 @@ async-stream = "0.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile = "3"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
+
 # PTY support: not available on Android (portable-pty → termios → no android impl)
 [target.'cfg(not(target_os = "android"))'.dependencies]
 portable-pty = "0.8"

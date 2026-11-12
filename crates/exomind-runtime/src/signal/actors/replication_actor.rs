@@ -8,12 +8,12 @@ use tracing::warn;
 use crate::eventlog::{EventLogStore, EventRecord};
 use crate::proposal::{Proposal, ProposalStore};
 use crate::signal::{SignalEvent, SignalPool};
-use crate::timeblock::BlockPhase;
 use crate::task::store::{
     compare_task_replication_preference, merge_task_snapshot, merge_task_status_history,
     normalize_task_status_history, validate_partial_task_status_history,
 };
 use crate::task::{Task, TaskStore};
+use crate::timeblock::BlockPhase;
 use crate::timeblock::{ActiveBlockData, TimeBlockData, TimeBlockStore};
 
 const EVENTLOG_REPLICATION_TOPIC: &str = "eventlog.replication.appended";
@@ -78,6 +78,17 @@ struct ProposalReplicationPayload {
     proposal: Proposal,
 }
 
+struct LegacyReplicationStores {
+    task_store: Arc<TaskStore>,
+    proposal_store: Arc<ProposalStore>,
+}
+
+struct ReplicationStores {
+    eventlog_store: Arc<EventLogStore>,
+    timeblock_store: Arc<TimeBlockStore>,
+    legacy: Option<LegacyReplicationStores>,
+}
+
 pub fn spawn_replication_actor(
     pool: Arc<SignalPool>,
     local_host_id: String,
@@ -85,6 +96,43 @@ pub fn spawn_replication_actor(
     task_store: Arc<TaskStore>,
     timeblock_store: Arc<TimeBlockStore>,
     proposal_store: Arc<ProposalStore>,
+) -> tokio::task::JoinHandle<()> {
+    spawn_replication_with_stores(
+        pool,
+        local_host_id,
+        ReplicationStores {
+            eventlog_store,
+            timeblock_store,
+            legacy: Some(LegacyReplicationStores {
+                task_store,
+                proposal_store,
+            }),
+        },
+    )
+}
+
+/// Replicate recordings and timeblocks without acquiring task/proposal write capabilities.
+pub fn spawn_recording_replication_actor(
+    pool: Arc<SignalPool>,
+    local_host_id: String,
+    eventlog_store: Arc<EventLogStore>,
+    timeblock_store: Arc<TimeBlockStore>,
+) -> tokio::task::JoinHandle<()> {
+    spawn_replication_with_stores(
+        pool,
+        local_host_id,
+        ReplicationStores {
+            eventlog_store,
+            timeblock_store,
+            legacy: None,
+        },
+    )
+}
+
+fn spawn_replication_with_stores(
+    pool: Arc<SignalPool>,
+    local_host_id: String,
+    stores: ReplicationStores,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut rx = pool.subscribe();
@@ -98,13 +146,18 @@ pub fn spawn_replication_actor(
 
                     match event.topic.as_str() {
                         EVENTLOG_REPLICATION_TOPIC => {
-                            if let Err(error) = apply_eventlog_replication(&eventlog_store, &event)
+                            if let Err(error) =
+                                apply_eventlog_replication(&stores.eventlog_store, &event)
                             {
                                 warn!(event_id = %event.id, error = %error, "replication_actor: eventlog apply failed");
                             }
                         }
                         TASK_REPLICATION_TOPIC => {
-                            match apply_task_replication(&task_store, &local_host_id, &event) {
+                            let Some(legacy) = &stores.legacy else {
+                                continue;
+                            };
+                            match apply_task_replication(&legacy.task_store, &local_host_id, &event)
+                            {
                                 Ok(Some(payload)) => {
                                     publish_local_replication_apply_signal(
                                         &pool,
@@ -121,7 +174,7 @@ pub fn spawn_replication_actor(
                         }
                         TIMEBLOCK_ACTIVE_REPLICATION_TOPIC => {
                             match apply_timeblock_active_replication(
-                                &timeblock_store,
+                                &stores.timeblock_store,
                                 &local_host_id,
                                 &event,
                             ) {
@@ -141,7 +194,7 @@ pub fn spawn_replication_actor(
                         }
                         TIMEBLOCK_COMPLETED_REPLICATION_TOPIC => {
                             match apply_timeblock_completed_replication(
-                                &timeblock_store,
+                                &stores.timeblock_store,
                                 &local_host_id,
                                 &event,
                             ) {
@@ -160,8 +213,11 @@ pub fn spawn_replication_actor(
                             }
                         }
                         PROPOSAL_REPLICATION_TOPIC => {
+                            let Some(legacy) = &stores.legacy else {
+                                continue;
+                            };
                             match apply_proposal_replication(
-                                &proposal_store,
+                                &legacy.proposal_store,
                                 &local_host_id,
                                 &event,
                             ) {

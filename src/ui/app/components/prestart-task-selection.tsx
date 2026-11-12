@@ -9,11 +9,17 @@ export function isPrestartSelectableTask(task: TaskNode): boolean {
   return task.status === 'pending' || task.status === 'in_progress' || task.status === 'suspended';
 }
 
-export function usePrestartSelectableTasks(): TaskNode[] {
+export function usePrestartSelectableTasks(enabled = true): TaskNode[] {
   const [selectableTasks, setSelectableTasks] = useState<TaskNode[]>([]);
   const loadRequestIdRef = useRef(0);
 
   useEffect(() => {
+    if (!enabled) {
+      loadRequestIdRef.current += 1;
+      setSelectableTasks([]);
+      return;
+    }
+
     let disposed = false;
     const taskService = getTaskService();
 
@@ -76,7 +82,7 @@ export function usePrestartSelectableTasks(): TaskNode[] {
       disposed = true;
       unsubscribe();
     };
-  }, []);
+  }, [enabled]);
 
   return selectableTasks;
 }

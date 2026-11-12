@@ -24,7 +24,6 @@ import type {
 import type { TaskNode } from '@/lib/types/task';
 import { cn } from '@/lib/utils';
 import { PageShell } from '@/ui/app/components/PageShell';
-import { TaskDomainTabs } from '@/ui/app/components/TaskDomainTabs';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import {
   MessageSquarePlus,
@@ -743,7 +742,6 @@ export function ProposalInboxPage() {
     <PageShell
       title="任务"
       subtitle="提案箱视图：Agent 的操作先进入提案箱，再由你决定批准、拒绝还是暂缓。"
-      headerBottom={<TaskDomainTabs active="proposals" />}
       headerAction={(
         <Button
           type="button"

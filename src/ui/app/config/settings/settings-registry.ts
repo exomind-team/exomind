@@ -8,7 +8,6 @@ import {
   DatabaseZap,
   GitCommit,
   Globe,
-  Inbox,
   Key,
   LifeBuoy,
   List,
@@ -70,11 +69,6 @@ import {
   subscribeAgentPageEnabledChanges,
 } from '@/config/agent-page-enabled';
 import {
-  getApiAgentTabEnabled,
-  setApiAgentTabEnabled,
-  subscribeApiAgentTabEnabledChanges,
-} from '@/config/api-agent-tab-enabled';
-import {
   getGoalsPageEnabled,
   setGoalsPageEnabled,
   subscribeGoalsPageEnabledChanges,
@@ -118,11 +112,6 @@ import {
   setCommandPaletteEnabled,
   subscribeCommandPaletteEnabledChanges,
 } from '@/config/command-palette-enabled';
-import {
-  getProposalInboxEnabled,
-  setProposalInboxEnabled,
-  subscribeProposalInboxEnabledChanges,
-} from '@/config/proposal-inbox-enabled';
 import {
   getVoiceTranscriptSendMode,
   setVoiceTranscriptSendMode,
@@ -957,7 +946,6 @@ function resetAllSettings(): string {
 export const FEATURE_TOGGLE_SETTING_IDS = [
   'agent-page-enabled',
   'goals-page-enabled',
-  'proposal-inbox-enabled',
   'desktop-adaptive',
   'command-palette-enabled',
 ] as const;
@@ -982,16 +970,6 @@ export const FEATURE_TOGGLE_SETTINGS = [
     get: getGoalsPageEnabled,
     set: setGoalsPageEnabled,
     subscribe: subscribeGoalsPageEnabledChanges,
-  },
-  {
-    id: 'proposal-inbox-enabled',
-    label: '提案箱（任务域）',
-    icon: Inbox,
-    rowTestId: 'feature-toggle-proposal-inbox-row',
-    controlTestId: 'feature-toggle-proposal-inbox-switch',
-    get: getProposalInboxEnabled,
-    set: setProposalInboxEnabled,
-    subscribe: subscribeProposalInboxEnabledChanges,
   },
   {
     id: 'desktop-adaptive',
@@ -1082,7 +1060,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'now-workbench-overlay-enabled',
     label: '启用悬浮工作台',
-    description: '在桌面最上层显示可独立隐藏的当下工作台，提供专注计时、任务启动与事件记录。',
+    description: '在桌面最上层显示可独立隐藏的当下工作台，提供专注计时与事件记录。',
     icon: Monitor,
     category: 'appearance',
     type: 'boolean',
@@ -1171,7 +1149,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: '输入框发送方式',
     icon: Key,
     category: 'input',
-    description: '统一控制「任务 / 当下」输入框使用 Enter 发送还是 Ctrl/Cmd+Enter 发送',
+    description: '统一控制文本输入框使用 Enter 发送还是 Ctrl/Cmd+Enter 发送',
     rowTestId: 'new-settings-input-send-mode-row',
     type: 'enum',
     options: [
@@ -1276,7 +1254,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: '唤起后快速聚焦输入',
     icon: Search,
     category: 'input',
-    description: '关闭时仅显示并聚焦主窗口；开启后会在当下记录页或任务主页面进一步聚焦输入框',
+    description: '关闭时仅显示并聚焦主窗口；开启后会在当下记录页进一步聚焦记录输入框',
     rowTestId: 'new-settings-main-window-shortcut-quick-focus-row',
     controlTestId: 'new-settings-main-window-shortcut-quick-focus-switch',
     type: 'boolean',
@@ -1734,19 +1712,6 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     set: setPerfLoggingEnabled,
     subscribe: subscribePerfLoggingEnabledChanges,
   },
-  {
-    id: 'api-agent-tab-enabled',
-    label: 'API Agent Tab',
-    description: '在网络页顶部显示 API Agent 调试页签',
-    icon: Bot,
-    category: 'developer',
-    controlTestId: 'new-settings-api-agent-tab-switch',
-    type: 'boolean',
-    visible: devOnly,
-    get: () => getApiAgentTabEnabled(),
-    set: setApiAgentTabEnabled,
-    subscribe: subscribeApiAgentTabEnabledChanges,
-  },
   ...FEATURE_TOGGLE_SETTINGS.map((setting) => ({
     id: setting.id,
     label: setting.label,
@@ -1797,29 +1762,40 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'clear-local-cache',
     label: '清空本地缓存',
-    description: '清除 UI 偏好与临时缓存，不影响事件日志、任务和时间块数据',
+    description: '清除 UI 偏好与临时缓存，不影响事件记录和时间块数据',
     category: 'danger',
     type: 'action',
     actionMode: 'button',
     buttonLabel: '立即清空',
-    confirmMessage: '确认清空本地缓存？UI 偏好（DAG 布局、搜索选项、模式记忆等）将恢复默认。事件日志、任务和时间块数据不受影响。',
+    confirmMessage: '确认清空本地缓存？UI 偏好（布局、搜索选项、模式记忆等）将恢复默认。事件记录和时间块数据不受影响。',
     onAction: clearExomindLocalCache,
   },
   {
     id: 'reset-all-settings',
     label: '重置所有设置',
-    description: '将所有设置项恢复为默认值，不影响事件日志、任务和时间块数据',
+    description: '将所有设置项恢复为默认值，不影响事件记录和时间块数据',
     category: 'danger',
     type: 'action',
     actionMode: 'button',
     buttonLabel: '恢复默认',
-    confirmMessage: '确认重置所有设置？所有配置（含 API Key、快捷键、UI 偏好）将恢复默认。事件日志、任务和时间块数据不受影响。',
+    confirmMessage: '确认重置所有设置？所有配置（含 API Key、快捷键、UI 偏好）将恢复默认。事件记录和时间块数据不受影响。',
     onAction: resetAllSettings,
   },
 ];
 
+const ALPHA_REMOVED_SETTING_IDS = new Set([
+  'task-page-fuzzy-search',
+  'task-create-success-action',
+  'task-dag-pan-speed',
+  'task-dag-zoom-speed',
+]);
+
 export function getVisibleSettings(ctx: SettingsContext): SettingsItem[] {
-  return SETTINGS_REGISTRY.filter((item) => !item.visible || item.visible(ctx));
+  return SETTINGS_REGISTRY.filter((item) =>
+    item.category !== 'terminal-agent' &&
+    !ALPHA_REMOVED_SETTING_IDS.has(item.id) &&
+    (!item.visible || item.visible(ctx))
+  );
 }
 
 export const DEFAULT_VOICE_OVERLAY_OFFSET = DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET;

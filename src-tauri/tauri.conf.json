@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ExoMind",
-  "version": "0.5.1",
-  "identifier": "com.exomind.app",
+  "version": "0.6.0-alpha04",
+  "identifier": "com.exomind.app.v06",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",

@@ -2,7 +2,6 @@ import {
   AlarmClock,
   Bot,
   Brain,
-  Crosshair,
   Filter,
   List,
   Mail,
@@ -43,15 +42,16 @@ import type { RuntimeAggregatedAgent, RuntimeHostSnapshot } from '@/services/run
 import type { RuntimeCreateAgentRequest } from '@/services/runtime-client';
 import type { SignalGraphNodeType } from '../agents-signal-topology';
 
+// Alpha retains the device/signal network. Legacy management stays dormant
+// until the retained network responsibilities are extracted from AgentsPage.
+export const AGENT_MANAGEMENT_ENABLED = false;
+
 export const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
+  { id: 'device', icon: Monitor, label: '设备网络' },
   { id: 'topology', icon: Waypoints, label: '信号拓扑' },
-  { id: 'sessions', icon: Crosshair, label: '会话' },
-  { id: 'tiled', icon: Rocket, label: '平铺' },
   { id: 'list', icon: Bot, label: '节点' },
   { id: 'history', icon: AlarmClock, label: '信号历史' },
   { id: 'routes', icon: List, label: '路由' },
-  { id: 'device', icon: Monitor, label: '设备网络' },
-  { id: 'api-agent', icon: Webhook, label: 'API Agent' },
 ];
 
 export type AddNodeOption = {
@@ -63,33 +63,9 @@ export type AddNodeOption = {
 
 export const ADD_NODE_OPTIONS: AddNodeOption[] = [
   {
-    id: 'claude_cli',
-    title: 'Claude CLI',
-    description: '在 Runtime 中创建 Claude CLI Agent',
-    tintColor: '#C75B3A',
-  },
-  {
-    id: 'codex_cli',
-    title: 'Codex CLI',
-    description: '在 Runtime 中创建 Codex CLI Agent',
-    tintColor: '#0D9488',
-  },
-  {
-    id: 'api',
-    title: 'API Agent',
-    description: '通过 OpenAI / Anthropic 接口创建 Agent',
-    tintColor: '#2563EB',
-  },
-  {
-    id: 'echo',
-    title: 'Echo Agent',
-    description: '本地回显测试 Agent',
-    tintColor: '#78716C',
-  },
-  {
     id: 'device',
     title: '添加设备',
-    description: '连接 exomind-rt 主机并聚合 Agent 列表',
+    description: '连接 exomind-rt 主机',
     tintColor: '#0D9488',
   },
 ];

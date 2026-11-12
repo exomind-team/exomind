@@ -71,7 +71,7 @@ pub fn ensure_now_workbench_overlay_window(app: &AppHandle) -> Result<(), String
     // Dev-manager instances provide an explicit per-instance/per-window directory.
     // Business scope still comes only from the main-window profile broker.
     let builder = if let Some(data_dir) =
-        resolve_overlay_webview_data_dir(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL)
+        resolve_overlay_webview_data_dir(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL)?
     {
         builder.data_directory(data_dir)
     } else {

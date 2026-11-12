@@ -106,6 +106,7 @@ impl MainWindowShortcutState {
             .unwrap_or_else(|_| Some(DEFAULT_MAIN_WINDOW_SHORTCUT.to_string()))
     }
 
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     fn set(&self, shortcut: Option<String>) {
         if let Ok(mut value) = self.shortcut.lock() {
             *value = shortcut;
@@ -137,19 +138,9 @@ pub fn register_main_window_shortcut(
     state: &MainWindowShortcutState,
     voice_state: &VoiceShortcutState,
 ) {
-    let Some(shortcut) = state.get() else {
-        return;
-    };
-
-    if shortcut.eq_ignore_ascii_case(&voice_state.get()) {
-        log::warn!(
-            "skip main window shortcut registration because it conflicts with voice shortcut"
-        );
-        return;
-    }
-
-    if let Err(error) = register_main_window_shortcut_listener(app, &shortcut) {
-        log::warn!("failed to register main window shortcut {shortcut}: {error}");
+    if let Err(error) = apply_main_window_shortcut(app, state, voice_state, state.get().as_deref())
+    {
+        log::warn!("failed to register main window shortcut at startup: {error}");
     }
 }
 
@@ -226,15 +217,67 @@ pub fn apply_main_window_shortcut(
     voice_state: &VoiceShortcutState,
     raw_shortcut: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let next_shortcut = raw_shortcut.map(normalize_shortcut).transpose()?;
-    let current_shortcut = state.get();
+    apply_main_window_shortcut_with_registry(
+        state,
+        &voice_state.get(),
+        raw_shortcut,
+        &TauriMainWindowShortcutRegistry(app),
+    )
+}
 
-    if current_shortcut == next_shortcut {
-        return Ok(current_shortcut);
+// The same transition is exercised with a controlled registry in tests, while
+// native registration and its actual state stay at this OS adapter boundary.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+trait MainWindowShortcutRegistry {
+    fn is_registered(&self, shortcut: &str) -> bool;
+    fn unregister(&self, shortcut: &str) -> Result<(), String>;
+    fn register(&self, shortcut: &str) -> Result<(), String>;
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+struct TauriMainWindowShortcutRegistry<'a>(&'a AppHandle);
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl MainWindowShortcutRegistry for TauriMainWindowShortcutRegistry<'_> {
+    fn is_registered(&self, shortcut: &str) -> bool {
+        self.0.global_shortcut().is_registered(shortcut)
+    }
+
+    fn unregister(&self, shortcut: &str) -> Result<(), String> {
+        self.0
+            .global_shortcut()
+            .unregister(shortcut)
+            .map_err(|error| error.to_string())
+    }
+
+    fn register(&self, shortcut: &str) -> Result<(), String> {
+        register_main_window_shortcut_listener(self.0, shortcut)
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn apply_main_window_shortcut_with_registry(
+    state: &MainWindowShortcutState,
+    voice_shortcut: &str,
+    raw_shortcut: Option<&str>,
+    registry: &impl MainWindowShortcutRegistry,
+) -> Result<Option<String>, String> {
+    let next_shortcut = raw_shortcut.map(normalize_shortcut).transpose()?;
+    // Serialize the full OS transition, including failure restoration, so two
+    // concurrent settings calls cannot leave a stale desired/registered pair.
+    let mut current_shortcut = state
+        .shortcut
+        .lock()
+        .map_err(|_| "failed to lock main window shortcut state".to_string())?;
+    let was_registered = current_shortcut
+        .as_deref()
+        .is_some_and(|shortcut| registry.is_registered(shortcut));
+
+    if *current_shortcut == next_shortcut && (next_shortcut.is_none() || was_registered) {
+        return Ok(current_shortcut.clone());
     }
 
     if let Some(next_shortcut_value) = next_shortcut.as_ref() {
-        let voice_shortcut = voice_state.get();
         if voice_shortcut.eq_ignore_ascii_case(next_shortcut_value) {
             return Err(format!(
                 "shortcut conflicts with voice shortcut {voice_shortcut}"
@@ -242,27 +285,28 @@ pub fn apply_main_window_shortcut(
         }
     }
 
-    if let Some(current_shortcut_value) = current_shortcut.as_ref() {
-        let was_registered = app
-            .global_shortcut()
-            .is_registered(current_shortcut_value.as_str());
-        if was_registered {
-            app.global_shortcut()
-                .unregister(current_shortcut_value.as_str())
-                .map_err(|error| error.to_string())?;
-        }
+    if let Some(current_shortcut_value) = current_shortcut.as_deref().filter(|_| was_registered) {
+        registry.unregister(current_shortcut_value)?;
     }
 
     if let Some(next_shortcut_value) = next_shortcut.as_ref() {
-        if let Err(error) = register_main_window_shortcut_listener(app, next_shortcut_value) {
-            if let Some(current_shortcut_value) = current_shortcut.as_ref() {
-                let _ = register_main_window_shortcut_listener(app, current_shortcut_value);
+        if let Err(error) = registry.register(next_shortcut_value) {
+            let message =
+                format!("failed to register main window shortcut {next_shortcut_value}: {error}");
+            if let Some(current_shortcut_value) =
+                current_shortcut.as_deref().filter(|_| was_registered)
+            {
+                if let Err(restore_error) = registry.register(current_shortcut_value) {
+                    return Err(format!(
+                        "{message}; failed to restore previous shortcut {current_shortcut_value}: {restore_error}"
+                    ));
+                }
             }
-            return Err(error);
+            return Err(message);
         }
     }
 
-    state.set(next_shortcut.clone());
+    *current_shortcut = next_shortcut.clone();
     Ok(next_shortcut)
 }
 
@@ -309,7 +353,7 @@ pub fn ensure_voice_overlay_window(app: &AppHandle) -> Result<(), String> {
     let builder = builder.transparent(true);
 
     let builder =
-        if let Some(data_dir) = resolve_overlay_webview_data_dir(VOICE_OVERLAY_WINDOW_LABEL) {
+        if let Some(data_dir) = resolve_overlay_webview_data_dir(VOICE_OVERLAY_WINDOW_LABEL)? {
             builder.data_directory(data_dir)
         } else {
             builder
@@ -1027,6 +1071,146 @@ mod tests {
     };
     use tauri::window::Color;
 
+    #[derive(Default)]
+    struct ControlledMainWindowShortcutRegistry {
+        registered: std::cell::RefCell<std::collections::HashSet<String>>,
+        occupied: std::cell::RefCell<std::collections::HashSet<String>>,
+        attempts: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl super::MainWindowShortcutRegistry for ControlledMainWindowShortcutRegistry {
+        fn is_registered(&self, shortcut: &str) -> bool {
+            self.registered.borrow().contains(shortcut)
+        }
+
+        fn unregister(&self, shortcut: &str) -> Result<(), String> {
+            self.registered.borrow_mut().remove(shortcut);
+            Ok(())
+        }
+
+        fn register(&self, shortcut: &str) -> Result<(), String> {
+            self.attempts.borrow_mut().push(shortcut.to_string());
+            if self.occupied.borrow().contains(shortcut) {
+                return Err("shortcut is occupied".to_string());
+            }
+            self.registered.borrow_mut().insert(shortcut.to_string());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn main_window_shortcut_retries_same_key_after_startup_registration_conflict() {
+        let state = super::MainWindowShortcutState::new();
+        let registry = ControlledMainWindowShortcutRegistry::default();
+        registry.occupied.borrow_mut().insert("Ctrl+E".into());
+
+        for _ in 0..2 {
+            let error = super::apply_main_window_shortcut_with_registry(
+                &state,
+                "Alt+Q",
+                Some("Ctrl+E"),
+                &registry,
+            )
+            .unwrap_err();
+            assert!(error.contains("Ctrl+E") && error.contains("occupied"));
+        }
+        assert_eq!(state.get().as_deref(), Some("Ctrl+E"));
+        registry.occupied.borrow_mut().clear();
+
+        super::apply_main_window_shortcut_with_registry(&state, "Alt+Q", Some("Ctrl+E"), &registry)
+            .unwrap();
+
+        assert!(registry.registered.borrow().contains("Ctrl+E"));
+        assert_eq!(registry.attempts.borrow().len(), 3);
+    }
+
+    #[test]
+    fn main_window_shortcut_reuses_same_key_only_when_registered() {
+        let state = super::MainWindowShortcutState::new();
+        let registry = ControlledMainWindowShortcutRegistry::default();
+        registry.registered.borrow_mut().insert("Ctrl+E".into());
+
+        super::apply_main_window_shortcut_with_registry(&state, "Alt+Q", Some("Ctrl+E"), &registry)
+            .unwrap();
+
+        assert!(registry.attempts.borrow().is_empty());
+        assert!(registry.registered.borrow().contains("Ctrl+E"));
+    }
+
+    #[test]
+    fn main_window_shortcut_failure_restores_only_a_previously_registered_key() {
+        let state = super::MainWindowShortcutState::new();
+        let registry = ControlledMainWindowShortcutRegistry::default();
+        registry.occupied.borrow_mut().insert("Ctrl+Shift+E".into());
+
+        super::apply_main_window_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+Shift+E"),
+            &registry,
+        )
+        .unwrap_err();
+
+        assert_eq!(&*registry.attempts.borrow(), &["Ctrl+Shift+E"]);
+        assert!(registry.registered.borrow().is_empty());
+        assert_eq!(state.get().as_deref(), Some("Ctrl+E"));
+    }
+
+    #[test]
+    fn main_window_shortcut_failure_restores_the_owned_previous_key() {
+        let state = super::MainWindowShortcutState::new();
+        let registry = ControlledMainWindowShortcutRegistry::default();
+        registry.registered.borrow_mut().insert("Ctrl+E".into());
+        registry.occupied.borrow_mut().insert("Ctrl+Shift+E".into());
+
+        super::apply_main_window_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+Shift+E"),
+            &registry,
+        )
+        .unwrap_err();
+
+        assert!(registry.registered.borrow().contains("Ctrl+E"));
+        assert_eq!(state.get().as_deref(), Some("Ctrl+E"));
+    }
+
+    #[test]
+    fn main_window_shortcut_reports_registration_and_restoration_failure() {
+        let state = super::MainWindowShortcutState::new();
+        let registry = ControlledMainWindowShortcutRegistry::default();
+        registry.registered.borrow_mut().insert("Ctrl+E".into());
+        registry
+            .occupied
+            .borrow_mut()
+            .extend(["Ctrl+E".into(), "Ctrl+Shift+E".into()]);
+
+        let error = super::apply_main_window_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+Shift+E"),
+            &registry,
+        )
+        .unwrap_err();
+
+        assert!(
+            error.contains("Ctrl+Shift+E") && error.contains("restore previous shortcut Ctrl+E")
+        );
+        assert!(registry.registered.borrow().is_empty());
+    }
+
+    #[test]
+    fn disabling_main_window_shortcut_releases_the_registered_key() {
+        let state = super::MainWindowShortcutState::new();
+        let registry = ControlledMainWindowShortcutRegistry::default();
+        registry.registered.borrow_mut().insert("Ctrl+E".into());
+
+        super::apply_main_window_shortcut_with_registry(&state, "Alt+Q", None, &registry).unwrap();
+
+        assert_eq!(state.get(), None);
+        assert!(registry.registered.borrow().is_empty());
+    }
+
     #[test]
     fn calculate_overlay_position_centers_bottom_on_primary_work_area() {
         let (x, y) = calculate_overlay_position(0, 0, 1920, 1080);
@@ -1042,7 +1226,7 @@ mod tests {
     }
 
     #[test]
-    fn choose_voice_overlay_anchor_prefers_main_window_monitor_over_cursor_monitor() {
+    fn choose_voice_overlay_anchor_prefers_cursor_then_main_window_monitor() {
         let main_monitor = MonitorGeometry {
             position_x: 3840,
             position_y: -392,
@@ -1068,11 +1252,15 @@ mod tests {
             Some(primary_monitor),
         );
 
-        assert_eq!(anchor, Some(main_monitor));
+        assert_eq!(anchor, Some(cursor_monitor));
+        assert_eq!(
+            choose_voice_overlay_anchor(Some(main_monitor), None, Some(primary_monitor)),
+            Some(main_monitor)
+        );
     }
 
     #[test]
-    fn choose_voice_overlay_anchor_falls_back_to_cursor_then_primary() {
+    fn choose_voice_overlay_anchor_uses_cursor_then_primary_without_a_main_monitor() {
         let cursor_monitor = MonitorGeometry {
             position_x: 0,
             position_y: -2160,

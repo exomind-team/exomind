@@ -17,7 +17,7 @@ export interface UseSessionStreamOptions {
   authToken?: string;
   /** Optional multi-host targets（多主机会话源） */
   targets?: SessionStreamTarget[];
-  /** Whether to enable the stream */
+  /** Enable reads and SSE; disabled hooks expose no cached sessions or refresh work. */
   enabled?: boolean;
 }
 
@@ -29,7 +29,7 @@ export interface UseSessionStreamResult {
   loading: boolean;
   /** Error message if any */
   error: string | null;
-  /** Manually refresh session list */
+  /** Manually refresh while enabled and mounted. */
   refresh: () => Promise<void>;
 }
 
@@ -148,6 +148,10 @@ export function useSessionStream({
   const eventSourcesRef = useRef<EventSource[]>([]);
   const authWarningKeysRef = useRef<Set<string>>(new Set());
   const fetchRequestIdRef = useRef(0);
+  const enabledRef = useRef(enabled);
+  const lifecycleActiveRef = useRef(false);
+  const activeFetchControllersRef = useRef(new Set<AbortController>());
+  enabledRef.current = enabled;
   const resolvedTargetsRef = useRef<{
     signature: string;
     targets: SessionStreamTarget[];
@@ -184,9 +188,9 @@ export function useSessionStream({
   const resolvedTargets = resolvedTargetsRef.current.targets;
 
   useEffect(() => {
-    setSessions(readCachedSessionSnapshot(resolvedTargetsSignature, true));
+    setSessions(enabled ? readCachedSessionSnapshot(resolvedTargetsSignature, true) : []);
     setError(null);
-  }, [resolvedTargetsSignature]);
+  }, [enabled, resolvedTargetsSignature]);
 
   const decorateSession = useCallback(
     (session: SessionInfo, target: SessionStreamTarget): SessionInfo => ({
@@ -199,10 +203,14 @@ export function useSessionStream({
   );
 
   const fetchSessions = useCallback(async () => {
-    if (resolvedTargets.length === 0) return;
+    if (!lifecycleActiveRef.current || !enabledRef.current || !enabled || resolvedTargets.length === 0
+      || resolvedTargetsRef.current.signature !== resolvedTargetsSignature) return;
 
     const requestId = fetchRequestIdRef.current + 1;
     fetchRequestIdRef.current = requestId;
+    const isCurrentRequest = () => lifecycleActiveRef.current && enabledRef.current
+      && fetchRequestIdRef.current === requestId
+      && resolvedTargetsRef.current.signature === resolvedTargetsSignature;
     const cachedSessions = readCachedSessionSnapshot(resolvedTargetsSignature, true);
     setLoading(true);
     setError(null);
@@ -211,6 +219,7 @@ export function useSessionStream({
         const headers: Record<string, string> = {};
         if (target.authToken) headers['Authorization'] = `Bearer ${target.authToken}`;
         const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        if (controller) activeFetchControllersRef.current.add(controller);
         const timeoutId = typeof window !== 'undefined'
           ? window.setTimeout(() => controller?.abort(), SESSION_FETCH_TIMEOUT_MS)
           : setTimeout(() => controller?.abort(), SESSION_FETCH_TIMEOUT_MS);
@@ -232,6 +241,7 @@ export function useSessionStream({
           );
         } finally {
           clearTimeout(timeoutId);
+          if (controller) activeFetchControllersRef.current.delete(controller);
         }
         if (!response.ok) {
           if (response.status === 401) {
@@ -253,7 +263,7 @@ export function useSessionStream({
         return data.map((session) => decorateSession(session, target));
       }));
 
-      if (fetchRequestIdRef.current !== requestId) {
+      if (!isCurrentRequest()) {
         return;
       }
 
@@ -288,7 +298,7 @@ export function useSessionStream({
       }
       setError(failedMessages[0] ?? 'session fetch failed（会话拉取失败）');
     } catch (e) {
-      if (fetchRequestIdRef.current !== requestId) {
+      if (!isCurrentRequest()) {
         return;
       }
       if (cachedSessions.length > 0) {
@@ -296,18 +306,36 @@ export function useSessionStream({
       }
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      if (fetchRequestIdRef.current === requestId) {
+      if (isCurrentRequest()) {
         setLoading(false);
       }
     }
-  }, [decorateSession, resolvedTargets, resolvedTargetsSignature]);
+  }, [decorateSession, enabled, resolvedTargets, resolvedTargetsSignature]);
 
   // Initial fetch + SSE subscription
   useEffect(() => {
+    // Disabling, changing targets or unmounting invalidates both HTTP and SSE work.
+    fetchRequestIdRef.current += 1;
+    lifecycleActiveRef.current = enabled;
     for (const eventSource of eventSourcesRef.current) {
       eventSource.close();
     }
     eventSourcesRef.current = [];
+
+    let disposed = false;
+    const cleanup = () => {
+      disposed = true;
+      lifecycleActiveRef.current = false;
+      fetchRequestIdRef.current += 1;
+      for (const controller of activeFetchControllersRef.current) {
+        controller.abort();
+      }
+      activeFetchControllersRef.current.clear();
+      for (const eventSource of eventSourcesRef.current) {
+        eventSource.close();
+      }
+      eventSourcesRef.current = [];
+    };
 
     if (!enabled || resolvedTargets.length === 0) {
       if (!enabled) {
@@ -315,13 +343,13 @@ export function useSessionStream({
       }
       setLoading(false);
       setError(null);
-      return;
+      return cleanup;
     }
 
     // Tests and non-browser environments may not provide EventSource.
     // In real browsers this stays always-on; in unsupported environments we no-op.
     if (!supportsEventSource) {
-      return;
+      return cleanup;
     }
 
     // Fetch initial data
@@ -347,9 +375,12 @@ export function useSessionStream({
       eventSourcesRef.current.push(es);
 
       const handleEvent = (event: MessageEvent) => {
+        if (disposed || !enabledRef.current
+          || resolvedTargetsRef.current.signature !== resolvedTargetsSignature) return;
         try {
           const data = JSON.parse(event.data);
           setSessions((prev) => {
+            if (disposed || !enabledRef.current) return prev;
             switch (event.type) {
               case 'session.created': {
                 const session = decorateSession(data.session as SessionInfo, target);
@@ -386,18 +417,13 @@ export function useSessionStream({
       es.addEventListener('session.deleted', handleEvent);
     }
 
-    return () => {
-      for (const eventSource of eventSourcesRef.current) {
-        eventSource.close();
-      }
-      eventSourcesRef.current = [];
-    };
+    return cleanup;
   }, [decorateSession, enabled, fetchSessions, resolvedTargets, resolvedTargetsSignature, supportsEventSource]);
 
   return {
-    sessions,
-    loading,
-    error,
+    sessions: enabled ? sessions : [],
+    loading: enabled ? loading : false,
+    error: enabled ? error : null,
     refresh: fetchSessions,
   };
 }

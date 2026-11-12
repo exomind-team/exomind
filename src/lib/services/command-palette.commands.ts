@@ -1,6 +1,6 @@
 import type { CommandDefinition } from '@/lib/types/command-palette';
 
-export type CoreNavigationPath = '/' | '/eventlog' | '/tasks' | '/reminders' | '/settings' | '/agents';
+export type CoreNavigationPath = '/' | '/eventlog' | '/reminders' | '/settings' | '/agents';
 
 interface CreateCoreNavigationCommandsOptions {
   navigate: (path: CoreNavigationPath) => Promise<void> | void;
@@ -47,19 +47,6 @@ export function createCoreNavigationCommands(
       keywords: ['番茄钟', '输入', '事件日志'],
       async execute() {
         await options.navigate('/eventlog');
-        return { ok: true };
-      },
-    },
-    {
-      id: 'navigate:tasks',
-      title: '打开任务',
-      description: '跳转到任务页面',
-      category: 'navigation',
-      permissionTier: 'safe',
-      aliases: ['任务', 'tasks', 'task'],
-      keywords: ['todo', '计划'],
-      async execute() {
-        await options.navigate('/tasks');
         return { ok: true };
       },
     },
@@ -122,19 +109,6 @@ export function createCoreNavigationCommands(
       },
       async execute() {
         await options.navigate('/agents');
-        return { ok: true };
-      },
-    },
-    {
-      id: 'navigate:goals-legacy',
-      title: '打开目标（长期任务）',
-      description: '已移至任务页，跳转到当下视图',
-      category: 'navigation',
-      permissionTier: 'safe',
-      aliases: ['目标', 'goals', '长期'],
-      keywords: ['长期任务', 'strategy'],
-      async execute() {
-        await options.navigate('/tasks');
         return { ok: true };
       },
     },

@@ -70,17 +70,28 @@ pub fn resolve_instance_app_data_dir(app: &AppHandle) -> Result<PathBuf, String>
     Ok(resolved)
 }
 
-pub fn resolve_overlay_webview_data_dir(label: &str) -> Option<PathBuf> {
-    let root = resolve_env_path(DEV_WEBVIEW_OVERLAY_DATA_ROOT_ENV)?;
+pub fn resolve_instance_runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = resolve_instance_app_data_dir(app)?;
+    let runtime_dir = resolve_instance_runtime_dir_from_app_data_dir(&app_data_dir);
+    ensure_dir(&runtime_dir)?;
+    Ok(runtime_dir)
+}
+
+pub fn resolve_overlay_webview_data_dir(label: &str) -> Result<Option<PathBuf>, String> {
+    let Some(root) = resolve_env_path(DEV_WEBVIEW_OVERLAY_DATA_ROOT_ENV) else {
+        return Ok(None);
+    };
     let resolved = root.join(label);
-    ensure_dir(&resolved).ok()?;
-    Some(resolved)
+    ensure_dir(&resolved).map_err(|error| {
+        format!("failed to prepare isolated WebView data directory for {label}: {error}")
+    })?;
+    Ok(Some(resolved))
 }
 
 pub fn resolve_main_webview_data_dir() -> Option<PathBuf> {
-    let resolved = resolve_env_path(DEV_WEBVIEW_MAIN_DATA_DIR_ENV)?;
-    ensure_dir(&resolved).ok()?;
-    Some(resolved)
+    // Preparation belongs to app setup so an invalid explicit directory fails
+    // startup instead of silently falling back to the default WebView profile.
+    resolve_env_path(DEV_WEBVIEW_MAIN_DATA_DIR_ENV)
 }
 
 pub fn resolve_legacy_shared_app_data_dir() -> Option<PathBuf> {
@@ -407,6 +418,87 @@ mod tests {
         let resolved = resolve_instance_runtime_dir_from_app_data_dir(&app_data_dir);
 
         assert_eq!(resolved, app_data_dir.join("runtime"));
+    }
+
+    #[test]
+    fn main_webview_directory_honors_explicit_override_without_preparing_it() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let path = temp_path("main-webview-override");
+        let path_text = path.to_str().unwrap();
+        let _guard = EnvGuard::set(DEV_WEBVIEW_MAIN_DATA_DIR_ENV, Some(path_text));
+
+        assert_eq!(resolve_main_webview_data_dir(), Some(path.clone()));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn invalid_explicit_main_webview_directory_cannot_silently_fall_back() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let path = temp_path("main-webview-blocked");
+        fs::write(&path, "blocking-file").unwrap();
+        let _guard = EnvGuard::set(DEV_WEBVIEW_MAIN_DATA_DIR_ENV, Some(path.to_str().unwrap()));
+
+        let resolved = resolve_main_webview_data_dir().unwrap();
+
+        assert_eq!(resolved, path);
+        assert!(fs::create_dir_all(&resolved).is_err());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn main_webview_directory_uses_tauri_default_only_without_an_override() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _guard = EnvGuard::set(DEV_WEBVIEW_MAIN_DATA_DIR_ENV, None);
+
+        assert_eq!(resolve_main_webview_data_dir(), None);
+    }
+
+    #[test]
+    fn overlay_webview_data_dir_uses_default_only_without_an_override() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _guard = EnvGuard::set(DEV_WEBVIEW_OVERLAY_DATA_ROOT_ENV, None);
+
+        assert_eq!(
+            resolve_overlay_webview_data_dir("voice-overlay").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn overlay_webview_data_dir_prepares_a_separate_profile_for_each_window() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let root = temp_path("overlay-webview-profiles");
+        let _guard = EnvGuard::set(
+            DEV_WEBVIEW_OVERLAY_DATA_ROOT_ENV,
+            Some(root.to_str().unwrap()),
+        );
+
+        for label in ["voice-overlay", "now-workbench-overlay", "action-dock"] {
+            let resolved = resolve_overlay_webview_data_dir(label).unwrap().unwrap();
+            assert_eq!(resolved, root.join(label));
+            assert!(resolved.is_dir());
+        }
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn overlay_webview_data_dir_surfaces_an_invalid_explicit_root() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let root = temp_path("blocked-overlay-webview-root");
+        fs::write(&root, "blocking-file").unwrap();
+        let _guard = EnvGuard::set(
+            DEV_WEBVIEW_OVERLAY_DATA_ROOT_ENV,
+            Some(root.to_str().unwrap()),
+        );
+
+        for label in ["voice-overlay", "now-workbench-overlay", "action-dock"] {
+            let error = resolve_overlay_webview_data_dir(label).unwrap_err();
+            assert!(error.contains(label));
+            assert!(error.contains("blocked-overlay-webview-root"));
+        }
+
+        fs::remove_file(&root).unwrap();
     }
 
     #[test]

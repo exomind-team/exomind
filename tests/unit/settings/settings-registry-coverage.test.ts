@@ -40,6 +40,30 @@ function flattenVisible(items: SettingsItem[], ctx: SettingsContext): SettingsIt
 }
 
 describe('settings registry coverage audit', () => {
+  it.each([false, true])('hides task and agent/session settings with developer mode %s', (developerMode) => {
+    const ctx = { ...getBaseCtx(), developerMode };
+    const visibleItems = getVisibleSettings(ctx);
+    const visibleIds = flattenVisible(visibleItems, ctx).map((item) => item.id);
+
+    [
+      'task-page-fuzzy-search',
+      'task-create-success-action',
+      'task-dag-pan-speed',
+      'task-dag-zoom-speed',
+      'tiled-workbench-navigation-shortcut-scheme',
+      'tiled-workbench-command-shortcut-scheme',
+      'tiled-workbench-passthrough-shortcut',
+      'pty-waiting-input-idle-timeout',
+      'pty-terminal-replay-limit-kb',
+      'api-agent-tab-enabled',
+      'proposal-inbox-enabled',
+    ].forEach((id) => {
+      expect(visibleIds).not.toContain(id);
+    });
+    expect(visibleItems.some((item) => item.category === 'terminal-agent')).toBe(false);
+    expect(flattenAll(SETTINGS_REGISTRY).some((item) => item.id === 'api-agent-tab-enabled')).toBe(false);
+  });
+
   it('exposes the single top-level voice input group and removes legacy voice groups（顶层只保留快捷语音输入分组，移除旧语音入口）', () => {
     const topLevelIds = SETTINGS_REGISTRY.map((item) => item.id);
 
@@ -119,10 +143,10 @@ describe('settings registry coverage audit', () => {
     expect(registryModule.FEATURE_TOGGLE_SETTING_IDS).toEqual([
       'agent-page-enabled',
       'goals-page-enabled',
-      'proposal-inbox-enabled',
       'desktop-adaptive',
       'command-palette-enabled',
     ]);
+    expect(registryModule.SETTINGS_REGISTRY.some((item) => item.id === 'proposal-inbox-enabled')).toBe(false);
     expect(registryModule.FEATURE_TOGGLE_SETTINGS.map((item) => item.id)).toEqual(registryModule.FEATURE_TOGGLE_SETTING_IDS);
   });
 });

@@ -74,7 +74,7 @@ async fn today_planner_windows_create_start_and_reflow() {
     let dir = tempdir().unwrap();
     let sqlite_path = dir.path().join("today-planner.sqlite");
     let store = Arc::new(TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
-    let app = test_router(test_state_with_timeblock_store(store));
+    let app = test_router(test_state_with_timeblock_store(Arc::clone(&store)));
 
     let create_response = app
         .clone()
@@ -177,7 +177,25 @@ async fn today_planner_windows_create_start_and_reflow() {
         .to_bytes();
     let start_payload: Value = serde_json::from_slice(&start_body).unwrap();
     assert_eq!(start_payload["sourcePlannedBlockId"], work_segment_id);
-    assert_eq!(start_payload["taskIds"], json!(["task-a", "task-b"]));
+    assert_eq!(start_payload["taskIds"], json!([]));
+    assert_eq!(
+        store
+            .get_active_scoped(Some("user-a"))
+            .unwrap()
+            .unwrap()
+            .task_ids,
+        Vec::<String>::new(),
+        "the actual persisted timeblock must not inherit task-domain associations"
+    );
+    assert_eq!(
+        store
+            .get_segment_scoped(Some("user-a"), &work_segment_id)
+            .unwrap()
+            .unwrap()
+            .linked_task_ids,
+        vec!["task-a".to_string(), "task-b".to_string()],
+        "retiring active task writes must not erase the retained reference data"
+    );
 
     let reflow_response = app
         .clone()
@@ -364,7 +382,7 @@ async fn today_planner_start_conflicts_while_feedback_is_still_in_progress() {
                 target_minutes: Some(25),
                 elapsed: 25 * 60 * 1000,
                 updated_at: Some(1_774_624_600_000u64),
-                phase: Some("feedback_in_progress".to_string()),
+                phase: Some(exomind_runtime::timeblock::BlockPhase::FeedbackInProgress),
                 version: Some(3),
                 actor_id: Some("test".to_string()),
                 last_transition_at: Some(1_774_624_600_000u64),

@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { AGENT_MANAGEMENT_ENABLED } from './agents-utils';
 
 const DEFAULT_SYSTEM_PROMPT = 'You are ExoMind API Agent tester.'; // API Agent 调试系统提示词
 const DEFAULT_TOOLS_JSON = JSON.stringify([], null, 2);
@@ -134,6 +135,11 @@ function DataMetric({
 }
 
 export function ApiAgentTabView() {
+  if (!AGENT_MANAGEMENT_ENABLED) return null;
+  return <ApiAgentManagementView />;
+}
+
+function ApiAgentManagementView() {
   const adapter = useMemo(() => new AgentSessionRtAdapter(), []);
   const providerProfiles = useMemo(
     () => [...listProviderProfiles()].sort((left, right) => {

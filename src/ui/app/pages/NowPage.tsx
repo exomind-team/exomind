@@ -1,13 +1,12 @@
 import { ListTodo, NotebookPen, Target } from 'lucide-react';
 import { ChatPage, type ChatPageKeepAliveState } from '@/components/Chat/ChatPage';
-import { BlockTaskAssociationList } from '@/ui/app/components/BlockTaskAssociationList';
 import { useFocusKeepAwakeController } from '@/ui/app/components/FocusKeepAwakeController';
 import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
 import { PageHeaderNav } from '@/ui/app/components/PageHeaderNav';
 import { NowTodayTab } from '@/ui/app/components/NowTodayTab';
 import { PageShell } from '@/ui/app/components/PageShell';
 import { useLocation, useNavigate } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   EVENTLOG_TAB_VALUES,
   getEventlogPathForTab,
@@ -48,7 +47,6 @@ function NowViewBar({
 export function NowPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [prestartSelectedTaskIds, setPrestartSelectedTaskIds] = useState<string[]>([]);
   const recordKeepAliveRef = useRef<ChatPageKeepAliveState | null>(null);
   const activeTab = resolveEventlogTabFromLocation(location.pathname, location.searchStr ?? '');
   const focusKeepAwakeControl = useFocusKeepAwakeController(
@@ -90,14 +88,10 @@ export function NowPage() {
           >
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
               <FocusTimerWidget
-                prestartSelectedTaskIds={prestartSelectedTaskIds}
-                onPrestartSelectedTaskIdsChange={setPrestartSelectedTaskIds}
+                prestartSelectedTaskIds={[]}
                 showRunningLinkedTasks={false}
+                taskAssociationsEnabled={false}
                 keepAwakeControl={focusKeepAwakeControl}
-              />
-              <BlockTaskAssociationList
-                prestartSelectedTaskIds={prestartSelectedTaskIds}
-                onPrestartSelectedTaskIdsChange={setPrestartSelectedTaskIds}
               />
             </div>
           </div>

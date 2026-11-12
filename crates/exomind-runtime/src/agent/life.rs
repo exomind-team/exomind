@@ -10,7 +10,6 @@ use super::broker::{
 use super::cognition::{
     BodyStatus, CognitionContext, CognitionEngine, CognitionOutput, KnowledgeOp,
 };
-use super::proposal_tools::{execute_proposal_tool_call, is_proposal_tool_name};
 use super::session::{
     AgentSessionRecord, AgentSessionRuntime, SessionError, TOOL_PRESET_RECENT_EVENTS,
     ToolCallRecord, resolve_agent_tools_for_runtime, resolve_provider_profile_with_runtime,
@@ -20,7 +19,6 @@ use super::tools::eventlog::get_recent_events_tool;
 use super::workspace::{ActionEntry, AgentWorkspace};
 use super::{Agent, ChatChunk, ChatRequest};
 use crate::energy::AgentEnergySnapshot;
-use crate::proposal::{Publisher, PublisherType};
 use crate::signal::types::SignalEvent;
 
 // ---------------------------------------------------------------------------
@@ -484,11 +482,6 @@ async fn execute_internal_tool_calls(
     tool_calls: &[ToolCall],
 ) -> Vec<(ToolCallRecord, TurnItem)> {
     let mut results = Vec::with_capacity(tool_calls.len());
-    let publisher = Publisher {
-        publisher_type: PublisherType::Agent,
-        id: "api-agent".to_string(),
-        name: "API Agent".to_string(),
-    };
 
     for tool_call in tool_calls {
         let content = match tool_call.name.as_str() {
@@ -496,19 +489,6 @@ async fn execute_internal_tool_calls(
                 let (_, tool_fn) =
                     get_recent_events_tool(Arc::clone(&runtime.eventlog_store), scope_key.clone());
                 match tool_fn(tool_call.input.clone()).await {
-                    Ok(content) => content,
-                    Err(error) => format!("Tool error: {error}"),
-                }
-            }
-            other if is_proposal_tool_name(other) => {
-                match execute_proposal_tool_call(
-                    Arc::clone(&runtime.proposal_store),
-                    scope_key.clone(),
-                    publisher.clone(),
-                    tool_call,
-                )
-                .await
-                {
                     Ok(content) => content,
                     Err(error) => format!("Tool error: {error}"),
                 }
@@ -697,12 +677,10 @@ impl Agent for CognitiveLifeAgent {
 mod tests {
     use super::*;
     use crate::agent::llm_cognition::LlmCognition;
-    use crate::agent::proposal_tools::ADD_TASK_PROPOSAL_TOOL;
     use crate::agent::session::{AgentSessionRuntime, AgentSessionStore};
     use crate::config::PutConfigEntryInput;
     use crate::config::types::USER_CONFIG_SCOPE;
     use crate::eventlog::{EventLogStore, EventRecord};
-    use crate::proposal::{ActionType, ProposalFilter, ProposalStore};
     use axum::extract::State as AxumState;
     use axum::http::StatusCode;
     use axum::{Json, Router, routing::post};
@@ -1024,9 +1002,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn internal_proposal_tool_calls_use_shared_helper_and_persist_proposals() {
+    async fn alpha_disables_internal_proposal_tool_calls() {
         let tmp = tempfile::tempdir().unwrap();
-        let proposal_store = Arc::new(ProposalStore::new());
+        let proposal_store = Arc::new(crate::proposal::ProposalStore::new());
         let runtime = AgentSessionRuntime::new(
             Arc::new(crate::config::ConfigStore::new()),
             Arc::new(EventLogStore::new(tmp.path().join("eventlog"))),
@@ -1039,50 +1017,41 @@ mod tests {
             .with_presets(vec![
                 crate::agent::session::TOOL_PRESET_PROPOSAL_TOOLS.to_string(),
             ]);
-        let tools = resolve_agent_tools_for_runtime(
+        let error = resolve_agent_tools_for_runtime(
             &runtime,
             Vec::new(),
             &trigger.presets,
             trigger.scope_key.clone(),
         )
-        .unwrap();
-        assert_eq!(tools.len(), 4);
-        assert!(tools.iter().any(|tool| tool.name == ADD_TASK_PROPOSAL_TOOL));
+        .unwrap_err();
+        assert!(matches!(error, SessionError::UnsupportedTool(_)));
 
         let executed = execute_internal_tool_calls(
             &runtime,
             Some("profile-alpha".to_string()),
             &[ToolCall {
                 id: "proposal-call-1".to_string(),
-                name: ADD_TASK_PROPOSAL_TOOL.to_string(),
-                input: json!({
-                    "title": "为依赖图验收创建任务提案",
-                    "body": "事件日志提示明天需要验收任务依赖图新布局",
-                    "taskTitle": "验收任务依赖图新布局",
-                    "description": "结合最近 task-dag 改动做验收",
-                    "tags": ["task-dag", "acceptance"],
-                    "priority": "high"
-                }),
+                name: "add_task_proposal".to_string(),
+                input: json!({}),
             }],
         )
         .await;
 
         assert_eq!(executed.len(), 1);
-        assert_eq!(executed[0].0.tool_name, ADD_TASK_PROPOSAL_TOOL);
-        assert!(
-            executed[0]
-                .0
-                .output
-                .as_deref()
-                .is_some_and(|output| output.contains("\"actionType\":\"task.create\""))
+        assert_eq!(executed[0].0.tool_name, "add_task_proposal");
+        assert_eq!(
+            executed[0].0.output.as_deref(),
+            Some("Unsupported internal tool: add_task_proposal"),
         );
-
-        let proposals = proposal_store
-            .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
-            .unwrap();
-        assert_eq!(proposals.len(), 1);
-        assert_eq!(proposals[0].action_type, ActionType::CreateTask);
-        assert_eq!(proposals[0].title, "为依赖图验收创建任务提案");
+        assert!(
+            proposal_store
+                .list_scoped(
+                    Some("profile-alpha"),
+                    &crate::proposal::ProposalFilter::default(),
+                )
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]

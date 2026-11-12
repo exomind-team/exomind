@@ -1,8 +1,11 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
+mod app_lifecycle;
 mod appbar;
 mod commands;
 mod dev_instance_paths;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod system_tray;
 mod windows_appbar;
 
 use commands::asr_commands::{
@@ -55,11 +58,7 @@ use commands::workspace_commands::{
 };
 use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
 use dev_instance_paths::{
-    resolve_instance_app_data_dir, resolve_instance_runtime_dir_from_app_data_dir,
-    resolve_legacy_shared_app_data_dir, resolve_legacy_shared_runtime_dir,
-    resolve_legacy_shared_webview_main_data_dir, resolve_main_webview_data_dir,
-    resolve_mcp_bridge_base_port, seed_instance_app_data_dir_if_needed,
-    seed_instance_runtime_dir_if_needed, seed_instance_webview_main_data_dir_if_needed,
+    resolve_instance_runtime_dir, resolve_main_webview_data_dir, resolve_mcp_bridge_base_port,
 };
 use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
 use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
@@ -73,20 +72,16 @@ use windows_appbar::{
 const DEFAULT_SIGNAL_ROUTES_FILE_NAME: &str = "signal-routes.default.json";
 const DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON: &str =
     include_str!("../../config/signal-routes.default.json");
+#[cfg(test)]
 const DEFAULT_MESH_STATE_FILE_NAME: &str = "mesh-state.json";
 const DEVICE_RUNTIME_HOST_ID_KEY: &str = "exomind:runtimeHostId";
 const RUNTIME_IDENTITY_SOURCE: &str = "src-tauri:seed-runtime-identity";
 
-fn seed_runtime_default_signal_routes_path(runtime_dir: &std::path::Path) {
-    if std::env::var_os("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT").is_some() {
-        return;
-    }
-
+fn seed_runtime_default_signal_routes_path(
+    runtime_dir: &std::path::Path,
+) -> Result<std::path::PathBuf, std::io::Error> {
     let bundled_routes_dir = runtime_dir.join("config");
-    if let Err(error) = std::fs::create_dir_all(&bundled_routes_dir) {
-        log::error!("failed to create runtime config dir for signal routes: {error}");
-        return;
-    }
+    std::fs::create_dir_all(&bundled_routes_dir)?;
 
     let bundled_routes_path = bundled_routes_dir.join(DEFAULT_SIGNAL_ROUTES_FILE_NAME);
     let should_write = match std::fs::read_to_string(&bundled_routes_path) {
@@ -95,19 +90,12 @@ fn seed_runtime_default_signal_routes_path(runtime_dir: &std::path::Path) {
     };
 
     if should_write {
-        if let Err(error) = std::fs::write(&bundled_routes_path, DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON)
-        {
-            log::error!("failed to seed bundled signal routes file: {error}");
-            return;
-        }
+        std::fs::write(&bundled_routes_path, DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON)?;
     }
-
-    // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
-    unsafe {
-        std::env::set_var("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT", &bundled_routes_path);
-    }
+    Ok(bundled_routes_path)
 }
 
+#[cfg(test)]
 fn resolve_runtime_config_sqlite_path(runtime_dir: &std::path::Path) -> std::path::PathBuf {
     std::env::var_os("EXOMIND_RT_CONFIG_SQLITE_PATH")
         .filter(|value| !value.is_empty())
@@ -137,6 +125,7 @@ fn resolve_or_create_runtime_host_id(
     Ok(generated)
 }
 
+#[cfg(test)]
 fn seed_runtime_identity_env_paths(runtime_dir: &std::path::Path) {
     if std::env::var_os("EXOMIND_RT_HOST_ID").is_none() {
         let config_sqlite_path = resolve_runtime_config_sqlite_path(runtime_dir);
@@ -168,6 +157,7 @@ fn seed_runtime_identity_env_paths(runtime_dir: &std::path::Path) {
     }
 }
 
+#[cfg(test)]
 fn seed_runtime_sqlite_env_paths(runtime_dir: &std::path::Path) {
     if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none() {
         let signal_sqlite_path = runtime_dir.join("signal-pool.sqlite");
@@ -219,7 +209,13 @@ fn seed_runtime_sqlite_env_paths(runtime_dir: &std::path::Path) {
         }
     }
 
-    seed_runtime_default_signal_routes_path(runtime_dir);
+    let routes_path = seed_runtime_default_signal_routes_path(runtime_dir)
+        .expect("test route seed should be writable");
+    // Only the legacy test helper uses environment paths. Production startup
+    // passes an explicit root and never publishes a process-wide route override.
+    unsafe {
+        std::env::set_var("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT", routes_path);
+    }
     seed_runtime_identity_env_paths(runtime_dir);
 }
 
@@ -240,11 +236,10 @@ pub fn run() {
     let volcano_asr_stream_state = std::sync::Arc::new(VolcanoAsrStreamState::default());
     let mut context = tauri::generate_context!();
 
-    #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let main_window_override = resolve_main_webview_data_dir().and_then(|main_data_dir| {
-        // Tauri config only honors relative dataDirectory values, so debug-only
-        // instance isolation must recreate the main window from Rust with an
-        // absolute per-instance WebView2 data dir.
+        // Explicit isolation applies to release as well as debug. Recreating the
+        // main window lets Rust pass an absolute WebView2 data directory.
         let main_window_config = context
             .config()
             .app
@@ -293,22 +288,14 @@ pub fn run() {
         .plugin(exomind_android_timeblock_end_alert::init())
         .manage(ws_client_state.clone())
         .manage(runtime_process_state.clone())
+        .manage(app_lifecycle::AppExitState::default())
         .manage(voice_shortcut_state)
         .manage(main_window_shortcut_state)
         .manage(volcano_asr_stream_state)
         .setup(move |app| {
-            #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let Some((main_window_config, main_data_dir)) = main_window_override.as_ref() {
-                if let Some(legacy_webview_dir) = resolve_legacy_shared_webview_main_data_dir() {
-                    if let Err(error) = seed_instance_webview_main_data_dir_if_needed(
-                        main_data_dir,
-                        &legacy_webview_dir,
-                    ) {
-                        log::warn!(
-                            "instance webview main data seed incomplete, will retry on next launch: {error}"
-                        );
-                    }
-                }
+                std::fs::create_dir_all(main_data_dir)?;
                 if app.get_webview_window("main").is_none() {
                     tauri::WebviewWindowBuilder::from_config(app.handle(), main_window_config)?
                         .data_directory(main_data_dir.clone())
@@ -327,6 +314,9 @@ pub fn run() {
                 }
             }
 
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            system_tray::install(app.handle())?;
+
             // Register global voice shortcut (toggle, 按一次开始再按一次结束) and prewarm overlay window（预热悬浮窗）.
             let voice_shortcut_state = app.state::<VoiceShortcutState>();
             let main_window_shortcut_state = app.state::<MainWindowShortcutState>();
@@ -343,60 +333,10 @@ pub fn run() {
                 log::warn!("failed to prewarm action-dock window: {error}");
             }
 
-            if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none()
-                || std::env::var_os("EXOMIND_RT_EVENTLOG_SQLITE_PATH").is_none()
-                || std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH").is_none()
-                || std::env::var_os("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH").is_none()
-                || std::env::var_os("EXOMIND_RT_SESSION_SQLITE_PATH").is_none()
-                || std::env::var_os("EXOMIND_RT_CONFIG_SQLITE_PATH").is_none()
-            {
-                match resolve_instance_app_data_dir(&app.handle()) {
-                    Ok(app_data_dir) => {
-                        if let Some(legacy_app_data_dir) = resolve_legacy_shared_app_data_dir() {
-                            if let Err(error) = seed_instance_app_data_dir_if_needed(
-                                &app_data_dir,
-                                &legacy_app_data_dir,
-                            ) {
-                                log::warn!(
-                                    "instance app data seed incomplete, will retry on next launch: {error}"
-                                );
-                            }
-                        }
-
-                        let runtime_dir = resolve_instance_runtime_dir_from_app_data_dir(&app_data_dir);
-                        if let Err(error) = std::fs::create_dir_all(&runtime_dir) {
-                            log::error!(
-                                "failed to create instance runtime data dir for runtime sqlite files: {error}"
-                            );
-                        } else {
-                            if let Some(legacy_runtime_dir) = resolve_legacy_shared_runtime_dir() {
-                                if let Err(error) =
-                                    seed_instance_runtime_dir_if_needed(&runtime_dir, &legacy_runtime_dir)
-                                {
-                                    log::warn!(
-                                        "instance runtime seed incomplete, will retry on next launch: {error}"
-                                    );
-                                }
-                            }
-
-                            // Set EXOMIND_RT_DATA_DIR so the EventLog JSON-files backend
-                            // and other file-based stores write inside the app sandbox
-                            // instead of the read-only CWD (critical on Android).
-                            if std::env::var_os("EXOMIND_RT_DATA_DIR").is_none() {
-                                unsafe {
-                                    std::env::set_var("EXOMIND_RT_DATA_DIR", &runtime_dir);
-                                }
-                            }
-                            seed_runtime_sqlite_env_paths(&runtime_dir);
-                        }
-                    }
-                    Err(error) => {
-                        log::error!(
-                            "failed to resolve instance app data dir for runtime sqlite files: {error}"
-                        );
-                    }
-                }
-            }
+            // Alpha imports no legacy seed. Explicit options give every owned
+            // store this v06 directory without consulting per-store shell paths.
+            let runtime_dir = resolve_instance_runtime_dir(app.handle())?;
+            seed_runtime_default_signal_routes_path(&runtime_dir)?;
 
             let runtime_target_mode = match load_persisted_runtime_target_mode(&app.handle()) {
                 Ok(mode) => mode,
@@ -458,6 +398,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            app_lifecycle::app_main_window_close,
+            app_lifecycle::app_request_exit,
             // WebSocket 客户端命令
             ws_connect,
             ws_disconnect,
@@ -562,24 +504,40 @@ pub fn run() {
         builder = builder.plugin(mcp_bridge_builder.build());
     }
 
-    builder
+    let app = builder
         .on_window_event(|window, event| {
-            // When the main window is closed (or destroyed), exit the entire application
-            // so that overlay windows (now-workbench-overlay, voice-overlay) don't linger.
             if window.label() == "main" {
-                if let tauri::WindowEvent::Destroyed = event {
-                    windows_appbar::detach_on_shutdown(window.app_handle());
-                    std::process::exit(0);
+                match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        // Alpha keeps close-to-exit behavior. Preserve the main
+                        // window until the owned runtime has finished stopping.
+                        if !app_lifecycle::exit_ready(window.app_handle()) {
+                            api.prevent_close();
+                            app_lifecycle::request_exit(window.app_handle(), 0);
+                        }
+                    }
+                    tauri::WindowEvent::Destroyed => {
+                        app_lifecycle::request_exit(window.app_handle(), 0);
+                    }
+                    _ => {}
                 }
             }
         })
-        .run(context)
-        .expect("error while running tauri application");
+        .build(context)
+        .expect("error while building tauri application");
+    app.run(|app, event| {
+        if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+            if !app_lifecycle::exit_ready(app) {
+                api.prevent_exit();
+                app_lifecycle::request_exit(app, code.unwrap_or(0));
+            }
+        }
+    });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::seed_runtime_sqlite_env_paths;
+    use super::{seed_runtime_default_signal_routes_path, seed_runtime_sqlite_env_paths};
     use exomind_runtime::config::store::ConfigStore;
     use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
     use std::sync::{Mutex, OnceLock};
@@ -757,6 +715,29 @@ mod tests {
 
         std::fs::remove_dir_all(&runtime_dir).ok();
         clear_runtime_sqlite_envs();
+    }
+
+    #[test]
+    fn bundled_route_writer_preserves_the_process_environment() {
+        let _guard = runtime_env_lock().lock().unwrap();
+        let directory = std::env::temp_dir().join(format!("exomind-routes-writer-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let before = std::env::var_os("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT");
+        let written = seed_runtime_default_signal_routes_path(&directory).unwrap();
+        assert!(written.starts_with(&directory));
+        assert!(written.is_file());
+        assert_eq!(std::env::var_os("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT"), before);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn bundled_route_writer_returns_unusable_directory_errors() {
+        let directory = std::env::temp_dir().join(format!("exomind-routes-error-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let not_a_directory = directory.join("file");
+        std::fs::write(&not_a_directory, "fixture").unwrap();
+        assert!(seed_runtime_default_signal_routes_path(&not_a_directory).is_err());
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

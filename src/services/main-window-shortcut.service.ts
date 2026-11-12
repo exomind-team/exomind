@@ -15,25 +15,10 @@ import {
   syncMainWindowShortcutSelectionWithRuntime,
   takePendingMainWindowShortcutActivation,
 } from '@/services/main-window-shortcut-runtime';
-import { buildTasksMainSearch } from '@/ui/app/pages/task-route-memory';
 import { getEventlogPathForTab } from '@/ui/app/pages/eventlog-route-memory';
 
 export const MAIN_WINDOW_SHORTCUT_EVENT_NAME = 'main-window-shortcut';
 export const MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT = 'eventlog-record-input';
-export const MAIN_WINDOW_FOCUS_TARGET_TASKS_QUICK_ADD_INPUT = 'tasks-quick-add-input';
-
-type RouterLocationSnapshot = {
-  pathname: string;
-  searchStr: string;
-};
-
-function getRouterLocationSnapshot(): RouterLocationSnapshot {
-  const location = appRouter.state.location;
-  return {
-    pathname: location.pathname,
-    searchStr: location.searchStr ?? '',
-  };
-}
 
 async function navigateToEventlogRecord(): Promise<void> {
   await appRouter.navigate({
@@ -41,47 +26,66 @@ async function navigateToEventlogRecord(): Promise<void> {
   });
 }
 
-async function navigateToTasksMain(): Promise<void> {
-  await appRouter.navigate({
-    to: '/tasks',
-    search: buildTasksMainSearch(),
-  });
-}
-
 export class MainWindowShortcutService {
   private initialized = false;
+  private initPromise: Promise<void> | null = null;
+  private lifecycle = 0;
   private unlistenEvent: (() => void) | null = null;
   private unlistenVoiceShortcut: (() => void) | null = null;
   private unlistenQuickFocus: (() => void) | null = null;
   private unlistenSelection: (() => void) | null = null;
   private quickFocusEnabled = getMainWindowShortcutQuickFocusEnabled();
 
-  async init(): Promise<void> {
+  init(): Promise<void> {
     if (this.initialized) {
-      return;
+      return Promise.resolve();
     }
+    if (this.initPromise) return this.initPromise;
 
-    if (!await isTauri()) {
-      return;
-    }
+    const lifecycle = ++this.lifecycle;
+    const handles: Array<() => void> = [];
+    let committed = false;
+    const task = (async () => {
+      if (!await isTauri() || lifecycle !== this.lifecycle) return;
 
-    this.initialized = true;
-    await syncMainWindowShortcutSelectionWithRuntime({ notify: false });
+      await this.syncShortcut(lifecycle);
+      if (lifecycle !== this.lifecycle) return;
 
-    this.unlistenVoiceShortcut = subscribeVoiceShortcutHotkeyChanges(() => {
-      void syncMainWindowShortcutSelectionWithRuntime({ notify: false });
+      const unlistenVoice = subscribeVoiceShortcutHotkeyChanges(() => {
+        void this.syncShortcut(lifecycle);
+      });
+      handles.push(unlistenVoice);
+      const unlistenSelection = this.subscribeSelectionStorageChanges(lifecycle);
+      handles.push(unlistenSelection);
+      const unlistenQuickFocus = subscribeMainWindowShortcutQuickFocusChanges((enabled) => {
+        if (lifecycle === this.lifecycle) this.quickFocusEnabled = enabled;
+      });
+      handles.push(unlistenQuickFocus);
+      const unlistenEvent = await listen(MAIN_WINDOW_SHORTCUT_EVENT_NAME, async () => {
+        await this.consumePendingActivation(lifecycle);
+      });
+      handles.push(unlistenEvent);
+      if (lifecycle !== this.lifecycle) return;
+
+      this.unlistenVoiceShortcut = unlistenVoice;
+      this.unlistenSelection = unlistenSelection;
+      this.unlistenQuickFocus = unlistenQuickFocus;
+      this.unlistenEvent = unlistenEvent;
+      this.initialized = true;
+      committed = true;
+      await this.consumePendingActivation(lifecycle);
+    })().finally(() => {
+      // A registration that arrives after unmount belongs to the old lifecycle.
+      if (!committed) handles.forEach((unlisten) => unlisten());
+      if (this.initPromise === task) this.initPromise = null;
     });
-    this.unlistenSelection = this.subscribeSelectionStorageChanges();
-    this.unlistenQuickFocus = subscribeMainWindowShortcutQuickFocusChanges((enabled) => {
-      this.quickFocusEnabled = enabled;
-    });
-    this.unlistenEvent = await listen(MAIN_WINDOW_SHORTCUT_EVENT_NAME, async () => {
-      await this.consumePendingActivation();
-    });
-    await this.consumePendingActivation();
+    this.initPromise = task;
+    return task;
   }
 
   destroy(): void {
+    ++this.lifecycle;
+    this.initPromise = null;
     this.unlistenEvent?.();
     this.unlistenEvent = null;
     this.unlistenVoiceShortcut?.();
@@ -93,18 +97,29 @@ export class MainWindowShortcutService {
     this.initialized = false;
   }
 
-  private subscribeSelectionStorageChanges(): () => void {
+  private async syncShortcut(lifecycle: number): Promise<void> {
+    if (lifecycle !== this.lifecycle) return;
+    try {
+      await syncMainWindowShortcutSelectionWithRuntime({ notify: false });
+    } catch (error) {
+      if (lifecycle === this.lifecycle) console.warn('[main-window-shortcut] registration failed; settings can retry', error);
+    }
+  }
+
+  private subscribeSelectionStorageChanges(lifecycle: number): () => void {
     if (typeof window === 'undefined') {
       return () => {};
     }
 
     const handleStorage = (event: StorageEvent) => {
-      if (event.key !== MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY) {
+      if (lifecycle !== this.lifecycle || event.key !== MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY) {
         return;
       }
       void syncMainWindowShortcutSelectionWithRuntime({
         notify: false,
         selection: getMainWindowShortcutSelection(),
+      }).catch((error) => {
+        if (lifecycle === this.lifecycle) console.warn('[main-window-shortcut] selection sync failed', error);
       });
     };
 
@@ -114,37 +129,24 @@ export class MainWindowShortcutService {
     };
   }
 
-  private async handleShortcutActivated(): Promise<void> {
-    if (!this.quickFocusEnabled) {
+  private async handleShortcutActivated(lifecycle: number): Promise<void> {
+    if (lifecycle !== this.lifecycle || !this.quickFocusEnabled) {
       return;
     }
 
-    const location = getRouterLocationSnapshot();
-    if (location.pathname === '/' || location.pathname.startsWith('/eventlog')) {
-      await navigateToEventlogRecord();
-      requestMainWindowFocusTarget(MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT);
-      return;
-    }
-
-    if (location.pathname === '/tasks') {
-      requestMainWindowFocusTarget(MAIN_WINDOW_FOCUS_TARGET_TASKS_QUICK_ADD_INPUT);
-      return;
-    }
-
-    if (location.pathname.startsWith('/tasks/')) {
-      await navigateToTasksMain();
-      requestMainWindowFocusTarget(MAIN_WINDOW_FOCUS_TARGET_TASKS_QUICK_ADD_INPUT);
-      return;
-    }
+    await navigateToEventlogRecord();
+    if (lifecycle !== this.lifecycle) return;
+    requestMainWindowFocusTarget(MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT);
   }
 
-  private async consumePendingActivation(): Promise<void> {
+  private async consumePendingActivation(lifecycle: number): Promise<void> {
+    if (lifecycle !== this.lifecycle) return;
     const pendingActivation = await takePendingMainWindowShortcutActivation();
-    if (!pendingActivation) {
+    if (lifecycle !== this.lifecycle || !pendingActivation) {
       return;
     }
 
-    await this.handleShortcutActivated();
+    await this.handleShortcutActivated(lifecycle);
   }
 }
 

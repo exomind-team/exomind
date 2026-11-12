@@ -10,6 +10,7 @@ const routeState = vi.hoisted(() => ({
   closePalette: vi.fn(),
   togglePalette: vi.fn(),
   setSidebarCollapsed: vi.fn(),
+  proposalCoordinatorMounted: vi.fn(),
 }));
 
 function subscribeNoop() {
@@ -87,7 +88,10 @@ vi.mock('@/ui/app/components/ProposalNotificationBadge', () => ({
 }));
 
 vi.mock('@/ui/app/components/ProposalNotificationCoordinator', () => ({
-  ProposalNotificationCoordinator: () => null,
+  ProposalNotificationCoordinator: () => {
+    routeState.proposalCoordinatorMounted();
+    return null;
+  },
 }));
 
 vi.mock('@/ui/app/components/ReminderNotifier', () => ({
@@ -128,28 +132,31 @@ describe('routes proposal badge shells issue #677', () => {
     routeState.closePalette.mockReset();
     routeState.togglePalette.mockReset();
     routeState.setSidebarCollapsed.mockReset();
+    routeState.proposalCoordinatorMounted.mockReset();
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it('mounts proposal badge in desktop shell（桌面壳层挂载 proposal 角标）', async () => {
+  it('keeps proposal badges and coordination disabled in the desktop shell', async () => {
     routeState.isDesktop = true;
     routeState.desktopAdaptiveEnabled = true;
 
     await renderSettingsRoute();
 
     expect(screen.getByTestId('desktop-sidebar')).toBeInTheDocument();
-    expect(screen.getAllByTestId('proposal-badge-desktop')).toHaveLength(1);
+    expect(screen.queryByTestId('proposal-badge-desktop')).not.toBeInTheDocument();
+    expect(routeState.proposalCoordinatorMounted).not.toHaveBeenCalled();
   });
 
-  it('keeps proposal badge in mobile shell（移动壳层继续挂载 proposal 入口角标）', async () => {
+  it('keeps proposal badges and coordination disabled in the mobile shell', async () => {
     routeState.isDesktop = false;
 
     await renderSettingsRoute();
 
     expect(screen.getByTestId('mobile-bottom-tab')).toBeInTheDocument();
-    expect(screen.getAllByTestId('proposal-badge-mobile-floating')).toHaveLength(1);
+    expect(screen.queryByTestId('proposal-badge-mobile-floating')).not.toBeInTheDocument();
+    expect(routeState.proposalCoordinatorMounted).not.toHaveBeenCalled();
   });
 });

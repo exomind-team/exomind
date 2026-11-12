@@ -964,6 +964,127 @@ describe("FocusTimerWidget state machine（新专注计时组件状态机）", (
     );
   });
 
+  it.each(["controlled", "launcher", "draft"] as const)(
+    "keeps task writes disabled for %s configuration through start and feedback end",
+    async (entry) => {
+      const ref = createRef<FocusTimerWidgetHandle>();
+      const onSelectedIdsChange = vi.fn();
+      const validTask = {
+        id: "synthetic-task",
+        title: "合成关联任务",
+        status: "pending",
+      };
+      listTasksMock.mockResolvedValue([validTask]);
+      getTaskMock.mockResolvedValue(validTask);
+      startBlockMock.mockResolvedValue({
+        startId: "synthetic-start",
+        name: "合成专注",
+        startTime: Date.now(),
+        elapsed: 0,
+        mode: "countdown",
+        targetMinutes: 25,
+        paused: false,
+        phase: "running",
+        taskIds: [validTask.id],
+        taskAssociationLog: [],
+      });
+      endBlockMock.mockImplementation(async () => {
+        onBlockChangeHandler?.(null);
+        return null;
+      });
+      if (entry === "draft") {
+        localStorage.setItem("exomind:focus-timer:config-draft:v1", JSON.stringify({
+          taskNameDraft: "合成专注",
+          timerMode: "countdown",
+          countdownMinutes: 25,
+          selectedTaskIds: [validTask.id],
+          inputFocused: true,
+          updatedAt: Date.now(),
+        }));
+      }
+
+      render(<FocusTimerWidget
+        ref={ref}
+        taskAssociationsEnabled={false}
+        {...(entry === "controlled" ? {
+          prestartSelectedTaskIds: [validTask.id],
+          onPrestartSelectedTaskIdsChange: onSelectedIdsChange,
+        } : {})}
+      />);
+      if (entry === "launcher") {
+        await act(async () => ref.current?.openTaskConfig({
+          title: "合成专注",
+          preselectedTaskIds: [validTask.id],
+        }));
+      } else if (entry === "controlled") {
+        fireEvent.click(screen.getByTestId("new-focus-idle-card"));
+        fireEvent.change(screen.getByTestId("new-focus-task-input"), {
+          target: { value: "合成专注" },
+        });
+      }
+      fireEvent.click(screen.getByTestId("new-focus-start-button"));
+      await waitFor(() => expect(startBlockMock).toHaveBeenCalledWith(
+        "合成专注",
+        expect.objectContaining({ mode: "countdown", minutes: 25 }),
+        undefined,
+        undefined,
+        expectFocusTimerStartMeta(),
+      ));
+      await screen.findByTestId("new-focus-state-running");
+      fireEvent.click(screen.getByTestId("new-focus-end-button"));
+      fireEvent.change(await screen.findByTestId("new-focus-feedback-textarea"), {
+        target: { value: "合成反馈" },
+      });
+      expect(screen.queryByTestId("feedback-task-status-section")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("new-focus-feedback-confirm"));
+      await waitFor(() => expect(endBlockMock).toHaveBeenCalledWith(
+        "合成反馈", undefined, expectFocusTimerEndMeta(),
+      ));
+
+      expect(listTasksMock).not.toHaveBeenCalled();
+      expect(getTaskMock).not.toHaveBeenCalled();
+      expect(onTaskChangeMock).not.toHaveBeenCalled();
+      expect(transitionTaskMock).not.toHaveBeenCalled();
+      expect(addTaskToBlockMock).not.toHaveBeenCalled();
+      expect(onBlockEndForTasksMock).not.toHaveBeenCalled();
+      expect(appendEventDataMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps task followups disabled when a linked active block is delivered by sync", async () => {
+    const now = Date.now();
+    const validTask = { id: "synthetic-synced-task", title: "合成同步任务", status: "in_progress" };
+    getTaskMock.mockResolvedValue(validTask);
+    render(<FocusTimerWidget taskAssociationsEnabled={false} />);
+    await waitFor(() => expect(onBlockChangeHandler).not.toBeNull());
+    act(() => onBlockChangeHandler?.({
+      startId: "synthetic-synced-block",
+      name: "合成同步时间块",
+      startTime: now,
+      elapsed: 0,
+      mode: "countup",
+      paused: false,
+      phase: "running",
+      taskIds: [validTask.id],
+      taskAssociationLog: [{
+        blockId: "synthetic-synced-block", taskId: validTask.id,
+        action: "associated", timestamp: now, source: "manual",
+      }],
+    }));
+    await screen.findByTestId("new-focus-state-running");
+    fireEvent.click(screen.getByTestId("new-focus-end-button"));
+    fireEvent.change(await screen.findByTestId("new-focus-feedback-textarea"), {
+      target: { value: "同步块反馈" },
+    });
+    fireEvent.click(screen.getByTestId("new-focus-feedback-confirm"));
+    await waitFor(() => expect(endBlockMock).toHaveBeenCalledWith(
+      "同步块反馈", undefined, expectFocusTimerEndMeta(),
+    ));
+    expect(getTaskMock).not.toHaveBeenCalled();
+    expect(onBlockEndForTasksMock).not.toHaveBeenCalled();
+    expect(appendEventDataMock).not.toHaveBeenCalled();
+  });
+
   it("preselects pending or in-progress linked tasks before start", async () => {
     const ref = createRef<FocusTimerWidgetHandle>();
     listTasksMock.mockResolvedValue([

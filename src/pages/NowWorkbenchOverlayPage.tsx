@@ -538,8 +538,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   const isLiveRunningSingleCardMode = !isStaticPreview && model.mode === 'running';
   const isLiveRunningMiniMode = isLiveRunningSingleCardMode && isMiniCollapsed;
   const isLiveRunningMiniPeekMode = isLiveRunningMiniMode && isMiniHovered;
-  const isLiveIdleBubbleMode = !isStaticPreview
-    && (model.mode === 'idle_with_tasks' || model.mode === 'idle_input_only');
+  const isLiveIdleBubbleMode = !isStaticPreview && model.mode !== 'running';
   const isIdleExpanded = isLiveIdleBubbleMode
     && (isIdleHovered || isIdleInputFocused);
   const shouldMeasureIdleBubbleShell = isLiveIdleBubbleMode && Boolean(model.nudge);
@@ -917,10 +916,6 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     setIsIdleInputFocused(false);
   }, []);
 
-  const handleIdleTaskStart = useCallback((task: TaskNode) => {
-    void onStartTask(task);
-  }, [onStartTask]);
-
   const handleIdleCollapse = useCallback(() => {
     setIsIdleHovered(false);
     setIsIdleInputFocused(false);
@@ -1065,8 +1060,6 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   }
 
   if (isLiveIdleBubbleMode) {
-    const previewTasks = model.visibleTasks.slice(0, 3);
-    const hasOverflowTasks = model.visibleTasks.length > previewTasks.length;
 
     return (
       <div className="now-workbench-overlay-root now-workbench-overlay-root--mini">
@@ -1123,11 +1116,11 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                   <div className="flex items-center gap-2" data-tauri-drag-region>
                     <span className="h-2.5 w-2.5 rounded-full bg-[#A8A29E]" data-tauri-drag-region />
                     <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>
-                      待办
+                      当下
                     </span>
                   </div>
                   <p className="mt-1 truncate text-[16px] font-semibold" data-tauri-drag-region>
-                    {model.mode === 'idle_with_tasks' ? '接下来做什么？' : '现在先记点什么'}
+                    现在先记点什么
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
@@ -1156,42 +1149,18 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                 </div>
               </div>
 
-              {model.mode === 'idle_with_tasks' ? (
-                <div className="mt-4 space-y-3">
-                  <div data-testid="now-overlay-task-choice-list" className="grid max-h-[188px] gap-2 overflow-y-auto pr-1">
-                    {model.visibleTasks.map((task) => (
-                      <button
-                        key={task.id}
-                        type="button"
-                        aria-label={task.title}
-                        onClick={() => handleIdleTaskStart(task)}
-                        className="flex w-full items-center justify-between rounded-[16px] border border-white/10 bg-white/8 px-4 py-3 text-left shadow-sm transition-colors hover:bg-white/12"
-                      >
-                        <span className="truncate text-[14px] font-medium">{task.title}</span>
-                        <span className="ml-3 shrink-0 text-[11px] text-[#A8A29E] dark:text-[#78716C]">开始</span>
-                      </button>
-                    ))}
-                  </div>
-                  <section className="overflow-hidden rounded-[18px] border border-white/10 bg-white/8">
-                    <NowInputRow onSend={onSend} placeholder="记录当下的事实..." />
-                  </section>
-                </div>
-              ) : null}
-
-              {model.mode === 'idle_input_only' ? (
-                <div className="mt-4 space-y-3">
-                  <section
-                    data-testid="now-overlay-empty-state"
-                    className="rounded-[18px] border border-dashed border-white/10 bg-white/6 px-4 py-4 text-center"
-                  >
-                    <p className="text-[14px] font-medium text-[#57534E] dark:text-[#D6D3D1]">当前没有可直接开始的任务</p>
-                    <p className="mt-1 text-[12px] text-[#A8A29E] dark:text-[#78716C]">先记一条输入，或者稍后再开始时间块。</p>
-                  </section>
-                  <section className="overflow-hidden rounded-[18px] border border-white/10 bg-white/8">
-                    <NowInputRow onSend={onSend} placeholder="记录当下的事实..." />
-                  </section>
-                </div>
-              ) : null}
+              <div className="mt-4 space-y-3">
+                <section
+                  data-testid="now-overlay-empty-state"
+                  className="rounded-[18px] border border-dashed border-white/10 bg-white/6 px-4 py-4 text-center"
+                >
+                  <p className="text-[14px] font-medium text-[#57534E] dark:text-[#D6D3D1]">时间块尚未开始</p>
+                  <p className="mt-1 text-[12px] text-[#A8A29E] dark:text-[#78716C]">可以在这里快速记录，或回主程序开始专注。</p>
+                </section>
+                <section className="overflow-hidden rounded-[18px] border border-white/10 bg-white/8">
+                  <NowInputRow onSend={onSend} placeholder="记录当下的事实..." />
+                </section>
+              </div>
             </div>
           ) : (
             <div
@@ -1214,27 +1183,12 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                 <div className="flex items-center gap-2" data-tauri-drag-region>
                   <span className="h-2.5 w-2.5 rounded-full bg-[#A8A29E]" data-tauri-drag-region />
                   <span className="text-[15px] font-semibold text-[#D6D3D1] dark:text-[#E7E5E4]" data-tauri-drag-region>
-                    {hasOverflowTasks ? `待办 (${model.visibleTasks.length})` : '待办'}
+                    当下
                   </span>
                 </div>
-                {previewTasks.length > 0 ? (
-                  <div className="mt-2 space-y-1" data-tauri-drag-region>
-                    {previewTasks.map((task) => (
-                      <p key={task.id} className="truncate text-[13px] font-medium" data-tauri-drag-region>
-                        · {task.title}
-                      </p>
-                    ))}
-                    {hasOverflowTasks ? (
-                      <p className="truncate text-[13px] font-medium text-[#D6D3D1]/75" data-tauri-drag-region>
-                        · ……
-                      </p>
-                    ) : null}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-[13px] font-medium text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>
-                    · 无待办
-                  </p>
-                )}
+                <p className="mt-2 text-[13px] font-medium text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>
+                  · 随时记录
+                </p>
               </div>
             </div>
           )}
@@ -1265,6 +1219,8 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
               <FocusTimerWidget
                 ref={focusTimerWidgetRef}
                 surface="overlay"
+                  taskAssociationsEnabled={false}
+                  showRunningLinkedTasks={false}
                 overlayRunningChrome={{
                   statusLabel: model.statusLabel,
                   onCollapse: () => setIsMiniCollapsed(true),
@@ -1407,7 +1363,11 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                 ) : null}
 
                 <section className="rounded-[20px] border border-[#E7E5E4] bg-white/70 px-2 py-2 dark:border-[#292524] dark:bg-[#1C1917]/65">
-                  <FocusTimerWidget ref={focusTimerWidgetRef} />
+                  <FocusTimerWidget
+                    ref={focusTimerWidgetRef}
+                    taskAssociationsEnabled={false}
+                    showRunningLinkedTasks={false}
+                  />
                 </section>
               </>
             )}

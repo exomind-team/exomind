@@ -1151,7 +1151,11 @@ export function ChatPage({
 
       {/* TimeBlock 控件栏 */}
       {variant === 'new-mobile' && showTimerWidget ? (
-        <FocusTimerWidget ref={focusTimerWidgetRef} />
+        <FocusTimerWidget
+          ref={focusTimerWidgetRef}
+          taskAssociationsEnabled={false}
+          showRunningLinkedTasks={false}
+        />
       ) : variant === 'default' ? (
         <TimeBlockWidget ref={timeBlockWidgetRef} variant="default" />
       ) : null}

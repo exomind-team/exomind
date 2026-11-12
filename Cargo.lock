@@ -1402,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "exomind"
-version = "0.5.1"
+version = "0.6.0-alpha04"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1516,6 +1516,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

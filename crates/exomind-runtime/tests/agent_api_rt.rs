@@ -14,24 +14,19 @@ use exomind_runtime::agent::api::ApiProviderProfile;
 use exomind_runtime::agent::broker::{ToolDef, TurnItem};
 use exomind_runtime::agent::life::{AgentApiTickTrigger, CognitiveLifeAgent};
 use exomind_runtime::agent::llm_cognition::LlmCognition;
-use exomind_runtime::agent::proposal_tools::{
-    ADD_EVENT_PROPOSAL_TOOL, ADD_TASK_PROPOSAL_TOOL, ADD_TIMEBLOCK_PROPOSAL_TOOL,
-    execute_proposal_tool_call, is_proposal_tool_name, proposal_tool_defs,
-};
+use exomind_runtime::agent::proposal_tools::proposal_tool_defs;
 use exomind_runtime::agent::session::{
     AgentSessionRuntime, AgentSessionStore, AgentTrigger, SessionError, TOOL_PRESET_PROPOSAL_TOOLS,
-    TOOL_PRESET_RECENT_EVENTS, run_broker_agent_session_from_sources_with_runtime,
-    run_broker_agent_session_with_runtime,
+    TOOL_PRESET_RECENT_EVENTS, run_broker_agent_session_with_runtime,
 };
 use exomind_runtime::agent::tools::GET_RECENT_EVENTS_TOOL;
-use exomind_runtime::agent::tools::eventlog::get_recent_events_tool;
 use exomind_runtime::agent::workspace::AgentWorkspace;
 use exomind_runtime::config::types::USER_CONFIG_SCOPE;
 use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
 use exomind_runtime::energy::AgentEnergySnapshot;
 use exomind_runtime::eventlog::{EventLogStore, EventRecord};
 use exomind_runtime::proposal::{
-    ActionType, ProposalFilter, ProposalStore, Publisher, PublisherType,
+    ActionType, CreateProposalInput, ProposalFilter, ProposalStore, Publisher, PublisherType,
 };
 use exomind_runtime::routes::{agent_sessions, eventlog};
 use http_body_util::BodyExt;
@@ -65,6 +60,124 @@ fn make_test_state(data_dir: &Path) -> AppState {
     state.agent_api_session_store = agent_api_session_store;
     state.eventlog_watch_tx = eventlog_watch_tx;
     state
+}
+
+const ALPHA_PROPOSAL_TEST_SCOPE: &str = "profile-alpha-proposal-test";
+
+struct CountingUpstream {
+    base_url: String,
+    calls: Arc<AtomicUsize>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl CountingUpstream {
+    async fn start() -> Self {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let app = Router::new()
+            .fallback(|AxumState(calls): AxumState<Arc<AtomicUsize>>| async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Json(json!({
+                    "choices": [{ "message": {
+                        "role": "assistant",
+                        "content": "Unexpected upstream request",
+                        "tool_calls": []
+                    } }]
+                }))
+            })
+            .with_state(Arc::clone(&calls));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        Self {
+            base_url,
+            calls,
+            task,
+        }
+    }
+
+    fn profile(&self) -> ApiProviderProfile {
+        ApiProviderProfile {
+            provider: "openai".to_string(),
+            model: "synthetic-alpha-model".to_string(),
+            base_url: Some(self.base_url.clone()),
+            api_key: "synthetic-alpha-key".to_string(),
+        }
+    }
+
+    fn hits(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for CountingUpstream {
+    fn drop(&mut self) {
+        // A failed assertion must also release this test's listener.
+        self.task.abort();
+    }
+}
+
+fn alpha_proposal_test_state(data_dir: &Path) -> (AppState, String) {
+    let mut state = make_test_state(data_dir);
+    state.proposal_store =
+        Arc::new(ProposalStore::with_sqlite_path(&data_dir.join("proposals.sqlite3")).unwrap());
+    let mut scoped_proposal_id = String::new();
+    for scope in [None, Some(ALPHA_PROPOSAL_TEST_SCOPE)] {
+        let proposal = state
+            .proposal_store
+            .create_scoped(
+                scope,
+                CreateProposalInput {
+                    title: "Synthetic retained proposal".to_string(),
+                    body: "Preserve this fixture while refusing new proposal work".to_string(),
+                    action_type: ActionType::AppendEvent,
+                    action_params: json!({ "content": "Synthetic event", "tags": [] }),
+                    references: Vec::new(),
+                    publisher: Publisher {
+                        publisher_type: PublisherType::Agent,
+                        id: "synthetic-seed-agent".to_string(),
+                        name: "Synthetic Seed Agent".to_string(),
+                    },
+                },
+            )
+            .unwrap();
+        if scope.is_some() {
+            scoped_proposal_id = proposal.id;
+        }
+    }
+    (state, scoped_proposal_id)
+}
+
+fn proposal_effect_snapshot(state: &AppState) -> Value {
+    json!({
+        "scopedProposals": state.proposal_store.list_scoped(
+            Some(ALPHA_PROPOSAL_TEST_SCOPE), &ProposalFilter::default(),
+        ).unwrap(),
+        "anonymousProposals": state.proposal_store.list(&ProposalFilter::default()).unwrap(),
+        "scopedEvents": state.eventlog_store.list_events(Some(ALPHA_PROPOSAL_TEST_SCOPE)).unwrap(),
+        "anonymousEvents": state.eventlog_store.list_events(None).unwrap(),
+        "signalJournalEntries": state.signal_pool.journal().len(),
+        "signalWindowEntries": state.signal_pool.window().len(),
+    })
+}
+
+fn configure_test_agent_provider(state: &AppState, profile: &ApiProviderProfile) {
+    for (key, value, sensitive) in [
+        ("exomind:agentApiProvider", profile.provider.clone(), false),
+        ("exomind:agentApiModel", profile.model.clone(), false),
+        (
+            "exomind:agentApiBaseUrl",
+            profile.base_url.clone().unwrap(),
+            false,
+        ),
+        ("exomind:agentApiApiKey", profile.api_key.clone(), true),
+    ] {
+        state
+            .config_store
+            .put(put_config(key, value, sensitive))
+            .unwrap();
+    }
 }
 
 async fn fake_openai_handler(
@@ -148,225 +261,6 @@ async fn fake_openai_combined_sources_handler(
     }))
 }
 
-async fn fake_openai_proposal_story_handler(
-    AxumState(call_count): AxumState<Arc<AtomicUsize>>,
-    Json(payload): Json<Value>,
-) -> Json<Value> {
-    let turn = call_count.fetch_add(1, Ordering::SeqCst);
-
-    if turn == 0 {
-        let tool_names = payload["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|tool| tool["function"]["name"].as_str().unwrap().to_string())
-            .collect::<Vec<_>>();
-        assert!(tool_names.contains(&ADD_TASK_PROPOSAL_TOOL.to_string()));
-        assert!(tool_names.contains(&ADD_TIMEBLOCK_PROPOSAL_TOOL.to_string()));
-        assert!(tool_names.contains(&ADD_EVENT_PROPOSAL_TOOL.to_string()));
-
-        return Json(json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "proposal-tool-1",
-                        "type": "function",
-                        "function": {
-                            "name": ADD_TASK_PROPOSAL_TOOL,
-                            "arguments": "{\"title\":\"为任务依赖图新布局创建验收任务提案\",\"body\":\"事件日志提到明天可能要验收任务依赖图新布局，需要提前形成可执行草案。\",\"taskTitle\":\"验收任务依赖图新布局\",\"description\":\"基于最近 task-dag 改动，检查新布局与搜索交互。\",\"tags\":[\"task-dag\",\"acceptance\"],\"priority\":\"high\"}"
-                        }
-                    }]
-                }
-            }]
-        }));
-    }
-
-    if turn == 1 {
-        assert!(payload["messages"].as_array().is_some_and(|messages| {
-            messages
-                .iter()
-                .any(|message| message["role"] == json!("tool"))
-        }));
-        return Json(json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "proposal-tool-2",
-                        "type": "function",
-                        "function": {
-                            "name": ADD_TIMEBLOCK_PROPOSAL_TOOL,
-                            "arguments": "{\"title\":\"为任务依赖图验收预留时间块\",\"body\":\"日志里已经出现明天验收意图，且 task-dag 相关功能刚落地，适合补一个聚焦验收时间块。\",\"name\":\"任务依赖图新布局验收\",\"description\":\"集中检查任务依赖图的新布局与搜索体验\",\"tags\":[\"task-dag\",\"review\"],\"mode\":\"countdown\",\"targetMinutes\":45}"
-                        }
-                    }]
-                }
-            }]
-        }));
-    }
-
-    if turn == 2 {
-        return Json(json!({
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "proposal-tool-3",
-                        "type": "function",
-                        "function": {
-                            "name": ADD_EVENT_PROPOSAL_TOOL,
-                            "arguments": "{\"title\":\"补一条时间块完成总结事件提案\",\"body\":\"事件日志显示刚完成一个时间块并准备开始总结，适合补一条 Agent 总结事件草案。\",\"content\":\"Agent 总结：已完成文件搜索验证，下一步转向任务依赖图新布局验收与回填。\",\"tags\":[\"agent-summary\",\"timeblock-review\"]}"
-                        }
-                    }]
-                }
-            }]
-        }));
-    }
-
-    Json(json!({
-        "choices": [{
-            "message": {
-                "role": "assistant",
-                "content": "我已根据事件日志创建任务提案、计划时间块提案和总结事件提案，其中任务提案用于明天验收任务依赖图新布局。",
-                "tool_calls": []
-            }
-        }]
-    }))
-}
-
-async fn fake_openai_combined_story_handler(
-    AxumState(call_count): AxumState<Arc<AtomicUsize>>,
-    Json(payload): Json<Value>,
-) -> Json<Value> {
-    let turn = call_count.fetch_add(1, Ordering::SeqCst);
-    let tool_names = payload["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|tool| tool["function"]["name"].as_str().unwrap().to_string())
-        .collect::<Vec<_>>();
-
-    let tool_contents = payload["messages"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|message| message["role"] == json!("tool"))
-        .filter_map(|message| message["content"].as_str())
-        .collect::<Vec<_>>();
-
-    match turn {
-        0 => {
-            assert!(tool_names.contains(&GET_RECENT_EVENTS_TOOL.to_string()));
-            assert!(tool_names.contains(&"get_weather".to_string()));
-            assert!(tool_names.contains(&ADD_TASK_PROPOSAL_TOOL.to_string()));
-
-            Json(json!({
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [{
-                            "id": "combined-tool-1",
-                            "type": "function",
-                            "function": {
-                                "name": GET_RECENT_EVENTS_TOOL,
-                                "arguments": "{\"limit\":5}"
-                            }
-                        }]
-                    }
-                }]
-            }))
-        }
-        1 => {
-            assert!(
-                tool_contents
-                    .iter()
-                    .any(|content| content.contains("明天要出门去银行存钱，不知天气如何"))
-            );
-            assert!(tool_contents.iter().any(|content| {
-                content.contains("家里刚找到之前不知跑哪去了的伞，原来是放衣柜里了")
-            }));
-
-            Json(json!({
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [{
-                            "id": "combined-tool-2",
-                            "type": "function",
-                            "function": {
-                                "name": "get_weather",
-                                "arguments": "{\"date\":\"tomorrow\"}"
-                            }
-                        }]
-                    }
-                }]
-            }))
-        }
-        2 => {
-            assert!(
-                tool_contents
-                    .iter()
-                    .any(|content| content.contains("明天温度24.5度，暴雨"))
-            );
-
-            Json(json!({
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [
-                            {
-                                "id": "combined-tool-3",
-                                "type": "function",
-                                "function": {
-                                    "name": ADD_TASK_PROPOSAL_TOOL,
-                                    "arguments": "{\"title\":\"任务提案：出门准备雨伞\",\"body\":\"近期事件显示明天要出门去银行，天气工具显示明天暴雨，而且用户已经找到了伞，因此需要提前准备并带上雨伞。\",\"taskTitle\":\"出门准备雨伞\",\"description\":\"出门前从衣柜取出雨伞并随身携带。\",\"tags\":[\"天气\",\"暴雨\",\"出门准备\"],\"priority\":\"high\"}"
-                                }
-                            },
-                            {
-                                "id": "combined-tool-4",
-                                "type": "function",
-                                "function": {
-                                    "name": ADD_TASK_PROPOSAL_TOOL,
-                                    "arguments": "{\"title\":\"任务提案：银行存钱\",\"body\":\"近期事件明确提到明天要出门去银行存钱，应单独形成明日外出事务任务。\",\"taskTitle\":\"银行存钱\",\"description\":\"明天出门去银行办理存钱事项。\",\"tags\":[\"银行\",\"外出\"],\"priority\":\"high\"}"
-                                }
-                            }
-                        ]
-                    }
-                }]
-            }))
-        }
-        3 => {
-            assert!(
-                tool_contents
-                    .iter()
-                    .any(|content| content.contains("出门准备雨伞"))
-            );
-            assert!(
-                tool_contents
-                    .iter()
-                    .any(|content| content.contains("银行存钱"))
-            );
-
-            Json(json!({
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": "我先读取了近期事件，再查询了明天的天气。由于明天要去银行且天气是暴雨，同时事件里提到雨伞已经找回，所以我创建了两条任务提案：出门准备雨伞、银行存钱。",
-                        "tool_calls": []
-                    }
-                }]
-            }))
-        }
-        other => panic!("unexpected combined story turn: {other}"),
-    }
-}
-
 async fn spawn_fake_openai_server() -> (String, oneshot::Sender<()>) {
     let app = Router::new()
         .route("/chat/completions", post(fake_openai_handler))
@@ -392,52 +286,6 @@ async fn spawn_fake_openai_combined_sources_server() -> (String, oneshot::Sender
         .route(
             "/chat/completions",
             post(fake_openai_combined_sources_handler),
-        )
-        .with_state(Arc::new(AtomicUsize::new(0)));
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-
-    tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async {
-                let _ = shutdown_rx.await;
-            })
-            .await
-            .unwrap();
-    });
-
-    (format!("http://{addr}"), shutdown_tx)
-}
-
-async fn spawn_fake_openai_proposal_story_server() -> (String, oneshot::Sender<()>) {
-    let app = Router::new()
-        .route(
-            "/chat/completions",
-            post(fake_openai_proposal_story_handler),
-        )
-        .with_state(Arc::new(AtomicUsize::new(0)));
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-
-    tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async {
-                let _ = shutdown_rx.await;
-            })
-            .await
-            .unwrap();
-    });
-
-    (format!("http://{addr}"), shutdown_tx)
-}
-
-async fn spawn_fake_openai_combined_story_server() -> (String, oneshot::Sender<()>) {
-    let app = Router::new()
-        .route(
-            "/chat/completions",
-            post(fake_openai_combined_story_handler),
         )
         .with_state(Arc::new(AtomicUsize::new(0)));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -504,66 +352,6 @@ fn weather_tool() -> ToolDef {
             "required": ["date"],
             "additionalProperties": false
         }),
-    }
-}
-
-fn tomorrow_weather_tool() -> ToolDef {
-    ToolDef {
-        name: "get_weather".to_string(),
-        description: "返回明天的天气与气温".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "date": {
-                    "type": "string",
-                    "enum": ["tomorrow"]
-                }
-            },
-            "required": ["date"],
-            "additionalProperties": false
-        }),
-    }
-}
-
-fn combined_story_system_prompt() -> String {
-    "你是一个外心软件的个人成长 Agent 助手。你会尽量利用当前可用的一切工具，结合用户事件日志、任务、时间块或其他可获得的上下文信息，主动推理并提出能帮助用户成长或更好行动的举措。若合适，你应通过提案系统添加用户可见的提案，并在最终说明你的决策依据。不要跳过信息收集步骤；先使用可用工具理解情况，再决定是否需要进一步行动。若你识别到多个彼此独立、分别值得执行的行动，应拆分成多个提案表达，不要把不同动作合并成一个笼统事项。若某个行动已经足够具体并可直接执行，应优先将它表达为单独的任务提案，而不是只用其他类型提案笼统替代。即使多个动作服务于同一个较大目标，只要它们在性质上不同，例如一个偏向准备、一个偏向确认或安排，也应视为不同的独立任务。".to_string()
-}
-
-fn combined_story_user_prompt() -> String {
-    "现在开始你的个人成长辅助工作。请结合你当前可以读取到的信息和工具，主动发现值得帮助用户处理的事项；如果你判断应创建提案，就优先把可执行行动落成明确任务提案。若存在多个相互独立的行动，请分别创建，不要合并，也不要仅用时间块或事件提案替代本应单独存在的任务提案。即使几个动作围绕同一个总体事项，只要动作性质不同，也请拆成不同任务，并在最后说明你为什么这样决策。".to_string()
-}
-
-async fn execute_combined_story_tool_call(
-    eventlog_store: Arc<EventLogStore>,
-    proposal_store: Arc<ProposalStore>,
-    publisher: &Publisher,
-    scope_key: &str,
-    tool_call: &exomind_runtime::agent::broker::ToolCall,
-) -> String {
-    match tool_call.name.as_str() {
-        GET_RECENT_EVENTS_TOOL => {
-            let (_, tool_fn) = get_recent_events_tool(eventlog_store, Some(scope_key.to_string()));
-            tool_fn(tool_call.input.clone())
-                .await
-                .unwrap_or_else(|error| panic!("recent events tool execution failed: {error}"))
-        }
-        "get_weather" => {
-            assert_eq!(
-                tool_call.input["date"].as_str(),
-                Some("tomorrow"),
-                "combined weather story should request tomorrow weather"
-            );
-            "明天温度24.5度，暴雨".to_string()
-        }
-        name if is_proposal_tool_name(name) => execute_proposal_tool_call(
-            proposal_store,
-            Some(scope_key.to_string()),
-            publisher.clone(),
-            tool_call,
-        )
-        .await
-        .unwrap_or_else(|error| panic!("proposal tool execution failed: {error}")),
-        other => panic!("unexpected combined story tool requested: {other}"),
     }
 }
 
@@ -639,40 +427,6 @@ fn retryable_upstream_error_detection_keeps_401_non_retryable() {
     assert!(!is_retryable_upstream_error_message(
         "OpenAI HTTP 401 Unauthorized"
     ));
-}
-
-#[test]
-fn combined_story_prompts_stay_generic_and_avoid_target_hints() {
-    let system_prompt = combined_story_system_prompt();
-    let user_prompt = combined_story_user_prompt();
-
-    for forbidden in ["伞", "银行", "存钱", "雨", "天气"] {
-        assert!(
-            !system_prompt.contains(forbidden),
-            "system prompt should stay generic: {system_prompt}"
-        );
-        assert!(
-            !user_prompt.contains(forbidden),
-            "user prompt should stay generic: {user_prompt}"
-        );
-    }
-
-    assert!(system_prompt.contains("个人成长"));
-    assert!(system_prompt.contains("工具"));
-    assert!(system_prompt.contains("事件日志"));
-    assert!(system_prompt.contains("提案"));
-    assert!(system_prompt.contains("多个彼此独立"));
-    assert!(system_prompt.contains("不要把不同动作合并成一个笼统事项"));
-    assert!(system_prompt.contains("单独的任务提案"));
-    assert!(system_prompt.contains("一个偏向准备、一个偏向确认或安排"));
-    assert!(user_prompt.contains("个人成长辅助工作"));
-    assert!(user_prompt.contains("创建提案"));
-    assert!(user_prompt.contains("决策"));
-    assert!(user_prompt.contains("多个相互独立的行动"));
-    assert!(user_prompt.contains("不要合并"));
-    assert!(user_prompt.contains("明确任务提案"));
-    assert!(user_prompt.contains("不要仅用时间块或事件提案替代"));
-    assert!(user_prompt.contains("动作性质不同"));
 }
 
 #[tokio::test]
@@ -961,6 +715,246 @@ async fn life_tick_persists_internal_agent_session() {
 }
 
 #[tokio::test]
+async fn alpha_proposal_http_routes_are_unavailable_without_side_effects() {
+    let temp = tempfile::tempdir().unwrap();
+    let (state, proposal_id) = alpha_proposal_test_state(temp.path());
+    let upstream = CountingUpstream::start().await;
+    configure_test_agent_provider(&state, &upstream.profile());
+    let before = proposal_effect_snapshot(&state);
+    let app = exomind_runtime::routes::router().with_state(state.clone());
+    let publisher = json!({
+        "publisher_type": "agent", "id": "synthetic-request-agent", "name": "Synthetic Request Agent"
+    });
+
+    for prefix in ["/proposals", "/api/proposals"] {
+        let query = format!("?user_id={ALPHA_PROPOSAL_TEST_SCOPE}");
+        let item_path = format!("{prefix}/{proposal_id}");
+        let requests = [
+            ("GET", format!("{prefix}{query}"), Value::Null),
+            (
+                "POST",
+                format!("{prefix}{query}"),
+                json!({
+                    "title": "Synthetic disabled proposal", "body": "Synthetic request",
+                    "action_type": "append_event", "action_params": { "content": "Synthetic effect", "tags": [] },
+                    "publisher": publisher,
+                }),
+            ),
+            ("GET", format!("{item_path}{query}"), Value::Null),
+            (
+                "PATCH",
+                format!("{item_path}{query}"),
+                json!({ "status": "approved" }),
+            ),
+            (
+                "POST",
+                format!("{item_path}/comments{query}"),
+                json!({
+                    "author": publisher, "content": "Synthetic comment",
+                }),
+            ),
+        ];
+        for (method, path, body) in requests {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path.as_str())
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
+            assert_eq!(proposal_effect_snapshot(&state), before, "{method} {path}");
+        }
+    }
+    assert_eq!(upstream.hits(), 0);
+}
+
+#[tokio::test]
+async fn alpha_agent_session_http_rejects_proposal_preset_aliases_before_upstream() {
+    let temp = tempfile::tempdir().unwrap();
+    let (state, _) = alpha_proposal_test_state(temp.path());
+    let upstream = CountingUpstream::start().await;
+    let before = proposal_effect_snapshot(&state);
+    let app = exomind_runtime::routes::router().with_state(state.clone());
+
+    for (field, presets) in [
+        ("presets", vec![TOOL_PRESET_PROPOSAL_TOOLS]),
+        ("toolGroups", vec![TOOL_PRESET_PROPOSAL_TOOLS]),
+        (
+            "presets",
+            vec![TOOL_PRESET_RECENT_EVENTS, TOOL_PRESET_PROPOSAL_TOOLS],
+        ),
+    ] {
+        let mut payload = json!({
+            "providerProfile": upstream.profile(),
+            "scopeKey": ALPHA_PROPOSAL_TEST_SCOPE,
+            "newUserMessage": "Synthetic disabled proposal request",
+        });
+        payload[field] = json!(presets);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/agent-sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "{field}: {presets:?}"
+        );
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let error = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            error.contains("proposal inbox tools are disabled"),
+            "{error}"
+        );
+        assert_eq!(upstream.hits(), 0, "{field}: {presets:?}");
+        assert_eq!(proposal_effect_snapshot(&state), before);
+    }
+}
+
+#[tokio::test]
+async fn alpha_agent_session_http_rejects_each_explicit_proposal_tool_before_upstream() {
+    let temp = tempfile::tempdir().unwrap();
+    let (state, _) = alpha_proposal_test_state(temp.path());
+    let upstream = CountingUpstream::start().await;
+    let before = proposal_effect_snapshot(&state);
+    let app = exomind_runtime::routes::router().with_state(state.clone());
+
+    for tool in proposal_tool_defs() {
+        let payload = json!({
+            "providerProfile": upstream.profile(),
+            "scopeKey": ALPHA_PROPOSAL_TEST_SCOPE,
+            "tools": [&tool],
+            "newUserMessage": "Synthetic explicit proposal request",
+        });
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/agent-sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{}", tool.name);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let error = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            error.contains("proposal inbox tools are disabled"),
+            "{error}"
+        );
+        assert_eq!(upstream.hits(), 0, "{}", tool.name);
+        assert_eq!(proposal_effect_snapshot(&state), before, "{}", tool.name);
+    }
+}
+
+#[tokio::test]
+async fn alpha_broker_entry_rejects_proposal_tools_before_upstream() {
+    let temp = tempfile::tempdir().unwrap();
+    let (state, _) = alpha_proposal_test_state(temp.path());
+    let upstream = CountingUpstream::start().await;
+    let before = proposal_effect_snapshot(&state);
+    let runtime = AgentSessionRuntime::from_state(&state);
+
+    for tool in proposal_tool_defs() {
+        let tool_name = tool.name.clone();
+        let error = run_broker_agent_session_with_runtime(
+            upstream.profile(),
+            None,
+            vec![tool],
+            Vec::new(),
+            Some("Synthetic broker proposal request".to_string()),
+            AgentTrigger::Internal {
+                source: "synthetic-alpha-test".to_string(),
+            },
+            &runtime,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&error, SessionError::UnsupportedTool(_)),
+            "{error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("proposal inbox tools are disabled"),
+            "{error}"
+        );
+        assert_eq!(upstream.hits(), 0, "{tool_name}");
+        assert_eq!(proposal_effect_snapshot(&state), before, "{tool_name}");
+    }
+}
+
+#[tokio::test]
+async fn alpha_life_tick_records_proposal_preset_rejection_without_upstream_or_proposal_writes() {
+    let temp = tempfile::tempdir().unwrap();
+    let (state, _) = alpha_proposal_test_state(temp.path());
+    let upstream = CountingUpstream::start().await;
+    configure_test_agent_provider(&state, &upstream.profile());
+    let before = proposal_effect_snapshot(&state);
+    let trigger = AgentApiTickTrigger::new(AgentSessionRuntime::from_state(&state))
+        .with_scope_key(Some(ALPHA_PROPOSAL_TEST_SCOPE.to_string()))
+        .with_presets(vec![TOOL_PRESET_PROPOSAL_TOOLS.to_string()]);
+    let workspace = AgentWorkspace::init("synthetic-alpha-life", temp.path()).unwrap();
+    let cognition = Box::new(LlmCognition::new(
+        "synthetic-alpha-life",
+        "# Synthetic Soul",
+    ));
+    let agent = CognitiveLifeAgent::new(
+        "synthetic-alpha-life",
+        "Synthetic Alpha Life",
+        workspace,
+        cognition,
+    )
+    .with_agent_api_tick_trigger(trigger);
+    let energy = AgentEnergySnapshot {
+        agent_id: "synthetic-alpha-life".to_string(),
+        current: 90,
+        max: 100,
+        ratio: 0.9,
+        tick_cost: 10,
+        phase: "normal".to_string(),
+        is_dormant: false,
+    };
+
+    let _signals = agent.on_tick(&energy).await;
+    let workspace_state = agent.workspace().load_state().unwrap();
+    let session_id = workspace_state["agent_api_session_id"].as_str().unwrap();
+    let diagnostic = state
+        .agent_api_session_store
+        .get(session_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(diagnostic.status, "failed");
+    assert!(
+        diagnostic
+            .error_message
+            .as_deref()
+            .unwrap()
+            .contains("proposal inbox tools are disabled")
+    );
+    assert!(diagnostic.tool_calls.is_empty());
+    assert_eq!(upstream.hits(), 0);
+    assert_eq!(proposal_effect_snapshot(&state), before);
+}
+
+#[tokio::test]
 async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_present() {
     let Some(profile) = real_upstream_provider_profile_from_env() else {
         eprintln!(
@@ -1093,681 +1087,6 @@ async fn broker_weather_flow_skips_without_env_and_uses_real_upstream_when_prese
     assert!(second_turn.assistant_turn.tool_calls.is_empty());
     eprintln!("=== broker_weather_flow completed ===");
     eprintln!("final_answer={}", second_turn.content);
-}
-
-#[tokio::test]
-async fn broker_proposal_story_contract_creates_real_proposals() {
-    let temp = tempfile::tempdir().unwrap();
-    let proposal_store = Arc::new(ProposalStore::new());
-    let runtime = AgentSessionRuntime::new(
-        Arc::new(ConfigStore::new()),
-        Arc::new(EventLogStore::new(temp.path().join("eventlog"))),
-        Arc::clone(&proposal_store),
-        Arc::new(AgentSessionStore::new()),
-    );
-    let system_prompt = Some(
-        "你是外心中的提案草案助手。请从事件日志中提取值得形成草案的事项，优先通过工具创建任务提案、计划时间块提案、事件提案。"
-            .to_string(),
-    );
-    let prompt = r#"下面是最近的事件记录和开发上下文：
-2026-04-04 09:10 事件：刚推送 test(rt): add broker file search validation
-2026-04-04 09:35 事件：feat(task-dag): unify dag text and tag search 已在 dev
-2026-04-04 10:20 事件：对了，明天可能要验收下任务依赖图新布局
-2026-04-04 10:45 事件：刚完成一轮 pwd/ls/cd 文件搜索验证，准备回填 issue
-2026-04-04 11:05 事件：完成一个时间块，准备开始总结
-
-请提取其中值得形成草案的事项。至少为“明天可能要验收下任务依赖图新布局”创建一个任务提案；如果上下文表明应该安排时间块或补一条总结事件，也请创建相应草案。完成后请用中文总结你创建了哪些草案以及原因。"#.to_string();
-    let publisher = Publisher {
-        publisher_type: PublisherType::Agent,
-        id: "api-agent".to_string(),
-        name: "API Agent".to_string(),
-    };
-
-    let (base_url, shutdown_tx) = spawn_fake_openai_proposal_story_server().await;
-    let profile = ApiProviderProfile {
-        provider: "openai".to_string(),
-        model: "gpt-test".to_string(),
-        base_url: Some(base_url),
-        api_key: "sk-test".to_string(),
-    };
-
-    let mut history = Vec::new();
-    let mut next_user_message = Some(prompt.clone());
-    let mut turn_count = 0usize;
-
-    loop {
-        turn_count += 1;
-        assert!(turn_count <= 6, "proposal story exceeded turn budget");
-
-        let record = run_broker_agent_session_with_runtime(
-            profile.clone(),
-            system_prompt.clone(),
-            proposal_tool_defs(),
-            history.clone(),
-            next_user_message.take(),
-            AgentTrigger::Internal {
-                source: "agent-turn-broker-proposal-story".to_string(),
-            },
-            &runtime,
-        )
-        .await
-        .unwrap();
-
-        if turn_count == 1 {
-            history.push(TurnItem::User {
-                content: prompt.clone(),
-            });
-        }
-
-        history.push(TurnItem::Assistant {
-            content: record.assistant_turn.content.clone(),
-            tool_calls: record.assistant_turn.tool_calls.clone(),
-        });
-
-        if record.status == "completed" {
-            assert!(record.content.contains("任务提案"));
-            break;
-        }
-
-        for tool_call in &record.assistant_turn.tool_calls {
-            let output = execute_proposal_tool_call(
-                Arc::clone(&proposal_store),
-                Some("profile-alpha".to_string()),
-                publisher.clone(),
-                tool_call,
-            )
-            .await
-            .unwrap();
-
-            history.push(TurnItem::ToolResult {
-                tool_call_id: tool_call.id.clone(),
-                tool_name: tool_call.name.clone(),
-                content: output,
-            });
-        }
-    }
-
-    let proposals = proposal_store
-        .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
-        .unwrap();
-    assert_eq!(proposals.len(), 3);
-    assert!(
-        proposals
-            .iter()
-            .any(|proposal| proposal.action_type == ActionType::CreateTask)
-    );
-    assert!(
-        proposals
-            .iter()
-            .any(|proposal| proposal.action_type == ActionType::StartTimeblock)
-    );
-    assert!(
-        proposals
-            .iter()
-            .any(|proposal| proposal.action_type == ActionType::AppendEvent)
-    );
-
-    let _ = shutdown_tx.send(());
-}
-
-#[tokio::test]
-async fn broker_combined_story_contract_reads_events_weather_and_creates_two_task_proposals() {
-    let temp = tempfile::tempdir().unwrap();
-    let eventlog_store = Arc::new(EventLogStore::new(temp.path().join("eventlog")));
-    let proposal_store = Arc::new(ProposalStore::new());
-    let runtime = AgentSessionRuntime::new(
-        Arc::new(ConfigStore::new()),
-        Arc::clone(&eventlog_store),
-        Arc::clone(&proposal_store),
-        Arc::new(AgentSessionStore::new()),
-    );
-    let scope_key = "profile-alpha";
-
-    eventlog_store
-        .append_event(
-            Some(scope_key),
-            EventRecord {
-                id: "evt-bank".to_string(),
-                timestamp: 2,
-                content: "明天要出门去银行存钱，不知天气如何".to_string(),
-                tags: vec!["life".to_string(), "bank".to_string()],
-                refs: Vec::new(),
-                metadata: None,
-            },
-        )
-        .unwrap();
-    eventlog_store
-        .append_event(
-            Some(scope_key),
-            EventRecord {
-                id: "evt-umbrella".to_string(),
-                timestamp: 1,
-                content: "家里刚找到之前不知跑哪去了的伞，原来是放衣柜里了".to_string(),
-                tags: vec!["home".to_string(), "umbrella".to_string()],
-                refs: Vec::new(),
-                metadata: None,
-            },
-        )
-        .unwrap();
-
-    let system_prompt = Some(combined_story_system_prompt());
-    let prompt = combined_story_user_prompt();
-    let publisher = Publisher {
-        publisher_type: PublisherType::Agent,
-        id: "api-agent".to_string(),
-        name: "API Agent".to_string(),
-    };
-
-    let (base_url, shutdown_tx) = spawn_fake_openai_combined_story_server().await;
-    let profile = ApiProviderProfile {
-        provider: "openai".to_string(),
-        model: "gpt-test".to_string(),
-        base_url: Some(base_url),
-        api_key: "sk-test".to_string(),
-    };
-
-    let presets = vec![
-        TOOL_PRESET_RECENT_EVENTS.to_string(),
-        TOOL_PRESET_PROPOSAL_TOOLS.to_string(),
-    ];
-    let mut history = Vec::new();
-    let mut next_user_message = Some(prompt.clone());
-    let mut turn_count = 0usize;
-    let mut executed_tools = Vec::new();
-
-    loop {
-        turn_count += 1;
-        assert!(turn_count <= 6, "combined story exceeded turn budget");
-
-        let record = run_broker_agent_session_from_sources_with_runtime(
-            profile.clone(),
-            system_prompt.clone(),
-            vec![tomorrow_weather_tool()],
-            &presets,
-            Some(scope_key.to_string()),
-            history.clone(),
-            next_user_message.take(),
-            AgentTrigger::Internal {
-                source: "agent-turn-broker-combined-story-contract".to_string(),
-            },
-            &runtime,
-        )
-        .await
-        .unwrap();
-
-        if turn_count == 1 {
-            history.push(TurnItem::User {
-                content: prompt.clone(),
-            });
-        }
-
-        history.push(TurnItem::Assistant {
-            content: record.assistant_turn.content.clone(),
-            tool_calls: record.assistant_turn.tool_calls.clone(),
-        });
-
-        if record.status == "completed" {
-            assert!(record.content.contains("雨伞"));
-            assert!(record.content.contains("银行"));
-            break;
-        }
-
-        for tool_call in &record.assistant_turn.tool_calls {
-            executed_tools.push(tool_call.name.clone());
-            let output = execute_combined_story_tool_call(
-                Arc::clone(&eventlog_store),
-                Arc::clone(&proposal_store),
-                &publisher,
-                scope_key,
-                tool_call,
-            )
-            .await;
-            history.push(TurnItem::ToolResult {
-                tool_call_id: tool_call.id.clone(),
-                tool_name: tool_call.name.clone(),
-                content: output,
-            });
-        }
-    }
-
-    assert_eq!(
-        executed_tools,
-        vec![
-            GET_RECENT_EVENTS_TOOL.to_string(),
-            "get_weather".to_string(),
-            ADD_TASK_PROPOSAL_TOOL.to_string(),
-            ADD_TASK_PROPOSAL_TOOL.to_string()
-        ]
-    );
-
-    let proposals = proposal_store
-        .list_scoped(Some(scope_key), &ProposalFilter::default())
-        .unwrap();
-    let task_titles = proposals
-        .iter()
-        .filter(|proposal| proposal.action_type == ActionType::CreateTask)
-        .map(|proposal| proposal.title.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(task_titles.len(), 2, "proposals={proposals:?}");
-    assert!(task_titles.iter().any(|title| title.contains("雨伞")));
-    assert!(task_titles.iter().any(|title| title.contains("银行存钱")));
-
-    let _ = shutdown_tx.send(());
-}
-
-#[tokio::test]
-async fn broker_proposal_story_skips_without_env_and_uses_real_upstream_when_present() {
-    let Some(profile) = real_upstream_provider_profile_from_env() else {
-        eprintln!(
-            "skipping real-upstream proposal story: set EXOMIND_AGENT_API_RT_ENABLE=1 together with EXOMIND_AGENT_API_PROVIDER / MODEL / API_KEY env vars"
-        );
-        return;
-    };
-
-    let temp = tempfile::tempdir().unwrap();
-    let proposal_store = Arc::new(ProposalStore::new());
-    let runtime = AgentSessionRuntime::new(
-        Arc::new(ConfigStore::new()),
-        Arc::new(EventLogStore::new(temp.path().join("eventlog"))),
-        Arc::clone(&proposal_store),
-        Arc::new(AgentSessionStore::new()),
-    );
-    let system_prompt = Some(
-        "你是外心中的提案草案助手。你会阅读最近事件与开发上下文，把值得后续处理的事项转成结构化草案。优先通过工具创建任务提案、计划时间块提案、事件提案，而不是只做口头建议。若上下文明确提到后续验收、需要安排专注工作时间、或者需要补一条总结事件，就应分别创建对应草案。完成必要的草案创建后，再用中文总结你创建了哪些草案以及原因。"
-            .to_string(),
-    );
-    let prompt = r#"下面是最近的事件记录和开发上下文：
-2026-04-04 09:10 事件：刚推送 test(rt): add broker file search validation
-2026-04-04 09:35 事件：feat(task-dag): unify dag text and tag search 已在 dev
-2026-04-04 10:20 事件：对了，明天可能要验收下任务依赖图新布局
-2026-04-04 10:45 事件：刚完成一轮 pwd/ls/cd 文件搜索验证，准备回填 issue
-2026-04-04 11:05 事件：完成一个时间块，准备开始总结
-2026-04-04 11:20 事件：下一步希望把这轮 API Agent 实验整理成 issue 回填与简明总结
-
-请先阅读这些内容，提取其中值得形成草案的事项。你可以按需要调用添加任务提案、添加计划时间块提案、添加事件提案这三种工具。至少应为“明天可能要验收下任务依赖图新布局”创建一个任务提案；如果上下文表明应该安排时间块或补一条总结事件，也请创建相应草案。完成后请用中文总结你创建了哪些草案以及原因。"#.to_string();
-    let publisher = Publisher {
-        publisher_type: PublisherType::Agent,
-        id: "api-agent".to_string(),
-        name: "API Agent".to_string(),
-    };
-
-    let mut history = Vec::new();
-    let mut next_user_message = Some(prompt.clone());
-    let mut turn_count = 0usize;
-
-    eprintln!("=== broker_proposal_story start ===");
-    eprintln!("provider={} model={}", profile.provider, profile.model);
-
-    loop {
-        turn_count += 1;
-        assert!(
-            turn_count <= 10,
-            "proposal story exceeded turn budget; history={history:?}"
-        );
-
-        eprintln!("\n--- turn {turn_count} request ---");
-        eprintln!(
-            "history_len={} new_user_message_present={}",
-            history.len(),
-            next_user_message.is_some()
-        );
-
-        let record = match run_broker_agent_session_with_runtime(
-            profile.clone(),
-            system_prompt.clone(),
-            proposal_tool_defs(),
-            history.clone(),
-            next_user_message.take(),
-            AgentTrigger::Internal {
-                source: "agent-turn-broker-proposal-story".to_string(),
-            },
-            &runtime,
-        )
-        .await
-        {
-            Ok(record) => record,
-            Err(error) => {
-                panic_if_auth_failed(&error);
-                panic!("real-upstream proposal story turn failed: {error}");
-            }
-        };
-
-        eprintln!("--- turn {turn_count} response ---");
-        eprintln!("session_id={}", record.session_id);
-        eprintln!("status={}", record.status);
-        eprintln!(
-            "content={}",
-            serde_json::to_string_pretty(&record.content).unwrap()
-        );
-        eprintln!(
-            "assistant_turn={}",
-            serde_json::to_string_pretty(&record.assistant_turn).unwrap()
-        );
-        eprintln!(
-            "tool_calls={}",
-            serde_json::to_string_pretty(&record.tool_calls).unwrap()
-        );
-
-        if turn_count == 1 {
-            history.push(TurnItem::User {
-                content: prompt.clone(),
-            });
-        }
-
-        history.push(TurnItem::Assistant {
-            content: record.assistant_turn.content.clone(),
-            tool_calls: record.assistant_turn.tool_calls.clone(),
-        });
-
-        if record.status == "completed" {
-            let proposals = proposal_store
-                .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
-                .unwrap();
-            assert!(
-                !proposals.is_empty(),
-                "proposal story should create at least one proposal"
-            );
-            assert!(
-                proposals
-                    .iter()
-                    .any(|proposal| proposal.action_type == ActionType::CreateTask),
-                "proposal story must create at least one task proposal; proposals={proposals:?}"
-            );
-            assert!(
-                proposals
-                    .iter()
-                    .any(|proposal| proposal.action_type == ActionType::StartTimeblock),
-                "proposal story should create at least one timeblock proposal; proposals={proposals:?}"
-            );
-            assert!(
-                proposals
-                    .iter()
-                    .any(|proposal| proposal.action_type == ActionType::AppendEvent),
-                "proposal story should create at least one event proposal; proposals={proposals:?}"
-            );
-            assert!(
-                proposals
-                    .iter()
-                    .all(|proposal| proposal.publisher.publisher_type == PublisherType::Agent),
-                "all created proposals should be agent-published; proposals={proposals:?}"
-            );
-            assert!(
-                proposals
-                    .iter()
-                    .filter(|proposal| proposal.action_type == ActionType::CreateTask)
-                    .any(|proposal| proposal.status
-                        == exomind_runtime::proposal::ProposalStatus::Pending),
-                "created task proposals should remain pending; proposals={proposals:?}"
-            );
-            assert!(
-                record.content.contains("任务提案") || record.content.contains("任务草案"),
-                "final summary should mention the created task proposal: {record:?}"
-            );
-            eprintln!("=== broker_proposal_story completed ===");
-            eprintln!(
-                "proposals={}",
-                serde_json::to_string_pretty(&proposals).unwrap()
-            );
-            eprintln!("final_answer={}", record.content);
-            break;
-        }
-
-        assert_eq!(
-            record.status, "needs_tool_calls",
-            "intermediate proposal story turn should request tools: {record:?}"
-        );
-        assert!(
-            !record.assistant_turn.tool_calls.is_empty(),
-            "proposal story should return at least one tool call before completion: {record:?}"
-        );
-
-        for tool_call in &record.assistant_turn.tool_calls {
-            let output = execute_proposal_tool_call(
-                Arc::clone(&proposal_store),
-                Some("profile-alpha".to_string()),
-                publisher.clone(),
-                tool_call,
-            )
-            .await
-            .unwrap_or_else(|error| panic!("proposal tool execution failed: {error}"));
-
-            let proposals = proposal_store
-                .list_scoped(Some("profile-alpha"), &ProposalFilter::default())
-                .unwrap();
-            eprintln!(
-                "executed_tool_call={}",
-                serde_json::to_string_pretty(tool_call).unwrap()
-            );
-            eprintln!("tool_output={output}");
-            eprintln!(
-                "proposal_snapshot={}",
-                serde_json::to_string_pretty(&proposals).unwrap()
-            );
-
-            history.push(TurnItem::ToolResult {
-                tool_call_id: tool_call.id.clone(),
-                tool_name: tool_call.name.clone(),
-                content: output,
-            });
-        }
-    }
-}
-
-#[tokio::test]
-async fn broker_combined_story_skips_without_env_and_uses_real_upstream_when_present() {
-    let Some(profile) = real_upstream_provider_profile_from_env() else {
-        eprintln!(
-            "skipping real-upstream combined story: set EXOMIND_AGENT_API_RT_ENABLE=1 together with EXOMIND_AGENT_API_PROVIDER / MODEL / API_KEY env vars"
-        );
-        return;
-    };
-
-    let temp = tempfile::tempdir().unwrap();
-    let eventlog_store = Arc::new(EventLogStore::new(temp.path().join("eventlog")));
-    let proposal_store = Arc::new(ProposalStore::new());
-    let runtime = AgentSessionRuntime::new(
-        Arc::new(ConfigStore::new()),
-        Arc::clone(&eventlog_store),
-        Arc::clone(&proposal_store),
-        Arc::new(AgentSessionStore::new()),
-    );
-    let scope_key = "profile-alpha";
-
-    eventlog_store
-        .append_event(
-            Some(scope_key),
-            EventRecord {
-                id: "evt-bank".to_string(),
-                timestamp: 2,
-                content: "明天要出门去银行存钱，不知天气如何".to_string(),
-                tags: vec!["life".to_string(), "bank".to_string()],
-                refs: Vec::new(),
-                metadata: None,
-            },
-        )
-        .unwrap();
-    eventlog_store
-        .append_event(
-            Some(scope_key),
-            EventRecord {
-                id: "evt-umbrella".to_string(),
-                timestamp: 1,
-                content: "家里刚找到之前不知跑哪去了的伞，原来是放衣柜里了".to_string(),
-                tags: vec!["home".to_string(), "umbrella".to_string()],
-                refs: Vec::new(),
-                metadata: None,
-            },
-        )
-        .unwrap();
-
-    let system_prompt = Some(combined_story_system_prompt());
-    let prompt = combined_story_user_prompt();
-    let publisher = Publisher {
-        publisher_type: PublisherType::Agent,
-        id: "api-agent".to_string(),
-        name: "API Agent".to_string(),
-    };
-    let presets = vec![
-        TOOL_PRESET_RECENT_EVENTS.to_string(),
-        TOOL_PRESET_PROPOSAL_TOOLS.to_string(),
-    ];
-    let mut history = Vec::new();
-    let mut next_user_message = Some(prompt.clone());
-    let mut turn_count = 0usize;
-    let mut executed_tools = Vec::new();
-
-    eprintln!("=== broker_combined_story start ===");
-    eprintln!("provider={} model={}", profile.provider, profile.model);
-
-    loop {
-        turn_count += 1;
-        assert!(
-            turn_count <= 10,
-            "combined story exceeded turn budget; history={history:?}"
-        );
-
-        eprintln!("\n--- turn {turn_count} request ---");
-        eprintln!(
-            "history_len={} new_user_message_present={}",
-            history.len(),
-            next_user_message.is_some()
-        );
-
-        let user_message_for_turn = next_user_message.take();
-        let record = run_real_upstream_turn_with_retries(
-            &format!("combined story turn {turn_count}"),
-            || {
-                run_broker_agent_session_from_sources_with_runtime(
-                    profile.clone(),
-                    system_prompt.clone(),
-                    vec![tomorrow_weather_tool()],
-                    &presets,
-                    Some(scope_key.to_string()),
-                    history.clone(),
-                    user_message_for_turn.clone(),
-                    AgentTrigger::Internal {
-                        source: "agent-turn-broker-combined-story".to_string(),
-                    },
-                    &runtime,
-                )
-            },
-        )
-        .await
-        .unwrap_or_else(|error| panic!("real-upstream combined story turn failed: {error}"));
-
-        eprintln!("--- turn {turn_count} response ---");
-        eprintln!("session_id={}", record.session_id);
-        eprintln!("status={}", record.status);
-        eprintln!(
-            "content={}",
-            serde_json::to_string_pretty(&record.content).unwrap()
-        );
-        eprintln!(
-            "assistant_turn={}",
-            serde_json::to_string_pretty(&record.assistant_turn).unwrap()
-        );
-        eprintln!(
-            "tool_calls={}",
-            serde_json::to_string_pretty(&record.tool_calls).unwrap()
-        );
-
-        if turn_count == 1 {
-            history.push(TurnItem::User {
-                content: prompt.clone(),
-            });
-        }
-
-        history.push(TurnItem::Assistant {
-            content: record.assistant_turn.content.clone(),
-            tool_calls: record.assistant_turn.tool_calls.clone(),
-        });
-
-        if record.status == "completed" {
-            let proposals = proposal_store
-                .list_scoped(Some(scope_key), &ProposalFilter::default())
-                .unwrap();
-            let task_proposals = proposals
-                .iter()
-                .filter(|proposal| proposal.action_type == ActionType::CreateTask)
-                .collect::<Vec<_>>();
-
-            assert!(
-                executed_tools
-                    .iter()
-                    .any(|name| name == GET_RECENT_EVENTS_TOOL),
-                "combined story must read recent events first; executed_tools={executed_tools:?}"
-            );
-            assert!(
-                executed_tools.iter().any(|name| name == "get_weather"),
-                "combined story must query weather; executed_tools={executed_tools:?}"
-            );
-            assert!(
-                task_proposals.len() >= 2,
-                "combined story should create at least two task proposals; proposals={proposals:?}"
-            );
-            assert!(
-                task_proposals.iter().any(|proposal| {
-                    proposal.title.contains("雨伞")
-                        || proposal.title.contains("伞")
-                        || proposal.body.contains("雨伞")
-                        || proposal.body.contains("伞")
-                        || proposal.body.contains("雨具")
-                }),
-                "combined story should create an umbrella-preparation proposal; proposals={proposals:?}"
-            );
-            assert!(
-                task_proposals.iter().any(|proposal| {
-                    proposal.title.contains("银行")
-                        || proposal.body.contains("银行")
-                        || proposal.body.contains("存钱")
-                }),
-                "combined story should create a bank/deposit proposal; proposals={proposals:?}"
-            );
-            assert!(
-                record.content.contains("雨伞") || record.content.contains("银行"),
-                "final answer should summarize the created proposals: {record:?}"
-            );
-            eprintln!("=== broker_combined_story completed ===");
-            eprintln!(
-                "proposals={}",
-                serde_json::to_string_pretty(&proposals).unwrap()
-            );
-            eprintln!("executed_tools={executed_tools:?}");
-            eprintln!("final_answer={}", record.content);
-            break;
-        }
-
-        assert_eq!(
-            record.status, "needs_tool_calls",
-            "intermediate combined story turn should request tools: {record:?}"
-        );
-        assert!(
-            !record.assistant_turn.tool_calls.is_empty(),
-            "combined story should keep using tools before completion: {record:?}"
-        );
-
-        for tool_call in &record.assistant_turn.tool_calls {
-            executed_tools.push(tool_call.name.clone());
-            let output = execute_combined_story_tool_call(
-                Arc::clone(&eventlog_store),
-                Arc::clone(&proposal_store),
-                &publisher,
-                scope_key,
-                tool_call,
-            )
-            .await;
-            eprintln!(
-                "executed_tool_call={}",
-                serde_json::to_string_pretty(tool_call).unwrap()
-            );
-            eprintln!("tool_output={output}");
-            history.push(TurnItem::ToolResult {
-                tool_call_id: tool_call.id.clone(),
-                tool_name: tool_call.name.clone(),
-                content: output,
-            });
-        }
-    }
 }
 
 #[tokio::test]

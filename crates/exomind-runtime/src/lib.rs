@@ -235,6 +235,15 @@ fn configured_mesh_state_path_from_env(data_dir: Option<&Path>) -> Option<PathBu
         })
 }
 
+/// Built-in actor capabilities selected by the host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinActorProfile {
+    /// Existing runtime actors, including external input and task/proposal domains.
+    Legacy,
+    /// Recording, timeblock replication and passive signal delivery only.
+    Recording,
+}
+
 /// Runtime startup options（运行时启动选项）.
 #[derive(Debug, Clone)]
 pub struct RuntimeStartOptions {
@@ -248,6 +257,11 @@ pub struct RuntimeStartOptions {
     pub device_id: String,
     /// spawn built-in rust actors（是否拉起内置 Rust Actor）.
     pub spawn_builtin_actors: bool,
+    /// Restrict built-in background work independently of storage path policy.
+    pub builtin_actor_profile: BuiltinActorProfile,
+    /// Register heartbeat/life in the Legacy profile when built-in actors are enabled.
+    /// The Recording profile always excludes these autonomous agents.
+    pub spawn_autonomous_agents: bool,
     /// optional mesh state path（可选 peer/interest 持久化路径）.
     pub mesh_state_path: Option<PathBuf>,
     /// optional signal sqlite path（可选 SignalPool SQLite 路径）.
@@ -260,6 +274,33 @@ pub struct RuntimeStartOptions {
     pub enable_mdns: bool,
     /// optional data directory for agent workspaces（可选 Agent workspace 数据目录）.
     pub data_dir: Option<PathBuf>,
+    /// Allow environment storage paths. When disabled, `data_dir` is required and
+    /// owns all persistent stores and agent/PTY data; mesh/signal path overrides are ignored.
+    /// Default routes then come from `data_dir/config/signal-routes.default.json`.
+    pub use_environment_storage_paths: bool,
+}
+
+impl RuntimeStartOptions {
+    /// Builds options without reading environment variables or opening any storage.
+    /// Persistence stays under `data_dir`; background capabilities use the Recording profile.
+    pub fn isolated(data_dir: PathBuf) -> Self {
+        Self {
+            bind_host: "127.0.0.1".to_string(),
+            port: DEFAULT_RT_PORT,
+            host_id: format!("host-{}", uuid::Uuid::new_v4()),
+            device_id: format!("device-{}", uuid::Uuid::new_v4()),
+            spawn_builtin_actors: true,
+            builtin_actor_profile: BuiltinActorProfile::Recording,
+            spawn_autonomous_agents: false,
+            mesh_state_path: None,
+            signal_storage_path: None,
+            auth_secret: None,
+            allow_lan_without_auth: false,
+            enable_mdns: false,
+            data_dir: Some(data_dir),
+            use_environment_storage_paths: false,
+        }
+    }
 }
 
 impl Default for RuntimeStartOptions {
@@ -279,6 +320,8 @@ impl Default for RuntimeStartOptions {
             host_id: configured_host_id_from_env(),
             device_id: configured_device_id_from_env(),
             spawn_builtin_actors: true,
+            builtin_actor_profile: BuiltinActorProfile::Legacy,
+            spawn_autonomous_agents: true,
             mesh_state_path: configured_mesh_state_path_from_env(data_dir.as_deref()),
             signal_storage_path: env::var("EXOMIND_RT_SIGNAL_SQLITE_PATH")
                 .ok()
@@ -287,12 +330,15 @@ impl Default for RuntimeStartOptions {
             allow_lan_without_auth: false,
             enable_mdns,
             data_dir,
+            use_environment_storage_paths: true,
         }
     }
 }
 
 #[derive(Debug, Error)]
 pub enum RuntimeStartError {
+    #[error("isolated runtime startup requires an explicit data directory")]
+    MissingIsolatedDataDir,
     #[error("invalid bind address: {raw}")]
     InvalidBindAddress {
         raw: String,
@@ -311,6 +357,8 @@ pub enum RuntimeStartError {
 
 #[derive(Debug, Error)]
 pub enum RuntimeStopError {
+    #[error("runtime summary task join failed: {0}")]
+    JoinSummaryTask(#[source] tokio::task::JoinError),
     #[error("runtime server task join failed: {0}")]
     JoinServerTask(#[source] tokio::task::JoinError),
     #[error("runtime server returned IO error: {0}")]
@@ -328,7 +376,10 @@ pub struct RuntimeHandle {
     mdns: Option<Arc<discovery::MdnsDiscovery>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_task: Option<JoinHandle<std::io::Result<()>>>,
+    #[cfg(windows)]
+    wildcard_reservation: Option<Arc<tokio::net::TcpSocket>>,
     actor_tasks: Vec<JoinHandle<()>>,
+    summary_tasks: agent::timeblock_summary::TimeblockSummaryTasks,
     #[cfg(not(target_os = "android"))]
     pty_manager: Arc<pty::PtyManager>,
     tick_manager: Arc<tick::TickManager>,
@@ -427,6 +478,7 @@ impl RuntimeHandle {
 
     /// Graceful shutdown（优雅停止）.
     pub async fn stop(&mut self) -> Result<(), RuntimeStopError> {
+        let summary_stop = self.summary_tasks.stop().await;
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
@@ -451,31 +503,37 @@ impl RuntimeHandle {
             mesh_relay.shutdown().await;
         }
 
-        if let Some(server_task) = self.server_task.take() {
+        let server_stop = if let Some(server_task) = self.server_task.take() {
             let mut server_task = server_task;
             match tokio::time::timeout(std::time::Duration::from_secs(2), &mut server_task).await {
-                Ok(Ok(Ok(()))) => {}
-                Ok(Ok(Err(error))) => return Err(RuntimeStopError::ServerIo(error)),
-                Ok(Err(error)) if error.is_cancelled() => {}
-                Ok(Err(error)) => return Err(RuntimeStopError::JoinServerTask(error)),
+                Ok(Ok(Ok(()))) => Ok(()),
+                Ok(Ok(Err(error))) => Err(RuntimeStopError::ServerIo(error)),
+                Ok(Err(error)) if error.is_cancelled() => Ok(()),
+                Ok(Err(error)) => Err(RuntimeStopError::JoinServerTask(error)),
                 Err(_) => {
                     server_task.abort();
                     match server_task.await {
-                        Ok(Ok(())) => {}
-                        Ok(Err(error)) => return Err(RuntimeStopError::ServerIo(error)),
-                        Err(error) if error.is_cancelled() => {}
-                        Err(error) => return Err(RuntimeStopError::JoinServerTask(error)),
+                        Ok(Ok(())) => Ok(()),
+                        Ok(Err(error)) => Err(RuntimeStopError::ServerIo(error)),
+                        Err(error) if error.is_cancelled() => Ok(()),
+                        Err(error) => Err(RuntimeStopError::JoinServerTask(error)),
                     }
                 }
             }
-        }
+        } else {
+            Ok(())
+        };
+        #[cfg(windows)]
+        self.wildcard_reservation.take();
+        server_stop?;
 
-        Ok(())
+        summary_stop.map_err(RuntimeStopError::JoinSummaryTask)
     }
 }
 
 impl Drop for RuntimeHandle {
     fn drop(&mut self) {
+        self.summary_tasks.abort();
         if let Some(mdns) = self.mdns.take() {
             mdns.shutdown();
         }
@@ -503,6 +561,9 @@ pub async fn start_with_options(
 ) -> Result<RuntimeHandle, RuntimeStartError> {
     let mut options = options;
     ensure_auth_secret_for_bind_host(&mut options);
+    if !options.use_environment_storage_paths && options.data_dir.is_none() {
+        return Err(RuntimeStartError::MissingIsolatedDataDir);
+    }
 
     let bind_addr_raw = format!("{}:{}", options.bind_host, options.port);
     let bind_addr: SocketAddr =
@@ -513,24 +574,44 @@ pub async fn start_with_options(
                 source,
             })?;
 
-    let listener = tokio::net::TcpListener::bind(bind_addr)
-        .await
-        .map_err(|source| RuntimeStartError::BindListener {
+    let bound = bind_runtime_listener(bind_addr).await.map_err(|source| {
+        RuntimeStartError::BindListener {
             bind_addr: bind_addr_raw.clone(),
             source,
-        })?;
+        }
+    })?;
+    let listener = bound.listener;
+    #[cfg(windows)]
+    let wildcard_reservation = bound.wildcard_reservation;
     let local_addr = listener
         .local_addr()
         .map_err(RuntimeStartError::ReadLocalAddr)?;
 
+    let storage_paths = runtime_storage_paths_for_persistent_start(
+        options.data_dir.clone(),
+        options.use_environment_storage_paths,
+    );
+    // Isolated options make the data directory authoritative even if these optional
+    // paths were copied from environment-based defaults before start_with_options().
+    let (mesh_state_path, signal_storage_path) = if options.use_environment_storage_paths {
+        (
+            options.mesh_state_path.clone(),
+            options.signal_storage_path.clone(),
+        )
+    } else {
+        (
+            Some(storage_paths.data_dir.join("mesh-state.json")),
+            Some(storage_paths.data_dir.join("signal-pool.sqlite")),
+        )
+    };
     let mut state = AppState::new_runtime_with_storage_paths(
         local_addr.port(),
         options.host_id.clone(),
-        options.mesh_state_path.clone(),
-        options.signal_storage_path.clone(),
+        mesh_state_path,
+        signal_storage_path,
         true,
         options.auth_secret.clone(),
-        runtime_storage_paths_for_persistent_start(options.data_dir.clone()),
+        storage_paths,
     );
     state.device_id = options.device_id.clone();
     state.allow_lan_without_auth = options.allow_lan_without_auth;
@@ -576,17 +657,6 @@ pub async fn start_with_options(
                 &state.signal_pool,
             )),
         );
-        actor_tasks.push(
-            signal::actors::external_input_actor::spawn_external_input_actor(Arc::clone(
-                &state.signal_pool,
-            )),
-        );
-        actor_tasks.push(
-            signal::actors::external_source_actor::spawn_external_source_actor(
-                Arc::clone(&state.signal_pool),
-                signal::actors::external_source_actor::ExternalSourceConfig::default(),
-            ),
-        );
         actor_tasks.push(signal::actors::eventlog_actor::spawn_eventlog_actor(
             Arc::clone(&state.signal_pool),
         ));
@@ -594,22 +664,48 @@ pub async fn start_with_options(
             Arc::clone(&state.signal_pool),
             options.host_id.clone(),
         ));
-        actor_tasks.push(signal::actors::replication_actor::spawn_replication_actor(
-            Arc::clone(&state.signal_pool),
-            options.host_id.clone(),
-            Arc::clone(&state.eventlog_store),
-            Arc::clone(&state.task_store),
-            Arc::clone(&state.timeblock_store),
-            Arc::clone(&state.proposal_store),
-        ));
-        actor_tasks.push(task::actor::spawn_task_store_actor(
-            Arc::clone(&state.signal_pool),
-            Arc::clone(&state.task_store),
-        ));
+        match options.builtin_actor_profile {
+            BuiltinActorProfile::Recording => actor_tasks.push(
+                signal::actors::replication_actor::spawn_recording_replication_actor(
+                    Arc::clone(&state.signal_pool),
+                    options.host_id.clone(),
+                    Arc::clone(&state.eventlog_store),
+                    Arc::clone(&state.timeblock_store),
+                ),
+            ),
+            BuiltinActorProfile::Legacy => {
+                actor_tasks.push(
+                    signal::actors::external_input_actor::spawn_external_input_actor(Arc::clone(
+                        &state.signal_pool,
+                    )),
+                );
+                actor_tasks.push(
+                    signal::actors::external_source_actor::spawn_external_source_actor(
+                        Arc::clone(&state.signal_pool),
+                        signal::actors::external_source_actor::ExternalSourceConfig::default(),
+                    ),
+                );
+                actor_tasks.push(signal::actors::replication_actor::spawn_replication_actor(
+                    Arc::clone(&state.signal_pool),
+                    options.host_id.clone(),
+                    Arc::clone(&state.eventlog_store),
+                    Arc::clone(&state.task_store),
+                    Arc::clone(&state.timeblock_store),
+                    Arc::clone(&state.proposal_store),
+                ));
+                actor_tasks.push(task::actor::spawn_task_store_actor(
+                    Arc::clone(&state.signal_pool),
+                    Arc::clone(&state.task_store),
+                ));
+            }
+        }
     }
 
     // Register heartbeat demo agent + energy
-    if options.spawn_builtin_actors {
+    if options.spawn_builtin_actors
+        && options.builtin_actor_profile == BuiltinActorProfile::Legacy
+        && options.spawn_autonomous_agents
+    {
         let heartbeat = Arc::new(agent::heartbeat::HeartbeatAgent::new("heartbeat"));
         state.registry.register(heartbeat);
         state
@@ -656,7 +752,7 @@ pub async fn start_with_options(
     }
 
     // Register timeblock_summary built-in agent service
-    {
+    let summary_tasks = {
         agent::timeblock_summary::init_config_defaults(&state.config_store);
         let session_runtime = agent::session::AgentSessionRuntime::from_state(&state);
         let tb_summary = Arc::new(agent::timeblock_summary::TimeblockSummaryAgentService::new(
@@ -674,7 +770,7 @@ pub async fn start_with_options(
             "timeblock_summary",
             crate::energy::AgentEnergy::new(crate::energy::AgentEnergy::DEFAULT_MAX, 1),
         );
-        tb_summary.spawn();
+        let tasks = tb_summary.spawn();
 
         // Register signal routes for UI topology (clean duplicates first)
         let now = chrono::Utc::now().to_rfc3339();
@@ -718,7 +814,8 @@ pub async fn start_with_options(
                 updated_at: now.clone(),
             });
         }
-    }
+        tasks
+    };
 
     // Start tick scheduler for all agents with tick_interval_secs > 0.
     // 启动所有启用 tick 的 agent 生命周期循环。
@@ -729,7 +826,13 @@ pub async fn start_with_options(
     let pty_manager = Arc::clone(&state.pty_manager);
     let app = app_with_state(state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    #[cfg(windows)]
+    let server_reservation = wildcard_reservation.clone();
     let server_task = tokio::spawn(async move {
+        // Keep the reservation until the listener future actually exits, including
+        // cancellation after RuntimeHandle::drop() requests abort without joining.
+        #[cfg(windows)]
+        let _reservation = server_reservation;
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -755,11 +858,95 @@ pub async fn start_with_options(
         mdns,
         shutdown_tx: Some(shutdown_tx),
         server_task: Some(server_task),
+        #[cfg(windows)]
+        wildcard_reservation,
         actor_tasks,
+        summary_tasks,
         #[cfg(not(target_os = "android"))]
         pty_manager,
         tick_manager,
     })
+}
+
+struct RuntimeListenerBinding {
+    listener: tokio::net::TcpListener,
+    #[cfg(windows)]
+    wildcard_reservation: Option<Arc<tokio::net::TcpSocket>>,
+}
+
+async fn bind_runtime_listener(bind_addr: SocketAddr) -> std::io::Result<RuntimeListenerBinding> {
+    #[cfg(windows)]
+    {
+        let new_socket = || {
+            if bind_addr.is_ipv4() {
+                tokio::net::TcpSocket::new_v4()
+            } else {
+                tokio::net::TcpSocket::new_v6()
+            }
+        };
+        let mut actual_addr = bind_addr;
+        let wildcard_reservation = if bind_addr.ip().is_unspecified() {
+            None
+        } else {
+            // Windows 2003+ permits specific-exclusive and wildcard-default binds
+            // under the same account. Holding the latter with reuse off blocks a
+            // foreign wildcard binder; it never listens or expands request exposure.
+            // An exclusive wildcard would also reject our own specific listener.
+            let reservation = new_socket()?;
+            reservation.set_reuseaddr(false)?;
+            let wildcard_ip = if bind_addr.is_ipv4() {
+                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
+            } else {
+                std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)
+            };
+            reservation.bind(SocketAddr::new(wildcard_ip, bind_addr.port()))?;
+            actual_addr.set_port(reservation.local_addr()?.port());
+            Some(Arc::new(reservation))
+        };
+        let socket = new_socket()?;
+        socket.set_reuseaddr(false)?;
+        set_windows_exclusive_bind(&socket)?;
+        socket.bind(actual_addr)?;
+        Ok(RuntimeListenerBinding {
+            listener: socket.listen(1024)?,
+            wildcard_reservation,
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        tokio::net::TcpListener::bind(bind_addr)
+            .await
+            .map(|listener| RuntimeListenerBinding { listener })
+    }
+}
+
+#[cfg(windows)]
+fn set_windows_exclusive_bind(socket: &tokio::net::TcpSocket) -> std::io::Result<()> {
+    use std::os::windows::io::AsRawSocket;
+    use windows_sys::Win32::Networking::WinSock::{
+        SO_EXCLUSIVEADDRUSE, SOL_SOCKET, WSAGetLastError, setsockopt,
+    };
+
+    let exclusive = 1_i32;
+    // SAFETY: TcpSocket owns a live SOCKET throughout this synchronous call. Winsock
+    // reads an initialized, correctly sized BOOL and does not retain its pointer.
+    let result = unsafe {
+        setsockopt(
+            socket.as_raw_socket() as _,
+            SOL_SOCKET,
+            SO_EXCLUSIVEADDRUSE,
+            (&exclusive as *const i32).cast(),
+            std::mem::size_of_val(&exclusive) as i32,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        // SAFETY: WSAGetLastError reads the calling thread's last Winsock error.
+        Err(std::io::Error::from_raw_os_error(unsafe {
+            WSAGetLastError()
+        }))
+    }
 }
 
 fn workspace_root_from_manifest() -> Option<PathBuf> {
@@ -888,6 +1075,7 @@ fn resolve_data_dir() -> PathBuf {
 #[derive(Debug, Clone)]
 struct RuntimeStoragePaths {
     data_dir: PathBuf,
+    default_signal_routes_path: Option<PathBuf>,
     eventlog_sqlite_path: Option<PathBuf>,
     config_sqlite_path: Option<PathBuf>,
     reminder_sqlite_path: Option<PathBuf>,
@@ -900,6 +1088,7 @@ struct RuntimeStoragePaths {
 fn runtime_storage_paths_from_env() -> RuntimeStoragePaths {
     RuntimeStoragePaths {
         data_dir: resolve_data_dir(),
+        default_signal_routes_path: resolve_default_signal_routes_path(),
         eventlog_sqlite_path: env::var("EXOMIND_RT_EVENTLOG_SQLITE_PATH")
             .ok()
             .map(PathBuf::from),
@@ -924,37 +1113,34 @@ fn runtime_storage_paths_from_env() -> RuntimeStoragePaths {
     }
 }
 
-fn runtime_storage_paths_for_persistent_start(data_dir: Option<PathBuf>) -> RuntimeStoragePaths {
+fn runtime_storage_paths_for_persistent_start(
+    data_dir: Option<PathBuf>,
+    use_environment_storage_paths: bool,
+) -> RuntimeStoragePaths {
     let data_dir = data_dir.unwrap_or_else(resolve_data_dir);
+    let storage_path = |env_key: &str, filename: &str| {
+        use_environment_storage_paths
+            .then(|| env::var(env_key).ok().map(PathBuf::from))
+            .flatten()
+            .or_else(|| Some(data_dir.join(filename)))
+    };
     RuntimeStoragePaths {
-        eventlog_sqlite_path: env::var("EXOMIND_RT_EVENTLOG_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| Some(data_dir.join("eventlog.sqlite"))),
-        config_sqlite_path: env::var("EXOMIND_RT_CONFIG_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| Some(data_dir.join("config.sqlite"))),
-        reminder_sqlite_path: env::var("EXOMIND_RT_REMINDER_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| Some(data_dir.join("reminders.sqlite"))),
-        task_sqlite_path: env::var("EXOMIND_RT_TASK_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| Some(data_dir.join("tasks.sqlite"))),
-        proposal_sqlite_path: env::var("EXOMIND_RT_PROPOSAL_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| Some(data_dir.join("proposals.sqlite"))),
-        timeblock_sqlite_path: env::var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| Some(data_dir.join("timeblocks.sqlite"))),
-        session_sqlite_path: env::var("EXOMIND_RT_SESSION_SQLITE_PATH")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| Some(data_dir.join("sessions.sqlite"))),
+        default_signal_routes_path: if use_environment_storage_paths {
+            resolve_default_signal_routes_path()
+        } else {
+            let bundled_routes = data_dir.join("config/signal-routes.default.json");
+            bundled_routes.is_file().then_some(bundled_routes)
+        },
+        eventlog_sqlite_path: storage_path("EXOMIND_RT_EVENTLOG_SQLITE_PATH", "eventlog.sqlite"),
+        config_sqlite_path: storage_path("EXOMIND_RT_CONFIG_SQLITE_PATH", "config.sqlite"),
+        reminder_sqlite_path: storage_path("EXOMIND_RT_REMINDER_SQLITE_PATH", "reminders.sqlite"),
+        task_sqlite_path: storage_path("EXOMIND_RT_TASK_SQLITE_PATH", "tasks.sqlite"),
+        proposal_sqlite_path: storage_path("EXOMIND_RT_PROPOSAL_SQLITE_PATH", "proposals.sqlite"),
+        timeblock_sqlite_path: storage_path(
+            "EXOMIND_RT_TIMEBLOCK_SQLITE_PATH",
+            "timeblocks.sqlite",
+        ),
+        session_sqlite_path: storage_path("EXOMIND_RT_SESSION_SQLITE_PATH", "sessions.sqlite"),
         data_dir,
     }
 }
@@ -997,6 +1183,9 @@ impl AppState {
         let tempdir = tempfile::tempdir().expect("create isolated runtime tempdir");
         let storage_paths = RuntimeStoragePaths {
             data_dir: tempdir.path().join("runtime-data"),
+            default_signal_routes_path: builtin_signal_routes_path(
+                env::current_dir().ok().as_deref(),
+            ),
             eventlog_sqlite_path: Some(tempdir.path().join("eventlog.sqlite")),
             config_sqlite_path: Some(tempdir.path().join("config.sqlite")),
             reminder_sqlite_path: Some(tempdir.path().join("reminders.sqlite")),
@@ -1030,8 +1219,9 @@ impl AppState {
         registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
         registry.register(Arc::new(agent::echo::EchoAgent::new()));
 
-        let default_routes_path =
-            resolve_default_signal_routes_path().map(|path| path.to_string_lossy().to_string());
+        let default_routes_path = storage_paths
+            .default_signal_routes_path
+            .map(|path| path.to_string_lossy().to_string());
         let signal_pool = Arc::new(match signal_storage_path {
             Some(path) => match SignalPool::with_sqlite_path(default_routes_path.as_deref(), &path)
             {
@@ -1228,14 +1418,18 @@ fn resolve_default_signal_routes_path() -> Option<PathBuf> {
 }
 
 fn resolve_default_signal_routes_path_from(current_dir: Option<&Path>) -> Option<PathBuf> {
-    const DEFAULT_ROUTES_RELATIVE_PATH: &str = "config/signal-routes.default.json";
-
     if let Ok(override_path) = env::var("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT") {
         let candidate = PathBuf::from(override_path);
         if candidate.is_file() {
             return Some(candidate);
         }
     }
+
+    builtin_signal_routes_path(current_dir)
+}
+
+fn builtin_signal_routes_path(current_dir: Option<&Path>) -> Option<PathBuf> {
+    const DEFAULT_ROUTES_RELATIVE_PATH: &str = "config/signal-routes.default.json";
 
     if let Some(cwd) = current_dir {
         let candidate = cwd.join(DEFAULT_ROUTES_RELATIVE_PATH);
@@ -2194,7 +2388,6 @@ mod tests {
                 .contains("config/signal-routes.default.json")
         );
     }
-
 
     #[test]
     fn persisted_runtime_host_id_reuses_device_scope_config_entry() {

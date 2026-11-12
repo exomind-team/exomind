@@ -5,7 +5,6 @@ import {
   Plus,
   Settings,
   Sparkles,
-  TerminalSquare,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,10 +31,6 @@ import {
   type RuntimeTargetMode,
 } from "@/config/runtime-target";
 import { resolveLocalServiceHost } from "@/config/local-service-host";
-import {
-  getApiAgentTabEnabled,
-  subscribeApiAgentTabEnabledChanges,
-} from "@/config/api-agent-tab-enabled";
 import {
   getSyncAutomationEnabled,
   setSyncAutomationEnabled as persistSyncAutomationEnabled,
@@ -219,6 +214,7 @@ import {
   resolveRuntimeHostDialAddress,
 } from "@/lib/utils/runtime-host-address";
 import {
+  AGENT_MANAGEMENT_ENABLED,
   VIEW_ITEMS,
   ADD_NODE_OPTIONS,
   TOPOLOGY_SCOPE_KEY,
@@ -1124,7 +1120,6 @@ function TabBar({
 export function AgentsPage() {
   const supportsInlineRightPanel = useIsDesktop(1024);
   const initialRuntimeTarget = getSelectedRuntimeTarget();
-  const initialApiAgentTabEnabled = getApiAgentTabEnabled();
   const initialTiledWorkbenchState = useMemo(
     () => readAgentsTiledWorkbenchPersistState(),
     [],
@@ -1134,15 +1129,9 @@ export function AgentsPage() {
       initialTiledWorkbenchState.activeLayoutId
     ] ?? Object.values(initialTiledWorkbenchState.layouts)[0];
   const initialTiledState = useMemo(() => readAgentsTiledPersistState(), []);
-  const [apiAgentTabEnabled, setApiAgentTabEnabled] = useState(
-    initialApiAgentTabEnabled,
+  const [viewMode, setViewMode] = useState<AgentHubViewMode>(
+    () => readAgentsViewModePersistState(),
   );
-  const [viewMode, setViewMode] = useState<AgentHubViewMode>(() => {
-    const persisted = readAgentsViewModePersistState();
-    return persisted === "api-agent" && !initialApiAgentTabEnabled
-      ? "topology"
-      : persisted;
-  });
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>("all");
   const [topologyLayoutMode, setTopologyLayoutMode] =
     useState<TopologyLayoutMode>("manual");
@@ -1477,7 +1466,7 @@ export function AgentsPage() {
     useState(getRuntimeExternalAuthToken());
   const [runtimeTargetError, setRuntimeTargetError] = useState("");
   const [rightPanel, setRightPanel] = useState<AgentHubRightPanelContext>(() =>
-    supportsInlineRightPanel && initialTiledState.fullscreenPtyId
+    AGENT_MANAGEMENT_ENABLED && supportsInlineRightPanel && initialTiledState.fullscreenPtyId
       ? { state: "PTY_TERMINAL", ptyId: initialTiledState.fullscreenPtyId }
       : { state: "CLOSED" },
   );
@@ -1515,7 +1504,7 @@ export function AgentsPage() {
   >([]);
   /** The currently active PTY — persists across panel close/open to keep the terminal mounted. */
   const [activePtyId, setActivePtyId] = useState<string | null>(
-    initialTiledState.fullscreenPtyId ?? null,
+    AGENT_MANAGEMENT_ENABLED ? initialTiledState.fullscreenPtyId ?? null : null,
   );
   const [activePtyHostId, setActivePtyHostId] = useState<string | null>(null);
   const [activePtyTerminalNonce, setActivePtyTerminalNonce] = useState(0);
@@ -1524,7 +1513,7 @@ export function AgentsPage() {
   >(new Map());
   const [fullscreenTerminalRecovery, setFullscreenTerminalRecovery] =
     useState<RecoverableTerminalSessionSnapshot | null>(
-      initialTiledState.fullscreenTerminalRecovery ?? null,
+      AGENT_MANAGEMENT_ENABLED ? initialTiledState.fullscreenTerminalRecovery ?? null : null,
     );
   const [autoResumingSessionIds, setAutoResumingSessionIds] = useState<
     string[]
@@ -1604,6 +1593,7 @@ export function AgentsPage() {
     setRightPanel({ state: "ROUTE_EDIT", routeId });
   };
   const openAgentDetail = (nodeId: string) => {
+    if (!AGENT_MANAGEMENT_ENABLED) return;
     if (!supportsInlineRightPanel) {
       const runtimeEntityId = resolveRuntimeEntityId(nodeId);
       navigateToSecondaryPage(
@@ -1697,6 +1687,7 @@ export function AgentsPage() {
   );
 
   const openAgentCreateSheet = (kind: RuntimeCreateAgentRequest["kind"]) => {
+    if (!AGENT_MANAGEMENT_ENABLED) return;
     setAgentCreateKind(kind);
     setAgentCreateError("");
     setAgentCreateSelectedHostId("");
@@ -1749,6 +1740,7 @@ export function AgentsPage() {
 
   // Energy polling for right panel (2s interval)
   useEffect(() => {
+    if (!AGENT_MANAGEMENT_ENABLED) return;
     if (rightPanel.state !== "AGENT_DETAIL" || !rightPanel.nodeId) return;
     const nodeId = rightPanel.nodeId;
     const runtimeEntityId = resolveRuntimeEntityId(nodeId);
@@ -1903,6 +1895,7 @@ export function AgentsPage() {
   };
 
   const handleOpenAgentChat = async (nodeId: string) => {
+    if (!AGENT_MANAGEMENT_ENABLED) return;
     const agentId = resolveRuntimeEntityId(nodeId);
     setChatAgentId(agentId);
     setChatError("");
@@ -1965,6 +1958,7 @@ export function AgentsPage() {
 
   const sendChatPrompt = useCallback(
     async (rawPrompt: string) => {
+      if (!AGENT_MANAGEMENT_ENABLED) return;
       const prompt = rawPrompt.trim();
       if (!chatAgentId || !prompt || isChatSending) return;
 
@@ -2484,6 +2478,7 @@ export function AgentsPage() {
   };
 
   const handleCreateManualAgent = async () => {
+    if (!AGENT_MANAGEMENT_ENABLED) return;
     setIsAgentCreating(true);
     setAgentCreateError("");
     setRuntimeHostError("");
@@ -2612,6 +2607,7 @@ export function AgentsPage() {
   };
 
   const handleStopAgent = async (nodeId: string) => {
+    if (!AGENT_MANAGEMENT_ENABLED) return;
     const agentId = resolveRuntimeEntityId(nodeId);
     const hostCandidates = sortRouteHostsByPriority(runtimeHostSnapshots).map(
       (item) => item.host,
@@ -2645,6 +2641,7 @@ export function AgentsPage() {
   };
 
   const handleTabChange = (tab: AgentHubViewMode) => {
+    if (!VIEW_ITEMS.some((item) => item.id === tab)) return;
     setViewMode(tab);
     // 保留 PTY 终端面板状态（避免切换 Tab 丢失终端会话）
     if (rightPanel.state !== "PTY_TERMINAL") {
@@ -2675,30 +2672,13 @@ export function AgentsPage() {
   >(null);
   const [peerPairingOpen, setPeerPairingOpen] = useState(false);
 
-  useEffect(
-    () => subscribeApiAgentTabEnabledChanges(setApiAgentTabEnabled),
-    [],
-  );
-
   useEffect(() => {
     if (!syncAutomationEnabled) {
       confirmedMeshReplayKeyRef.current.clear();
     }
   }, [syncAutomationEnabled]);
 
-  useEffect(() => {
-    if (!apiAgentTabEnabled && viewMode === "api-agent") {
-      setViewMode("topology");
-    }
-  }, [apiAgentTabEnabled, viewMode]);
-
-  const visibleViewItems = useMemo(
-    () =>
-      apiAgentTabEnabled
-        ? VIEW_ITEMS
-        : VIEW_ITEMS.filter((item) => item.id !== "api-agent"),
-    [apiAgentTabEnabled],
-  );
+  const visibleViewItems = VIEW_ITEMS;
 
   const openPtyTerminal = useCallback(
     (
@@ -2709,6 +2689,7 @@ export function AgentsPage() {
         reconnectIfSame?: boolean;
       } = {},
     ) => {
+      if (!AGENT_MANAGEMENT_ENABLED) return;
       setFailedPtyConnectionIds((prev) => prev.filter((id) => id !== ptyId));
       if (options.expectFreshPresence) {
         setPendingPtyPresenceChecks((prev) => {
@@ -2755,6 +2736,7 @@ export function AgentsPage() {
         sourceHostId?: string;
       }>
     > => {
+      if (!AGENT_MANAGEMENT_ENABLED) return [];
       const headers: Record<string, string> = {};
       if (authToken) {
         headers.Authorization = `Bearer ${authToken}`;
@@ -2776,6 +2758,7 @@ export function AgentsPage() {
 
   const fetchSessionList = useCallback(
     async (rtBaseUrl: string, authToken?: string): Promise<SessionInfo[]> => {
+      if (!AGENT_MANAGEMENT_ENABLED) return [];
       return fetchRuntimeJsonWithTimeout<SessionInfo[]>(
         `${rtBaseUrl}/sessions`,
         {
@@ -3269,11 +3252,11 @@ export function AgentsPage() {
   } = useSessionStream({
     rtBaseUrl: null,
     targets: sessionStreamTargets,
-    enabled: !useMockData,
+    enabled: AGENT_MANAGEMENT_ENABLED && !useMockData,
   });
 
   const dashboardSessions = useMemo(
-    () => (useMockData ? MOCK_SESSIONS : liveSessions),
+    () => (AGENT_MANAGEMENT_ENABLED ? (useMockData ? MOCK_SESSIONS : liveSessions) : []),
     [liveSessions, useMockData],
   );
   useEffect(() => {
@@ -3962,7 +3945,7 @@ export function AgentsPage() {
   ]);
 
   useTiledWorkbenchKeyboard({
-    enabled: viewMode === "tiled",
+    enabled: AGENT_MANAGEMENT_ENABLED && viewMode === "tiled",
     suspended: tiledWorkbenchKeyboardSuspended,
     tree: tiledPaneTree,
     focusedSlotId: tiledFocusedSlotId,
@@ -3977,6 +3960,7 @@ export function AgentsPage() {
   });
 
   useEffect(() => {
+    if (!AGENT_MANAGEMENT_ENABLED) return;
     const currentSnapshot = buildCurrentTiledLayoutSnapshot();
     const now = new Date().toISOString();
     const persistedLayouts = tiledActiveLayoutRecord
@@ -4011,7 +3995,7 @@ export function AgentsPage() {
   ]);
 
   useEffect(() => {
-    if (sessionLoading) {
+    if (!AGENT_MANAGEMENT_ENABLED || sessionLoading) {
       return;
     }
 
@@ -4129,7 +4113,7 @@ export function AgentsPage() {
   }, [activePtyHostId, activePtyId, dashboardSessions, matchingActivePty]);
 
   useEffect(() => {
-    if (useMockData) {
+    if (!AGENT_MANAGEMENT_ENABLED || useMockData) {
       return;
     }
 
@@ -4449,7 +4433,7 @@ export function AgentsPage() {
     [knownPtyIds],
   );
   useEffect(() => {
-    if (sessionLoading) {
+    if (!AGENT_MANAGEMENT_ENABLED || sessionLoading) {
       return;
     }
 
@@ -4775,6 +4759,7 @@ export function AgentsPage() {
   );
   const completeDisconnectedTerminalSession = useCallback(
     async (session: SessionInfo, reason: string) => {
+      if (!AGENT_MANAGEMENT_ENABLED) return session;
       const completionSteps = buildTerminalSessionCompletionSteps(
         session.status,
       );
@@ -4814,6 +4799,7 @@ export function AgentsPage() {
   );
   const completeSessionWithoutRuntimeControl = useCallback(
     async (session: SessionInfo, reason: string) => {
+      if (!AGENT_MANAGEMENT_ENABLED) return session;
       const completionSteps = buildTerminalSessionCompletionSteps(
         session.status,
       );
@@ -6443,6 +6429,7 @@ export function AgentsPage() {
   const fetchPtyAgents = async (
     connectionOverride?: PtySpawnConnectionTarget | null,
   ) => {
+    if (!AGENT_MANAGEMENT_ENABLED) return;
     const connection = connectionOverride ?? ptySpawnConnection;
     const currentHostId = connection.hostId ?? null;
     const currentHostAddress =
@@ -6589,6 +6576,7 @@ export function AgentsPage() {
 
   const lastResolvedPtyConnectionKeyRef = useRef<string | null>(null);
   useEffect(() => {
+    if (!AGENT_MANAGEMENT_ENABLED) return;
     if (
       !runtimeServiceStatus?.running &&
       runtimeHostSnapshots.length === 0 &&
@@ -6706,6 +6694,7 @@ export function AgentsPage() {
 
   useEffect(() => {
     if (
+      !AGENT_MANAGEMENT_ENABLED ||
       !activePtyId ||
       !fullscreenTerminalRecovery ||
       !fullscreenTerminalRecoveryKey ||
@@ -6985,7 +6974,7 @@ export function AgentsPage() {
   ]);
 
   useEffect(() => {
-    if (!hasLoadedPtyAgents) {
+    if (!AGENT_MANAGEMENT_ENABLED || !hasLoadedPtyAgents) {
       return;
     }
 
@@ -7096,7 +7085,7 @@ export function AgentsPage() {
   ]);
 
   useEffect(() => {
-    if (useMockData || !hasLoadedPtyAgents || tiledPaneOrder.length === 0) {
+    if (!AGENT_MANAGEMENT_ENABLED || useMockData || !hasLoadedPtyAgents || tiledPaneOrder.length === 0) {
       return;
     }
 
@@ -7163,7 +7152,7 @@ export function AgentsPage() {
   ]);
 
   useEffect(() => {
-    if (useMockData || !hasLoadedPtyAgents) {
+    if (!AGENT_MANAGEMENT_ENABLED || useMockData || !hasLoadedPtyAgents) {
       return;
     }
 
@@ -7287,7 +7276,7 @@ export function AgentsPage() {
   ]);
 
   useEffect(() => {
-    if (useMockData || !hasLoadedPtyAgents) {
+    if (!AGENT_MANAGEMENT_ENABLED || useMockData || !hasLoadedPtyAgents) {
       return;
     }
 
@@ -9088,6 +9077,7 @@ export function AgentsPage() {
         onSelectNode={(nodeId) => {
           // PTY nodes: open terminal panel or navigate on mobile
           if (nodeId.startsWith("pty-")) {
+            if (!AGENT_MANAGEMENT_ENABLED) return;
             const ptyId = nodeId.replace("pty-", "");
             const matchingPty = ptyAgents.find((pty) => pty.id === ptyId);
             const matchingSession = findSessionForPty(
@@ -9173,7 +9163,6 @@ export function AgentsPage() {
     runtimeTargetModeValue,
     runtimeExternalAddressDraft,
     runtimeServiceStatus,
-    apiAgentTabEnabled,
     nodesFilter,
     dashboardSessions,
     sessionLoading,
@@ -9243,20 +9232,6 @@ export function AgentsPage() {
                 </button>
                 <button
                   type="button"
-                  data-testid="pty-spawn-button"
-                  onClick={() =>
-                    openPtySpawnDialogForSlot(
-                      viewMode === "tiled" ? tiledFocusedSlotId : null,
-                    )
-                  }
-                  className="flex h-9 items-center gap-1.5 rounded-full bg-[#0D9488] px-3 text-sm text-white"
-                  aria-label="新建 Terminal"
-                >
-                  <TerminalSquare size={16} />
-                  <span className="hidden sm:inline">Terminal</span>
-                </button>
-                <button
-                  type="button"
                   data-testid="agent-add-node-button"
                   onClick={() => setSheetOpen(true)}
                   disabled={isAgentCreating}
@@ -9304,6 +9279,10 @@ export function AgentsPage() {
             PtyTerminal 保持挂载 → PTY WebSocket 连接不断 → 终端状态持久化。
             但平铺视图本身已经占用 PTY，因此不额外挂载右栏终端，避免重复加载。 */}
         {viewMode !== "tiled" &&
+          (AGENT_MANAGEMENT_ENABLED ||
+            rightPanel.state === "ROUTE_EDIT" ||
+            rightPanel.state === "ACTOR_DETAIL" ||
+            rightPanel.state === "SIGNAL_DETAIL") &&
           (rightPanel.state !== "CLOSED" || activePtyId != null) && (
             <>
               {rightPanel.state !== "CLOSED" && (
@@ -10115,12 +10094,12 @@ export function AgentsPage() {
           )}
       </div>
 
-      {activeComposerTarget && !isTiledWorkbenchImmersive ? (
+      {AGENT_MANAGEMENT_ENABLED && activeComposerTarget && !isTiledWorkbenchImmersive ? (
         <AgentGlobalComposer target={activeComposerTarget} />
       ) : null}
 
       {/* PTY Spawn Dialog */}
-      <PtySpawnDialog
+      {AGENT_MANAGEMENT_ENABLED && <PtySpawnDialog
         open={showPtySpawnDialog}
         onOpenChange={(open) => {
           setShowPtySpawnDialog(open);
@@ -10189,7 +10168,7 @@ export function AgentsPage() {
           });
           void refreshRuntimeSnapshot();
         }}
-      />
+      />}
 
       {/* Sheets（移动端） */}
       {sheetOpen && (
@@ -10202,7 +10181,7 @@ export function AgentsPage() {
           onAddDevice={() => setHostManagerOpen(true)}
         />
       )}
-      {agentCreateOpen && (
+      {AGENT_MANAGEMENT_ENABLED && agentCreateOpen && (
         <AgentCreateSheet
           kind={agentCreateKind}
           providerProfiles={providerProfiles}

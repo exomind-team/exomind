@@ -1,6 +1,7 @@
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::appbar;
+use crate::dev_instance_paths::resolve_overlay_webview_data_dir;
 
 const ACTION_DOCK_LABEL: &str = "action-dock";
 
@@ -9,7 +10,7 @@ pub fn ensure_action_dock_window(app: &AppHandle) -> Result<tauri::WebviewWindow
         return Ok(window);
     }
 
-    let window = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         ACTION_DOCK_LABEL,
         WebviewUrl::App("action-dock.html".into()),
@@ -18,9 +19,17 @@ pub fn ensure_action_dock_window(app: &AppHandle) -> Result<tauri::WebviewWindow
     .inner_size(360.0, 800.0)
     .decorations(false)
     .resizable(false)
-    .visible(false) // 隐藏直到停靠 / hidden until docked
-    .build()
-    .map_err(|error| format!("创建 action-dock 窗口失败: {error}"))?;
+    .visible(false); // 隐藏直到停靠 / hidden until docked
+
+    let builder = if let Some(data_dir) = resolve_overlay_webview_data_dir(ACTION_DOCK_LABEL)? {
+        builder.data_directory(data_dir)
+    } else {
+        builder
+    };
+
+    let window = builder
+        .build()
+        .map_err(|error| format!("创建 action-dock 窗口失败: {error}"))?;
 
     Ok(window)
 }

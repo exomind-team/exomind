@@ -1,13 +1,50 @@
 use crate::agent::tools::{ToolDef, ToolError, ToolFn};
-use crate::eventlog::{EventListFilter, EventLogStore};
+use crate::eventlog::{EventListFilter, EventLogStore, EventRecord};
 use crate::eventlog_appender::EventLogAppender;
 use crate::timeblock::TimeBlockData;
 use serde_json::{Value, json};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::SummaryKind;
 
 pub const SUBMIT_TIMEBLOCK_SUMMARY_TOOL: &str = "submit_timeblock_summary";
+
+/// Summary output capability, closed before its owning service tasks are cancelled.
+#[derive(Clone)]
+pub struct SummaryEventWriter {
+    appender: EventLogAppender,
+    closed: Arc<AtomicBool>,
+}
+
+impl SummaryEventWriter {
+    pub fn new(appender: EventLogAppender) -> Self {
+        Self {
+            appender,
+            closed: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
+    /// Rejects new output after shutdown starts. The task owner also joins in-flight writes.
+    pub async fn append_event(
+        &self,
+        user_id: Option<&str>,
+        event: EventRecord,
+    ) -> Result<(), String> {
+        if self.is_closed() {
+            return Err("timeblock_summary is stopped".to_string());
+        }
+        self.appender.append_event(user_id, event).await
+    }
+}
 
 /// Build the timeblock tag for a given block_id.
 pub fn build_block_tag(block_id: &str) -> String {
@@ -192,7 +229,7 @@ pub struct AgentSourceMetadata {
 pub fn submit_timeblock_summary_tool(
     block: TimeBlockData,
     kind: SummaryKind,
-    eventlog_appender: EventLogAppender,
+    event_writer: SummaryEventWriter,
     source: Arc<AgentSourceMetadata>,
     user_id: String,
 ) -> (ToolDef, ToolFn) {
@@ -273,7 +310,7 @@ pub fn submit_timeblock_summary_tool(
     let tool_fn: ToolFn = Box::new(move |input: Value| {
         let block_id_expected = expected_block_id.clone();
         let kind_expected = expected_kind.clone();
-        let appender = eventlog_appender.clone();
+        let writer = event_writer.clone();
         let src = Arc::clone(&source_meta);
         let uid = captured_user_id.clone();
         Box::pin(async move {
@@ -430,7 +467,7 @@ pub fn submit_timeblock_summary_tool(
             } else {
                 Some(uid.as_str())
             };
-            match appender.append_event(opt_uid, event.clone()).await {
+            match writer.append_event(opt_uid, event.clone()).await {
                 Ok(_) => Ok(format!("已写入 agent_feedback 事件，event_id={}", event.id)),
                 Err(e) => Err(ToolError::ExecutionFailed(format!(
                     "failed to write eventlog: {e}"
@@ -440,4 +477,63 @@ pub fn submit_timeblock_summary_tool(
     });
 
     (def, tool_fn)
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use crate::signal::SignalPool;
+
+    #[tokio::test]
+    async fn submit_future_created_before_shutdown_cannot_append_after_output_is_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            EventLogStore::with_sqlite_path(
+                dir.path().to_path_buf(),
+                &dir.path().join("eventlog.sqlite"),
+            )
+            .unwrap(),
+        );
+        let pool = Arc::new(SignalPool::new(None));
+        let writer = SummaryEventWriter::new(EventLogAppender::new(
+            Arc::clone(&store),
+            "synthetic-host".to_string(),
+            pool,
+            None,
+        ));
+        let block = serde_json::from_value(json!({
+            "id": "pending-block",
+            "name": "pending-block",
+            "startId": "pending-block",
+            "endId": "pending-block-end",
+            "startTime": 1_700_000_000_000_u64,
+            "endTime": 1_700_000_060_000_u64
+        }))
+        .unwrap();
+        let (_, submit) = submit_timeblock_summary_tool(
+            block,
+            SummaryKind::End,
+            writer.clone(),
+            Arc::new(AgentSourceMetadata {
+                device_name: "synthetic-device".to_string(),
+                platform: "test".to_string(),
+                provider: "local".to_string(),
+                model: "controlled".to_string(),
+            }),
+            "synthetic-profile".to_string(),
+        );
+        let pending = submit(json!({
+            "blockId": "pending-block",
+            "narrative": "Valid summary that becomes stale during shutdown."
+        }));
+        writer.close();
+
+        assert!(matches!(pending.await, Err(ToolError::ExecutionFailed(_))));
+        assert!(
+            store
+                .list_events(Some("synthetic-profile"))
+                .unwrap()
+                .is_empty()
+        );
+    }
 }

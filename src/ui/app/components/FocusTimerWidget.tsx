@@ -94,6 +94,7 @@ interface FocusTimerWidgetProps {
   prestartSelectedTaskIds?: string[];
   onPrestartSelectedTaskIdsChange?: (taskIds: string[]) => void;
   showRunningLinkedTasks?: boolean;
+  taskAssociationsEnabled?: boolean;
   keepAwakeControl?: FocusKeepAwakeControl;
 }
 
@@ -143,7 +144,7 @@ function parseCustomDurationMinutes(rawValue: string): number | null {
 }
 
 function formatRunningBlockName(name: string | null | undefined): string {
-  return name?.trim() || "未命名任务";
+  return name?.trim() || "未命名时间块";
 }
 
 function formatClock(ms: number): string {
@@ -342,6 +343,7 @@ export const FocusTimerWidget = forwardRef<
     prestartSelectedTaskIds,
     onPrestartSelectedTaskIdsChange,
     showRunningLinkedTasks = true,
+    taskAssociationsEnabled = true,
     keepAwakeControl,
   },
   ref,
@@ -423,10 +425,10 @@ export const FocusTimerWidget = forwardRef<
   const [feedback, setFeedback] = useState("");
   const [feedbackInProgress, setFeedbackInProgress] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-  const selectableTasks = usePrestartSelectableTasks();
+  const selectableTasks = usePrestartSelectableTasks(taskAssociationsEnabled);
   const [internalSelectedTaskIds, setInternalSelectedTaskIds] = useState<
     string[]
-  >(initialConfigDraft?.selectedTaskIds ?? []);
+  >(taskAssociationsEnabled ? initialConfigDraft?.selectedTaskIds ?? [] : []);
   const {
     canSubmitFeedback,
     handleFeedbackKeyDown,
@@ -478,25 +480,29 @@ export const FocusTimerWidget = forwardRef<
         now: Date.now(),
       })
     : null;
-  const selectedTaskIds = prestartSelectedTaskIds ?? internalSelectedTaskIds;
+  const selectedTaskIds = taskAssociationsEnabled
+    ? prestartSelectedTaskIds ?? internalSelectedTaskIds
+    : [];
   taskNameDraftRef.current = taskNameDraft;
   timerModeRef.current = timerMode;
   countdownMinutesRef.current = countdownMinutes;
   selectedTaskIdsRef.current = selectedTaskIds;
   const setSelectedTaskIds = useCallback(
     (nextValue: string[] | ((current: string[]) => string[])) => {
-      const resolvedValue = normalizePreselectedTaskIds(
-        typeof nextValue === "function"
-          ? nextValue(selectedTaskIds)
-          : nextValue,
-      );
+      const resolvedValue = taskAssociationsEnabled
+        ? normalizePreselectedTaskIds(
+            typeof nextValue === "function"
+              ? nextValue(selectedTaskIds)
+              : nextValue,
+          )
+        : [];
       if (onPrestartSelectedTaskIdsChange) {
         onPrestartSelectedTaskIdsChange(resolvedValue);
         return;
       }
       setInternalSelectedTaskIds(resolvedValue);
     },
-    [onPrestartSelectedTaskIdsChange, selectedTaskIds],
+    [onPrestartSelectedTaskIdsChange, selectedTaskIds, taskAssociationsEnabled],
   );
   const syncIdleElapsedFromMode = useCallback(
     (mode: TimerMode, minutes: number) => {
@@ -521,12 +527,14 @@ export const FocusTimerWidget = forwardRef<
       taskNameDraft: taskNameDraftRef.current,
       timerMode: timerModeRef.current,
       countdownMinutes: countdownMinutesRef.current,
-      selectedTaskIds: selectedTaskIdsRef.current,
       inputFocused: taskInputFocusIntentRef.current,
       ...overrides,
+      selectedTaskIds: taskAssociationsEnabled
+        ? overrides.selectedTaskIds ?? selectedTaskIdsRef.current
+        : [],
       updatedAt: Date.now(),
     }),
-    [],
+    [taskAssociationsEnabled],
   );
 
   const persistCurrentConfigDraft = useCallback(
@@ -548,7 +556,9 @@ export const FocusTimerWidget = forwardRef<
         taskNameDraft: snapshot.taskNameDraft,
         timerMode: snapshot.timerMode,
         countdownMinutes: normalizeCountdownMinutes(snapshot.countdownMinutes),
-        selectedTaskIds: normalizePreselectedTaskIds(snapshot.selectedTaskIds),
+        selectedTaskIds: taskAssociationsEnabled
+          ? normalizePreselectedTaskIds(snapshot.selectedTaskIds)
+          : [],
         inputFocused: snapshot.inputFocused,
         updatedAt: Date.now(),
       };
@@ -592,6 +602,7 @@ export const FocusTimerWidget = forwardRef<
       setFocusUiState,
       setSelectedTaskIds,
       syncIdleElapsedFromMode,
+      taskAssociationsEnabled,
     ],
   );
 
@@ -778,7 +789,9 @@ export const FocusTimerWidget = forwardRef<
       }
       taskInputFocusIntentRef.current = false;
       activeBlockDataRef.current = visibleBlock;
-      const resolvedTaskIds = resolveActiveTaskIds(visibleBlock);
+      const resolvedTaskIds = taskAssociationsEnabled
+        ? resolveActiveTaskIds(visibleBlock)
+        : [];
       const taskLoadRequestId = linkedTasksLoadRequestRef.current + 1;
       linkedTasksLoadRequestRef.current = taskLoadRequestId;
 
@@ -880,7 +893,7 @@ export const FocusTimerWidget = forwardRef<
       cancelled = true;
       unsubscribe();
     };
-  }, [applyActiveBlock]);
+  }, [applyActiveBlock, taskAssociationsEnabled]);
 
   useEffect(() => {
     if (!isRunningUi || isPaused) {
@@ -1001,9 +1014,11 @@ export const FocusTimerWidget = forwardRef<
       countdownMinutes: config.mode === "countdown" ? config.minutes : null,
     });
 
-    const selectedTasks = selectedTaskIds
-      .map((taskId) => selectableTasks.find((task) => task.id === taskId))
-      .filter((task): task is TaskNode => Boolean(task));
+    const selectedTasks = taskAssociationsEnabled
+      ? selectedTaskIds
+          .map((taskId) => selectableTasks.find((task) => task.id === taskId))
+          .filter((task): task is TaskNode => Boolean(task))
+      : [];
     const selectedIdsForStart = selectedTasks.map((task) => task.id);
     const skippedTaskIds = selectedTaskIds.filter(
       (taskId) => !selectedIdsForStart.includes(taskId),
@@ -1090,6 +1105,7 @@ export const FocusTimerWidget = forwardRef<
     focusTaskInput,
     selectableTasks,
     selectedTaskIds,
+    taskAssociationsEnabled,
     setFocusUiState,
     taskNameDraft,
     timerMode,
@@ -1379,8 +1395,10 @@ export const FocusTimerWidget = forwardRef<
       if (feedbackSubmitting) return;
       const trimmedFeedback = feedbackText?.trim() ?? "";
       const blockDataSnapshot = activeBlockDataRef.current;
-      const taskIdsSnapshot = resolveActiveTaskIds(blockDataSnapshot);
-      const linkedTasksSnapshot = linkedTasks;
+      const taskIdsSnapshot = taskAssociationsEnabled
+        ? resolveActiveTaskIds(blockDataSnapshot)
+        : [];
+      const linkedTasksSnapshot = taskAssociationsEnabled ? linkedTasks : [];
       const taskStatusChoicesSnapshot = { ...taskStatusChoices };
       const taskTitles = linkedTasksSnapshot.reduce<Record<string, string>>(
         (titles, task) => {
@@ -1468,7 +1486,7 @@ export const FocusTimerWidget = forwardRef<
       }
 
       // Record block association and apply task status transition
-      if (blockDataSnapshot && taskIdsSnapshot.length > 0) {
+      if (taskAssociationsEnabled && blockDataSnapshot && taskIdsSnapshot.length > 0) {
         try {
           await getTaskTimerService().onBlockEndForTasks(
             taskIdsSnapshot,
@@ -1560,6 +1578,7 @@ export const FocusTimerWidget = forwardRef<
       setFocusUiState,
       setRunningNameEditing,
       taskStatusChoices,
+      taskAssociationsEnabled,
       timerMode,
     ],
   );
@@ -1656,7 +1675,7 @@ export const FocusTimerWidget = forwardRef<
             ? taskConfig.trim()
             : taskConfig.title.trim();
         const nextPreselectedTaskIds =
-          typeof taskConfig === "string"
+          !taskAssociationsEnabled || typeof taskConfig === "string"
             ? []
             : normalizePreselectedTaskIds(taskConfig.preselectedTaskIds);
         setTaskNameDraft(nextTitle);
@@ -1681,6 +1700,8 @@ export const FocusTimerWidget = forwardRef<
       handlePauseOrResume,
       runningSubState,
       setFocusUiState,
+      setSelectedTaskIds,
+      taskAssociationsEnabled,
       uiState,
     ],
   );

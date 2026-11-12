@@ -9,6 +9,9 @@ import {
   getRuntimeTargetMode,
   getSelectedRuntimeTarget,
   rememberEmbeddedRuntimeStatus,
+  persistEmbeddedRuntimeStatus,
+  fetchEmbeddedPortFromIpc,
+  getPreferredEmbeddedRuntimePort,
   resolveEmbeddedRuntimeBindHost,
   setEmbeddedRuntimeNetworkMode,
   setRuntimeExternalAuthToken,
@@ -22,8 +25,16 @@ import {
   __resetRuntimeConfigCacheForTests,
 } from '@/config/runtime-config-cache';
 
+const invokeMock = vi.hoisted(() => vi.fn());
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke:invokeMock,
+  isTauri:() => Boolean(window.__TAURI_INTERNALS__),
+}));
+
 describe('runtime target config（Runtime 目标配置）', () => {
   beforeEach(() => {
+    invokeMock.mockReset();
+    persistEmbeddedRuntimeStatus(null);
     window.localStorage.clear();
     __resetRuntimeConfigCacheForTests();
   });
@@ -42,7 +53,7 @@ describe('runtime target config（Runtime 目标配置）', () => {
     });
   });
 
-  it('uses 127.0.0.1 loopback for tauri embedded target（Tauri embedded 目标应回落到 127.0.0.1）', () => {
+  it('keeps a native business target unavailable until IPC confirms its port', () => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       configurable: true,
       value: {},
@@ -51,8 +62,10 @@ describe('runtime target config（Runtime 目标配置）', () => {
     expect(getSelectedRuntimeTarget()).toMatchObject({
       mode: 'embedded',
       host: '127.0.0.1',
-      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      port: 0,
     });
+    expect(getPreferredEmbeddedRuntimePort()).toBe(DEFAULT_EMBEDDED_RUNTIME_PORT);
+    expect(() => toRuntimeBaseUrl(getSelectedRuntimeTarget())).toThrow('没有已确认的实例端口');
   });
 
   it('sanitizes cached embedded runtime status without selecting its stale port（清理缓存的内嵌 runtime 状态但不采用旧端口）', () => {
@@ -73,7 +86,7 @@ describe('runtime target config（Runtime 目标配置）', () => {
     expect(getSelectedRuntimeTarget()).toMatchObject({
       mode: 'embedded',
       host: '127.0.0.1',
-      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      port: 0,
     });
     expect(getSelectedRuntimeTarget().authToken).toBeUndefined();
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).not.toContain('"authSecret"');
@@ -188,5 +201,28 @@ describe('runtime target config（Runtime 目标配置）', () => {
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"port":48202');
 
     unsubscribe();
+  });
+
+  it('does not adopt an external IPC listener and retries when an owned instance becomes ready', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    invokeMock.mockResolvedValueOnce({ running:true,externalRuntime:true,host:'127.0.0.1',port:9124 });
+    await fetchEmbeddedPortFromIpc();
+    expect(getSelectedRuntimeTarget().port).toBe(0);
+    invokeMock.mockResolvedValueOnce({ running:true,externalRuntime:false,host:'127.0.0.1',port:48203,hostId:'owned-v06' });
+    await fetchEmbeddedPortFromIpc();
+    expect(getSelectedRuntimeTarget().port).toBe(48203);
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not restore a target from a status response that arrives after stop', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable:true,value:{} });
+    let completeStatus!: (status: unknown) => void;
+    invokeMock.mockImplementationOnce(() => new Promise(resolve => { completeStatus=resolve; }));
+    const pending=fetchEmbeddedPortFromIpc();
+    persistEmbeddedRuntimeStatus(null);
+    completeStatus({running:true,externalRuntime:false,host:'127.0.0.1',port:48205,hostId:'retired-v06'});
+    await pending;
+    expect(getSelectedRuntimeTarget().port).toBe(0);
+    expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toBeNull();
   });
 });

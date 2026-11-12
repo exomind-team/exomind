@@ -7,6 +7,7 @@ import { RuntimeClient } from '@/services/runtime-client';
 import { findPreferredRuntimeHostForAgent, getRuntimeManager } from '@/services/runtime-manager';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { WorkspaceTabs } from './WorkspaceTabs';
+import { AGENT_MANAGEMENT_ENABLED } from './agents-utils';
 
 export const PHASE_LABELS: Record<string, string> = {
   normal: '正常',
@@ -191,6 +192,11 @@ async function resolveAgentRuntimeHost(agentId: string) {
 }
 
 export function AgentDetailPage({ agentId }: { agentId?: string }) {
+  if (!AGENT_MANAGEMENT_ENABLED) return null;
+  return <AgentManagementDetail agentId={agentId} />;
+}
+
+function AgentManagementDetail({ agentId }: { agentId?: string }) {
   const isDesktop = useIsDesktop();
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
   const [loading, setLoading] = useState(true);

@@ -10,7 +10,6 @@ pub mod energy;
 pub mod eventlog;
 pub mod mesh;
 pub mod profiles;
-pub mod proposals;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
 pub mod reminders;
@@ -34,7 +33,6 @@ pub fn router() -> Router<AppState> {
         .merge(eventlog::router())
         .merge(mesh::router())
         .merge(profiles::router())
-        .merge(proposals::router())
         .merge(reminders::router())
         .merge(sessions::router())
         .merge(signals::router())
