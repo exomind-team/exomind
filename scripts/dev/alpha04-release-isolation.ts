@@ -14,12 +14,12 @@ import { connect, createServer, type Server } from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-const workflowRunId = "43193996739";
-const workflowRunUrl = "https://github.com/exomind-team/exomind/actions/runs/43193996739";
-const releaseCommit = "080f12a424b72ebdbb9ed5731be4b6b0520e9ed3";
-const expectedInstallerSha256 = "220bbbd46418f515d3fd15b99f0105cd10ca456e4ab74da0bb5742c0a32acd51";
+const workflowRunId = "43214581730";
+const workflowRunUrl = "https://github.com/exomind-team/exomind/actions/runs/43214581730";
+const releaseCommit = "c8933b14431bc2733a5ece4d60791ec8bd655ba2";
+const expectedInstallerSha256 = "3d1a00f37f5e608fa40d0f6b919ca35a702b397e4dccf13bbb79485ab74603ba";
 const defaultInstaller =
-  "F:/ExoMind-task-artifacts/2026-11-12/alpha04-release-isolation/downloaded-nsis/target/release/bundle/nsis/ExoMind_0.6.0-alpha04_x64-setup.exe";
+  "F:/ExoMind-task-artifacts/2026-11-12/alpha04-release-isolation/ci-43214581730/windows-nsis/target/release/bundle/nsis/ExoMind_0.6.0-alpha04_x64-setup.exe";
 const defaultArtifactRoot = "F:/ExoMind-task-artifacts/2026-11-12/alpha04-release-isolation/runs";
 const isolatedAppId = "com.exomind.app.v06";
 const configMarkerKey = "exomind:alpha04:release-isolation";
