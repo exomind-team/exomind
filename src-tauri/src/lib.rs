@@ -58,7 +58,8 @@ use commands::workspace_commands::{
 };
 use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
 use dev_instance_paths::{
-    resolve_instance_runtime_dir, resolve_main_webview_data_dir, resolve_mcp_bridge_base_port,
+    resolve_instance_log_dir_from_env, resolve_instance_runtime_dir, resolve_main_webview_data_dir,
+    resolve_mcp_bridge_base_port,
 };
 use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
 use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
@@ -235,6 +236,20 @@ pub fn run() {
     let main_window_shortcut_state = MainWindowShortcutState::new();
     let volcano_asr_stream_state = std::sync::Arc::new(VolcanoAsrStreamState::default());
     let mut context = tauri::generate_context!();
+    let mut log_targets = vec![
+        Target::new(TargetKind::Stdout),
+        Target::new(TargetKind::Webview),
+    ];
+    if let Some(log_dir) = resolve_instance_log_dir_from_env() {
+        log_targets.push(Target::new(TargetKind::Folder {
+            path: log_dir,
+            file_name: Some("exomind.log".into()),
+        }));
+    } else {
+        log_targets.push(Target::new(TargetKind::LogDir {
+            file_name: Some("exomind.log".into()),
+        }));
+    }
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let main_window_override = resolve_main_webview_data_dir().and_then(|main_data_dir| {
@@ -264,11 +279,7 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
-                .targets([
-                    Target::new(TargetKind::Stdout),
-                    Target::new(TargetKind::Webview),
-                    Target::new(TargetKind::LogDir { file_name: Some("exomind.log".into()) }),
-                ])
+                .targets(log_targets)
                 .level(log::LevelFilter::Info)
                 .level_for("tungstenite", log::LevelFilter::Warn)
                 .level_for("tokio_tungstenite", log::LevelFilter::Warn)

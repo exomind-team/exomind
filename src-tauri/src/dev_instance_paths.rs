@@ -5,6 +5,7 @@ use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
 use exomind_runtime::config::ConfigStore;
 
 pub const DEV_APP_DATA_DIR_ENV: &str = "EXOMIND_DEV_APP_DATA_DIR";
+pub const DEV_LOG_DIR_ENV: &str = "EXOMIND_DEV_LOG_DIR";
 pub const DEV_RUNTIME_DATA_DIR_ENV: &str = "EXOMIND_DEV_RUNTIME_DATA_DIR";
 pub const DEV_WEBVIEW_MAIN_DATA_DIR_ENV: &str = "EXOMIND_DEV_WEBVIEW_MAIN_DATA_DIR";
 pub const DEV_WEBVIEW_OVERLAY_DATA_ROOT_ENV: &str = "EXOMIND_DEV_WEBVIEW_OVERLAY_DATA_ROOT";
@@ -58,6 +59,12 @@ pub fn resolve_instance_runtime_dir_from_app_data_dir(app_data_dir: &Path) -> Pa
     }
 
     app_data_dir.join(RUNTIME_DIR_NAME)
+}
+
+pub fn resolve_instance_log_dir_from_env() -> Option<PathBuf> {
+    resolve_env_path(DEV_LOG_DIR_ENV).or_else(|| {
+        resolve_env_path(DEV_APP_DATA_DIR_ENV).map(|app_data_dir| app_data_dir.join("logs"))
+    })
 }
 
 pub fn resolve_instance_app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -418,6 +425,48 @@ mod tests {
         let resolved = resolve_instance_runtime_dir_from_app_data_dir(&app_data_dir);
 
         assert_eq!(resolved, app_data_dir.join("runtime"));
+    }
+
+    #[test]
+    fn log_dir_uses_explicit_log_override() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _log_guard = EnvGuard::set(
+            DEV_LOG_DIR_ENV,
+            Some("D:/tmp/exomind-instance/logs-explicit"),
+        );
+        let _app_guard = EnvGuard::set(
+            DEV_APP_DATA_DIR_ENV,
+            Some("D:/tmp/exomind-instance/app-data"),
+        );
+
+        assert_eq!(
+            resolve_instance_log_dir_from_env(),
+            Some(PathBuf::from("D:/tmp/exomind-instance/logs-explicit"))
+        );
+    }
+
+    #[test]
+    fn log_dir_follows_explicit_app_data_root() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _log_guard = EnvGuard::set(DEV_LOG_DIR_ENV, None);
+        let _app_guard = EnvGuard::set(
+            DEV_APP_DATA_DIR_ENV,
+            Some("D:/tmp/exomind-instance/app-data"),
+        );
+
+        assert_eq!(
+            resolve_instance_log_dir_from_env(),
+            Some(PathBuf::from("D:/tmp/exomind-instance/app-data/logs"))
+        );
+    }
+
+    #[test]
+    fn log_dir_uses_default_log_target_without_overrides() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _log_guard = EnvGuard::set(DEV_LOG_DIR_ENV, None);
+        let _app_guard = EnvGuard::set(DEV_APP_DATA_DIR_ENV, None);
+
+        assert_eq!(resolve_instance_log_dir_from_env(), None);
     }
 
     #[test]
