@@ -108,6 +108,9 @@
 
 > 以下文件均为进行中的计划，已完成的计划已移至 [ARCHIVE-INDEX.md](ARCHIVE-INDEX.md)。
 
+- [0.6 Alpha 阶段收尾](plans/2026-11-13-v0.6-alpha-closeout.md) -- 本轮修复、验证、证据边界和内部保存点。
+- [0.6 Beta 功能计划](plans/2026-11-13-v0.6-beta-feature-plan.md) -- 用户叙事、批次依赖与验收矩阵；实施等待用户命令。
+
 - [产品规划](plans/product-plan.md) -- 外心产品规划与实施计划
 - [Agent Workbench Phase 1 平铺工作台](plans/2026-03-30-agent-workbench-phase1-flat-workbench-design.md) -- Agent Workbench 第一阶段设计
 - [任务 MCP 集成](plans/task-mcp-integration.md) -- 任务系统通过 MCP 接入 Agent
