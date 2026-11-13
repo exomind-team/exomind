@@ -13,7 +13,7 @@ pub async fn mobile_fullscreen_set(app: tauri::AppHandle, enabled: bool) -> Resu
     {
         use tauri::Manager;
         let webview = app
-            .get_webview("main")
+            .get_webview_window("main")
             .ok_or_else(|| "main Android WebView is unavailable".to_string())?;
         let (send, receive) = tokio::sync::oneshot::channel();
         webview
