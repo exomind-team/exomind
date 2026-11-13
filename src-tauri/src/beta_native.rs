@@ -394,7 +394,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
         ]);
     #[cfg(debug_assertions)]
     {
-        let mut bridge = tauri_plugin_mcp_bridge::Builder::new();
+        let mut bridge = tauri_plugin_mcp_bridge::Builder::new().bind_address("127.0.0.1");
         if let Some(port) = crate::dev_instance_paths::resolve_mcp_bridge_base_port() {
             bridge = bridge.base_port(port);
         }
