@@ -1,0 +1,25 @@
+[package]
+name = "exomind-beta-host"
+version = "0.1.0"
+edition = "2024"
+description = "Isolated authenticated host for the append-only Beta Core"
+
+[[bin]]
+name = "exomind-beta"
+path = "src/main.rs"
+
+[dependencies]
+exomind-core = { path = "../exomind-core" }
+axum = "0.7"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "signal", "time"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+rand = "0.8"
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
