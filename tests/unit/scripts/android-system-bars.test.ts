@@ -5,6 +5,18 @@ import { join } from 'node:path';
 import { ensureAndroidSystemBarsInMainActivity, ensureMdnsMulticastLockInMainActivity, ensureMdnsMulticastLockInMainActivityFile } from '../../../scripts/dev/android-manifest-permission-lib';
 
 describe('Android generated Activity system bars', () => {
+  it('adds rotation restoration to a fresh Beta Activity only when explicitly requested', () => {
+    const fresh = 'package com.exomind.app.v06.beta\nimport android.os.Bundle\nclass MainActivity : TauriActivity() {\n  override fun onCreate(savedInstanceState: Bundle?) {\n    super.onCreate(savedInstanceState)\n  }\n}\n';
+    const result = ensureAndroidSystemBarsInMainActivity(fresh, { ensureConfigurationChanged: true });
+    expect(result.activityKotlin).toContain('override fun onConfigurationChanged(newConfig: android.content.res.Configuration)');
+    expect(result.activityKotlin).toMatch(/super\.onConfigurationChanged\(newConfig\)\s+applyExomindSystemBars\(\)/);
+    expect(result.activityKotlin).not.toContain('MulticastLock');
+    expect(result.activityKotlin).not.toContain('WindowInsetsCompat.CONSUMED');
+    expect(ensureAndroidSystemBarsInMainActivity(result.activityKotlin, { ensureConfigurationChanged: true }))
+      .toEqual({ activityKotlin: result.activityKotlin, changed: false });
+    // Default Alpha calls retain their original byte-level transformation.
+    expect(ensureAndroidSystemBarsInMainActivity(fresh).activityKotlin).not.toContain('override fun onConfigurationChanged');
+  });
   it('upgrades the existing multicast Activity without discarding keyboard or custom integration', () => {
     const generated = ensureMdnsMulticastLockInMainActivity(`package com.exomind.app.v06
 class MainActivity : TauriActivity() {

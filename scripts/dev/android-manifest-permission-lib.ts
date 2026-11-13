@@ -406,7 +406,10 @@ export function ensureMdnsMulticastLockInMainActivity(activityKotlin: string): K
   };
 }
 
-export function ensureAndroidSystemBarsInMainActivity(activityKotlin: string): KotlinPatchResult {
+export function ensureAndroidSystemBarsInMainActivity(
+  activityKotlin: string,
+  options: { ensureConfigurationChanged?: boolean } = {},
+): KotlinPatchResult {
   if (activityKotlin.includes(ANDROID_FULLSCREEN_METHOD_MARKER)
     || !/class\s+MainActivity\s*:\s*TauriActivity\(\)/.test(activityKotlin)
     || !/super\.onCreate\(savedInstanceState\)/.test(activityKotlin)
@@ -468,7 +471,20 @@ export function ensureAndroidSystemBarsInMainActivity(activityKotlin: string): K
     '    androidx.core.view.ViewCompat.requestApplyInsets(content)',
     '  }',
   ].join(newline);
-  patched = patched.replace(/\r?\n}\s*$/, methods + newline + '}' + newline);
+  // Alpha already supplies this callback through its multicast template. Keep
+  // its default transformation byte-identical; fresh Beta opts in explicitly.
+  const configurationHook = options.ensureConfigurationChanged
+    && !/override\s+fun\s+onConfigurationChanged\s*\(/.test(activityKotlin)
+    ? [
+      '',
+      '  override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {',
+      '    super.onConfigurationChanged(newConfig)',
+      '    applyExomindSystemBars()',
+      '  }',
+      '',
+    ].join(newline)
+    : '';
+  patched = patched.replace(/\r?\n}\s*$/, configurationHook + methods + newline + '}' + newline);
   return { activityKotlin: patched, changed: true };
 }
 
