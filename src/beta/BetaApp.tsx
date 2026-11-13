@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
-import { ArrowUp, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { PageShell } from '@/ui/app/components/PageShell';
 import { EventTimestamp } from '@/ui/app/components/EventTimestamp';
+import { NowInputRowView, resizeNowInputTextarea } from '@/ui/app/components/NowInputRowView';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import type { EventDateDisplayMode } from '@/lib/eventlog/format-event-timestamp';
 import { nativeBetaClient, webBetaClient, type BetaClient, type BetaProfile, type BetaStatus, type BetaPage } from './client';
 import { BetaDraftController, errorMessage } from './drafts';
@@ -201,6 +201,8 @@ function ProfileWorkspace({ client, controller, profileId }: { client: BetaClien
     } catch (failure) { if (alive.current) setError(errorMessage(failure)); }
   }
   const draft = drafts.drafts[profileId];
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => resizeNowInputTextarea(textareaRef.current), [draft?.text]);
   const pending = drafts.pending.filter(item => item.command.profile_id === profileId && item.state !== 'committed');
   const busy = pending.some(item => item.state === 'pending' && item.draft_revision === draft?.revision);
   return <>
@@ -225,19 +227,24 @@ function ProfileWorkspace({ client, controller, profileId }: { client: BetaClien
         <p className={`max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-sm leading-relaxed ${event.author_kind === 'human' ? 'bg-active text-foreground' : 'bg-muted/15 text-foreground'}`}>{event.text}</p>
       </article>)}</div>
     </div>
-    <div className="shrink-0 border-t border-border-page px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+    <NowInputRowView
+      value={draft?.text ?? ''}
+      placeholder="记录此刻的想法…"
+      inputRef={textareaRef}
+      textareaLabel="记录当下"
+      sendLabel="发送"
+      onValueChange={(next, element) => { try { controller.setDraft(profileId, next); resizeNowInputTextarea(element); } catch (failure) { setError(errorMessage(failure)); } }}
+      onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }}
+      onSend={() => submit()}
+      sendDisabled={!draft?.text.trim() || busy || !!drafts.persistenceError}
+      beforeControls={<>
       {drafts.persistenceError && <p role="alert" className="mb-2 text-xs text-destructive">{drafts.persistenceError}</p>}
       {pending.map(item => <div key={item.command.command_id} className="mb-2 flex items-center gap-2 text-xs text-secondary">
         <div className="min-w-0 flex-1"><p>{item.state === 'pending' ? '正在确认保存…' : `结果待确认${item.error_code ? `（${item.error_code}）` : ''}`}</p><p className="truncate">{item.command.text}</p>{item.message && <p>{item.message}</p>}</div>
         {item.state !== 'pending' && <Button variant="outline" size="sm" onClick={() => void submit(item.command.command_id)}>查证并重试</Button>}
       </div>)}
-      <form className="flex items-end gap-2" onSubmit={event => { event.preventDefault(); void submit(); }}>
-        <Textarea aria-label="记录当下" placeholder="记录此刻的想法…" className="max-h-40 min-h-12 resize-y rounded-2xl" value={draft?.text ?? ''}
-          onChange={event => { try { controller.setDraft(profileId, event.target.value); } catch (failure) { setError(errorMessage(failure)); } }}
-          onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} />
-        <Button type="submit" size="icon" className="shrink-0 rounded-full" aria-label="发送" disabled={!draft?.text.trim() || busy || !!drafts.persistenceError}><ArrowUp className="size-5" /></Button>
-      </form>
-      <p role="status" className="mt-2 text-[11px] text-muted">{pending.length ? '待确认的提交会保留原文与原命令' : draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision) ? '本机已保存' : 'Ctrl / ⌘ + Enter 发送'}</p>
-    </div>
+      </>}
+      afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{pending.length ? '待确认的提交会保留原文与原命令' : draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision) ? '本机已保存' : 'Ctrl / ⌘ + Enter 发送'}</p>}
+    />
   </>;
 }
