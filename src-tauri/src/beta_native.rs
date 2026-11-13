@@ -445,7 +445,20 @@ fn data_root(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
         }
         return Ok(root);
     }
-    Ok(app.path().app_data_dir()?.join("beta-host"))
+    // Resolve the platform-owned app directory before the independent host's
+    // strict path checks. Android may expose this directory through OS aliases;
+    // explicit user overrides above still retain their strict validation.
+    let base = app.path().app_data_dir()?;
+    std::fs::create_dir_all(&base)?;
+    let base = base.canonicalize()?;
+    let root = base.join("beta-host");
+    #[cfg(debug_assertions)]
+    log::info!(
+        "Beta platform storage: absolute={}, root={}",
+        root.is_absolute(),
+        root.display()
+    );
+    Ok(root)
 }
 
 pub fn run(mut context: tauri::Context<tauri::Wry>) {
