@@ -25,6 +25,7 @@ use commands::file_commands::{
     save_json_file, write_file,
 };
 use commands::keep_awake_commands::focus_keep_awake_set;
+use commands::mobile_display_commands::mobile_fullscreen_set;
 use commands::now_workbench_overlay_commands::{
     now_workbench_overlay_ensure, now_workbench_overlay_focus_main, now_workbench_overlay_hide,
     now_workbench_overlay_profile_get, now_workbench_overlay_profile_set,
@@ -444,6 +445,7 @@ pub fn run() {
             runtime_service_start,
             runtime_service_stop,
             runtime_service_status,
+            mobile_fullscreen_set,
             runtime_network_mode_set,
             runtime_network_mode_get,
             runtime_target_mode_set,

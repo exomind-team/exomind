@@ -168,6 +168,22 @@ describe('NowInputRow', () => {
     expect(onValueChange).toHaveBeenLastCalledWith('同步外部搜索态');
   });
 
+  it.each([
+    ['无法获取当前档案：请确保已设置档案', '先打开或创建本地档案，草稿已保留。'],
+    ['RT eventlog append failed: 500', '草稿已保留，请重试；如仍失败，可在设置中检查本机服务状态。'],
+  ])('preserves the draft and gives an accurate save failure for %s', async (failure, description) => {
+    const onSend = vi.fn().mockRejectedValue(new Error(failure));
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+    const textarea = screen.getByTestId('new-now-input-textarea') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: '保留这份草稿' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('new-now-send-button'));
+      await Promise.resolve();
+    });
+    expect(textarea.value).toBe('保留这份草稿');
+    expect(mockToast).toHaveBeenCalledWith({ title: '记录未保存', description, variant: 'destructive' });
+  });
+
   it('renders voice button and starts voice recording by ref handle', () => {
     const ref = React.createRef<{ startVoiceRecording: () => void }>();
     render(<NowInputRow ref={ref} onSend={vi.fn()} placeholder="输入内容记录事件..." />);

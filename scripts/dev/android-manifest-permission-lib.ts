@@ -128,6 +128,7 @@ export function findMainActivityPath(javaRoot: string): string | null {
 }
 
 const MDNS_MULTICAST_LOCK_MARKER = 'createMulticastLock("exomind-mdns-lock")';
+const ANDROID_FULLSCREEN_METHOD_MARKER = 'fun setExomindFullscreen(enabled: Boolean)';
 
 function detectNewline(value: string): string {
   return value.includes('\r\n') ? '\r\n' : '\n';
@@ -405,6 +406,72 @@ export function ensureMdnsMulticastLockInMainActivity(activityKotlin: string): K
   };
 }
 
+export function ensureAndroidSystemBarsInMainActivity(activityKotlin: string): KotlinPatchResult {
+  if (activityKotlin.includes(ANDROID_FULLSCREEN_METHOD_MARKER)
+    || !/class\s+MainActivity\s*:\s*TauriActivity\(\)/.test(activityKotlin)
+    || !/super\.onCreate\(savedInstanceState\)/.test(activityKotlin)
+    || !/\n}\s*$/.test(activityKotlin)) {
+    return { activityKotlin, changed: false };
+  }
+
+  const newline = detectNewline(activityKotlin);
+  let patched = activityKotlin.replace(
+    'super.onCreate(savedInstanceState)',
+    'super.onCreate(savedInstanceState)' + newline + '    installExomindSystemBarInsets()',
+  ).replace(
+    'super.onConfigurationChanged(newConfig)',
+    'super.onConfigurationChanged(newConfig)' + newline + '    applyExomindSystemBars()',
+  );
+  const methods = [
+    '',
+    '  private var exomindFullscreen = false',
+    '',
+    '  @androidx.annotation.Keep',
+    `  ${ANDROID_FULLSCREEN_METHOD_MARKER} {`,
+    '    exomindFullscreen = enabled',
+    '    applyExomindSystemBars()',
+    '  }',
+    '',
+    '  override fun onResume() {',
+    '    super.onResume()',
+    '    applyExomindSystemBars()',
+    '  }',
+    '',
+    '  override fun onWindowFocusChanged(hasFocus: Boolean) {',
+    '    super.onWindowFocusChanged(hasFocus)',
+    '    if (hasFocus) applyExomindSystemBars()',
+    '  }',
+    '',
+    '  private fun installExomindSystemBarInsets() {',
+    '    androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)',
+    '    val content = findViewById<android.view.View>(android.R.id.content)',
+    '    androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->',
+    '      val bars = androidx.core.view.WindowInsetsCompat.Type.systemBars()',
+    '      val cutout = androidx.core.view.WindowInsetsCompat.Type.displayCutout()',
+    '      val padding = insets.getInsets(if (exomindFullscreen) cutout else bars or cutout)',
+    '      view.setPadding(padding.left, padding.top, padding.right, padding.bottom)',
+    '      // Consume only what this root already applied; preserve IME insets.',
+    '      androidx.core.view.WindowInsetsCompat.Builder(insets)',
+    '        .setInsets(bars or cutout, androidx.core.graphics.Insets.NONE)',
+    '        .setInsetsIgnoringVisibility(bars or cutout, androidx.core.graphics.Insets.NONE)',
+    '        .build()',
+    '    }',
+    '    applyExomindSystemBars()',
+    '  }',
+    '',
+    '  private fun applyExomindSystemBars() {',
+    '    val content = findViewById<android.view.View>(android.R.id.content) ?: return',
+    '    val controller = androidx.core.view.WindowCompat.getInsetsController(window, content)',
+    '    val bars = androidx.core.view.WindowInsetsCompat.Type.systemBars()',
+    '    controller.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE',
+    '    if (exomindFullscreen) controller.hide(bars) else controller.show(bars)',
+    '    androidx.core.view.ViewCompat.requestApplyInsets(content)',
+    '  }',
+  ].join(newline);
+  patched = patched.replace(/\r?\n}\s*$/, methods + newline + '}' + newline);
+  return { activityKotlin: patched, changed: true };
+}
+
 export function ensureRequiredAudioPermissionsInManifestFile(manifestPath: string): ManifestFilePatchResult {
   try {
     const originalManifest = readFileSync(manifestPath, 'utf8');
@@ -438,12 +505,22 @@ export function ensureRequiredAudioPermissionsInManifestFile(manifestPath: strin
 export function ensureMdnsMulticastLockInMainActivityFile(activityPath: string): KotlinFilePatchResult {
   try {
     const originalActivity = readFileSync(activityPath, 'utf8');
-    const patched = ensureMdnsMulticastLockInMainActivity(originalActivity);
+    const multicast = ensureMdnsMulticastLockInMainActivity(originalActivity);
+    const systemBars = ensureAndroidSystemBarsInMainActivity(multicast.activityKotlin);
+    const patched = {
+      activityKotlin: systemBars.activityKotlin,
+      changed: multicast.changed || systemBars.changed,
+    };
+
+    // Both integrations are runtime requirements; a partial Activity must fail the build.
+    if (!patched.activityKotlin.includes(MDNS_MULTICAST_LOCK_MARKER)
+      || !patched.activityKotlin.includes(ANDROID_FULLSCREEN_METHOD_MARKER)
+      || !/^\s*installExomindSystemBarInsets\(\)\s*$/m.test(patched.activityKotlin)) {
+      return { status: 'invalid-activity', changed: false };
+    }
 
     if (!patched.changed) {
-      return originalActivity.includes(MDNS_MULTICAST_LOCK_MARKER)
-        ? { status: 'already-present', changed: false }
-        : { status: 'invalid-activity', changed: false };
+      return { status: 'already-present', changed: false };
     }
 
     writeFileSync(activityPath, patched.activityKotlin, 'utf8');

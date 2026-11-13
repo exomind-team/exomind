@@ -1,5 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import packageJson from '../../../../../package.json';
+import { getMobileFullscreenEnabled, subscribeMobileFullscreenChanges } from '@/config/mobile-fullscreen-preference';
+import { changeMobileFullscreenPreference } from '@/services/mobile-display.service';
 import {
   Activity,
   Bot,
@@ -1003,6 +1005,21 @@ export const FEATURE_TOGGLE_SETTINGS = [
  * - `group` is preferred over `custom` for "tap row -> open overlay -> edit several child settings" flows.
  */
 export const SETTINGS_REGISTRY: SettingsItem[] = [
+  {
+    id: 'mobile-fullscreen-enabled',
+    label: '全屏模式',
+    description: '隐藏 Android 系统栏；关闭时内容避让状态栏、导航栏和屏幕缺口，横竖屏均生效。',
+    icon: Monitor,
+    category: 'appearance',
+    type: 'boolean',
+    visible: androidTauriOnly,
+    rowTestId: 'new-settings-mobile-fullscreen-row',
+    controlTestId: 'new-settings-mobile-fullscreen-switch',
+    get: getMobileFullscreenEnabled,
+    set: changeMobileFullscreenPreference,
+    subscribe: subscribeMobileFullscreenChanges,
+    errorMessagePrefix: '全屏模式切换失败',
+  },
   {
     id: 'theme',
     label: '主题',

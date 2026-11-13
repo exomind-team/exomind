@@ -195,6 +195,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   const pasteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attachmentFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestDraftRef = useRef<{ key: string; value: string; dirty: boolean } | null>(null);
   const submittingRef = useRef(false);
   const previousQuotedRefsRef = useRef<EventRef[]>([]);
   const quoteSyncPendingRef = useRef(false);
@@ -281,6 +282,12 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       clearTimeout(draftPersistTimerRef.current);
       draftPersistTimerRef.current = null;
     }
+    const pending = latestDraftRef.current;
+    if (pending?.dirty) {
+      if (pending.value.trim()) writeInputDraft(pending.key, pending.value);
+      else clearInputDraft(pending.key);
+      pending.dirty = false;
+    }
   }, []);
 
   useEffect(() => {
@@ -299,13 +306,20 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       clearTimeout(draftPersistTimerRef.current);
       draftPersistTimerRef.current = null;
     }
+    // The submitted text remains a draft until a receipt arrives. A profile
+    // close while awaiting it must not flush the temporarily empty composer.
+    if (submittingRef.current && value === '') return;
 
+    const pending = { key: effectiveDraftStorageKey, value, dirty: true };
+    latestDraftRef.current = pending;
     draftPersistTimerRef.current = setTimeout(() => {
+      if (latestDraftRef.current !== pending) return;
       if (!value.trim()) {
         clearInputDraft(effectiveDraftStorageKey);
       } else {
         writeInputDraft(effectiveDraftStorageKey, value);
       }
+      pending.dirty = false;
       draftPersistTimerRef.current = null;
     }, draftDebounceMs);
 
@@ -361,15 +375,19 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     submittingRef.current = true;
     setIsSubmitting(true);
     const saved = preparedValue;
+    const submittedDraft = latestDraftRef.current;
     setValue('');
     try {
       await onSend(trimmed, undefined, quoteFeatureEnabled ? resolvedRefs : undefined);
-      if (draftPersistTimerRef.current) {
-        clearTimeout(draftPersistTimerRef.current);
-        draftPersistTimerRef.current = null;
-      }
-      if (effectiveDraftStorageKey) {
-        clearInputDraft(effectiveDraftStorageKey);
+      // The receipt owns only the submitted snapshot. Typing during this wait
+      // creates a new snapshot even if its debounce has already written it.
+      if (latestDraftRef.current === submittedDraft) {
+        if (draftPersistTimerRef.current) {
+          clearTimeout(draftPersistTimerRef.current);
+          draftPersistTimerRef.current = null;
+        }
+        if (effectiveDraftStorageKey) clearInputDraft(effectiveDraftStorageKey);
+        latestDraftRef.current = null;
       }
       if (quoteFeatureEnabled) {
         onQuotedRefsChange?.([]);
@@ -386,7 +404,14 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       }
       focusTextarea(textareaRef.current);
       log.error(`[NowInputRow] send failed: ${error instanceof Error ? error.message : String(error)}`);
-      toast({ title: '发送失败', description: '请检查网络连接后重试', variant: 'destructive' });
+      const message = error instanceof Error ? error.message : String(error);
+      toast({
+        title: '记录未保存',
+        description: /无法获取当前档案|请先打开.*档案/.test(message)
+          ? '先打开或创建本地档案，草稿已保留。'
+          : '草稿已保留，请重试；如仍失败，可在设置中检查本机服务状态。',
+        variant: 'destructive',
+      });
     } finally {
       submittingRef.current = false;
       setIsSubmitting(false);

@@ -10,6 +10,7 @@ import { syncDevtoolsWithSettings } from "./lib/debug/devtools-runtime";
 import { ensureCryptoRandomUUID } from "./lib/utils/uuid";
 import { setOnRegistryChangeCallback } from "./lib/ai-registry/admin";
 import { syncLLMSettingsToRuntimeFlatKeys } from "./config/llm-settings";
+import { applyMobileFullscreenPreference } from './services/mobile-display.service';
 
 ensureCryptoRandomUUID();
 function renderApp(): void {
@@ -21,6 +22,7 @@ function renderApp(): void {
 }
 
 async function bootstrapApp(): Promise<void> {
+  await applyMobileFullscreenPreference().catch((error) => console.warn('[mobile-display]', error));
   // 渲染前从 Tauri IPC 获取真实 runtime 端口，确保后续所有 API 调用使用正确端口
   await fetchEmbeddedPortFromIpc();
   await hydratePersistedRuntimeTargetConfig();

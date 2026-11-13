@@ -404,10 +404,12 @@ jobs:
             'WifiManager\.MulticastLock',
             'acquireMulticastLock\(\)',
             'releaseMulticastLock\(\)',
-            'createMulticastLock\("exomind-mdns-lock"\)'
+            'createMulticastLock\("exomind-mdns-lock"\)',
+            'fun setExomindFullscreen\(enabled: Boolean\)',
+            '(?m)^\s*installExomindSystemBarInsets\(\)\s*$'
           )) {
             if (-not ($mainActivityContent -match $pattern)) {
-              throw "Missing Android multicast patch pattern: $pattern"
+              throw "Missing Android Activity integration pattern: $pattern"
             }
           }
 
@@ -425,7 +427,7 @@ jobs:
             throw "Missing usesCleartextTraffic=true in debug block."
           }
 
-          Write-Host "Android discovery permissions, multicast lock, and cleartext release placeholder verified."
+          Write-Host "Android discovery permissions, multicast lock, system bars, and cleartext release placeholder verified."
 
       - name: Build Android APK only (仅构建 APK，aarch64 + i686)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'

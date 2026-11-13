@@ -5,6 +5,12 @@ import { ChatPage } from '@/components/Chat/ChatPage';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { getEventLogService } from '@/lib/services/eventlog.service';
 
+vi.mock('@tanstack/react-router', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@tanstack/react-router')>(),
+  useLocation: () => ({ pathname: '/eventlog/record', searchStr: '' }),
+  useNavigate: () => vi.fn(),
+}));
+
 vi.mock('@/ui/stores/sync-store', () => ({
   useSyncStore: vi.fn(),
 }));
@@ -59,6 +65,7 @@ const baseEvent: Event = {
   timestamp: new Date('2026-03-17T10:00:00.000Z').getTime(),
   content: '记录了一条用户事件',
   tags: new Set(),
+  refs: [],
   metadata: {
     source: {
       deviceId: 'device-1',
@@ -87,7 +94,7 @@ describe('ChatPage profile placeholder', () => {
     loadEvents.mockResolvedValue([baseEvent]);
     loadEventsDetailed.mockResolvedValue({
       events: [baseEvent],
-      semantics: 'full',
+      semantics: 'full_snapshot',
       snapshotRevision: null,
     });
     mockGetEventLogService.mockReturnValue({
@@ -158,7 +165,7 @@ describe('ChatPage profile placeholder', () => {
 
     loadEventsDetailed.mockResolvedValue({
       events: [voiceEvent],
-      semantics: 'full',
+      semantics: 'full_snapshot',
       snapshotRevision: null,
     });
 

@@ -1402,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "exomind"
-version = "0.6.0-alpha04"
+version = "0.6.0-alpha05"
 dependencies = [
  "base64 0.22.1",
  "chrono",

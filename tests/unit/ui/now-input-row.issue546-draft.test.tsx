@@ -126,6 +126,45 @@ describe('NowInputRow issue-546 draft cache', () => {
     expect(screen.getByTestId('new-now-input-textarea')).toHaveValue('未提交草稿');
   });
 
+  it('flushes the latest draft when the profile closes before the debounce expires', () => {
+    const { unmount } = render(<NowInputRow onSend={vi.fn()} draftStorageKey="exomind:draft:profile-close" />);
+    fireEvent.change(screen.getByTestId('new-now-input-textarea'), { target: { value: '关闭档案前刚输入的草稿' } });
+    expect(localStorage.getItem('exomind:draft:profile-close')).toBeNull();
+    unmount();
+    render(<NowInputRow onSend={vi.fn()} draftStorageKey="exomind:draft:profile-close" />);
+    expect(screen.getByTestId('new-now-input-textarea')).toHaveValue('关闭档案前刚输入的草稿');
+  });
+
+  it('preserves a submitted draft when the profile closes before a save receipt arrives', async () => {
+    let completeSend!: () => void;
+    const onSend = vi.fn(() => new Promise<void>((resolve) => { completeSend = resolve; }));
+    const view = render(<NowInputRow onSend={onSend} draftStorageKey="exomind:draft:pending-send" />);
+    fireEvent.change(screen.getByTestId('new-now-input-textarea'), { target: { value: '尚无回执的提交草稿' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('new-now-send-button'));
+      await Promise.resolve();
+    });
+    view.unmount();
+    expect(localStorage.getItem('exomind:draft:pending-send')).toBe('尚无回执的提交草稿');
+    await act(async () => { completeSend(); await Promise.resolve(); });
+    expect(localStorage.getItem('exomind:draft:pending-send')).toBeNull();
+    act(() => vi.advanceTimersByTime(1000));
+    expect(localStorage.getItem('exomind:draft:pending-send')).toBeNull();
+  });
+
+  it.each([false, true])('keeps the newer draft after an older receipt, including an already flushed draft (%s)', async (flushNewDraft) => {
+    let completeSend!: () => void;
+    const view = render(<NowInputRow onSend={() => new Promise<void>((resolve) => { completeSend = resolve; })} draftStorageKey="exomind:draft:overlap" />);
+    fireEvent.change(screen.getByTestId('new-now-input-textarea'), { target: { value: '第一份提交' } });
+    await act(async () => { fireEvent.click(screen.getByTestId('new-now-send-button')); await Promise.resolve(); });
+    fireEvent.change(screen.getByTestId('new-now-input-textarea'), { target: { value: '等待期间的新草稿' } });
+    if (flushNewDraft) act(() => vi.advanceTimersByTime(300));
+    await act(async () => { completeSend(); await Promise.resolve(); });
+    view.unmount();
+    render(<NowInputRow onSend={vi.fn()} draftStorageKey="exomind:draft:overlap" />);
+    expect(screen.getByTestId('new-now-input-textarea')).toHaveValue('等待期间的新草稿');
+  });
+
   it('persists draft after debounce and clears it after successful submit', async () => {
     const onSend = vi.fn().mockResolvedValue(undefined);
     render(
@@ -149,7 +188,7 @@ describe('NowInputRow issue-546 draft cache', () => {
       fireEvent.click(screen.getByTestId('new-now-send-button'));
     });
 
-    expect(onSend).toHaveBeenCalledWith('等待提交的任务草稿');
+    expect(onSend).toHaveBeenCalledWith('等待提交的任务草稿', undefined, undefined);
     expect(textarea).toHaveValue('');
     expect(localStorage.getItem('exomind:draft:test-now-input')).toBeNull();
   });

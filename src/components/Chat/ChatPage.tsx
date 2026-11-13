@@ -807,6 +807,9 @@ export function ChatPage({
 
   // 处理发送消息
   const handleSend = useCallback(async (content: string, tags?: string[], refs?: EventRef[]) => {
+    if (!activeProfileId || !isLoggedIn) {
+      throw new Error('无法获取当前档案：请先打开或创建本地档案');
+    }
     const trimmed = content.trim();
     if (!trimmed) return;
     const resolvedRefs = buildRefsFromContent(trimmed, refs);
@@ -827,7 +830,7 @@ export function ChatPage({
       log.error(`[ChatPage] handleSend failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
-  }, [buildRefsFromContent]);
+  }, [activeProfileId, isLoggedIn, buildRefsFromContent]);
 
   // 全局快捷键：未聚焦输入框时 Enter/Shift+Enter/Ctrl+Enter 控制时间块和聚焦
   useEffect(() => {

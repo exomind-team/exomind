@@ -1,7 +1,7 @@
 {
   "name": "exomind",
   "private": true,
-  "version": "0.6.0-alpha04",
+  "version": "0.6.0-alpha05",
   "type": "module",
   "scripts": {
     "dev": "vite",
