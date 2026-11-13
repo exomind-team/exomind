@@ -9,7 +9,7 @@ export function EventTimestamp({ timestamp, now, mode }: { timestamp: number; no
     <button type="button" className="max-w-full break-words text-muted tabular-nums hover:text-foreground focus-visible:outline focus-visible:outline-2"
       aria-label={`${formatEventTimestamp(timestamp, 'full', now)}，点击切换完整或简略日期`}
       title={formatEventTimestamp(timestamp, 'full', now)}
-      onClick={() => setOverride(current === 'full' ? 'compact' : 'full')}>
+      onClick={() => setOverride(current === 'full' ? (mode === 'weekday' ? 'weekday' : 'compact') : 'full')}>
       <time dateTime={Number.isFinite(timestamp) && Number.isFinite(new Date(timestamp).getTime()) ? new Date(timestamp).toISOString() : undefined}>
         {formatEventTimestamp(timestamp, current, now)}
       </time>

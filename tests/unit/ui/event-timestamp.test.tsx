@@ -34,5 +34,9 @@ describe('事件日期披露', () => {
     expect(button).toHaveTextContent('12日 · 19:16');
     rerender(<EventTimestamp timestamp={at(2026, 11, 12)} now={now} mode="weekday" />);
     expect(button).toHaveTextContent('星期四 · 19:16');
+    fireEvent.click(button);
+    expect(button).toHaveTextContent('2026年11月12日 · 19:16');
+    fireEvent.click(button);
+    expect(button).toHaveTextContent('星期四 · 19:16');
   });
 });
