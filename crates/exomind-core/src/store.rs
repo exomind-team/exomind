@@ -13,8 +13,6 @@ use std::{
 };
 use uuid::Uuid;
 
-const SCHEMA_VERSION: i64 = 1;
-const APPLICATION_ID: i64 = 0x45584f36;
 const DATABASE_NAME: &str = "beta-core.sqlite3";
 const MAX_TEXT_BYTES: usize = 128 * 1024;
 const MAX_TAGS: usize = 64;
@@ -33,11 +31,22 @@ pub struct Core {
 
 impl Core {
     pub fn open(root: &Path) -> Result<Self, CoreError> {
+        Self::open_expected(root, None)
+    }
+
+    /// A persistent embedding may bind its authority to one device. Validate
+    /// that identity after SQLite journal recovery but before any migration.
+    pub fn open_bound(root: &Path, expected_device: DeviceId) -> Result<Self, CoreError> {
+        Self::open_expected(root, Some(expected_device))
+    }
+
+    fn open_expected(root: &Path, expected_device: Option<DeviceId>) -> Result<Self, CoreError> {
         if !root.is_absolute()
             || (root.exists() && std::fs::symlink_metadata(root)?.file_type().is_symlink())
         {
             return Err(CoreError::InvalidRoot);
         }
+        let mut recovery_evidence = false;
         if root.exists() {
             for entry in std::fs::read_dir(root)? {
                 let entry = entry?;
@@ -45,6 +54,11 @@ impl Core {
                     return Err(CoreError::InvalidRoot);
                 }
                 let name = entry.file_name();
+                if name == "backups" {
+                    crate::migrations::validate_backup_directory(&entry.path())?;
+                    recovery_evidence = true;
+                    continue;
+                }
                 if ![
                     DATABASE_NAME,
                     "beta-core.sqlite3-wal",
@@ -58,10 +72,19 @@ impl Core {
                 {
                     return Err(CoreError::ForeignRoot);
                 }
+                if name != DATABASE_NAME {
+                    recovery_evidence = true;
+                }
             }
         }
         std::fs::create_dir_all(root)?;
         let database_path = root.canonicalize()?.join(DATABASE_NAME);
+        let existed = database_path.exists();
+        if (!existed && (recovery_evidence || expected_device.is_some()))
+            || (existed && std::fs::metadata(&database_path)?.len() == 0)
+        {
+            return Err(CoreError::RecoveryRequired);
+        }
         if database_path.exists()
             && std::fs::symlink_metadata(&database_path)?
                 .file_type()
@@ -75,7 +98,8 @@ impl Core {
         }
         connection.busy_timeout(Duration::from_secs(5))?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
-        initialize(&mut connection)?;
+        connection.pragma_update(None, "synchronous", "FULL")?;
+        crate::migrations::initialize(&mut connection, &database_path, !existed, expected_device)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "FULL")?;
         let (device, human): (String, String) = connection.query_row(
@@ -203,7 +227,11 @@ impl Core {
         })
     }
 
-    fn check_scope(&self, context: &WriterContext, profile: ProfileId) -> Result<(), CoreError> {
+    pub(crate) fn check_scope(
+        &self,
+        context: &WriterContext,
+        profile: ProfileId,
+    ) -> Result<(), CoreError> {
         if context.owner != self.owner || context.device_id != self.device_id {
             return Err(CoreError::ForeignContext);
         }
@@ -219,13 +247,19 @@ impl Core {
         input: &CaptureCommand,
     ) -> Result<Receipt, CoreError> {
         self.check_scope(context, input.profile_id)?;
-        if input.text.trim().is_empty()
+        if (input.text.trim().is_empty() && input.originals.is_empty())
             || input.text.len() > MAX_TEXT_BYTES
             || input.occurred_at_ms < 0
         {
             return Err(CoreError::InvalidCapture(
                 "text or timestamp outside supported bounds",
             ));
+        }
+        if input.originals.len() > crate::MAX_CAPTURE_ORIGINALS {
+            return Err(CoreError::InvalidOriginal("capture group too large"));
+        }
+        for original in &input.originals {
+            crate::originals::validate_original(original)?;
         }
         if input.tags.len() > MAX_TAGS
             || input
@@ -253,9 +287,15 @@ impl Core {
             occurred_at_ms: i64,
             text: &'a str,
             tags: &'a [String],
+            #[serde(skip_serializing_if = "Option::is_none")]
+            originals: Option<&'a [crate::OriginalRef]>,
         }
         let fact = Fact {
-            kind: "capture/1",
+            kind: if input.originals.is_empty() {
+                "capture/1"
+            } else {
+                "capture/2"
+            },
             profile: input.profile_id,
             event: input.event_id,
             device: context.device_id,
@@ -264,6 +304,7 @@ impl Core {
             occurred_at_ms: input.occurred_at_ms,
             text: &input.text,
             tags: &tags,
+            originals: (!input.originals.is_empty()).then_some(input.originals.as_slice()),
         };
         let canonical = serde_json::to_vec(&fact)?;
         let digest = format!("{:x}", Sha256::digest(&canonical));
@@ -284,6 +325,7 @@ impl Core {
             receipt.replayed = true;
             return Ok(receipt);
         }
+        crate::originals::validate_references(&transaction, context, &input.originals)?;
         let existing: Option<(i64, String)> = transaction
             .query_row(
                 "SELECT local_seq,digest FROM events WHERE event_id=?1",
@@ -306,6 +348,7 @@ impl Core {
                 occurred_at_ms: input.occurred_at_ms,
                 text: input.text.clone(),
                 tags,
+                originals: input.originals.clone(),
                 digest: digest.clone(),
                 local_seq: 0,
             };
@@ -318,7 +361,18 @@ impl Core {
                     serde_json::to_string(&event)?
                 ],
             )?;
-            transaction.last_insert_rowid()
+            let event_sequence = transaction.last_insert_rowid();
+            for (ordinal, original) in input.originals.iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO event_originals(event_id,ordinal,original_id) VALUES(?1,?2,?3)",
+                    params![
+                        input.event_id.to_string(),
+                        ordinal as i64,
+                        original.original_id.to_string()
+                    ],
+                )?;
+            }
+            event_sequence
         };
         let receipt = Receipt {
             command_id: input.command_id,
@@ -450,46 +504,13 @@ impl Core {
             .transpose()
     }
 
-    fn connection(&self) -> Result<MutexGuard<'_, Connection>, CoreError> {
+    pub(crate) fn lifecycle(&self) -> Uuid {
+        self.owner
+    }
+
+    pub(crate) fn connection(&self) -> Result<MutexGuard<'_, Connection>, CoreError> {
         self.connection
             .lock()
             .map_err(|_| CoreError::ConnectionPoisoned)
     }
-}
-
-fn initialize(connection: &mut Connection) -> Result<(), CoreError> {
-    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    let application: i64 =
-        transaction.pragma_query_value(None, "application_id", |row| row.get(0))?;
-    if version != 0 && version != SCHEMA_VERSION {
-        return Err(CoreError::UnsupportedSchema(version));
-    }
-    if application != 0 && application != APPLICATION_ID {
-        return Err(CoreError::ForeignDatabase);
-    }
-    if version == 0 {
-        if application != 0 {
-            return Err(CoreError::ForeignDatabase);
-        }
-        let tables: i64 = transaction.query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-            [],
-            |row| row.get(0),
-        )?;
-        if tables != 0 {
-            return Err(CoreError::ForeignDatabase);
-        }
-        transaction.execute_batch("CREATE TABLE identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),device_id TEXT NOT NULL,human_author TEXT NOT NULL); CREATE TABLE profiles(id TEXT PRIMARY KEY,display_name TEXT NOT NULL); CREATE TABLE events(local_seq INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT UNIQUE NOT NULL,profile_id TEXT NOT NULL REFERENCES profiles(id),digest TEXT NOT NULL,body TEXT NOT NULL); CREATE TABLE command_receipts(command_id TEXT PRIMARY KEY,profile_id TEXT NOT NULL REFERENCES profiles(id),input_digest TEXT NOT NULL,receipt TEXT NOT NULL); CREATE INDEX events_profile_sequence ON events(profile_id,local_seq);")?;
-        transaction.execute(
-            "INSERT INTO identity(singleton,device_id,human_author) VALUES(1,?1,?2)",
-            params![DeviceId::new().to_string(), Uuid::new_v4().to_string()],
-        )?;
-        transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
-        transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-    } else if application != APPLICATION_ID {
-        return Err(CoreError::ForeignDatabase);
-    }
-    transaction.commit()?;
-    Ok(())
 }

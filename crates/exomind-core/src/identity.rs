@@ -64,6 +64,8 @@ identifier!(DeviceId);
 identifier!(CommandId);
 identifier!(EventId);
 identifier!(AgentId);
+identifier!(StageId);
+identifier!(OriginalId);
 
 impl AgentId {
     pub(crate) fn uuid(self) -> Uuid {

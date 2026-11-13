@@ -12,6 +12,7 @@ fn command(profile_id: ProfileId) -> CaptureCommand {
         occurred_at_ms: 1_794_000_000_000,
         text: "先可靠记下".to_owned(),
         tags: vec!["work".to_owned()],
+        originals: vec![],
     }
 }
 

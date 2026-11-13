@@ -9,6 +9,7 @@ fn capture(profile_id: ProfileId, text: impl Into<String>) -> CaptureCommand {
         occurred_at_ms: 1_794_000_000_000,
         text: text.into(),
         tags: vec!["query".to_owned()],
+        originals: vec![],
     }
 }
 
