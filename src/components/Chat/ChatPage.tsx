@@ -12,6 +12,8 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { EventTimestamp } from '@/ui/app/components/EventTimestamp';
+import { getEventDateDisplayMode, subscribeEventDateDisplayMode } from '@/config/event-date-display';
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Play, Pause, Square, FileText, NotepadText, Bot, Mic, Link2, ListTodo } from 'lucide-react';
@@ -241,6 +243,20 @@ export function ChatPage({
   onKeepAliveStateChange,
 }: ChatPageProps = {}) {
   const location = useLocation();
+  const [eventDateMode, setEventDateMode] = useState(getEventDateDisplayMode);
+  const [dateDisplayNow, setDateDisplayNow] = useState(Date.now);
+  useEffect(() => subscribeEventDateDisplayMode(setEventDateMode), []);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = () => setDateDisplayNow(Date.now());
+    const tick = () => {
+      refresh();
+      timer = setTimeout(tick, 60_000 - Date.now() % 60_000);
+    };
+    timer = setTimeout(tick, 60_000 - Date.now() % 60_000);
+    window.addEventListener('focus', refresh);
+    return () => { clearTimeout(timer); window.removeEventListener('focus', refresh); };
+  }, []);
   const navigate = useNavigate();
   const [events, setEvents] = useState<Event[]>([]);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -902,22 +918,6 @@ export function ChatPage({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [variant]);
 
-  // 格式化时间
-  const formatTime = (timestamp: number) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const isToday = date.toDateString() === now.toDateString();
-
-    if (isToday) {
-      return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    }
-    return date.toLocaleTimeString('zh-CN', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
 
   // 获取事件图标
   const getEventIcon = (event: Event) => {
@@ -1004,14 +1004,6 @@ export function ChatPage({
     return null;
   };
 
-  const formatMessageTime = (timestamp: number) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
-  };
 
   const getEventRowHighlightClassName = useCallback((eventId: string) => (
     highlightedEventId === eventId
@@ -1214,12 +1206,12 @@ export function ChatPage({
                     </Avatar>
                     <div className="min-w-0 max-w-[85%] flex-1">
                       <div
-                        className="mb-1 flex items-center gap-1 text-[11px] leading-[1.4]"
+                        className="mb-1 flex flex-wrap items-center gap-1 text-[11px] leading-[1.4]"
                         data-testid="new-mobile-message-meta"
                       >
                         <span className="text-xs font-semibold text-strong">{getSystemEventActorLabel(event)}</span>
                         <span className="text-muted">{eventSourceLabel}</span>
-                        <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
+                        <EventTimestamp timestamp={event.timestamp} now={dateDisplayNow} mode={eventDateMode} />
                       </div>
                       <div
                         className={`rounded-2xl border px-[14px] py-3 text-[13px] leading-[1.6] ${
@@ -1257,12 +1249,12 @@ export function ChatPage({
                 >
                   <div className="flex max-w-[84%] flex-col items-end">
                     <div
-                      className="mb-1 flex items-center justify-end gap-1 text-[11px] leading-[1.4]"
+                      className="mb-1 flex flex-wrap items-center justify-end gap-1 text-[11px] leading-[1.4]"
                       data-testid="new-mobile-message-meta"
                     >
                       <span className="text-muted">{eventSourceLabel}</span>
                       {voiceInput ? <VoiceInputBadge /> : null}
-                      <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
+                      <EventTimestamp timestamp={event.timestamp} now={dateDisplayNow} mode={eventDateMode} />
                       <span className="text-xs font-semibold text-strong">{userDisplayName}</span>
                     </div>
                     <div className="rounded-2xl bg-user-bubble px-[14px] py-[10px] text-[13px] leading-[1.6] text-user-bubble-text [&_.prose]:text-inherit [&_.prose_p]:text-inherit [&_.prose_li]:text-inherit">
@@ -1338,7 +1330,7 @@ export function ChatPage({
                         />
                         <div className="mt-0.5 flex items-center gap-2 sm:mt-1">
                           <p className="text-xs text-muted-foreground">
-                            {formatTime(event.timestamp)}
+                            <EventTimestamp timestamp={event.timestamp} now={dateDisplayNow} mode={eventDateMode} />
                           </p>
                           {isVoiceInputEvent(event) ? <VoiceInputBadge /> : null}
                         </div>

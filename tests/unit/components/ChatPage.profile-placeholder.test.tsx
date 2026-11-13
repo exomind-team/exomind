@@ -4,6 +4,8 @@ import type { Event } from '@/lib/types/event';
 import { ChatPage } from '@/components/Chat/ChatPage';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { getEventLogService } from '@/lib/services/eventlog.service';
+import { act } from '@testing-library/react';
+import { setEventDateDisplayMode } from '@/config/event-date-display';
 
 vi.mock('@tanstack/react-router', async (importOriginal) => ({
   ...await importOriginal<typeof import('@tanstack/react-router')>(),
@@ -77,6 +79,32 @@ const baseEvent: Event = {
 };
 
 describe('ChatPage profile placeholder', () => {
+  it('日期显示偏好持久化并实时更新已显示的消息', async () => {
+    mockUseSyncStore.mockReturnValue({ currentUser: '测试', isLoggedIn: true, activeProfileId: 'profile-test' } as never);
+    loadEventsDetailed.mockResolvedValue({ events: [{ ...baseEvent, timestamp: new Date(2026, 10, 12, 19, 16).getTime() }], semantics: 'full_snapshot' });
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(new Date(2026, 10, 13, 20).getTime());
+    try {
+      render(<ChatPage variant="new-mobile" />);
+      expect(await screen.findByText('12日 · 19:16')).toBeInTheDocument();
+      act(() => { setEventDateDisplayMode('weekday'); });
+      expect(await screen.findByText('星期四 · 19:16')).toBeInTheDocument();
+      expect(localStorage.getItem('exomind:eventDateDisplay')).toBe('weekday');
+      act(() => { setEventDateDisplayMode('full'); });
+      expect(await screen.findByText('2026年11月12日 · 19:16')).toBeInTheDocument();
+    } finally {
+      act(() => { setEventDateDisplayMode('compact'); });
+      clock.mockRestore();
+    }
+  });
+  it('披露昨天消息的日期而不是只显示时刻', async () => {
+    mockUseSyncStore.mockReturnValue({ currentUser: '测试', isLoggedIn: true, activeProfileId: 'profile-test' } as never);
+    loadEventsDetailed.mockResolvedValue({ events: [{ ...baseEvent, timestamp: new Date(2026, 10, 12, 19, 16).getTime() }], semantics: 'full_snapshot' });
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(new Date(2026, 10, 13, 20).getTime());
+    try {
+      render(<ChatPage variant="new-mobile" />);
+      expect(await screen.findByText('12日 · 19:16')).toBeInTheDocument();
+    } finally { clock.mockRestore(); }
+  });
   const unsubscribe = vi.fn();
   const loadEvents = vi.fn<() => Promise<Event[]>>();
   const loadEventsDetailed = vi.fn();

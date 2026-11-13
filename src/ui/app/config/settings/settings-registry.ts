@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import packageJson from '../../../../../package.json';
+import { getEventDateDisplayMode, setEventDateDisplayMode, subscribeEventDateDisplayMode } from '@/config/event-date-display';
 import { getMobileFullscreenEnabled, subscribeMobileFullscreenChanges } from '@/config/mobile-fullscreen-preference';
 import { changeMobileFullscreenPreference } from '@/services/mobile-display.service';
 import {
@@ -1005,6 +1006,18 @@ export const FEATURE_TOGGLE_SETTINGS = [
  * - `group` is preferred over `custom` for "tap row -> open overlay -> edit several child settings" flows.
  */
 export const SETTINGS_REGISTRY: SettingsItem[] = [
+  {
+    id: 'event-date-display',
+    label: '消息日期显示',
+    description: '简略日期只省略与今天相同的部分；星期模式同周显示星期，跨月或跨年仍显示日期。点击消息时间可切换完整与简略日期。',
+    icon: Monitor,
+    category: 'appearance',
+    type: 'enum',
+    options: [{ label: '简略日期', value: 'compact' }, { label: '完整日期', value: 'full' }, { label: '星期', value: 'weekday' }],
+    get: getEventDateDisplayMode,
+    set: (value: string) => setEventDateDisplayMode(value === 'full' || value === 'weekday' ? value : 'compact'),
+    subscribe: subscribeEventDateDisplayMode,
+  },
   {
     id: 'mobile-fullscreen-enabled',
     label: '全屏模式',
