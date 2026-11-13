@@ -10,6 +10,7 @@ import {
   collectManagedDesktopAppPids,
   collectManagedTauriCleanupPids,
   evaluateManagedTauriInstanceHealth,
+  hasManagedTauriInstanceActivity,
   isManagedTauriRootProcessOwned,
   matchesManagedWindowsProcessIdentity,
   resolveManagedTauriInstancePaths,
@@ -31,6 +32,10 @@ type ParsedArgs = {
 const PROJECT_ROOT = process.cwd();
 const DEFAULT_WEB_PORT = 1420;
 const desktopProcessNameCache = new Map<string, Promise<string | null>>();
+
+function resolveBridgePort(record: Pick<ManagedTauriInstanceRecord, 'webPort' | 'bridgePort'>): number {
+  return record.bridgePort ?? 9223 + Math.max(0, record.webPort - DEFAULT_WEB_PORT);
+}
 
 type PortListenerInfo = {
   LocalPort: number;
@@ -265,13 +270,18 @@ export async function collectManagedTauriHealthSnapshot(
   record: ManagedTauriInstanceRecord,
 ): Promise<ManagedTauriInstanceHealthSnapshot> {
   const rootPidAlive = isPidAlive(record.rootPid);
+  const bridgePort = resolveBridgePort(record);
+  const ports = [record.webPort, record.hmrPort, record.rtPort, bridgePort]
+    .filter((port): port is number => typeof port === 'number' && Number.isInteger(port) && port > 0);
   const portProbeScript = [
-    `$ports = @(${record.webPort}, ${record.hmrPort})`,
+    `$ports = @(${ports.join(', ')})`,
     "Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort } | Select-Object LocalPort, OwningProcess | ConvertTo-Json -Compress",
   ].join('; ');
   const portListeners = runPowerShellJson<PortListenerInfo>(portProbeScript);
   const webPortPids = groupListenerPidsByPort(portListeners, record.webPort);
   const hmrPortPids = groupListenerPidsByPort(portListeners, record.hmrPort);
+  const rtPortListening = record.rtPort !== undefined && groupListenerPidsByPort(portListeners, record.rtPort).length > 0;
+  const bridgePortListening = groupListenerPidsByPort(portListeners, bridgePort).length > 0;
   const processes = runPowerShellJson<ManagedWindowsProcessInfo>(
     'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, ExecutablePath, CreationDate | ConvertTo-Json -Compress',
   );
@@ -283,6 +293,8 @@ export async function collectManagedTauriHealthSnapshot(
       hmrPortListening: hmrPortPids.length > 0,
       webPortPids,
       hmrPortPids,
+      rtPortListening,
+      bridgePortListening,
       processes,
     };
   }
@@ -295,6 +307,8 @@ export async function collectManagedTauriHealthSnapshot(
       appProcessAlive: false,
       webPortPids,
       hmrPortPids,
+      rtPortListening,
+      bridgePortListening,
       appPids: [],
       processes,
     };
@@ -314,6 +328,8 @@ export async function collectManagedTauriHealthSnapshot(
     appProcessAlive: appPids.length > 0,
     webPortPids,
     hmrPortPids,
+    rtPortListening,
+    bridgePortListening,
     appPids,
     processes,
   };
@@ -380,14 +396,14 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
   const rtPort = parsePortFlag(flags, '--rt-port') ?? await findFreePort(9124);
   const requestedName = getFlagValue(flags, '--name') ?? `${target}-${webPort}`;
   const enableWatch = hasFlag(flags, '--watch');
-  const bridgePort = 9223 + Math.max(0, webPort - DEFAULT_WEB_PORT);
+  const bridgePort = resolveBridgePort({ webPort });
 
   const paths = resolveManagedTauriInstancePaths(PROJECT_ROOT, requestedName);
   await ensureRegistryDir(paths.registryDir);
 
   const existing = await readInstanceRecord(paths.metaPath);
-  if (existing && isPidAlive(existing.rootPid)) {
-    throw new Error(`instance already running: ${paths.name} (PID ${existing.rootPid})`);
+  if (existing && hasManagedTauriInstanceActivity(existing, await collectManagedTauriHealthSnapshot(existing))) {
+    throw new Error(`instance has unconfirmed activity: ${paths.name}; metadata retained`);
   }
 
   const baseEnv = {
@@ -444,6 +460,7 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     hmrPort,
     rtPort,
     logPath: paths.logPath,
+    bridgePort,
     metaPath: paths.metaPath,
     startedAt,
     enableWatch,
@@ -497,7 +514,7 @@ async function listCommand(): Promise<void> {
       web: `http://localhost:${record.webPort}`,
       hmr: record.hmrPort,
       rt: record.rtPort ?? '-',
-      bridge: 9223 + Math.max(0, record.webPort - DEFAULT_WEB_PORT),
+      bridge: resolveBridgePort(record),
       log: path.relative(PROJECT_ROOT, record.logPath),
     };
   }));
@@ -523,8 +540,8 @@ export async function stopCommand(flags: Map<string, string | true>): Promise<vo
   if (snapshot.rootPidAlive && !rootOwned) {
     throw new Error(`instance ownership could not be confirmed: ${paths.name}; metadata retained`);
   }
-  if (!rootOwned && (snapshot.webPortListening || snapshot.hmrPortListening || snapshot.appProcessAlive)) {
-    throw new Error(`unattributed listeners remain for ${paths.name}; metadata retained`);
+  if (!rootOwned && hasManagedTauriInstanceActivity(record, snapshot)) {
+    throw new Error(`unattributed activity remains for ${paths.name}; metadata retained`);
   }
   const cleanupPids = collectManagedTauriCleanupPids(record, snapshot);
 
@@ -543,8 +560,7 @@ export async function stopCommand(flags: Map<string, string | true>): Promise<vo
   const plannedPids = new Set(cleanupPids);
   const possibleDescendantsRemain = afterStop.processes?.some((processInfo) =>
     plannedPids.has(processInfo.ProcessId) || plannedPids.has(processInfo.ParentProcessId));
-  if (afterStop.rootPidAlive || afterStop.webPortListening || afterStop.hmrPortListening
-    || afterStop.appProcessAlive || possibleDescendantsRemain) {
+  if (hasManagedTauriInstanceActivity(record, afterStop) || possibleDescendantsRemain) {
     throw new Error(`instance stop is not confirmed: ${paths.name}; metadata retained`);
   }
 
@@ -595,10 +611,7 @@ async function pruneCommand(): Promise<void> {
 
   for (const record of records) {
     const snapshot = await collectManagedTauriHealthSnapshot(record);
-    const cleanupPids = collectManagedTauriCleanupPids(record, snapshot);
-
-    if (snapshot.rootPidAlive || cleanupPids.length > 0
-      || snapshot.webPortListening || snapshot.hmrPortListening || snapshot.appProcessAlive) {
+    if (hasManagedTauriInstanceActivity(record, snapshot)) {
       continue;
     }
 

@@ -14,7 +14,7 @@ import { collectManagedTauriHealthSnapshot, stopCommand } from '../../../scripts
 
 const record: ManagedTauriInstanceRecord = {
   name: 'synthetic', projectRoot: 'D:\\synthetic\\exomind', rootPid: 100,
-  webPort: 1420, hmrPort: 1421,
+  webPort: 1420, hmrPort: 1421, rtPort: 9124,
   logPath: 'D:\\synthetic\\exomind\\.tmp\\synthetic.log',
   metaPath: 'D:\\synthetic\\exomind\\.tmp\\synthetic.json',
   startedAt: '2026-11-13T03:00:00.000Z', enableWatch: false, target: 'desktop',
@@ -34,6 +34,8 @@ describe('tauri-dev-manager process boundary', () => {
   let stoppedPids: number[];
   let beforeReadProcess: ((pid: number) => void) | undefined;
   let stopFailure: boolean;
+  let suppressWebListeners: boolean;
+  let extraListeners: Array<{ LocalPort: number; OwningProcess: number }>;
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -41,6 +43,8 @@ describe('tauri-dev-manager process boundary', () => {
     stoppedPids = [];
     beforeReadProcess = undefined;
     stopFailure = false;
+    suppressWebListeners = false;
+    extraListeners = [];
     native.readFile.mockImplementation(async (filePath: string) => filePath.endsWith('Cargo.toml')
       ? '[package]\nname = "exomind"\n' : JSON.stringify(record));
     native.rm.mockResolvedValue(undefined);
@@ -69,9 +73,9 @@ describe('tauri-dev-manager process boundary', () => {
         return { status: stopFailure ? 1 : 0, stdout: '', stderr: stopFailure ? 'synthetic stop failure' : '' };
       }
       if (script.includes('Get-NetTCPConnection')) {
-        const listeners = processes.some((processInfo) => processInfo.ProcessId === 200)
+        const listeners = !suppressWebListeners && processes.some((processInfo) => processInfo.ProcessId === 200)
           ? [{ LocalPort: 1420, OwningProcess: 200 }, { LocalPort: 1421, OwningProcess: 200 }] : [];
-        return { status: 0, stdout: JSON.stringify(listeners), stderr: '' };
+        return { status: 0, stdout: JSON.stringify([...listeners, ...extraListeners]), stderr: '' };
       }
       const pidFilter = script.match(/ProcessId=(\d+)/);
       if (pidFilter) beforeReadProcess?.(Number(pidFilter[1]));
@@ -137,10 +141,39 @@ describe('tauri-dev-manager process boundary', () => {
   it('does not report stopped when orphan listeners cannot be attributed', async () => {
     processes = processes.filter((processInfo) => processInfo.ProcessId !== 100);
 
-    await expect(stopCommand(new Map([['--name', record.name]]))).rejects.toThrow(/ownership|listener/i);
+    await expect(stopCommand(new Map([['--name', record.name]]))).rejects.toThrow(/activity|ownership|listener/i);
 
     expect(stoppedPids).toEqual([]);
     expect(native.rm).not.toHaveBeenCalled();
+  });
+
+  it('retains metadata for an orphan child even without Web or HMR listeners', async () => {
+    processes = processes.filter((processInfo) => processInfo.ProcessId !== 100);
+    suppressWebListeners = true;
+
+    await expect(stopCommand(new Map([['--name', record.name]]))).rejects.toThrow(/activity|ownership|listener/i);
+
+    expect(stoppedPids).toEqual([]);
+    expect(native.rm).not.toHaveBeenCalled();
+  });
+
+  it.each([9124, 9223])('retains metadata when only port %i is still listening', async (port) => {
+    processes = [];
+    extraListeners = [{ LocalPort: port, OwningProcess: 400 }];
+
+    await expect(stopCommand(new Map([['--name', record.name]]))).rejects.toThrow(/activity|ownership|listener/i);
+
+    expect(stoppedPids).toEqual([]);
+    expect(native.rm).not.toHaveBeenCalled();
+  });
+
+  it('removes metadata when the root, descendants and all listeners are confirmed absent', async () => {
+    processes = [];
+
+    await stopCommand(new Map([['--name', record.name]]));
+
+    expect(stoppedPids).toEqual([]);
+    expect(native.rm).toHaveBeenCalledOnce();
   });
 
   it('retains metadata when a child starts after the cleanup snapshot', async () => {

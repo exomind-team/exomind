@@ -27,6 +27,7 @@ export type ManagedTauriInstanceRecord = {
   webPort: number;
   hmrPort: number;
   rtPort?: number;
+  bridgePort?: number;
   logPath: string;
   metaPath: string;
   startedAt: string;
@@ -60,6 +61,8 @@ export type ManagedTauriInstanceHealthSnapshot = {
   rootPidAlive: boolean;
   webPortListening: boolean;
   hmrPortListening: boolean;
+  rtPortListening?: boolean;
+  bridgePortListening?: boolean;
   appProcessAlive?: boolean;
   webPortPids?: number[];
   hmrPortPids?: number[];
@@ -380,4 +383,14 @@ export function collectManagedTauriCleanupPids(
     .map((processInfo) => processInfo.ProcessId);
   // Health hints and shared build paths do not grant process ownership.
   return uniquePositivePids([record.rootPid, ...descendantPids]);
+}
+
+export function hasManagedTauriInstanceActivity(
+  record: ManagedTauriInstanceRecord,
+  snapshot: ManagedTauriInstanceHealthSnapshot,
+): boolean {
+  // Orphan relationships and listeners prevent discarding metadata; they never grant cleanup ownership.
+  return snapshot.rootPidAlive || snapshot.webPortListening || snapshot.hmrPortListening
+    || Boolean(snapshot.rtPortListening || snapshot.bridgePortListening || snapshot.appProcessAlive)
+    || Boolean(snapshot.processes?.some((processInfo) => processInfo.ParentProcessId === record.rootPid));
 }
