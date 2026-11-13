@@ -2,7 +2,8 @@
 
 use exomind_beta_host::{BetaHost, HostError, HostStatus, RunningServer, Session};
 use exomind_core::{
-    CaptureCommand, CommandId, CoreError, EventPage, EventQuery, ProfileId, ProfileInfo, Receipt,
+    BeginStageCommand, CaptureCommand, CommandId, CoreError, EventPage, EventQuery, OriginalChunk,
+    OriginalId, ProfileId, ProfileInfo, Receipt, StageId, StageStatus,
 };
 use serde::Serialize;
 use std::{
@@ -30,19 +31,52 @@ impl From<HostError> for Failure {
             }
             HostError::Stopped => ("stopped", "本机服务已停止"),
             HostError::InvalidRequest
-            | HostError::Core(CoreError::InvalidCapture(_) | CoreError::InvalidQuery(_)) => {
-                ("invalid_request", "请求内容无效")
-            }
-            HostError::NotFound | HostError::Core(CoreError::UnknownProfile) => {
-                ("not_found", "档案或记录不存在")
-            }
+            | HostError::Core(
+                CoreError::InvalidCapture(_)
+                | CoreError::InvalidQuery(_)
+                | CoreError::InvalidOriginal(_)
+                | CoreError::InvalidOriginalOffset,
+            ) => ("invalid_request", "请求内容无效"),
+            HostError::NotFound
+            | HostError::Core(
+                CoreError::UnknownProfile | CoreError::UnknownStage | CoreError::UnknownOriginal,
+            ) => ("not_found", "档案或记录不存在"),
             HostError::Core(
-                CoreError::CommandConflict | CoreError::EventConflict | CoreError::ProfileConflict,
+                CoreError::CommandConflict
+                | CoreError::EventConflict
+                | CoreError::ProfileConflict
+                | CoreError::StageConflict
+                | CoreError::OriginalConflict
+                | CoreError::ChunkConflict,
             ) => ("conflict", "此标识已用于其他内容，请保留待确认稿件"),
-            HostError::Core(CoreError::ScopeMismatch | CoreError::ForeignContext) => {
-                ("forbidden", "会话所属档案不匹配")
-            }
+            HostError::Core(
+                CoreError::ScopeMismatch
+                | CoreError::ForeignContext
+                | CoreError::OriginalAccessDenied,
+            ) => ("forbidden", "会话所属档案不匹配"),
             HostError::RootInUse => ("root_in_use", "此数据目录已由另一个实例使用"),
+            HostError::PayloadTooLarge => ("payload_too_large", "数据分块超过允许大小"),
+            HostError::VerificationBusy => ("verification_busy", "文件校验正在处理中，请稍后重试"),
+            HostError::Core(CoreError::OriginalHashMismatch) => {
+                ("original_hash_mismatch", "文件校验不一致，暂存字节已保留")
+            }
+            HostError::Core(CoreError::VerificationCancelled) => {
+                ("cancelled", "文件校验已停止，暂存字节已保留")
+            }
+            HostError::Core(CoreError::StageIncomplete | CoreError::OriginalNotReady) => {
+                ("original_not_ready", "整组文件尚未完成保存与校验")
+            }
+            HostError::Core(CoreError::StageNotUploading | CoreError::StaleVerification) => {
+                ("stage_conflict", "文件暂存状态已变化，请查证后重试")
+            }
+            HostError::Core(CoreError::OriginalIntegrityMismatch) => (
+                "original_integrity_mismatch",
+                "已保存的文件字节校验失败，现有数据已保留",
+            ),
+            HostError::Core(CoreError::RecoveryRequired) => (
+                "recovery_required",
+                "现有资料需要恢复，已保留目录并停止创建空档案",
+            ),
             _ => ("storage_error", "本机存储操作失败，请保留稿件后重试"),
         };
         Self { code, message }
@@ -256,6 +290,119 @@ async fn beta_receipt(
     .await
 }
 
+#[tauri::command]
+async fn beta_begin_stage(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    command: BeginStageCommand,
+) -> Result<StageStatus, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .begin_stage(&state.human(command.profile_id)?, &command)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_stage_status(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    stage_id: StageId,
+) -> Result<StageStatus, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .stage_status(&state.human(profile_id)?, profile_id, stage_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_write_stage_chunk(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    stage_id: StageId,
+    offset: u64,
+    bytes: Vec<u8>,
+) -> Result<StageStatus, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state.host.write_stage_chunk(
+            &state.human(profile_id)?,
+            profile_id,
+            stage_id,
+            offset,
+            &bytes,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_verify_stage(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    stage_id: StageId,
+) -> Result<StageStatus, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .verify_stage(&state.human(profile_id)?, profile_id, stage_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_read_stage_range(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    stage_id: StageId,
+    offset: u64,
+    length: usize,
+) -> Result<OriginalChunk, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state.host.read_stage_range(
+            &state.human(profile_id)?,
+            profile_id,
+            stage_id,
+            offset,
+            length,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_read_original_range(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    original_id: OriginalId,
+    offset: u64,
+    length: usize,
+) -> Result<OriginalChunk, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state.host.read_original_range(
+            &state.human(profile_id)?,
+            profile_id,
+            original_id,
+            offset,
+            length,
+        )
+    })
+    .await
+}
+
 fn request_exit(app: &AppHandle, code: i32) {
     let state = app.state::<Arc<NativeState>>().inner().clone();
     if state.closing.swap(true, Ordering::AcqRel) {
@@ -390,6 +537,12 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             beta_events_page,
             beta_receipt,
             beta_request_exit,
+            beta_begin_stage,
+            beta_stage_status,
+            beta_write_stage_chunk,
+            beta_verify_stage,
+            beta_read_stage_range,
+            beta_read_original_range,
             crate::commands::mobile_display_commands::mobile_fullscreen_set
         ]);
     #[cfg(debug_assertions)]
@@ -508,6 +661,7 @@ mod tests {
             occurred_at_ms: 1,
             text: "synthetic queued".into(),
             tags: vec![],
+            originals: vec![],
         };
         let before_close_session = state.human(profile).unwrap();
         state.closing.store(true, Ordering::Release);

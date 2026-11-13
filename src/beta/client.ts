@@ -1,10 +1,15 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { BetaOriginal, BetaOriginalClient } from './original-types';
+import { BetaApiError } from './api-error';
+import { boundedOriginalBody, nativeOriginalClient, webOriginalClient, validateOriginal } from './original-client';
+export { BetaApiError } from './api-error';
 
-export interface BetaStatus { protocol: string; device_id: string; runtime_id?: string; running: boolean }
+export interface BetaStatus { protocol: string; device_id: string; runtime_id?: string; running: boolean; capabilities?: { originals?: boolean; max_original_chunk_bytes?: number } }
 export interface BetaProfile { profile_id: string; display_name: string }
 export interface BetaCommand {
   command_id: string; event_id: string; profile_id: string;
   occurred_at_ms: number; text: string; tags: string[];
+  originals?: BetaOriginal[];
 }
 export interface BetaReceipt {
   command_id: string; event_id: string; profile_id: string; local_seq: number;
@@ -14,20 +19,18 @@ export interface BetaEvent {
   event_id: string; profile_id: string; device_id: string; author_id: string;
   author_kind: 'human' | 'agent_note'; occurred_at_ms: number; text: string;
   tags: string[]; digest: string; local_seq: number;
+  originals?: BetaOriginal[];
 }
 export interface BetaQuery { before?: number; through?: number; limit?: number; search?: string }
 export interface BetaPage { items: BetaEvent[]; next_before: number | null; highwater: number }
 export interface BetaClient {
+  originals?: BetaOriginalClient;
   status(): Promise<BetaStatus>;
   profiles(): Promise<BetaProfile[]>;
   provisionProfile(profileId: string, name: string): Promise<BetaProfile>;
   capture(command: BetaCommand): Promise<BetaReceipt>;
   eventsPage(profileId: string, query: BetaQuery): Promise<BetaPage>;
   receipt(profileId: string, commandId: string): Promise<BetaReceipt | null>;
-}
-
-export class BetaApiError extends Error {
-  constructor(public readonly code: string, message: string, public readonly status = 0) { super(message); }
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -73,6 +76,10 @@ function page(value: unknown, profileId: string, query: BetaQuery): BetaPage {
       || !Number.isSafeInteger(event.local_seq) || Number(event.local_seq) <= 0 || Number(event.local_seq) >= previous
       || Number(event.local_seq) > Number(item.highwater) || !Number.isSafeInteger(event.occurred_at_ms)
       || (event.author_kind !== 'human' && event.author_kind !== 'agent_note')) throw new BetaApiError('invalid_page', '历史页包含不一致的记录');
+    if (event.originals !== undefined) {
+      if (!Array.isArray(event.originals)) throw new BetaApiError('invalid_page','记录的原件清单无效');
+      event.originals.forEach(validateOriginal);
+    }
     previous = Number(event.local_seq);
   }
   if (item.items.length > (query.limit ?? 100) || (item.next_before !== null
@@ -101,6 +108,11 @@ export function nativeBetaClient(call: NativeInvoke = invoke): BetaClient {
     return call<T>(name, args);
   }
   return {
+    originals: nativeOriginalClient(async <T>(name: string,args?:Record<string,unknown>) => {
+      const current=check(await call('beta_status'));
+      if(current.capabilities?.originals!==true) throw new BetaApiError('unsupported_originals','本机服务尚不支持原件，请更新后重试');
+      return call<T>(name,args);
+    }),
     async status() { return check(await call('beta_status')); },
     async profiles() { return profiles(await checked('beta_profiles')); },
     async provisionProfile(profileId, name) { return profile(await checked('beta_provision_profile', { profileId, name })); },
@@ -124,15 +136,16 @@ export function webBetaClient(endpoint: string, ownerToken: string, fetcher: typ
   const grants = new Map<string, Promise<string>>();
   const check = identityGuard();
   let runtime: string | undefined;
-  async function request(path: string, token: string | null, method = 'GET', body?: unknown): Promise<unknown> {
+  async function request(path: string, token: string | null, method = 'GET', body?: unknown, binaryBody = false, responseLimit?: number): Promise<unknown> {
     const abort = new AbortController();
     const timeout = setTimeout(() => abort.abort(), 15_000);
     try {
       const response = await fetcher(`${base}${path}`, {
         method, signal: abort.signal, redirect: 'error', credentials: 'omit',
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body !== undefined ? { 'Content-Type': binaryBody ? 'application/octet-stream' : 'application/json' } : {}) },
+        body: body === undefined ? undefined : binaryBody ? (body as Uint8Array).slice().buffer as ArrayBuffer : JSON.stringify(body),
       });
+      if (response.ok && responseLimit !== undefined) return await boundedOriginalBody(response,responseLimit);
       const value: unknown = await response.json();
       if (!response.ok) {
         const error = object(object(value).error);
@@ -147,8 +160,9 @@ export function webBetaClient(endpoint: string, ownerToken: string, fetcher: typ
     runtime = current.runtime_id;
     return current;
   }
-  async function humanToken(profileId: string): Promise<string> {
-    await hello();
+  async function humanToken(profileId: string, originals = false): Promise<string> {
+    const current=await hello();
+    if(originals && current.capabilities?.originals!==true) throw new BetaApiError('unsupported_originals','本机服务尚不支持原件，请更新后重试');
     let grant = grants.get(profileId);
     if (!grant) {
       grant = request('/grants', ownerToken, 'POST', { profile_id: profileId, kind: 'human' }).then(value => {
@@ -162,6 +176,10 @@ export function webBetaClient(endpoint: string, ownerToken: string, fetcher: typ
     return grant;
   }
   return {
+    originals: webOriginalClient({
+      async json(profileId,path,method,body) { return request(path,await humanToken(profileId,true),method,body); },
+      async binary(profileId,path,method,body,responseLimit) { return request(path,await humanToken(profileId,true),method,body,body!==undefined,responseLimit); },
+    }),
     status: hello,
     async profiles() { await hello(); return profiles(await request('/profiles', ownerToken)); },
     async provisionProfile(profileId, name) { await hello(); return profile(await request(`/profiles/${encodeURIComponent(profileId)}`, ownerToken, 'PUT', { name })); },
