@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 mod app_lifecycle;
+mod beta_native;
 mod appbar;
 mod commands;
 mod dev_instance_paths;
@@ -230,13 +231,19 @@ fn resolve_embedded_runtime_port() -> u16 {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    // Select the isolated host before constructing any legacy runtime state or
+    // reading its configuration. This identifier is supplied by beta config.
+    if context.config().identifier == "com.exomind.app.v06.beta" {
+        beta_native::run(context);
+        return;
+    }
     let ws_client_state = std::sync::Arc::new(WsClientState::default());
     let runtime_process_state = std::sync::Arc::new(RuntimeProcessState::new());
     let runtime_process_state_for_setup = runtime_process_state.clone();
     let voice_shortcut_state = VoiceShortcutState::new();
     let main_window_shortcut_state = MainWindowShortcutState::new();
     let volcano_asr_stream_state = std::sync::Arc::new(VolcanoAsrStreamState::default());
-    let mut context = tauri::generate_context!();
     let mut log_targets = vec![
         Target::new(TargetKind::Stdout),
         Target::new(TargetKind::Webview),

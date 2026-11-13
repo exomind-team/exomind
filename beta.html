@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>外心 Beta</title>
+    <script>
+      (() => {
+        let theme = 'system';
+        try { theme = localStorage.getItem('exomind:themePreference') || 'system'; } catch {}
+        const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root" style="height:100dvh;padding-top:env(safe-area-inset-top)"></div>
+    <script type="module" src="/src/beta-main.tsx"></script>
+  </body>
+</html>
