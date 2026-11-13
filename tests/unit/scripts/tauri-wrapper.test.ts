@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -539,6 +539,8 @@ describeWindowsOnly('tauri-wrapper', () => {
       'debug',
     );
     const apkPath = join(apkOutputDir, 'app-x86_64-debug.apk');
+    const previousApk = existsSync(apkPath) ? readFileSync(apkPath) : null;
+    const tauriConfig = JSON.parse(readFileSync(join(process.cwd(), 'src-tauri', 'tauri.conf.json'), 'utf8'));
 
     try {
       spawnSync('cmd.exe', ['/c', 'mkdir', fakeBinDir], { stdio: 'ignore' });
@@ -596,8 +598,10 @@ describeWindowsOnly('tauri-wrapper', () => {
         encoding: 'utf8',
       }).stdout;
       expect(adbLog).toContain('-s emulator-5554 install -r -d -g -t');
-      expect(adbLog).toMatch(/shell monkey -p com\.exomind\.app -c android\.intent\.category\.LAUNCHER/);
+      expect(adbLog).toContain(`shell monkey -p ${tauriConfig.identifier} -c android.intent.category.LAUNCHER`);
     } finally {
+      if (previousApk) writeFileSync(apkPath, previousApk);
+      else rmSync(apkPath, { force: true });
       rmSync(tempDir, { recursive: true, force: true });
     }
   }, 20000);

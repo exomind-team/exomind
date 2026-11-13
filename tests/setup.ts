@@ -3,7 +3,9 @@ import '@testing-library/jest-dom';
 import { mkdirSync } from 'node:fs';
 
 // Mock scrollIntoView (jsdom 不支持)
-Element.prototype.scrollIntoView = vi.fn();
+if (typeof Element !== 'undefined') {
+  Element.prototype.scrollIntoView = vi.fn();
+}
 
 function ensureLocalStorage() {
   const storage = window.localStorage as Partial<Storage> | undefined;
@@ -44,7 +46,9 @@ function ensureLocalStorage() {
   });
 }
 
-ensureLocalStorage();
+if (typeof window !== 'undefined') {
+  ensureLocalStorage();
+}
 
 function ensurePouchDbTestDirs() {
   const dirs = [

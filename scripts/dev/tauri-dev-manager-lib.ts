@@ -164,6 +164,7 @@ function uniquePositivePids(values: Array<number | undefined>): number[] {
 const WINDOWS_TOOL_PROCESS_NAMES = new Set(['bun.exe', 'cargo.exe', 'node.exe', 'vite.exe']);
 
 function getDescendantProcesses(processes: ManagedWindowsProcessInfo[], rootPid: number): ManagedWindowsProcessInfo[] {
+  const processesByPid = new Map(processes.map((processInfo) => [processInfo.ProcessId, processInfo]));
   const childrenByParent = new Map<number, ManagedWindowsProcessInfo[]>();
   for (const processInfo of processes) {
     const siblings = childrenByParent.get(processInfo.ParentProcessId) ?? [];
@@ -173,11 +174,19 @@ function getDescendantProcesses(processes: ManagedWindowsProcessInfo[], rootPid:
 
   const descendants: ManagedWindowsProcessInfo[] = [];
   const queue = [...(childrenByParent.get(rootPid) ?? [])];
-  const seen = new Set<number>();
+  const seen = new Set<number>([rootPid]);
 
   while (queue.length > 0) {
     const current = queue.shift();
     if (!current || seen.has(current.ProcessId)) {
+      continue;
+    }
+
+    const parent = processesByPid.get(current.ParentProcessId);
+    const parentCreatedAt = parseProcessCreationTime(parent?.CreationDate);
+    const childCreatedAt = parseProcessCreationTime(current.CreationDate);
+    // A recycled parent PID must not adopt a process from an older tree.
+    if (parentCreatedAt === null || childCreatedAt === null || childCreatedAt < parentCreatedAt) {
       continue;
     }
 
@@ -199,59 +208,65 @@ function matchesDesktopProcessName(name: string, expectedBaseName: string | null
   return !WINDOWS_TOOL_PROCESS_NAMES.has(normalized);
 }
 
-function matchesExpectedExecutablePath(
-  commandLine: string | null | undefined,
-  expectedExecutablePath: string | null | undefined,
-): boolean {
-  if (!commandLine || !expectedExecutablePath) {
-    return false;
-  }
-
-  return commandLine.toLowerCase().includes(expectedExecutablePath.trim().toLowerCase());
-}
-
 export function collectManagedDesktopAppPids(input: {
   processes: ManagedWindowsProcessInfo[];
-  rootPid: number;
+  record: ManagedTauriInstanceRecord;
   expectedBaseName: string | null;
-  expectedExecutablePath?: string | null;
-  allowPathOnlyMatch?: boolean;
 }): number[] {
-  const descendants = getDescendantProcesses(input.processes, input.rootPid);
-  const descendantPids = descendants
+  if (!isManagedTauriRootProcessOwned(input.record, input.processes)) {
+    return [];
+  }
+
+  return getDescendantProcesses(input.processes, input.record.rootPid)
     .filter((processInfo) => matchesDesktopProcessName(processInfo.Name, input.expectedBaseName))
     .map((processInfo) => processInfo.ProcessId);
-
-  const pathMatchedPids = input.allowPathOnlyMatch === false
-    ? []
-    : input.processes
-      .filter((processInfo) => matchesExpectedExecutablePath(processInfo.CommandLine, input.expectedExecutablePath))
-      .map((processInfo) => processInfo.ProcessId);
-
-  return uniquePositivePids([...descendantPids, ...pathMatchedPids]);
 }
 
 function normalizeProcessIdentityValue(value: string | null | undefined): string {
   return value?.trim().replace(/^"+|"+$/g, '').toLowerCase() ?? '';
 }
 
-function processMatchesRecordedRootIdentity(
-  record: ManagedTauriInstanceRecord,
-  processInfo: ManagedWindowsProcessInfo | undefined,
+export function parseProcessCreationTime(value: string | null | undefined): number | null {
+  const serializedDate = value?.match(/^\/Date\((-?\d+)(?:[+-]\d{4})?\)\/$/);
+  const createdAt = serializedDate ? Number(serializedDate[1]) : Date.parse(value ?? '');
+  return Number.isFinite(createdAt) ? createdAt : null;
+}
+
+export function matchesManagedWindowsProcessIdentity(
+  expected: Pick<ManagedWindowsProcessInfo, 'ProcessId' | 'CreationDate' | 'ExecutablePath'>,
+  processInfo: ManagedWindowsProcessInfo | null | undefined,
 ): boolean {
-  if (!processInfo) {
+  if (!Number.isInteger(expected.ProcessId) || expected.ProcessId <= 0
+    || !processInfo || processInfo.ProcessId !== expected.ProcessId) {
     return false;
   }
 
-  const recordedCreationDate = normalizeProcessIdentityValue(record.rootCreationDate);
-  const processCreationDate = normalizeProcessIdentityValue(processInfo.CreationDate);
-  if (recordedCreationDate) {
-    return processCreationDate === recordedCreationDate;
+  const recordedCreationDate = normalizeProcessIdentityValue(expected.CreationDate);
+  const recordedExecutablePath = normalizeProcessIdentityValue(expected.ExecutablePath);
+  if (!recordedCreationDate && !recordedExecutablePath) {
+    return false;
   }
 
-  const recordedExecutablePath = normalizeProcessIdentityValue(record.rootExecutablePath);
+  if (recordedCreationDate) {
+    const expectedCreatedAt = parseProcessCreationTime(expected.CreationDate);
+    if (expectedCreatedAt === null || parseProcessCreationTime(processInfo.CreationDate) !== expectedCreatedAt) {
+      return false;
+    }
+  }
+
   const processExecutablePath = normalizeProcessIdentityValue(processInfo.ExecutablePath);
-  return Boolean(recordedExecutablePath && processExecutablePath === recordedExecutablePath);
+  return !recordedExecutablePath || processExecutablePath === recordedExecutablePath;
+}
+
+export function isManagedTauriRootProcessOwned(
+  record: ManagedTauriInstanceRecord,
+  processes: ManagedWindowsProcessInfo[],
+): boolean {
+  return matchesManagedWindowsProcessIdentity({
+    ProcessId: record.rootPid,
+    CreationDate: record.rootCreationDate,
+    ExecutablePath: record.rootExecutablePath,
+  }, processes.find((processInfo) => processInfo.ProcessId === record.rootPid));
 }
 
 const DESKTOP_APP_STARTUP_GRACE_MS = 90_000;
@@ -357,31 +372,12 @@ export function collectManagedTauriCleanupPids(
   record: ManagedTauriInstanceRecord,
   snapshot: ManagedTauriInstanceHealthSnapshot,
 ): number[] {
-  const processes = snapshot.processes ?? [];
-  const rootProcess = processes.find((processInfo) => processInfo.ProcessId === record.rootPid);
-  const rootOwned = snapshot.rootPidAlive
-    && processMatchesRecordedRootIdentity(record, rootProcess);
-  const listenerPids = uniquePositivePids([
-    ...(snapshot.webPortPids ?? []),
-    ...(snapshot.hmrPortPids ?? []),
-  ]);
-  const targetDir = normalizeProcessIdentityValue(record.targetDir);
-  const targetMatchedListenerPids = processes
-    .filter((processInfo) => listenerPids.includes(processInfo.ProcessId))
-    .filter((processInfo) => {
-      const commandLine = normalizeProcessIdentityValue(processInfo.CommandLine);
-      return Boolean(targetDir && commandLine.includes(targetDir));
-    })
+  if (!snapshot.rootPidAlive || !isManagedTauriRootProcessOwned(record, snapshot.processes ?? [])) {
+    return [];
+  }
+
+  const descendantPids = getDescendantProcesses(snapshot.processes ?? [], record.rootPid)
     .map((processInfo) => processInfo.ProcessId);
-
-  const ownedRootPids = uniquePositivePids([
-    ...(rootOwned ? [record.rootPid] : []),
-    ...(snapshot.appPids ?? []),
-    ...targetMatchedListenerPids,
-  ]);
-  const descendantPids = ownedRootPids.flatMap((pid) =>
-    getDescendantProcesses(processes, pid).map((processInfo) => processInfo.ProcessId),
-  );
-
-  return uniquePositivePids([...ownedRootPids, ...descendantPids]);
+  // Health hints and shared build paths do not grant process ownership.
+  return uniquePositivePids([record.rootPid, ...descendantPids]);
 }

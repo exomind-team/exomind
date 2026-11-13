@@ -10,6 +10,8 @@ import {
   collectManagedDesktopAppPids,
   collectManagedTauriCleanupPids,
   evaluateManagedTauriInstanceHealth,
+  isManagedTauriRootProcessOwned,
+  matchesManagedWindowsProcessIdentity,
   resolveManagedTauriInstancePaths,
   type ManagedTauriInstanceHealthSnapshot,
   type ManagedTauriInstanceRecord,
@@ -17,6 +19,7 @@ import {
   type TauriDevTarget,
 } from './tauri-dev-manager-lib';
 import { resolveTauriDevTargetDir } from './tauri-dev-target-dir-lib';
+import { stopManagedWindowsProcess } from './tauri-dev-process-stop';
 
 type CommandName = 'start' | 'list' | 'status' | 'stop' | 'logs' | 'prune';
 
@@ -258,7 +261,7 @@ function groupListenerPidsByPort(portListeners: PortListenerInfo[], port: number
   )];
 }
 
-async function collectManagedTauriHealthSnapshot(
+export async function collectManagedTauriHealthSnapshot(
   record: ManagedTauriInstanceRecord,
 ): Promise<ManagedTauriInstanceHealthSnapshot> {
   const rootPidAlive = isPidAlive(record.rootPid);
@@ -269,6 +272,9 @@ async function collectManagedTauriHealthSnapshot(
   const portListeners = runPowerShellJson<PortListenerInfo>(portProbeScript);
   const webPortPids = groupListenerPidsByPort(portListeners, record.webPort);
   const hmrPortPids = groupListenerPidsByPort(portListeners, record.hmrPort);
+  const processes = runPowerShellJson<ManagedWindowsProcessInfo>(
+    'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, ExecutablePath, CreationDate | ConvertTo-Json -Compress',
+  );
 
   if (record.target !== 'desktop') {
     return {
@@ -277,12 +283,9 @@ async function collectManagedTauriHealthSnapshot(
       hmrPortListening: hmrPortPids.length > 0,
       webPortPids,
       hmrPortPids,
+      processes,
     };
   }
-
-  const processes = runPowerShellJson<ManagedWindowsProcessInfo>(
-    'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, ExecutablePath, CreationDate | ConvertTo-Json -Compress',
-  );
 
   if (!rootPidAlive) {
     return {
@@ -298,21 +301,10 @@ async function collectManagedTauriHealthSnapshot(
   }
 
   const expectedDesktopProcess = await resolveDesktopProcessBaseName(record.projectRoot);
-  const expectedExecutablePath = expectedDesktopProcess
-    ? path.join(
-      record.targetDir ?? resolveTauriDevTargetDir(record.projectRoot, {
-        EXOMIND_TAURI_INSTANCE_NAME: record.name,
-      }),
-      'debug',
-      `${expectedDesktopProcess}.exe`,
-    )
-    : null;
   const appPids = collectManagedDesktopAppPids({
     processes,
-    rootPid: record.rootPid,
+    record,
     expectedBaseName: expectedDesktopProcess,
-    expectedExecutablePath,
-    allowPathOnlyMatch: !record.lowMemory,
   });
 
   return {
@@ -325,17 +317,6 @@ async function collectManagedTauriHealthSnapshot(
     appPids,
     processes,
   };
-}
-
-function stopWindowsProcess(pid: number): void {
-  const result = spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
-    encoding: 'utf8',
-    windowsHide: true,
-  });
-
-  if (result.status !== 0 && isPidAlive(pid)) {
-    throw new Error(result.stderr || result.stdout || `failed to stop PID ${pid}`);
-  }
 }
 
 function parseTarget(flags: Map<string, string | true>): TauriDevTarget {
@@ -524,7 +505,7 @@ async function listCommand(): Promise<void> {
   console.table(rows);
 }
 
-async function stopCommand(flags: Map<string, string | true>): Promise<void> {
+export async function stopCommand(flags: Map<string, string | true>): Promise<void> {
   const requestedName = getFlagValue(flags, '--name');
   if (!requestedName) {
     throw new Error('stop requires --name');
@@ -537,10 +518,34 @@ async function stopCommand(flags: Map<string, string | true>): Promise<void> {
   }
 
   const snapshot = await collectManagedTauriHealthSnapshot(record);
+  const processes = snapshot.processes ?? [];
+  const rootOwned = isManagedTauriRootProcessOwned(record, processes);
+  if (snapshot.rootPidAlive && !rootOwned) {
+    throw new Error(`instance ownership could not be confirmed: ${paths.name}; metadata retained`);
+  }
+  if (!rootOwned && (snapshot.webPortListening || snapshot.hmrPortListening || snapshot.appProcessAlive)) {
+    throw new Error(`unattributed listeners remain for ${paths.name}; metadata retained`);
+  }
   const cleanupPids = collectManagedTauriCleanupPids(record, snapshot);
 
-  for (const pid of cleanupPids) {
-    stopWindowsProcess(pid);
+  // Stop leaves first; a tree kill can terminate children that were never verified.
+  for (const pid of [...cleanupPids].reverse()) {
+    const plannedProcess = processes.find((processInfo) => processInfo.ProcessId === pid);
+    const currentProcess = readManagedWindowsProcess(pid);
+    if (!currentProcess) continue;
+    if (!plannedProcess || !matchesManagedWindowsProcessIdentity(plannedProcess, currentProcess)) {
+      throw new Error(`process identity changed for PID ${pid}; metadata retained`);
+    }
+    stopManagedWindowsProcess(plannedProcess);
+  }
+
+  const afterStop = await collectManagedTauriHealthSnapshot(record);
+  const plannedPids = new Set(cleanupPids);
+  const possibleDescendantsRemain = afterStop.processes?.some((processInfo) =>
+    plannedPids.has(processInfo.ProcessId) || plannedPids.has(processInfo.ParentProcessId));
+  if (afterStop.rootPidAlive || afterStop.webPortListening || afterStop.hmrPortListening
+    || afterStop.appProcessAlive || possibleDescendantsRemain) {
+    throw new Error(`instance stop is not confirmed: ${paths.name}; metadata retained`);
   }
 
   await rm(paths.metaPath, { force: true });
@@ -592,7 +597,8 @@ async function pruneCommand(): Promise<void> {
     const snapshot = await collectManagedTauriHealthSnapshot(record);
     const cleanupPids = collectManagedTauriCleanupPids(record, snapshot);
 
-    if (snapshot.rootPidAlive || cleanupPids.length > 0) {
+    if (snapshot.rootPidAlive || cleanupPids.length > 0
+      || snapshot.webPortListening || snapshot.hmrPortListening || snapshot.appProcessAlive) {
       continue;
     }
 
@@ -628,10 +634,12 @@ async function main(): Promise<void> {
   }
 }
 
-try {
-  await main();
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
-  process.exit(1);
+if (import.meta.main) {
+  try {
+    await main();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    process.exit(1);
+  }
 }

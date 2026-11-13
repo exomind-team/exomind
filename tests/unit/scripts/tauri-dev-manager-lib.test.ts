@@ -10,7 +10,26 @@ import {
   collectManagedTauriCleanupPids,
   evaluateManagedTauriInstanceHealth,
   resolveManagedTauriInstancePaths,
+  type ManagedTauriInstanceRecord,
 } from '../../../scripts/dev/tauri-dev-manager-lib';
+
+function managedRecord(overrides: Partial<ManagedTauriInstanceRecord> = {}): ManagedTauriInstanceRecord {
+  return {
+    name: 'desktop',
+    projectRoot: 'D:\\project\\exomind',
+    rootPid: 100,
+    webPort: 1420,
+    hmrPort: 1421,
+    logPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.log',
+    metaPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.json',
+    startedAt: '2026-11-13T03:00:00.000Z',
+    enableWatch: false,
+    target: 'desktop',
+    rootExecutablePath: 'C:\\Bun\\bun.exe',
+    rootCreationDate: '2026-11-13T03:00:00.000Z',
+    ...overrides,
+  };
+}
 
 describe('tauri-dev-manager-lib', () => {
   it('builds a bounded Windows linker environment for low-memory Tauri runs（低内存模式应限制编译与链接并发）', () => {
@@ -221,7 +240,7 @@ describe('tauri-dev-manager-lib', () => {
     expect(cleanupPids).toEqual([]);
   });
 
-  it('only cleans path-confirmed app processes and their descendants after root exit（根进程退出后只清理路径已确认的 app 链）', () => {
+  it('does not treat app PID hints as ownership after root exit', () => {
     const cleanupPids = collectManagedTauriCleanupPids(
       {
         name: 'desktop',
@@ -255,7 +274,7 @@ describe('tauri-dev-manager-lib', () => {
       },
     );
 
-    expect(cleanupPids).toEqual([7777, 8888]);
+    expect(cleanupPids).toEqual([]);
   });
 
   it('requires the recorded root identity before stopping the root process tree（终止根进程树前必须匹配记录的根身份）', () => {
@@ -292,8 +311,18 @@ describe('tauri-dev-manager-lib', () => {
           },
           { ProcessId: 333436, ParentProcessId: 88, Name: 'node.exe' },
           { ProcessId: 444001, ParentProcessId: 333436, Name: 'node.exe' },
-          { ProcessId: 7777, ParentProcessId: 99, Name: 'exomind.exe' },
-          { ProcessId: 8888, ParentProcessId: 7777, Name: 'conhost.exe' },
+          {
+            ProcessId: 7777,
+            ParentProcessId: 1234,
+            Name: 'exomind.exe',
+            CreationDate: '2026-03-18T10:02:04.000Z',
+          },
+          {
+            ProcessId: 8888,
+            ParentProcessId: 7777,
+            Name: 'conhost.exe',
+            CreationDate: '2026-03-18T10:02:05.000Z',
+          },
         ],
       },
     );
@@ -377,7 +406,7 @@ describe('tauri-dev-manager-lib', () => {
     expect(cleanupPids).toEqual([]);
   });
 
-  it('allows a listener only when its command line matches the managed target dir（只有命令行走实例目标目录的监听进程才允许回收）', () => {
+  it('does not treat a shared target path in an unrelated listener command as ownership', () => {
     const cleanupPids = collectManagedTauriCleanupPids(
       {
         name: 'desktop',
@@ -414,14 +443,13 @@ describe('tauri-dev-manager-lib', () => {
       },
     );
 
-    expect(cleanupPids).toEqual([333436, 444001]);
+    expect(cleanupPids).toEqual([]);
   });
 
-  it('recognizes the desktop app by its resolved executable path even when it is no longer a bun descendant（桌面进程脱离 bun 子进程链后仍应被 manager 识别）', () => {
+  it('does not claim a detached app by executable path alone', () => {
     const appPids = collectManagedDesktopAppPids({
-      rootPid: 1234,
+      record: managedRecord({ rootPid: 1234 }),
       expectedBaseName: 'exomind',
-      expectedExecutablePath: 'G:\\exomind-cargo-target\\tauri-dev\\issue806-g\\debug\\exomind.exe',
       processes: [
         {
           ProcessId: 1234,
@@ -438,15 +466,81 @@ describe('tauri-dev-manager-lib', () => {
       ],
     });
 
-    expect(appPids).toEqual([7777]);
+    expect(appPids).toEqual([]);
+  });
+
+  it('does not accept app PID hints or descendants of a reused root PID', () => {
+    const cleanupPids = collectManagedTauriCleanupPids(managedRecord(), {
+      rootPidAlive: true,
+      webPortListening: false,
+      hmrPortListening: false,
+      appPids: [200],
+      processes: [
+        {
+          ProcessId: 100,
+          ParentProcessId: 1,
+          Name: 'bun.exe',
+          ExecutablePath: 'C:\\Bun\\bun.exe',
+          CreationDate: '2026-11-13T04:00:00.000Z',
+        },
+        {
+          ProcessId: 200,
+          ParentProcessId: 100,
+          Name: 'exomind.exe',
+          CreationDate: '2026-11-13T04:00:01.000Z',
+        },
+      ],
+    });
+
+    expect(cleanupPids).toEqual([]);
+  });
+
+  it('requires all recorded root identity fields to match, not only its creation time', () => {
+    const cleanupPids = collectManagedTauriCleanupPids(managedRecord(), {
+      rootPidAlive: true,
+      webPortListening: false,
+      hmrPortListening: false,
+      processes: [{
+        ProcessId: 100,
+        ParentProcessId: 1,
+        Name: 'bun.exe',
+        ExecutablePath: 'C:\\Other\\bun.exe',
+        CreationDate: '2026-11-13T03:00:00.000Z',
+      }],
+    });
+
+    expect(cleanupPids).toEqual([]);
+  });
+
+  it('rejects descendants that predate their current parent process', () => {
+    const cleanupPids = collectManagedTauriCleanupPids(managedRecord(), {
+      rootPidAlive: true,
+      webPortListening: false,
+      hmrPortListening: false,
+      processes: [
+        {
+          ProcessId: 100,
+          ParentProcessId: 1,
+          Name: 'bun.exe',
+          ExecutablePath: 'C:\\Bun\\bun.exe',
+          CreationDate: '2026-11-13T03:00:00.000Z',
+        },
+        {
+          ProcessId: 200,
+          ParentProcessId: 100,
+          Name: 'exomind.exe',
+          CreationDate: '2026-11-13T02:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(cleanupPids).toEqual([100]);
   });
 
   it('does not recognize shared low-memory executables by path alone（低内存共享 target 不得仅靠可执行路径认领进程）', () => {
     const appPids = collectManagedDesktopAppPids({
-      rootPid: 1234,
+      record: managedRecord({ rootPid: 1234, lowMemory: true }),
       expectedBaseName: 'exomind',
-      expectedExecutablePath: 'G:\\exomind-cargo-target\\tauri-dev\\low-memory-shared\\debug\\exomind.exe',
-      allowPathOnlyMatch: false,
       processes: [
         {
           ProcessId: 7777,
@@ -458,5 +552,35 @@ describe('tauri-dev-manager-lib', () => {
     });
 
     expect(appPids).toEqual([]);
+  });
+
+  it('recognizes only app descendants of the verified current root', () => {
+    const appPids = collectManagedDesktopAppPids({
+      record: managedRecord(),
+      expectedBaseName: 'exomind',
+      processes: [
+        {
+          ProcessId: 100,
+          ParentProcessId: 1,
+          Name: 'bun.exe',
+          ExecutablePath: 'C:\\Bun\\bun.exe',
+          CreationDate: '2026-11-13T03:00:00.000Z',
+        },
+        {
+          ProcessId: 200,
+          ParentProcessId: 100,
+          Name: 'exomind.exe',
+          CreationDate: '2026-11-13T03:00:01.000Z',
+        },
+        {
+          ProcessId: 300,
+          ParentProcessId: 1,
+          Name: 'exomind.exe',
+          CreationDate: '2026-11-13T03:00:02.000Z',
+        },
+      ],
+    });
+
+    expect(appPids).toEqual([200]);
   });
 });
