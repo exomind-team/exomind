@@ -23,6 +23,7 @@ fn command(profile: ProfileId) -> CaptureCommand {
         occurred_at_ms: 1,
         text: "synthetic gated capture".into(),
         tags: vec![],
+        originals: vec![],
     }
 }
 

@@ -8,7 +8,18 @@ use std::{
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
-        eprintln!("exomind-beta: {error}");
+        if matches!(
+            error.downcast_ref::<exomind_beta_host::HostError>(),
+            Some(exomind_beta_host::HostError::Core(
+                exomind_core::CoreError::RecoveryRequired
+            ))
+        ) {
+            eprintln!(
+                "exomind-beta: recovery_required: existing storage requires explicit recovery or completion of initialization"
+            );
+        } else {
+            eprintln!("exomind-beta: {error}");
+        }
         std::process::exit(1);
     }
 }

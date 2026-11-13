@@ -55,28 +55,93 @@ impl IntoResponse for HostError {
                 "stopped",
                 "Host is stopped",
             ),
+            Self::Core(CoreError::RecoveryRequired) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "recovery_required",
+                "Existing storage requires explicit recovery or completion of initialization",
+            ),
             Self::UntrustedOrigin => (
                 StatusCode::FORBIDDEN,
                 "untrusted_origin",
                 "Request host or origin rejected",
             ),
             Self::InvalidRequest
-            | Self::Core(CoreError::InvalidCapture(_) | CoreError::InvalidQuery(_)) => (
+            | Self::Core(
+                CoreError::InvalidCapture(_)
+                | CoreError::InvalidQuery(_)
+                | CoreError::InvalidOriginal(_)
+                | CoreError::InvalidOriginalOffset,
+            ) => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "Invalid request",
             ),
-            Self::NotFound | Self::Core(CoreError::UnknownProfile) => {
-                (StatusCode::NOT_FOUND, "not_found", "Resource not found")
-            }
+            Self::PayloadTooLarge => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "payload_too_large",
+                "Request body exceeds the permitted size",
+            ),
+            Self::VerificationBusy => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "verification_busy",
+                "Original verification slots are busy",
+            ),
+            Self::NotFound
+            | Self::Core(
+                CoreError::UnknownProfile | CoreError::UnknownStage | CoreError::UnknownOriginal,
+            ) => (StatusCode::NOT_FOUND, "not_found", "Resource not found"),
             Self::Core(
-                CoreError::CommandConflict | CoreError::EventConflict | CoreError::ProfileConflict,
+                CoreError::CommandConflict
+                | CoreError::EventConflict
+                | CoreError::ProfileConflict
+                | CoreError::StageConflict
+                | CoreError::OriginalConflict
+                | CoreError::ChunkConflict,
             ) => (
                 StatusCode::CONFLICT,
                 "conflict",
                 "Identifier is already bound to different content",
             ),
-            Self::Core(CoreError::ScopeMismatch | CoreError::ForeignContext) => (
+            Self::Core(CoreError::StageNotUploading) => (
+                StatusCode::CONFLICT,
+                "stage_not_uploading",
+                "Stage no longer accepts bytes",
+            ),
+            Self::Core(CoreError::StageIncomplete) => (
+                StatusCode::CONFLICT,
+                "stage_incomplete",
+                "Original upload is incomplete",
+            ),
+            Self::Core(CoreError::OriginalNotReady) => (
+                StatusCode::CONFLICT,
+                "original_not_ready",
+                "Original is not verified",
+            ),
+            Self::Core(CoreError::OriginalHashMismatch) => (
+                StatusCode::CONFLICT,
+                "original_hash_mismatch",
+                "Original bytes do not match the declared digest",
+            ),
+            Self::Core(CoreError::OriginalIntegrityMismatch) => (
+                StatusCode::CONFLICT,
+                "original_integrity_mismatch",
+                "Stored original bytes failed integrity verification",
+            ),
+            Self::Core(CoreError::VerificationCancelled) => (
+                StatusCode::CONFLICT,
+                "verification_cancelled",
+                "Original verification was cancelled",
+            ),
+            Self::Core(CoreError::StaleVerification) => (
+                StatusCode::CONFLICT,
+                "stale_verification",
+                "Original verification is no longer current",
+            ),
+            Self::Core(
+                CoreError::ScopeMismatch
+                | CoreError::ForeignContext
+                | CoreError::OriginalAccessDenied,
+            ) => (
                 StatusCode::FORBIDDEN,
                 "forbidden",
                 "Capability does not permit this operation",
@@ -151,6 +216,11 @@ async fn boundary(State(boundary): State<Boundary>, request: Request, next: Next
     } else {
         next.run(request).await
     };
+    // Status identity, private stage metadata and authenticated fact data must
+    // not be replayed from a browser/proxy cache across grant or host changes.
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     if let Some(origin) = origin {
         // The value comes from validated configuration, never arbitrary reflection.
         let Ok(origin) = HeaderValue::from_str(&origin) else {
@@ -176,7 +246,7 @@ async fn boundary(State(boundary): State<Boundary>, request: Request, next: Next
     response
 }
 
-fn bearer(headers: &HeaderMap) -> Result<String, HostError> {
+pub(crate) fn bearer(headers: &HeaderMap) -> Result<String, HostError> {
     let value = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -188,7 +258,7 @@ fn bearer(headers: &HeaderMap) -> Result<String, HostError> {
     Ok(raw.to_owned())
 }
 
-async fn work<T: Send + 'static>(
+pub(crate) async fn work<T: Send + 'static>(
     host: Arc<BetaHost>,
     action: impl FnOnce(&BetaHost) -> Result<T, HostError> + Send + 'static,
 ) -> Result<T, HostError> {
@@ -340,6 +410,7 @@ fn router(host: Arc<BetaHost>, address: SocketAddr, frontend_origins: Vec<String
         .route("/beta/v1/capture", post(capture))
         .route("/beta/v1/profiles/:profile/events", get(events))
         .route("/beta/v1/profiles/:profile/receipts/:command", get(receipt))
+        .merge(crate::originals_http::router())
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(middleware::from_fn_with_state(
             Boundary {

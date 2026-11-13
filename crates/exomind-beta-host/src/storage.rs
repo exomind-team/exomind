@@ -28,6 +28,7 @@ pub(crate) struct Persistence {
     pub auth: Connection,
     pub _lock: Connection,
     pub descriptor: Descriptor,
+    pub owner_existed: bool,
 }
 
 pub(crate) fn token() -> String {
@@ -143,6 +144,40 @@ pub(crate) fn private_path(path: &Path, directory: bool) -> Result<(), HostError
     Ok(())
 }
 
+fn private_tree(path: &Path, secure: bool) -> Result<(), HostError> {
+    let metadata = fs::symlink_metadata(path)?;
+    let kind = metadata.file_type();
+    if kind.is_symlink() || (!kind.is_file() && !kind.is_dir()) {
+        return Err(HostError::InvalidRoot);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // Junctions and other reparse points must not redirect a recursive ACL
+        // operation into an unrelated application's directory.
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err(HostError::InvalidRoot);
+        }
+    }
+    if secure {
+        private_path(path, kind.is_dir())?;
+    }
+    if kind.is_dir() {
+        for entry in fs::read_dir(path)? {
+            private_tree(&entry?.path(), secure)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn check_private_tree(path: &Path) -> Result<(), HostError> {
+    private_tree(path, false)
+}
+
+pub(crate) fn secure_private_tree(path: &Path) -> Result<(), HostError> {
+    private_tree(path, true)
+}
+
 fn checked_database(
     connection: &mut Connection,
     application: i64,
@@ -190,9 +225,22 @@ impl Persistence {
             .map_err(|error| if matches!(error, HostError::Database(rusqlite::Error::SqliteFailure(ref code, _)) if code.code == rusqlite::ErrorCode::DatabaseBusy || code.code == rusqlite::ErrorCode::DatabaseLocked) {HostError::RootInUse} else {error})?;
         lock.execute_batch("BEGIN EXCLUSIVE")
             .map_err(|_| HostError::RootInUse)?;
-        let mut auth = Connection::open(root.join("host-auth.sqlite3"))?;
+        let auth_path = root.join("host-auth.sqlite3");
+        let initialized_evidence = root.join(CONNECTION).exists() || root.join("core").exists();
+        if initialized_evidence && (!auth_path.exists() || fs::metadata(&auth_path)?.len() == 0) {
+            return Err(HostError::Core(exomind_core::CoreError::RecoveryRequired));
+        }
+        let mut auth = Connection::open(&auth_path)?;
         auth.busy_timeout(Duration::from_secs(5))?;
         auth.pragma_update(None, "synchronous", "FULL")?;
+        if initialized_evidence {
+            let application: i64 =
+                auth.pragma_query_value(None, "application_id", |row| row.get(0))?;
+            let version: i64 = auth.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            if application != AUTH_APPLICATION || version != 1 {
+                return Err(HostError::Core(exomind_core::CoreError::RecoveryRequired));
+            }
+        }
         checked_database(
             &mut auth,
             AUTH_APPLICATION,
@@ -205,6 +253,15 @@ impl Persistence {
                 |row| row.get(0),
             )
             .optional()?;
+        let has_binding: bool = auth.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_binding')",
+            [],
+            |row| row.get(0),
+        )?;
+        if owner.is_none() && (has_binding || root.join("core").exists()) {
+            return Err(HostError::Core(exomind_core::CoreError::RecoveryRequired));
+        }
+        let owner_existed = owner.is_some();
         let descriptor_path = root.join(CONNECTION);
         let descriptor = if descriptor_path.exists() {
             private_path(&descriptor_path, false)?;
@@ -232,6 +289,7 @@ impl Persistence {
             auth,
             _lock: lock,
             descriptor,
+            owner_existed,
         };
         if let Some(owner) = owner {
             if owner != token_hash(&persistence.descriptor.owner_token) {
@@ -247,6 +305,50 @@ impl Persistence {
             )?;
         }
         Ok(persistence)
+    }
+
+    pub(crate) fn bound_device(&self) -> Result<Option<exomind_core::DeviceId>, HostError> {
+        let exists: bool = self.auth.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_binding')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Ok(None);
+        }
+        let stored: Option<String> = self
+            .auth
+            .query_row(
+                "SELECT device_id FROM core_binding WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let device = stored
+            .and_then(|value| value.parse().ok())
+            .ok_or(HostError::Core(exomind_core::CoreError::RecoveryRequired))?;
+        Ok(Some(device))
+    }
+
+    pub(crate) fn bind_core(&mut self, device: exomind_core::DeviceId) -> Result<(), HostError> {
+        if self
+            .bound_device()?
+            .is_some_and(|expected| expected != device)
+        {
+            return Err(HostError::Core(exomind_core::CoreError::RecoveryRequired));
+        }
+        let transaction = self
+            .auth
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Host auth schema remains 1 for older owner/grant readers. This extra
+        // table is a durable one-time binding, never an automatic rebind.
+        transaction.execute_batch("CREATE TABLE IF NOT EXISTS core_binding(singleton INTEGER PRIMARY KEY CHECK(singleton=1),device_id TEXT NOT NULL)")?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO core_binding VALUES(1,?1)",
+            [device.to_string()],
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn write_descriptor(&mut self) -> Result<(), HostError> {
@@ -283,6 +385,49 @@ impl Persistence {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_core_backups_keep_directory_permissions_and_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let backup_dir = directory.path().join("core/backups");
+        fs::create_dir_all(&backup_dir).unwrap();
+        let backup = backup_dir.join("synthetic.sqlite3");
+        fs::write(&backup, b"synthetic preserved backup").unwrap();
+        check_private_tree(directory.path()).unwrap();
+        secure_private_tree(directory.path()).unwrap();
+        assert!(backup_dir.is_dir());
+        assert_eq!(fs::read(&backup).unwrap(), b"synthetic preserved backup");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&backup_dir).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(&backup).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recursive_core_permissions_reject_a_backup_symlink() {
+        use std::os::unix::fs::symlink;
+        let directory = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let backup_dir = directory.path().join("core/backups");
+        fs::create_dir_all(&backup_dir).unwrap();
+        let outside_file = outside.path().join("untouched");
+        fs::write(&outside_file, b"external sentinel").unwrap();
+        symlink(&outside_file, backup_dir.join("synthetic.sqlite3")).unwrap();
+        assert!(matches!(
+            check_private_tree(directory.path()),
+            Err(HostError::InvalidRoot)
+        ));
+        assert_eq!(fs::read(outside_file).unwrap(), b"external sentinel");
+    }
 
     #[test]
     fn initialization_reuses_durable_credentials_after_owner_insert_failure() {

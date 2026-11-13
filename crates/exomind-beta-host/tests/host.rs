@@ -36,6 +36,7 @@ fn command(profile: ProfileId, text: &str) -> CaptureCommand {
         occurred_at_ms: 1794560000000,
         text: text.into(),
         tags: vec!["synthetic".into()],
+        originals: vec![],
     }
 }
 fn local(host: &BetaHost, owner: &Session, profile: ProfileId, kind: GrantKind) -> String {

@@ -2,6 +2,10 @@
 //! the legacy Runtime and its stores are never instantiated here.
 mod http;
 #[cfg(test)]
+mod original_tests;
+mod originals;
+mod originals_http;
+#[cfg(test)]
 mod stop_tests;
 mod storage;
 
@@ -54,6 +58,10 @@ pub enum HostError {
     UntrustedOrigin,
     #[error("listener shutdown was interrupted")]
     Shutdown,
+    #[error("request body exceeds the permitted size")]
+    PayloadTooLarge,
+    #[error("all original verification slots are in use")]
+    VerificationBusy,
     #[error("core operation failed")]
     Core(#[from] CoreError),
     #[error("host database operation failed")]
@@ -126,6 +134,13 @@ pub struct HostStatus {
     pub runtime_id: Uuid,
     pub device_id: DeviceId,
     pub running: bool,
+    pub capabilities: HostCapabilities,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HostCapabilities {
+    pub originals: bool,
+    pub max_original_chunk_bytes: usize,
 }
 
 struct Resources {
@@ -142,6 +157,7 @@ pub struct BetaHost {
     device_id: DeviceId,
     accepting: AtomicBool,
     gate: Mutex<State>,
+    verifications: originals::VerificationRegistry,
     #[cfg(test)]
     capture_admitted: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
@@ -154,20 +170,30 @@ struct ProfileAuthority {
 
 impl BetaHost {
     pub fn open(root: &Path) -> Result<Self, HostError> {
-        let persistence = Persistence::open(root)?;
+        let mut persistence = Persistence::open(root)?;
         let core_root = persistence.root.join("core");
+        let main_database = core_root.join("beta-core.sqlite3");
+        if persistence.owner_existed
+            && (!main_database.exists() || std::fs::metadata(&main_database)?.len() == 0)
+        {
+            return Err(HostError::Core(CoreError::RecoveryRequired));
+        }
         std::fs::create_dir_all(&core_root)?;
+        storage::check_private_tree(&core_root)?;
         storage::private_path(&core_root, true)?;
-        let core = Core::open(&core_root)?;
+        let core = match persistence.bound_device()? {
+            Some(device) => Core::open_bound(&core_root, device)?,
+            None => Core::open(&core_root)?,
+        };
+        persistence.bind_core(core.device_id())?;
         // Secure recognized core files only after Core has validated its schema
         // and ownership. Never modify a foreign directory to make it acceptable.
-        for entry in std::fs::read_dir(&core_root)? {
-            storage::private_path(&entry?.path(), false)?;
-        }
+        storage::secure_private_tree(&core_root)?;
         Ok(Self {
             runtime_id: Uuid::new_v4(),
             device_id: core.device_id(),
             accepting: AtomicBool::new(true),
+            verifications: originals::VerificationRegistry::default(),
             #[cfg(test)]
             capture_admitted: Mutex::new(None),
             gate: Mutex::new(State {
@@ -207,6 +233,10 @@ impl BetaHost {
             runtime_id: self.runtime_id,
             device_id: self.device_id,
             running,
+            capabilities: HostCapabilities {
+                originals: true,
+                max_original_chunk_bytes: exomind_core::MAX_ORIGINAL_CHUNK_BYTES,
+            },
         })
     }
 
@@ -365,6 +395,7 @@ impl BetaHost {
         if changed == 0 {
             return Err(HostError::NotFound);
         }
+        self.verifications.cancel_grant(id)?;
         Ok(())
     }
 
@@ -431,14 +462,24 @@ impl BetaHost {
     }
 
     pub fn stop(&self) -> Result<(), HostError> {
+        self.stop_with_timeout(std::time::Duration::from_secs(5))
+    }
+
+    fn stop_with_timeout(&self, timeout: std::time::Duration) -> Result<(), HostError> {
         self.request_stop();
-        // Gate shared with final authorization and SQLite commit: queued work
-        // arriving after stop/revoke cannot acquire old submission eligibility.
-        let mut state = self.state()?;
-        state.resources.take();
-        if let Some(shutdown) = state.listener_shutdown.take() {
-            let _ = shutdown.send(());
+        {
+            // Stop listener admission before waiting, but never retain the gate
+            // while an owned verification drains its independent read handle.
+            let mut state = self.state()?;
+            if let Some(shutdown) = state.listener_shutdown.take() {
+                let _ = shutdown.send(());
+            }
         }
+        self.verifications.cancel_all()?;
+        self.verifications.wait_empty(timeout)?;
+        // A timeout deliberately retains resources/the root lock: an old read
+        // connection must not coexist with a newly opened host for this root.
+        self.state()?.resources.take();
         Ok(())
     }
 
