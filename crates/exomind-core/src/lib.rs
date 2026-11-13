@@ -25,6 +25,10 @@ pub enum CoreError {
     ReadOnlyDatabase,
     #[error("profile does not exist")]
     UnknownProfile,
+    #[error("profile ID is already bound to another display name")]
+    ProfileConflict,
+    #[error("invalid event query: {0}")]
+    InvalidQuery(&'static str),
     #[error("requested profile differs from the authenticated scope")]
     ScopeMismatch,
     #[error("context belongs to another core lifecycle")]
@@ -64,6 +68,47 @@ pub struct CaptureCommand {
     pub tags: Vec<String>,
 }
 
+/// Profile inventory is a trusted-host management capability, not a public
+/// discovery surface or authority to access these profiles' contents.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileInfo {
+    pub profile_id: ProfileId,
+    pub display_name: String,
+}
+
+pub const MAX_EVENT_PAGE_SIZE: usize = 100;
+
+/// Cursors are local commit positions, never event timestamps. Pass the first
+/// response's highwater as through to keep subsequent pages in one snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EventQuery {
+    pub before: Option<u64>,
+    pub through: Option<u64>,
+    pub limit: usize,
+    pub search: Option<String>,
+}
+
+impl Default for EventQuery {
+    fn default() -> Self {
+        Self {
+            before: None,
+            through: None,
+            limit: MAX_EVENT_PAGE_SIZE,
+            search: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EventPage {
+    pub items: Vec<EventRecord>,
+    pub next_before: Option<u64>,
+    pub highwater: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthorKind {
@@ -89,6 +134,7 @@ pub enum Durability {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Receipt {
     pub command_id: CommandId,
     pub event_id: EventId,
@@ -100,6 +146,7 @@ pub struct Receipt {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EventRecord {
     pub event_id: EventId,
     pub profile_id: ProfileId,

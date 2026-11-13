@@ -1,6 +1,6 @@
 use crate::{
-    AgentId, AuthorKind, CaptureCommand, CommandId, CoreError, DeviceId, Durability, EventRecord,
-    ProfileId, Receipt, WriterContext,
+    AgentId, AuthorKind, CaptureCommand, CommandId, CoreError, DeviceId, Durability, EventPage,
+    EventQuery, EventRecord, MAX_EVENT_PAGE_SIZE, ProfileId, ProfileInfo, Receipt, WriterContext,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::Serialize;
@@ -104,15 +104,65 @@ impl Core {
     }
 
     pub fn create_profile(&self, name: &str) -> Result<ProfileId, CoreError> {
+        self.provision_profile(ProfileId::new(), name)
+            .map(|profile| profile.profile_id)
+    }
+
+    /// Allows a host to reserve the UUID before its first request, so a lost
+    /// response cannot create a second profile when that request is repeated.
+    pub fn provision_profile(
+        &self,
+        profile_id: ProfileId,
+        name: &str,
+    ) -> Result<ProfileInfo, CoreError> {
         if name.trim().is_empty() {
             return Err(CoreError::InvalidCapture("empty profile display name"));
         }
-        let profile = ProfileId::new();
-        self.connection()?.execute(
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<String> = transaction
+            .query_row(
+                "SELECT display_name FROM profiles WHERE id=?1",
+                [profile_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            if existing != name {
+                return Err(CoreError::ProfileConflict);
+            }
+            return Ok(ProfileInfo {
+                profile_id,
+                display_name: existing,
+            });
+        }
+        transaction.execute(
             "INSERT INTO profiles(id, display_name) VALUES (?1,?2)",
-            params![profile.to_string(), name],
+            params![profile_id.to_string(), name],
         )?;
-        Ok(profile)
+        transaction.commit()?;
+        Ok(ProfileInfo {
+            profile_id,
+            display_name: name.to_owned(),
+        })
+    }
+
+    pub fn profiles(&self) -> Result<Vec<ProfileInfo>, CoreError> {
+        let connection = self.connection()?;
+        let mut statement =
+            connection.prepare("SELECT id,display_name FROM profiles ORDER BY display_name,id")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut profiles = Vec::new();
+        for row in rows {
+            let (profile, name) = row?;
+            profiles.push(ProfileInfo {
+                profile_id: profile.parse()?,
+                display_name: name,
+            });
+        }
+        Ok(profiles)
     }
 
     /// Local management authority: adapters must not expose session creation
@@ -306,6 +356,79 @@ impl Core {
             events.push(event);
         }
         Ok(events)
+    }
+
+    /// Case-sensitive literal substring search over the original text. The
+    /// extra row is only lookahead; next_before always names the last returned
+    /// fact, preventing duplicates at equal timestamps and sparse sequences.
+    pub fn events_page(
+        &self,
+        context: &WriterContext,
+        profile: ProfileId,
+        query: &EventQuery,
+    ) -> Result<EventPage, CoreError> {
+        self.check_scope(context, profile)?;
+        if !(1..=MAX_EVENT_PAGE_SIZE).contains(&query.limit) {
+            return Err(CoreError::InvalidQuery("limit must be between 1 and 100"));
+        }
+        let connection = self.connection()?;
+        let current: i64 = connection.query_row(
+            "SELECT coalesce(max(local_seq),0) FROM events WHERE profile_id=?1",
+            [profile.to_string()],
+            |row| row.get(0),
+        )?;
+        let current = u64::try_from(current)
+            .map_err(|_| CoreError::InvalidQuery("invalid stored sequence"))?;
+        let highwater = query.through.unwrap_or(current);
+        if highwater > current {
+            return Err(CoreError::InvalidQuery(
+                "snapshot is ahead of available history",
+            ));
+        }
+        if let Some(before) = query.before {
+            if before == 0 || before > highwater + 1 {
+                return Err(CoreError::InvalidQuery(
+                    "before must be positive and within the snapshot",
+                ));
+            }
+        }
+        // SQLite sequences are signed; highwater+1 is still a valid exclusive
+        // upper boundary at i64::MAX, represented by no additional predicate.
+        let before = query.before.and_then(|value| i64::try_from(value).ok());
+        let through = i64::try_from(highwater)
+            .map_err(|_| CoreError::InvalidQuery("snapshot exceeds the SQLite sequence range"))?;
+        let mut statement = connection.prepare(
+            "SELECT local_seq,body FROM events WHERE profile_id=?1 AND local_seq<=?2 AND (?3 IS NULL OR local_seq<?3) AND (?4 IS NULL OR instr(json_extract(body,'$.text'),?4)>0) ORDER BY local_seq DESC LIMIT ?5"
+        )?;
+        let rows = statement.query_map(
+            params![
+                profile.to_string(),
+                through,
+                before,
+                query.search.as_deref(),
+                (query.limit + 1) as i64
+            ],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        let mut items = Vec::new();
+        for row in rows {
+            let (sequence, body) = row?;
+            let mut event: EventRecord = serde_json::from_str(&body)?;
+            event.local_seq = sequence as u64;
+            items.push(event);
+        }
+        let has_more = items.len() > query.limit;
+        items.truncate(query.limit);
+        let next_before = if has_more {
+            items.last().map(|event| event.local_seq)
+        } else {
+            None
+        };
+        Ok(EventPage {
+            items,
+            next_before,
+            highwater,
+        })
     }
 
     pub fn receipt(
