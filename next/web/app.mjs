@@ -4,19 +4,20 @@ const labels = { capture: '随手记', 'block.started': '时间块开始', 'bloc
 const states = { paired: '已配对，尚未确认补齐', catching_up: '记录补齐中', attachments_pending: '文字已拉取，附件待补齐', caught_up: '已拉取对端当前快照', paused: '已暂停', revoked: '已撤销', error: '连接或同步异常' };
 const jobStates = { pending: '等待处理', waiting_provider: '待配置模型', running: '生成中', succeeded: '已保存', failed: '失败，可重试', cancelled: '已取消' };
 let api, identity, files = [], nextBefore = null, query = '', refreshing = false, view = 'buffer', lastTimeline = '', lastCurrent = '', lastPeers = '', lastJobs = '', historyExpanded = false, refreshAgain = false, resetRequested = false, timelineGeneration = 0, blockBusy = false, blockAction = null, selectedUrls = [], detailGeneration = 0;
+let captureDraftId = crypto.randomUUID(), captureAttempt = null, captureBusy = false, captureContext = 0;
 function el(tag, content, className) { const e = document.createElement(tag); if (content !== undefined)
     e.textContent = content; if (className)
     e.className = className; return e; }
 function notice(message, error = false) { $('notice').textContent = message; $('notice').hidden = false; $('notice').classList.toggle('error', error); }
-function key(name) { return `exomind:${identity.deviceId}:${name}`; }
+function key(name, deviceId = identity.deviceId) { return `exomind:${deviceId}:${name}`; }
 function readLocal(name) {
     try { return JSON.parse(localStorage.getItem(key(name)) ?? 'null'); }
     catch { throw new Error('浏览器草稿读取失败，无法确认先前请求；不会自动生成替代操作。'); }
 }
-function saveLocal(name, value, { required = false } = {}) {
+function saveLocal(name, value, { required = false, deviceId = identity.deviceId } = {}) {
     try {
-        if (value === null) localStorage.removeItem(key(name));
-        else localStorage.setItem(key(name), JSON.stringify(value));
+        if (value === null) localStorage.removeItem(key(name, deviceId));
+        else localStorage.setItem(key(name, deviceId), JSON.stringify(value));
         return true;
     } catch {
         const message = '浏览器草稿存储不可用。请保留当前内容，恢复存储后重试。';
@@ -218,60 +219,99 @@ async function refresh({ reset = false } = {}) {
         if (refreshAgain) { refreshAgain = false; void refresh(); }
     }
 }
-function renderFiles() { const host = $('file-list'); host.replaceChildren(); files.forEach((file, i) => { const chip = el('span', undefined, 'file-chip'); chip.append(el('span', `${file.name} · ${formatBytes(file.size)}`), button('×', () => { files.splice(i, 1); renderFiles(); })); chip.lastChild.setAttribute('aria-label', `移除 ${file.name}`); host.append(chip); }); }
-function addFiles(values) { if ($('capture-text').readOnly)
-    return notice('上次记录尚未确认，请先重试。', true); const all = [...files, ...values]; if (all.length > 16)
+function touchCaptureDraft() {
+    captureDraftId = crypto.randomUUID();
+    saveLocal('draft', { id: captureDraftId, text: $('capture-text').value });
+}
+function restoreCaptureDraft() {
+    const stored = readLocal('pending');
+    // Old clients stored only the request. Its draft ownership is unknown, so
+    // confirming that legacy request must never clear a recovered current draft.
+    const envelope = stored === null ? null : stored && typeof stored === 'object' && Object.hasOwn(stored, 'request') ? stored : { request: stored, draftId: null };
+    const draft = readLocal('draft');
+    if (draft !== null && typeof draft !== 'string' && !(typeof draft?.id === 'string' && typeof draft?.text === 'string'))
+        throw new Error('浏览器草稿格式无效，原存储已保留，请勿用新操作替代未确认请求。');
+    if (envelope && !(typeof envelope.request?.id === 'string' && typeof envelope.request.text === 'string' && Array.isArray(envelope.request.files)))
+        throw new Error('待确认请求格式无效，原存储已保留。');
+    captureDraftId = draft && typeof draft === 'object' ? draft.id : draft === null && typeof envelope?.draftId === 'string' ? envelope.draftId : crypto.randomUUID();
+    $('capture-text').value = typeof draft === 'string' ? draft : draft?.text ?? envelope?.request.text ?? '';
+    captureAttempt = envelope ? { draftId: typeof envelope.draftId === 'string' ? envelope.draftId : null, request: envelope.request, durable: true } : null;
+    captureBusy = false;
+    $('capture-text').readOnly = false;
+    $('file-input').disabled = false;
+    $('send').disabled = false;
+    $('send').textContent = envelope ? '重试上一条' : '记下';
+    if (envelope) $('save-state').textContent = '上次提交尚未确认；重试沿用原 ID，当前输入属于下一稿。';
+}
+function renderFiles() { const host = $('file-list'); host.replaceChildren(); files.forEach((file, i) => { const chip = el('span', undefined, 'file-chip'); chip.append(el('span', `${file.name} · ${formatBytes(file.size)}`), button('×', () => { files.splice(i, 1); touchCaptureDraft(); renderFiles(); })); chip.lastChild.setAttribute('aria-label', `移除 ${file.name}`); host.append(chip); }); }
+function addFiles(values) { const all = [...files, ...values]; if (all.length > 16)
     return notice('首版每条最多 16 个附件。', true); if (all.some(f => f.size > 64 * 1024 * 1024))
-    return notice('首版单附件上限 64 MiB。', true); files = all; renderFiles(); }
+    return notice('首版单附件上限 64 MiB。', true); files = all; touchCaptureDraft(); renderFiles(); }
 async function send() {
+    if (captureBusy) return;
+    const context = captureContext;
+    const runtimeApi = api;
+    const deviceId = identity.deviceId;
+    captureBusy = true;
     $('send').disabled = true;
-    $('capture-text').readOnly = true;
-    $('file-input').disabled = true;
+    let attempt = captureAttempt;
+    const current = () => context === captureContext && captureAttempt === attempt;
     try {
-        let pending = readLocal('pending');
-        if (!pending) {
+        if (!attempt) {
             const value = $('capture-text').value;
-            if (!value.trim() && !files.length) {
-                $('capture-text').readOnly = false;
-                return;
-            }
-            const attachments = [];
-            for (const file of files) {
-                $('save-state').textContent = `校验并上传 ${file.name}`;
-                attachments.push(await upload(api, file, (sent, total) => { $('save-state').textContent = `${file.name} · ${formatBytes(sent)} / ${formatBytes(total)}`; }));
-            }
+            if (!value.trim() && !files.length) return;
             const active = JSON.parse(lastCurrent || '{"active":[]}').active;
-            pending = { id: crypto.randomUUID(), text: value, files: attachments, blockId: active.length === 1 ? active[0].id : null };
-            saveLocal('pending', pending, { required: true });
+            attempt = { id: crypto.randomUUID(), draftId: captureDraftId, text: value, sourceFiles: [...files], blockId: active.length === 1 ? active[0].id : null, request: null };
+            captureAttempt = attempt;
         }
-        $('capture-text').readOnly = true;
-        const receipt = await api.post('/v1/capture', pending);
+        if (!attempt.request) {
+            const attachments = [];
+            for (const file of attempt.sourceFiles) {
+                if (!current()) return;
+                $('save-state').textContent = `校验并上传 ${file.name}`;
+                attachments.push(await upload(runtimeApi, file, (sent, total) => { if (current()) $('save-state').textContent = `${file.name} · ${formatBytes(sent)} / ${formatBytes(total)}`; }));
+            }
+            if (!current()) return;
+            attempt.request = { id: attempt.id, text: attempt.text, files: attachments, blockId: attempt.blockId };
+        }
+        const pending = attempt.request;
+        saveLocal('pending', { draftId: attempt.draftId, request: pending }, { required: true, deviceId });
+        attempt.durable = true;
+        const receipt = await runtimeApi.post('/v1/capture', pending);
         if (receipt.id !== pending.id || receipt.durability !== 'local_committed')
             throw new Error('回执身份不匹配，记录仍待确认');
-        saveLocal('pending', null, { required: true });
-        saveLocal('draft', null);
-        files = [];
-        renderFiles();
-        $('capture-text').value = '';
-        $('capture-text').readOnly = false;
+        if (!current()) return;
+        // Keep the retry identity durable until all receipt-owned draft cleanup
+        // succeeds. A failure between the two keys must not mint a new command.
+        if (captureDraftId === attempt.draftId) {
+            saveLocal('draft', null, { required: true });
+        }
+        saveLocal('pending', null, { required: true, deviceId });
+        if (captureDraftId === attempt.draftId) {
+            files = [];
+            renderFiles();
+            $('capture-text').value = '';
+            captureDraftId = crypto.randomUUID();
+        }
+        captureAttempt = null;
         $('send').textContent = '记下';
         $('save-state').textContent = '已保存到本机。对端是否已收到，请在对端核对。';
         $('notice').hidden = true;
         await refresh();
-        $('capture-text').focus();
     }
     catch (error) {
-        if (readLocal('pending')) {
-            $('send').textContent = '重试确认';
-            $('save-state').textContent = '提交结果未确认，原内容与操作 ID 已保留；重试不会重复记下。';
-        }
+        if (!current()) return;
+        $('send').textContent = '重试上一条';
+        $('save-state').textContent = attempt.durable
+            ? '原提交已冻结，重试沿用原 ID，不会采用下一稿；可重新打开页面继续确认。'
+            : '原提交尚未完成上传/暂存，请保持页面打开并重试；重试不会采用下一稿。';
         notice(error.message, true);
     }
     finally {
-        $('send').disabled = false;
-        $('file-input').disabled = false;
-        if (!readLocal('pending'))
-            $('capture-text').readOnly = false;
+        if (context === captureContext) {
+            captureBusy = false;
+            $('send').disabled = false;
+        }
     }
 }
 function openBlock(action, blockId) {
@@ -332,7 +372,17 @@ $('block-dialog').addEventListener('cancel', e => { if (blockBusy) e.preventDefa
 $('cancel-block').onclick = () => $('block-dialog').close();
 $('start-block').onclick = () => openBlock('start');
 $('send').onclick = send;
-$('capture-text').addEventListener('input', () => saveLocal('draft', $('capture-text').value));
+$('capture-text').addEventListener('input', touchCaptureDraft);
+globalThis.addEventListener('beforeunload', event => {
+    const unpersistedAttempt = captureAttempt && !captureAttempt.durable;
+    const unpersistedFiles = files.length && !(captureAttempt?.durable && captureAttempt.draftId === captureDraftId);
+    if (unpersistedAttempt || unpersistedFiles) {
+        // File objects are not durable browser storage. The prototype must warn
+        // about leaving, rather than claim the next draft's bytes can be restored.
+        event.preventDefault();
+        event.returnValue = '';
+    }
+});
 $('capture-text').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault();
     if (!$('send').disabled)
@@ -386,6 +436,7 @@ catch (error) {
 $('make-invite').onclick = () => withNotice(async () => { $('invite-output').value = JSON.stringify(await api.post('/v1/pair/invitation', { endpoint: $('advertise').value }), null, 2); });
 $('copy-invite').onclick = () => withNotice(async () => { await navigator.clipboard.writeText($('invite-output').value); notice('邀请已复制；只通过可信渠道交给另一台设备。'); });
 $('join').onclick = () => withNotice(async () => { $('join').disabled = true; try {
+    if (captureAttempt) throw new Error('请先确认上一条记录，再加入另一档案。');
     await api.post('/v1/pair/join', { invitation: JSON.parse($('invite-input').value), endpoint: $('return-endpoint').value });
     identity = await api.get('/v1/hello');
     notice('已建立配对，数据是否补齐请以设备回执为准。');
@@ -397,6 +448,7 @@ finally {
 $('diagnostics').onclick = () => withNotice(async () => { $('diagnostics-output').textContent = JSON.stringify(await api.get('/v1/diagnostics'), null, 2); });
 $('access-form').onsubmit = e => { e.preventDefault(); void withNotice(async () => { const result = await api.post('/v1/access-tokens', { name: $('access-name').value, role: $('access-role').value }); $('access-result').textContent = JSON.stringify(result, null, 2); }); };
 async function connect(token) {
+    captureContext++;
     api = new Api(token);
     identity = await api.get('/v1/hello');
     sessionStorage.setItem('exomind-token', token);
@@ -406,13 +458,7 @@ async function connect(token) {
     $('device-name').textContent = identity.name;
     $('advertise').value = location.origin;
     $('return-endpoint').value = location.origin;
-    const pending = readLocal('pending');
-    $('capture-text').value = pending?.text ?? readLocal('draft') ?? '';
-    $('capture-text').readOnly = !!pending;
-    if (pending) {
-        $('send').textContent = '重试确认';
-        $('save-state').textContent = '上次提交尚未确认，重试将沿用原 ID。';
-    }
+    restoreCaptureDraft();
     await refresh({ reset: true });
     $('capture-text').focus();
 }

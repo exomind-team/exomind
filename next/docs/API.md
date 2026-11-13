@@ -52,6 +52,14 @@ type CaptureRequest = { id: string; text: string; files: Attachment[]; blockId: 
 
 `POST /v1/capture`。文本或附件至少一个非空；文本最长32768个 JS 字符单位；附件最多16，每个最多64MiB。blockId 若非null，必须引用本机已知开始事实。UI默认关联唯一进行中的块；HTTP调用方必须明确选择。
 
+### Web 提交快照与本机草稿
+
+客户端在开始保存时固定文本、附件集合、关联块和请求 ID。上传期间移除/添加附件或编辑文字只改变下一稿，不能改变已冻结的原提交；原提交失败后的“重试上一条”仍使用同一集合，已发出的请求沿用原 ID。客户端收到匹配的 `local_committed` 回执后，只清理仍属于原提交的草稿，不清掉后来编辑的下一稿；重复按钮/快捷键不会创建并行提交。
+
+这是浏览器内部缓存更新，**没有修改 CaptureRequest、协议或数据库 schema**：草稿缓存保存 `{id,text}`，完整待确认请求保存 `{draftId,request}`，只把 `request` 发送给 Runtime。旧版纯字符串草稿与直接请求体 pending 可继续读取；旧 pending 没有草稿身份，确认后保守保留当前输入。附件完成并持久化 pending 后，reload 可按原 ID 继续确认；浏览器缓存清理失败时先保留 pending，不因部分清理丢掉重试身份。
+
+尚未完成上传/暂存的固定提交，以及下一稿里新选择的 `File` 字节仍只在当前页面内存；离开页面会请求浏览器提示，但这不等于持久化或保证浏览器一定显示提示。关闭后这部分附件需重新选择，不能把本修复当作 Beta B1.2 原件/跨重启草稿恢复已经完成。`tests/capture-composer.test.mjs` 以受控上传/回执和最小 DOM 执行真实页面 handlers，证明状态与时序；它不代表真实浏览器、文件选择器或手机端验收。
+
 ```ts
 type Operation = {
   schema: 1; id: string; space: string; actor: string;
