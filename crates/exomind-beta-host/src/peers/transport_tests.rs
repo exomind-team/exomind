@@ -7,6 +7,9 @@ use tempfile::{TempDir, tempdir};
 #[path = "post_handshake_tests.rs"]
 mod post_handshake_tests;
 
+#[path = "binding_tests.rs"]
+mod binding_tests;
+
 fn host() -> (TempDir, Arc<BetaHost>, Session) {
     let root = tempdir().unwrap();
     let host = Arc::new(BetaHost::open(root.path()).unwrap());

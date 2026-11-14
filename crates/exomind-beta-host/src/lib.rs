@@ -13,7 +13,11 @@ mod originals;
 mod originals_http;
 mod peers;
 pub use peers::{
-    DeviceIdentityInfo, PeerCancellation, PeerChannel, PeerPin, PeerTransportListener,
+    CreatePeerInvitation, DeviceIdentityInfo, IssuedPeerInvitation, PEER_CORE_SCHEMA,
+    PEER_PROTOCOL, PeerCancellation, PeerCapabilities, PeerChannel, PeerClaimReceipt,
+    PeerInvitation, PeerInvitationOffer, PeerInvitationState, PeerInvitationStatus, PeerJoinClaim,
+    PeerJoinConfirmation, PeerJoinState, PeerJoinStatus, PeerMember, PeerMembershipEvidence,
+    PeerPin, PeerReadyAcknowledgement, PeerReadyReceipt, PeerTransportListener,
     PeerTransportOptions,
 };
 #[cfg(test)]
@@ -108,6 +112,22 @@ pub enum HostError {
     PeerCancelled,
     #[error("peer transport resource limit reached")]
     PeerBusy,
+    #[error("peer membership storage requires recovery")]
+    PeerMembershipRecoveryRequired,
+    #[error("peer membership persistence could not be confirmed")]
+    PeerMembershipUnavailable,
+    #[error("peer membership or join request conflicts with its durable identity")]
+    PeerMembershipConflict,
+    #[error("peer profile membership does not permit this operation")]
+    PeerMembershipDenied,
+    #[error("peer invitation has expired")]
+    PeerInvitationExpired,
+    #[error("peer invitation was revoked")]
+    PeerInvitationRevoked,
+    #[error("peer invitation was already claimed")]
+    PeerInvitationConsumed,
+    #[error("peer protocol or core schema requires an explicit upgrade")]
+    PeerProtocolMismatch,
     #[error("core operation failed")]
     Core(#[from] CoreError),
     #[error("host database operation failed")]
@@ -252,6 +272,7 @@ impl BetaHost {
             None => Core::open(&core_root)?,
         };
         persistence.bind_core(core.device_id())?;
+        peers::membership_store::migrate(&mut persistence.auth)?;
         // Secure recognized core files only after Core has validated its schema
         // and ownership. Never modify a foreign directory to make it acceptable.
         storage::secure_private_tree(&core_root)?;

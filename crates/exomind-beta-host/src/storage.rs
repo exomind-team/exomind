@@ -192,7 +192,11 @@ fn checked_database(
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let found: i64 = transaction.pragma_query_value(None, "application_id", |row| row.get(0))?;
     let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if found == application && version == 1 {
+    if found == application
+        && (version == 1
+            || (application == AUTH_APPLICATION
+                && version == crate::peers::membership_store::AUTH_VERSION))
+    {
         transaction.commit()?;
         return Ok(());
     }
@@ -243,7 +247,9 @@ impl Persistence {
             let application: i64 =
                 auth.pragma_query_value(None, "application_id", |row| row.get(0))?;
             let version: i64 = auth.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if application != AUTH_APPLICATION || version != 1 {
+            if application != AUTH_APPLICATION
+                || ![1, crate::peers::membership_store::AUTH_VERSION].contains(&version)
+            {
                 return Err(HostError::Core(exomind_core::CoreError::RecoveryRequired));
             }
         }

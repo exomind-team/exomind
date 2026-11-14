@@ -301,10 +301,35 @@ pub struct PeerChannel {
     peer: VerifiedTransportPeer,
     requests: mpsc::Sender<Request>,
     own: PeerCancellation,
+    scope: PeerCancellation,
     done: PeerCancellation,
+    expires_at: tokio::time::Instant,
     options: PeerTransportOptions,
 }
 impl PeerChannel {
+    /// A key-possession proof bound to this Host and a still-live transport.
+    /// Callers holding the Host gate can use this without acquiring it again.
+    /// This grants no profile capability; membership must be rechecked in the
+    /// same final Host transaction before any business operation.
+    pub(super) fn binding_pin(&self, host: &BetaHost) -> Result<PeerPin, HostError> {
+        if !std::ptr::eq(self.host.as_ref(), host) || self.owner.runtime_id != host.runtime_id {
+            return Err(HostError::Unauthorized);
+        }
+        if !host.accepting.load(Ordering::Acquire) || host.peers.cancel.is_cancelled() {
+            return Err(HostError::Stopped);
+        }
+        if self.own.is_cancelled()
+            || self.scope.is_cancelled()
+            || self.done.is_cancelled()
+            || self.requests.is_closed()
+        {
+            return Err(HostError::PeerCancelled);
+        }
+        if tokio::time::Instant::now() >= self.expires_at {
+            return Err(HostError::PeerTimeout);
+        }
+        Ok(self.peer.pin)
+    }
     pub fn peer_fingerprint(&self) -> PeerPin {
         self.peer.pin
     }
@@ -388,8 +413,10 @@ fn channel(
     let kill = own.clone();
     let finished = done.clone();
     let held_host = host.clone();
+    let expires_at = tokio::time::Instant::now() + options.channel_lifetime;
+    let channel_scope = scope.clone();
     tokio::spawn(async move {
-        let expires = tokio::time::Instant::now() + options.channel_lifetime;
+        let expires = expires_at;
         loop {
             let request = tokio::select! {biased;_=global.cancelled()=>break,_=scope.cancelled()=>break,_=kill.cancelled()=>break,_=tokio::time::sleep_until(expires)=>break,request=requests.recv()=>match request{Some(request)=>request,None=>break}};
             let limit = options
@@ -455,7 +482,9 @@ fn channel(
         peer,
         requests: put,
         own,
+        scope: channel_scope,
         done,
+        expires_at,
         options,
     })
 }

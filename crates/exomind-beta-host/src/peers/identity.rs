@@ -6,7 +6,7 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
     sign::CertifiedKey,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, OpenOptions},
@@ -23,7 +23,8 @@ const APPLICATION: i64 = 0x45585049;
 const MAX_KEY_BYTES: usize = 256;
 const MAX_SQL_VALUE_BYTES: i32 = 4096;
 const IDENTITY_SCHEMA: &str = "CREATE TABLE identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1),device_id TEXT NOT NULL,layout TEXT NOT NULL,key_pkcs8 BLOB NOT NULL,spki BLOB NOT NULL,pin TEXT NOT NULL,initialized INTEGER NOT NULL CHECK(initialized IN (0,1)))";
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct DeviceIdentityInfo {
     pub device_id: DeviceId,
     pub spki_der: Vec<u8>,
