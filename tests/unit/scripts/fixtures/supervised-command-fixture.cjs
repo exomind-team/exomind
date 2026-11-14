@@ -8,6 +8,12 @@ setTimeout(() => process.exit(99), 6500).unref();
 
 if (mode === 'success') { console.log('finite-success'); process.exit(0); }
 if (mode === 'failure') { console.error('finite-failure'); process.exit(7); }
+if (mode === 'lock-status') {
+  const helper=join(__dirname,'supervised-command-lock-status.ps1');
+  const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-File',helper,'-Directory',dir],{stdio:'inherit',windowsHide:true,timeout:3000});
+  if(result.status!==0)process.exit(93);
+  console.log('finite-lock-status');process.exit(0);
+}
 if (mode === 'silent') {
   console.log('fixture-ready');
   // A true blocked command: timer callbacks would themselves add Job CPU and

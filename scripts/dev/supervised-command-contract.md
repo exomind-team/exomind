@@ -1,6 +1,6 @@
 # Windows finite-command supervision
 
-Status: implemented; 12 real short-process regressions passed on Windows. A background CLI invocation also supervised an actual Cargo test through its expected nonzero exit and confirmed Job cleanup after the launcher returned. This runner is for finite cargo/node/Gradle commands, not unbounded services. It bounds external execution and exposes a separately readable result; it cannot repair or certify Codex's UI/API result delivery.
+Status: implemented; 13 real short-process regressions passed on Windows, including a temporarily exclusive status-file reader. A background CLI invocation also supervised an actual Cargo test through its expected nonzero exit and confirmed Job cleanup after the launcher returned. This runner is for finite cargo/node/Gradle commands, not unbounded services. It bounds external execution and exposes a separately readable result; it cannot repair or certify Codex's UI/API result delivery.
 
 ```text
 bun scripts/dev/supervised-command.ts start --config <absolute JSON path>

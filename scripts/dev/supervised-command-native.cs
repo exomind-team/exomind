@@ -19,6 +19,7 @@ public static class SupervisedCommandNative {
   const uint InheritHandle=1, Infinite=0xffffffff, WaitTimeout=258;
   const uint Read=0x80000000, Write=0x40000000, ShareRead=1, ShareWrite=2;
   const uint OpenExisting=3, OpenAlways=4, Normal=0x80;
+  const int SharedWriteTimeoutMilliseconds=600, SharedWriteRetryMilliseconds=10;
   static readonly IntPtr Invalid=new IntPtr(-1);
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer { MaxJsonLength=1048576 };
 
@@ -80,10 +81,24 @@ public static class SupervisedCommandNative {
     using(var reader=new StreamReader(stream,Encoding.UTF8,true)) return Json.Deserialize<T>(reader.ReadToEnd());
   }
   static string JobName(string run) { return "Local\\ExoMindFinite-"+Guid.Parse(run).ToString("N"); }
+  static void SharedFileWrite(Action write) {
+    var deadline=Stopwatch.StartNew();
+    for(;;) {
+      try {write();return;}
+      catch(IOException error) {
+        int code=error.HResult&0xffff;
+        if((code!=32&&code!=33)||deadline.ElapsedMilliseconds>=SharedWriteTimeoutMilliseconds) throw;
+        Thread.Sleep(SharedWriteRetryMilliseconds);
+      }
+    }
+  }
+  static void Diagnostic(string dir,string role,string phase,Exception error) {
+    try {File.WriteAllText(FileAt(dir,role+"-error.json"),Json.Serialize(new {phase=phase,type=error.GetType().FullName,hresult=error.HResult,at=Now()}),new UTF8Encoding(false));}catch{}
+  }
   static void Atomic(string path,object value) {
     string temporary=path+".tmp-"+Guid.NewGuid().ToString("N");
     try { File.WriteAllText(temporary,Json.Serialize(value),new UTF8Encoding(false));
-      if(File.Exists(path)) File.Replace(temporary,path,null); else File.Move(temporary,path);
+      SharedFileWrite(delegate {if(File.Exists(path)) File.Replace(temporary,path,null); else File.Move(temporary,path);});
     } finally { if(File.Exists(temporary)) File.Delete(temporary); }
   }
   static void Result(string dir,string run,string reason,int? code,bool cleaned) {
@@ -191,11 +206,14 @@ public static class SupervisedCommandNative {
         Accounting counts=Count(job);long cpu=counts.user+counts.kernel,output=Length(FileAt(dir,"stdout.log")),error=Length(FileAt(dir,"stderr.log"));
         if(cpu>lastCpu||output>lastOut||error>lastErr) {lastProgress=elapsed.ElapsedMilliseconds;state.lastProgressAt=Now();}
         lastCpu=cpu;lastOut=output;lastErr=error;state.cpu100ns=cpu.ToString();state.stdoutBytes=output;state.stderrBytes=error;pulse();
-        if(elapsed.ElapsedMilliseconds>=config.timeoutMs) {reason="total_timeout";break;}
+        if(elapsed.ElapsedMilliseconds>=config.timeoutMs||DateTime.UtcNow>=DateTime.Parse(state.commandStartedAt).ToUniversalTime().AddMilliseconds(config.timeoutMs)) {reason="total_timeout";break;}
         if(elapsed.ElapsedMilliseconds-lastProgress>=config.noProgressTimeoutMs) {reason="idle_timeout";break;}
         Thread.Sleep(config.pollIntervalMs);
       }
-    } catch { /* Input/argv/environment never enter a public diagnostic. */ }
+    } catch(Exception error) {
+      Diagnostic(dir,"supervisor",state.phase,error);
+      if(reason=="bootstrap_failed"&&state.phase=="running") reason="supervisor_failed";
+    }
     finally {
       state.phase="cleaning";try {pulse();}catch{}
       bool unassignedClean=true;
@@ -227,7 +245,7 @@ public static class SupervisedCommandNative {
       supervisor=Verified(initial.supervisor);
       job=OpenJobObject(JobQuery|JobTerminate,false,JobName(config.runId));Check(job!=IntPtr.Zero);
       Atomic(FileAt(dir,"watchdog.ready.json"),new {runId=config.runId,watchdog=Identify(GetCurrentProcess(),Process.GetCurrentProcess().Id)});
-      var clock=Stopwatch.StartNew();long sequence=-1,lastBeat=0;long? taskDeadline=null;
+      var clock=Stopwatch.StartNew();long sequence=-1,lastBeat=0;long? taskDeadline=null;DateTime? taskDeadlineUtc=null;
       while(!File.Exists(FileAt(dir,"result.json"))) {
         if(WaitForSingleObject(supervisor,0)==0) {reason="supervisor_lost";break;}
         if(File.Exists(FileAt(dir,"job.drained.json"))) {
@@ -242,11 +260,12 @@ public static class SupervisedCommandNative {
         if(state!=null&&state.runId==config.runId) {
           if(state.heartbeatSequence!=sequence) {sequence=state.heartbeatSequence;lastBeat=clock.ElapsedMilliseconds;}
           if(taskDeadline==null&&!String.IsNullOrEmpty(state.commandStartedAt)) {
-            long remaining=(long)(DateTime.Parse(state.commandStartedAt).ToUniversalTime().AddMilliseconds(config.timeoutMs)-DateTime.UtcNow).TotalMilliseconds;
+            taskDeadlineUtc=DateTime.Parse(state.commandStartedAt).ToUniversalTime().AddMilliseconds(config.timeoutMs);
+            long remaining=(long)(taskDeadlineUtc.Value-DateTime.UtcNow).TotalMilliseconds;
             taskDeadline=clock.ElapsedMilliseconds+Math.Max(0,Math.Min(config.timeoutMs,remaining))+config.pollIntervalMs*2;
           }
         }
-        if(taskDeadline.HasValue&&clock.ElapsedMilliseconds>=taskDeadline.Value) {reason="total_timeout";break;}
+        if(taskDeadline.HasValue&&(clock.ElapsedMilliseconds>=taskDeadline.Value||DateTime.UtcNow>=taskDeadlineUtc.Value)) {reason="total_timeout";break;}
         if(!taskDeadline.HasValue&&clock.ElapsedMilliseconds>=config.bootstrapTimeoutMs) {reason="watchdog_failed";break;}
         if(clock.ElapsedMilliseconds-lastBeat>=config.heartbeatTimeoutMs) {reason="heartbeat_timeout";break;}
         Thread.Sleep(config.pollIntervalMs);
@@ -255,7 +274,7 @@ public static class SupervisedCommandNative {
       if(WaitForSingleObject(supervisor,0)!=0) {Check(TerminateProcess(supervisor,224));Check(WaitForSingleObject(supervisor,(uint)config.cleanupTimeoutMs)==0);}
       cleaned=Drain(ref job,config.cleanupTimeoutMs);
       Result(dir,config.runId,cleaned?reason:"cleanup_failed",null,cleaned);
-    } catch { Result(dir,config.runId,"ownership_refused",null,false); }
+    } catch(Exception error) {Diagnostic(dir,"watchdog","guarding",error);Result(dir,config.runId,"ownership_refused",null,false);}
     finally {Close(ref supervisor);Close(ref job);}
     return 0;
   }

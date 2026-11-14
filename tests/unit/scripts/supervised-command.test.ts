@@ -60,6 +60,13 @@ describe.runIf(process.platform === 'win32')('finite supervised Windows commands
     const result = await waitFor(() => api.readSupervisedCommand(task.artifactDir).result ?? undefined);
     expect(result).toMatchObject({ reason: 'idle_timeout', cleanup: { confirmed: true } });
   }, 18000);
+  it('survives a bounded external reader holding the status file exclusively', async () => {
+    const api=await import('../../../scripts/dev/supervised-command');
+    const task=config('lock-status',{noProgressTimeoutMs:2500,heartbeatTimeoutMs:2500});
+    await api.startSupervisedCommand(task);
+    const result=await waitFor(()=>{try{return api.readSupervisedCommand(task.artifactDir).result??undefined;}catch(error){if(String(error).includes('unreadable'))return undefined;throw error;}});
+    expect(result).toMatchObject({reason:'completed',exitCode:0,cleanup:{confirmed:true,jobClosed:true}});
+  },18000);
   it('accepts real job CPU progress without output', async () => {
     const api = await import('../../../scripts/dev/supervised-command');
     const busy = config('cpu', { noProgressTimeoutMs: 500 }); await api.startSupervisedCommand(busy);
