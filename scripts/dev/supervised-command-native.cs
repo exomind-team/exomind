@@ -87,18 +87,25 @@ public static class SupervisedCommandNative {
       try {write();return;}
       catch(IOException error) {
         int code=error.HResult&0xffff;
-        if((code!=32&&code!=33)||deadline.ElapsedMilliseconds>=SharedWriteTimeoutMilliseconds) throw;
+        if((code!=32&&code!=33&&code!=1175)||deadline.ElapsedMilliseconds>=SharedWriteTimeoutMilliseconds) throw;
         Thread.Sleep(SharedWriteRetryMilliseconds);
       }
     }
   }
   static void Diagnostic(string dir,string role,string phase,Exception error) {
-    try {File.WriteAllText(FileAt(dir,role+"-error.json"),Json.Serialize(new {phase=phase,type=error.GetType().FullName,hresult=error.HResult,at=Now()}),new UTF8Encoding(false));}catch{}
+    try {File.WriteAllText(FileAt(dir,role+"-error.json"),Json.Serialize(new {phase=phase,type=error.GetType().FullName,hresult=error.HResult,operation=error.Data["operation"] as string,at=Now()}),new UTF8Encoding(false));}catch{}
   }
   static void Atomic(string path,object value) {
     string temporary=path+".tmp-"+Guid.NewGuid().ToString("N");
     try { File.WriteAllText(temporary,Json.Serialize(value),new UTF8Encoding(false));
-      SharedFileWrite(delegate {if(File.Exists(path)) File.Replace(temporary,path,null); else File.Move(temporary,path);});
+      // ReplaceFile 1175 retains both original names, so this owned snapshot
+      // can retry within the same bounded budget. 1176/1177 can be partial;
+      // AccessDenied (5) is not assumed transient. Never pre-delete a target.
+      // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew
+      SharedFileWrite(delegate {
+        try {if(File.Exists(path)) File.Replace(temporary,path,null); else File.Move(temporary,path);}
+        catch(Exception error) {error.Data["operation"]="snapshot_replace";throw;}
+      });
     } finally { if(File.Exists(temporary)) File.Delete(temporary); }
   }
   static void Result(string dir,string run,string reason,int? code,bool cleaned) {

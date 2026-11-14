@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -9,6 +9,17 @@ import { stopManagedWindowsProcess } from '../../../scripts/dev/tauri-dev-proces
 const roots: string[] = [];
 const sentinels: ChildProcess[] = [];
 const fixture = resolve('tests/unit/scripts/fixtures/supervised-command-fixture.cjs');
+function safeDiagnostics(dir: string) {
+  const diagnostics: Record<string, unknown> = {};
+  for (const role of ['supervisor', 'watchdog']) {
+    try {
+      const value = JSON.parse(readFileSync(join(dir, `${role}-error.json`), 'utf8'));
+      diagnostics[role] = { type: value.type ?? null, hresult: value.hresult ?? null,
+        phase: value.phase ?? null, operation: value.operation ?? null };
+    } catch (error) { diagnostics[role] = { diagnostic: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unreadable' }; }
+  }
+  return diagnostics;
+}
 function config(mode: string, overrides: Record<string, unknown> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'exomind-supervised-')); roots.push(root);
   const artifactDir = join(root, 'run');
@@ -20,7 +31,7 @@ async function waitFor<T>(read: () => T | undefined, timeoutMs = 8500): Promise<
   while (Date.now() < until) { const found = read(); if (found !== undefined) return found; await new Promise(resolve => setTimeout(resolve, 25)); }
   throw new Error('bounded supervised fixture did not reach its expected state');
 }
-afterEach(async () => {
+afterEach(async (context) => {
   // ChildProcess.kill uses the retained owned process handle; never enumerate images.
   for (const child of sentinels.splice(0)) if (child.exitCode === null) child.kill();
   const temporaryRoot = resolve(tmpdir()).toLowerCase();
@@ -28,6 +39,12 @@ afterEach(async () => {
     const owned = resolve(root);
     if (!isAbsolute(owned) || dirname(owned).toLowerCase() !== temporaryRoot || !basename(owned).startsWith('exomind-supervised-')) {
       throw new Error('Refusing cleanup outside the generated supervised fixture root');
+    }
+    if (context.task.result?.state === 'fail') {
+      const evidence = { directory: owned, diagnostics: safeDiagnostics(join(owned, 'run')) };
+      writeFileSync(join(owned, 'failure-diagnostic.json'), JSON.stringify(evidence));
+      process.stderr.write(`[supervised-fixture-preserved] ${JSON.stringify(evidence)}\n`);
+      continue;
     }
     // result.json confirms command Job drainage, not that both short guard
     // processes have already returned from Main and released their exe/CWD.
@@ -65,7 +82,31 @@ describe.runIf(process.platform === 'win32')('finite supervised Windows commands
     const task=config('lock-status',{noProgressTimeoutMs:2500,heartbeatTimeoutMs:2500});
     await api.startSupervisedCommand(task);
     const result=await waitFor(()=>{try{return api.readSupervisedCommand(task.artifactDir).result??undefined;}catch(error){if(String(error).includes('unreadable'))return undefined;throw error;}});
-    expect(result).toMatchObject({reason:'completed',exitCode:0,cleanup:{confirmed:true,jobClosed:true}});
+    expect(result, JSON.stringify(safeDiagnostics(task.artifactDir))).toMatchObject({reason:'completed',exitCode:0,cleanup:{confirmed:true,jobClosed:true}});
+  },18000);
+  it('replaces snapshots after a real reader temporarily refuses delete sharing without modifying its open snapshot', async () => {
+    const api=await import('../../../scripts/dev/supervised-command');
+    const task=config('read-no-delete',{noProgressTimeoutMs:2500,heartbeatTimeoutMs:2500});
+    await api.startSupervisedCommand(task);
+    const result=await waitFor(()=>api.readSupervisedCommand(task.artifactDir).result??undefined);
+    expect(result, JSON.stringify(safeDiagnostics(task.artifactDir))).toMatchObject({reason:'completed',exitCode:0,cleanup:{confirmed:true,jobClosed:true}});
+    expect(JSON.parse(readFileSync(join(task.artifactDir,'status-reader-proof.json'),'utf8'))).toEqual({heldSnapshotUnchanged:true});
+  },18000);
+  it('keeps a read-only publication target as an explicit AccessDenied failure', async () => {
+    const api=await import('../../../scripts/dev/supervised-command');
+    const task=config('readonly-status',{noProgressTimeoutMs:2500,heartbeatTimeoutMs:2500});
+    try {
+      await api.startSupervisedCommand(task);
+      const result=await waitFor(()=>api.readSupervisedCommand(task.artifactDir).result??undefined);
+      expect(result).toMatchObject({reason:'supervisor_failed',cleanup:{confirmed:true,jobClosed:true}});
+      const diagnostic=JSON.parse(readFileSync(join(task.artifactDir,'supervisor-error.json'),'utf8'));
+      expect(diagnostic.hresult & 0xffff).toBe(5);
+    } finally {
+      // Restore only this test's known owned metadata file for normal cleanup.
+      try { chmodSync(join(task.artifactDir,'status.json'),0o666); } catch(error) {
+        if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;
+      }
+    }
   },18000);
   it('accepts real job CPU progress without output', async () => {
     const api = await import('../../../scripts/dev/supervised-command');
@@ -93,7 +134,7 @@ describe.runIf(process.platform === 'win32')('finite supervised Windows commands
       await new Promise(resolve => setTimeout(resolve, 1));
     }
     expect(observations).toBeGreaterThan(100);
-    expect(result).toMatchObject({ reason: 'total_timeout', cleanup: { confirmed: true, jobClosed: true } });
+    expect(result, JSON.stringify(safeDiagnostics(task.artifactDir))).toMatchObject({ reason: 'total_timeout', cleanup: { confirmed: true, jobClosed: true } });
   }, 18000);
   it('returns before a descendant-held stdout ends and cleans that descendant on root exit', async () => {
     const api = await import('../../../scripts/dev/supervised-command'); const task = config('descendant-pipe');
