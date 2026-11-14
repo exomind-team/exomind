@@ -13,7 +13,8 @@ type FeedbackTarget={id:string;kind:'submit'|'append'}|null;
  * panel/dialog choices; controller/journal/Host own intent and business state. */
 export function BetaFocusTimer({controller,client,profileId,onCommitted}:{controller:BetaTimeblockController;client:BetaClient;profileId:string;onCommitted?:()=>void}){
   const state=useSyncExternalStore(controller.subscribe,controller.snapshot);
-  const [panel,setPanel]=useState<Panel>(()=>state.draft.name.trim()?{kind:'start'}:null);
+  const [panel,setPanel]=useState<Panel>(null);
+  const initializedOwner=useRef<BetaTimeblockController|null>(null);
   const [custom,setCustom]=useState({editing:false,text:String(state.draft.minutes)});
   const [feedback,setFeedback]=useState<FeedbackTarget>(null);
   const [error,setError]=useState('');const [roster,setRoster]=useState<Record<string,string>>({});const [choice,setChoice]=useState('');
@@ -26,6 +27,13 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted}:{contro
     const visible=()=>{if(!document.hidden)void refresh();};window.addEventListener('focus',visible);document.addEventListener('visibilitychange',visible);
     return()=>{alive.current=false;cancelled=true;clearTimeout(timer);clearInterval(display);window.removeEventListener('focus',visible);document.removeEventListener('visibilitychange',visible);};
   },[controller]);
+  useEffect(()=>{
+    if(!state.remote||initializedOwner.current===controller)return;
+    initializedOwner.current=controller;
+    // The first authoritative read decides what is running. A retained next
+    // draft stays in the journal until the user explicitly opens rotation.
+    setPanel(!state.remote.active&&state.draft.name.trim()?{kind:'start'}:null);
+  },[controller,state.remote,state.draft.name]);
   useEffect(()=>{
     const remote=state.remote;if(!remote)return;
     setRoster(previous=>{const next={...previous};if(remote.active)next[remote.active.block_id]=remote.active.name;for(const id of remote.pending_feedback)next[id]??=`时间块 ${id.slice(0,8)}`;return next;});
@@ -45,7 +53,7 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted}:{contro
   function setDraft(patch:Parameters<BetaTimeblockController['setStartDraft']>[0]){try{controller.setStartDraft(patch);}catch(failure){setError(message(failure));}}
   function start(){if(disabled){setError('当前操作或本机暂存尚未确认，请先查证');return;}
     if(panel?.kind==='rotate'&&state.remote?.active?.block_id!==panel.from){setError('当前时间块已变化，请重新确认切换目标');return;}
-    void run(()=>panel?.kind==='rotate'?controller.rotate():controller.start(),()=>{if(!controller.snapshot().draft.name.trim())setPanel(null);});
+    void run(()=>panel?.kind==='rotate'?controller.rotate():controller.start(),()=>setPanel(null));
   }
   const quick=(event:KeyboardEvent<HTMLElement>)=>!event.nativeEvent.isComposing&&event.key==='Enter'&&(event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey;
   function applyMinutes(raw:string){const number=Number.parseInt(raw,10);const minutes=Number.isFinite(number)?Math.max(1,Math.min(720,number)):state.draft.minutes;setDraft({mode:'countdown',minutes});setCustom({editing:false,text:String(minutes)});}

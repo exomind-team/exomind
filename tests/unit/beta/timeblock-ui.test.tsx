@@ -10,6 +10,51 @@ import type { BetaTimeblockSnapshot,BetaTimeblockCommand } from '@/beta/timebloc
 
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 describe('shared Alpha focus presentation with real Beta commands',()=>{
+  it('reopens the authoritative active block ahead of a retained next draft, which only an explicit rotation reveals',async()=>{
+    const client=timeblockClient(),journal=memoryIntentJournal();client.timeblocks.snapshot.mockResolvedValue({...activeSnapshot(),active:{...activeSnapshot().active!,name:'active A'}});
+    const previous=await BetaTimeblockController.open(client,D,P,{journal});previous.setStartDraft({name:'next B'});await previous.close();
+    const owner=await BetaTimeblockController.open(client,D,P,{journal});
+    const ui=render(<BetaFocusTimer controller={owner} client={client} profileId={P}/>);
+    try{
+      expect(await screen.findByTestId('new-focus-running-name-display')).toHaveTextContent('active A');
+      expect(screen.getByTestId('new-focus-running-clock')).toBeInTheDocument();expect(screen.queryByTestId('new-focus-task-input')).not.toBeInTheDocument();
+      expect(owner.snapshot().draft.name).toBe('next B');expect(client.timeblocks.command).not.toHaveBeenCalled();
+      await waitFor(()=>expect(screen.getByRole('button',{name:'切换时间块'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'切换时间块'}));
+      expect(screen.getByTestId('new-focus-task-input')).toHaveValue('next B');expect(client.timeblocks.command).not.toHaveBeenCalled();
+      expect(JSON.parse(journal.values.get(owner.storageKey)!).draft.name).toBe('next B');
+    }finally{ui.unmount();await owner.close();}
+  });
+  it('shows A after its delayed start receipt while preserving edited B until an explicit rotate',async()=>{
+    const client=timeblockClient(),journal=memoryIntentJournal(),ack=deferred<ReturnType<typeof receipt>>();let remote=snapshot();
+    client.timeblocks.snapshot.mockImplementation(async()=>structuredClone(remote));
+    client.timeblocks.command.mockImplementation(async command=>{
+      const action=command.action;if(action.kind!=='start'&&action.kind!=='rotate')throw new Error('unexpected action');
+      const spec=action.kind==='start'?action:action.next;
+      // Apply the backend projection before delaying only its ACK. A start
+      // action's `kind` belongs to the command, never to the active-block DTO.
+      remote={...remote,revision:String(client.timeblocks.command.mock.calls.length).padStart(64,'0'),active:{block_id:spec.block_id,name:spec.name,note:spec.note,timer:spec.timer,phase:'running',work_ms:0,deadline_reached:false,deadline:null}};
+      return action.kind==='start'?ack.promise:receipt(command);
+    });
+    const owner=await BetaTimeblockController.open(client,D,P,{journal});owner.setStartDraft({name:'start A'});await owner.flush();
+    const ui=render(<BetaFocusTimer controller={owner} client={client} profileId={P}/>);
+    try{
+      await waitFor(()=>expect(screen.getByTestId('new-focus-start-button')).toBeEnabled());fireEvent.click(screen.getByTestId('new-focus-start-button'));
+      await waitFor(()=>expect(client.timeblocks.command).toHaveBeenCalledTimes(1));const first=client.timeblocks.command.mock.calls[0][0];
+      expect(remote.active?.name).toBe('start A');expect(owner.snapshot().pending).toHaveLength(1);
+      fireEvent.change(screen.getByTestId('new-focus-task-input'),{target:{value:'next B'}});await act(async()=>{await owner.flush();});
+      expect(JSON.parse(journal.values.get(owner.storageKey)!).draft.name).toBe('next B');
+      await act(async()=>{ack.resolve(receipt(first));});
+      expect(await screen.findByTestId('new-focus-running-name-display')).toHaveTextContent('start A');
+      expect(screen.queryByTestId('new-focus-task-input')).not.toBeInTheDocument();expect(client.timeblocks.command).toHaveBeenCalledTimes(1);
+      await act(async()=>{await owner.flush();});expect(JSON.parse(journal.values.get(owner.storageKey)!).draft.name).toBe('next B');
+      await waitFor(()=>expect(screen.getByRole('button',{name:'切换时间块'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'切换时间块'}));
+      expect(screen.getByTestId('new-focus-task-input')).toHaveValue('next B');expect(client.timeblocks.command).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByTestId('new-focus-start-button'));
+      await waitFor(()=>expect(client.timeblocks.command).toHaveBeenCalledTimes(2));
+      const second=client.timeblocks.command.mock.calls[1][0];expect(second.action).toMatchObject({kind:'rotate',from_block_id:first.action.kind==='start'?first.action.block_id:'',next:{name:'next B'}});
+      expect(second.command_id).not.toBe(first.command_id);await waitFor(()=>expect(screen.getByTestId('new-focus-running-name-display')).toHaveTextContent('next B'));
+    }finally{ui.unmount();const first=client.timeblocks.command.mock.calls[0]?.[0];if(first)ack.resolve(receipt(first));await owner.close();}
+  });
   it('keeps Start/Pause/Resume/End/feedback/skipped/append/Rotate as explicit scoped user actions',async()=>{
     const client=timeblockClient();let remote:BetaTimeblockSnapshot=snapshot();
     client.timeblocks.snapshot.mockImplementation(async()=>structuredClone(remote));
