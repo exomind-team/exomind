@@ -42,7 +42,7 @@ schema 2 将暂存分块与 verified 原件保存在同一 SQLite 内，默认�
 
 在 `BEGIN IMMEDIATE` 排除其他写入后，用独立只读 source 执行 SQLite online backup，包含尚在 WAL 的事实；不简单复制主数据库。备份位于 `backups/schema-1-<UUID>.sqlite3`，新建不覆盖。备份自身 checkpoint 后固定 DELETE journal 模式，确保单个主文件可独立恢复，不能依赖旁边的 WAL/SHM。升级前检查备份 application/schema、integrity 以及四张旧业务表的逐字段摘要。备份或检查失败则不迁移；备份残留保留以供显式检查。随后事务建立新表与 trigger 并推进 user_version；不自动从备份覆盖恢复。回归实际只复制这个主备份到另一合成 root，重新打开后逐项核对身份、档案、完整事件 payload 与原 receipt。
 
-未知 schema、外来数据库和符号链接拒绝；backups 目录及条目有明确白名单。Host 需递归按真实类型设置权限，不能把目录当普通文件设置权限。旧二进制不能降级写 schema 2；备份恢复需先到独立 root 验证，不能让两个实例共享同一写入身份。
+未知 schema、外来数据库和符号链接拒绝；backups 目录及条目有明确白名单。Host 需递归按真实类型设置权限，不能把目录当普通文件设置权限。旧二进制不能降级写升级后的 schema；备份恢复需先到独立 root 验证，不能让两个实例共享同一写入身份。
 
 ```powershell
 cargo test -p exomind-core --locked -j 1
@@ -65,3 +65,11 @@ cargo test -p exomind-core --locked -j 1 --test original_migration actual_schema
 数据目录允许 SQLite 自己的 WAL/SHM 与 rollback journal；所有这些项仍拒绝符号链接。首次切换 WAL 之前或恢复过程中崩溃留下的合法 journal，交由 SQLite 恢复，不按“外来文件”拦住。子进程回归实际使用 DELETE journal、小页缓存和未提交事务制造 spill，确认热 journal 头后中断进程；恢复后原身份、记录和回执保留，未提交数据消失。这是进程中断恢复证据，仍不等同物理掉电测试。
 
 恢复拒绝边界：全新空 root 可以初始化；已有 backups/WAL/SHM/journal 而主库丢失、已有空白主库或未完成的 schema-0 库不能变成新身份，返回 `RecoveryRequired`。不自动从备份覆盖主库。合法主库仍交给 SQLite 恢复真实 hot journal。宿主可用 `open_bound(root, expected_device)` 在 journal 恢复后、迁移前核验持久设备绑定，换库失败不会先迁移另一设备的数据。无历史证据的旧半初始化目录若不能证明完整初始化，应保留现场并显式处理。
+
+## B1.3 typed 时间块与完整时间线
+
+schema 3 新增开始/暂停/恢复/轮转/行动结束/反馈等 typed 节点及私有 Scheduler deadline，合同见 [TIMEBLOCK-CONTRACT.md](TIMEBLOCK-CONTRACT.md)。human 控制，agent_note 不自动获得控制权；ClockStamp/SchedulerContext 无 serde 来源入口。稳定 request+caller 先回读幂等，server now 不进 request 摘要；Rotate 为单个稳定复合事实，节点/状态/deadline 与 Receipt 同事务。原 capture/1 与 capture/2 canonical、原件 byte/hash、旧 Receipt 不重写。
+
+`timeline_page` 是完整 typed 流，capture 与 timeblock 共用同一 events 序号、高水位及冻结分页。旧 `events/events_page` 仅保留 capture-only 兼容投影，timeblock_nodes 只是事件索引，不是另一份事实；不能把旧接口返回当作全量覆盖。
+
+schema 1/2 升级前完整备份对应已提交版本，包含所有表（原件块、引用、layout、事实及回执），目标持久 DELETE mode 并校验单文件恢复。新库直接初始化 3，不创建未提交的中间版本备份；布局缺失、缺库/换库等 recovery/open_bound 保护继续生效。实现及相关回归等待父代理串行复验；不代表 Native/UI、通知或 Android 时间块已经验收。

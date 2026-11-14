@@ -8,9 +8,11 @@ mod identity;
 mod migrations;
 mod originals;
 mod store;
+mod timeblocks;
 
 pub use identity::{
     AgentId, CommandId, DeviceId, EventId, InvalidIdentifier, OriginalId, ProfileId, StageId,
+    TimeblockId,
 };
 pub use originals::{
     BeginStageCommand, MAX_CAPTURE_ORIGINALS, MAX_ORIGINAL_CHUNK_BYTES, OriginalChunk, OriginalRef,
@@ -18,6 +20,7 @@ pub use originals::{
 };
 use serde::{Deserialize, Serialize};
 pub use store::Core;
+pub use timeblocks::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
@@ -95,6 +98,14 @@ pub enum CoreError {
     StaleVerification,
     #[error("schema backup could not be verified")]
     BackupVerification,
+    #[error("timeblock revision or state changed")]
+    TimeblockConflict,
+    #[error("timeblock control requires human authority")]
+    TimeblockControlDenied,
+    #[error("invalid timeblock request: {0}")]
+    InvalidTimeblock(&'static str),
+    #[error("timeblock causal history is incomplete or invalid")]
+    InvalidTimeblockHistory,
 }
 
 /// Claimed authors and unknown fields fail decoding rather than vanish.

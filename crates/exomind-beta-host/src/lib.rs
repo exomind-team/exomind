@@ -8,6 +8,9 @@ mod originals_http;
 #[cfg(test)]
 mod stop_tests;
 mod storage;
+mod timeblocks;
+mod timeblocks_http;
+pub use timeblocks::{DeadlineEnvelope, HostClock, HostClockSample, ServiceStatus};
 
 use exomind_core::{
     AgentId, CaptureCommand, CommandId, Core, CoreError, DeviceId, EventPage, EventQuery,
@@ -141,6 +144,8 @@ pub struct HostStatus {
 pub struct HostCapabilities {
     pub originals: bool,
     pub max_original_chunk_bytes: usize,
+    pub timeblocks: bool,
+    pub typed_timeline: bool,
 }
 
 struct Resources {
@@ -158,6 +163,8 @@ pub struct BetaHost {
     accepting: AtomicBool,
     gate: Mutex<State>,
     verifications: originals::VerificationRegistry,
+    clock: std::sync::Arc<dyn HostClock>,
+    services: std::sync::Arc<timeblocks::Services>,
     #[cfg(test)]
     capture_admitted: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
@@ -170,6 +177,15 @@ struct ProfileAuthority {
 
 impl BetaHost {
     pub fn open(root: &Path) -> Result<Self, HostError> {
+        Self::open_with_clock(
+            root,
+            std::sync::Arc::new(timeblocks::SystemHostClock::default()),
+        )
+    }
+    pub fn open_with_clock(
+        root: &Path,
+        clock: std::sync::Arc<dyn HostClock>,
+    ) -> Result<Self, HostError> {
         let mut persistence = Persistence::open(root)?;
         let core_root = persistence.root.join("core");
         let main_database = core_root.join("beta-core.sqlite3");
@@ -194,6 +210,8 @@ impl BetaHost {
             device_id: core.device_id(),
             accepting: AtomicBool::new(true),
             verifications: originals::VerificationRegistry::default(),
+            clock,
+            services: std::sync::Arc::new(timeblocks::Services::default()),
             #[cfg(test)]
             capture_admitted: Mutex::new(None),
             gate: Mutex::new(State {
@@ -219,6 +237,7 @@ impl BetaHost {
     /// close callback. Resource release still happens through stop/the gate.
     pub fn request_stop(&self) {
         self.accepting.store(false, Ordering::Release);
+        self.services.request_stop();
     }
 
     pub fn status(&self) -> Result<HostStatus, HostError> {
@@ -236,6 +255,8 @@ impl BetaHost {
             capabilities: HostCapabilities {
                 originals: true,
                 max_original_chunk_bytes: exomind_core::MAX_ORIGINAL_CHUNK_BYTES,
+                timeblocks: true,
+                typed_timeline: true,
             },
         })
     }
@@ -466,6 +487,7 @@ impl BetaHost {
     }
 
     fn stop_with_timeout(&self, timeout: std::time::Duration) -> Result<(), HostError> {
+        let deadline = std::time::Instant::now() + timeout;
         self.request_stop();
         {
             // Stop listener admission before waiting, but never retain the gate
@@ -476,7 +498,10 @@ impl BetaHost {
             }
         }
         self.verifications.cancel_all()?;
-        self.verifications.wait_empty(timeout)?;
+        self.services
+            .wait_stopped(deadline.saturating_duration_since(std::time::Instant::now()))?;
+        self.verifications
+            .wait_empty(deadline.saturating_duration_since(std::time::Instant::now()))?;
         // A timeout deliberately retains resources/the root lock: an old read
         // connection must not coexist with a newly opened host for this root.
         self.state()?.resources.take();

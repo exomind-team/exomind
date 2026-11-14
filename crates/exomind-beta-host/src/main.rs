@@ -61,6 +61,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let root = root.ok_or("--data-dir is required; no legacy/default directory is selected")?;
     let host = Arc::new(tokio::task::spawn_blocking(move || BetaHost::open(&root)).await??);
+    host.start_services()?;
     let server = serve_with_frontend_origins(
         host,
         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),

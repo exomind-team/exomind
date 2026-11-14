@@ -50,6 +50,21 @@ impl IntoResponse for HostError {
                 "forbidden",
                 "Capability does not permit this operation",
             ),
+            Self::Core(CoreError::TimeblockControlDenied) => (
+                StatusCode::FORBIDDEN,
+                "forbidden",
+                "Timeblock control requires human authority",
+            ),
+            Self::Core(CoreError::TimeblockConflict) => (
+                StatusCode::CONFLICT,
+                "timeblock_conflict",
+                "Timeblock revision or state changed",
+            ),
+            Self::Core(CoreError::InvalidTimeblockHistory) => (
+                StatusCode::CONFLICT,
+                "timeblock_history_incomplete",
+                "Timeblock causal history is incomplete or inconsistent",
+            ),
             Self::Stopped => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "stopped",
@@ -70,7 +85,8 @@ impl IntoResponse for HostError {
                 CoreError::InvalidCapture(_)
                 | CoreError::InvalidQuery(_)
                 | CoreError::InvalidOriginal(_)
-                | CoreError::InvalidOriginalOffset,
+                | CoreError::InvalidOriginalOffset
+                | CoreError::InvalidTimeblock(_),
             ) => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
@@ -411,6 +427,7 @@ fn router(host: Arc<BetaHost>, address: SocketAddr, frontend_origins: Vec<String
         .route("/beta/v1/profiles/:profile/events", get(events))
         .route("/beta/v1/profiles/:profile/receipts/:command", get(receipt))
         .merge(crate::originals_http::router())
+        .merge(crate::timeblocks_http::router())
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(middleware::from_fn_with_state(
             Boundary {

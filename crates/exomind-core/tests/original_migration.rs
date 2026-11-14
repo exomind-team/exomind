@@ -218,7 +218,7 @@ fn schema_one_wal_is_backed_up_before_upgrade_and_old_command_digest_stays_repla
     let schema: i64 = live
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(schema, 2);
+    assert_eq!(schema, 3);
     let paths: Vec<_> = std::fs::read_dir(root.path().join("backups"))
         .unwrap()
         .map(|item| item.unwrap().path())
@@ -404,7 +404,7 @@ fn recovery_guard_rejects_the_unreleased_schema_two_layout_without_resetting_fac
         database
             .pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
             .unwrap(),
-        2
+        3
     );
 }
 

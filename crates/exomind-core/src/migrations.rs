@@ -11,7 +11,7 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(crate) const SCHEMA_VERSION: i64 = 2;
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 pub(crate) const APPLICATION_ID: i64 = 0x45584f36;
 
 const ORIGINAL_SCHEMA: &str = "
@@ -72,6 +72,7 @@ pub(crate) fn validate_backup_directory(path: &Path) -> Result<(), CoreError> {
             .unwrap_or(name);
         let id = name
             .strip_prefix("schema-1-")
+            .or_else(|| name.strip_prefix("schema-2-"))
             .and_then(|name| name.strip_suffix(".sqlite3"))
             .ok_or(CoreError::ForeignRoot)?;
         if Uuid::parse_str(id)
@@ -98,17 +99,42 @@ fn private(path: &Path, directory: bool) -> Result<(), CoreError> {
     Ok(())
 }
 
-fn schema_one_digest(connection: &Connection) -> Result<Vec<u8>, CoreError> {
+fn snapshot_digest(connection: &Connection) -> Result<Vec<u8>, CoreError> {
     use rusqlite::types::ValueRef;
     let mut digest = Sha256::new();
-    for query in [
-        "SELECT * FROM identity ORDER BY singleton",
-        "SELECT * FROM profiles ORDER BY id",
-        "SELECT * FROM events ORDER BY local_seq",
-        "SELECT * FROM command_receipts ORDER BY command_id",
-    ] {
+    let mut definitions = connection
+        .prepare("SELECT type,name,COALESCE(sql,'') FROM sqlite_master ORDER BY type,name")?;
+    let definitions = definitions
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    for (kind, name, sql) in definitions {
+        for value in [kind, name, sql] {
+            digest.update((value.len() as u64).to_le_bytes());
+            digest.update(value.as_bytes());
+        }
+    }
+    // Verify all source tables, including staged bytes, reference rows and
+    // SQLite's sequence state, not only the four original schema-1 tables.
+    let mut schema=connection.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' AND (name NOT LIKE 'sqlite_%' OR name='sqlite_sequence') ORDER BY name")?;
+    let tables = schema
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    for (name, sql) in tables {
+        digest.update(sql.as_bytes());
+        let query = format!(
+            "SELECT * FROM \"{}\" ORDER BY rowid",
+            name.replace('"', "\"\"")
+        );
         digest.update(query.as_bytes());
-        let mut statement = connection.prepare(query)?;
+        let mut statement = connection.prepare(&query)?;
         let columns = statement.column_count();
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
@@ -144,7 +170,7 @@ fn schema_one_digest(connection: &Connection) -> Result<Vec<u8>, CoreError> {
 // The caller holds BEGIN IMMEDIATE on the main connection before this read-only
 // source is opened. No writer can change the schema-1 snapshot between backup
 // and migration; using another connection avoids backing up a write transaction.
-fn backup_schema_one(database_path: &Path) -> Result<(), CoreError> {
+fn backup_schema(database_path: &Path, expected_version: i64) -> Result<(), CoreError> {
     let directory = database_path
         .parent()
         .ok_or(CoreError::InvalidRoot)?
@@ -155,7 +181,10 @@ fn backup_schema_one(database_path: &Path) -> Result<(), CoreError> {
         fs::create_dir(&directory)?;
         private(&directory, true)?;
     }
-    let path = directory.join(format!("schema-1-{}.sqlite3", Uuid::new_v4()));
+    let path = directory.join(format!(
+        "schema-{expected_version}-{}.sqlite3",
+        Uuid::new_v4()
+    ));
     // Reserve without replacing an existing backup. A failed partial backup is
     // retained for explicit inspection, never silently removed or restored.
     fs::OpenOptions::new()
@@ -205,10 +234,10 @@ fn backup_schema_one(database_path: &Path) -> Result<(), CoreError> {
         destination.pragma_query_value(None, "application_id", |row| row.get(0))?;
     let integrity: String =
         destination.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
-    if version != 1 || application != APPLICATION_ID || integrity != "ok" {
+    if version != expected_version || application != APPLICATION_ID || integrity != "ok" {
         return Err(CoreError::BackupVerification);
     }
-    if schema_one_digest(&source)? != schema_one_digest(&destination)? {
+    if snapshot_digest(&source)? != snapshot_digest(&destination)? {
         return Err(CoreError::BackupVerification);
     }
     destination
@@ -232,7 +261,7 @@ pub(crate) fn initialize(
     let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
     let application: i64 =
         transaction.pragma_query_value(None, "application_id", |row| row.get(0))?;
-    if version != 0 && version != 1 && version != SCHEMA_VERSION {
+    if ![0, 1, 2, SCHEMA_VERSION].contains(&version) {
         return Err(CoreError::UnsupportedSchema(version));
     }
     if application != 0 && application != APPLICATION_ID {
@@ -275,10 +304,7 @@ pub(crate) fn initialize(
     } else if application != APPLICATION_ID {
         return Err(CoreError::ForeignDatabase);
     }
-    if version == 1 {
-        backup_schema_one(database_path)?;
-    }
-    if version == SCHEMA_VERSION {
+    if version >= 2 {
         // Schema 2 has not shipped. Its earlier synthetic fragmented layout
         // must not be silently interpreted as the bounded fixed-block format.
         // Keep the original bytes/facts untouched for explicit inspection.
@@ -291,13 +317,17 @@ pub(crate) fn initialize(
             return Err(CoreError::RecoveryRequired);
         }
     }
-    if version < SCHEMA_VERSION {
+    if version == 1 || version == 2 {
+        backup_schema(database_path, version)?;
+    }
+    if version < 2 {
         transaction.execute_batch(&ORIGINAL_SCHEMA.replace(
             "$MAX_CHUNK_BYTES",
             &crate::MAX_ORIGINAL_CHUNK_BYTES.to_string(),
         ))?;
-        transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
+    if version<3 {transaction.execute_batch(crate::timeblocks::SCHEMA)?;transaction.pragma_update(None,"user_version",SCHEMA_VERSION)?;}
+    else if transaction.prepare("SELECT e.kind,s.revision,n.request_digest FROM events e LEFT JOIN timeblock_state s ON s.profile_id=e.profile_id LEFT JOIN timeblock_nodes n ON n.event_id=e.event_id LIMIT 0").is_err(){return Err(CoreError::RecoveryRequired);}
     transaction.commit()?;
     Ok(())
 }

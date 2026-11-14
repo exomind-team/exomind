@@ -398,7 +398,7 @@ impl Core {
         self.check_scope(context, profile)?;
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare("SELECT local_seq,body FROM events WHERE profile_id=?1 ORDER BY local_seq")?;
+            .prepare("SELECT local_seq,body FROM events WHERE profile_id=?1 AND kind='capture' ORDER BY local_seq")?;
         let rows = statement.query_map([profile.to_string()], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?;
@@ -452,7 +452,7 @@ impl Core {
         let through = i64::try_from(highwater)
             .map_err(|_| CoreError::InvalidQuery("snapshot exceeds the SQLite sequence range"))?;
         let mut statement = connection.prepare(
-            "SELECT local_seq,body FROM events WHERE profile_id=?1 AND local_seq<=?2 AND (?3 IS NULL OR local_seq<?3) AND (?4 IS NULL OR instr(json_extract(body,'$.text'),?4)>0) ORDER BY local_seq DESC LIMIT ?5"
+            "SELECT local_seq,body FROM events WHERE profile_id=?1 AND kind='capture' AND local_seq<=?2 AND (?3 IS NULL OR local_seq<?3) AND (?4 IS NULL OR instr(json_extract(body,'$.text'),?4)>0) ORDER BY local_seq DESC LIMIT ?5"
         )?;
         let rows = statement.query_map(
             params![

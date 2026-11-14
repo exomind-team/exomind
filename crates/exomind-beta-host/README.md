@@ -1,6 +1,6 @@
 # Beta Host
 
-这是独立 Rust Beta Core 的宿主和传输适配器，不创建旧 Runtime、旧 `AppState` 或兼容写入路径。当前实现档案管理、按档案授权、文字/原件整组提交、分页/搜索和稳定回执；时间块、peer 同步与模型仍属于后续批次。
+这是独立 Rust Beta Core 的宿主和传输适配器，不创建旧 Runtime、旧 `AppState` 或兼容写入路径。当前实现档案管理、按档案授权、文字/原件整组提交、分页/搜索和稳定回执；时间块 Core/Host 接缝已加入；Native/UI/通知、peer 同步与模型另行验证。
 
 ```powershell
 cargo run -p exomind-beta-host --bin exomind-beta -- --data-dir <新的绝对独立目录> --port 0
@@ -63,3 +63,11 @@ cargo test -p exomind-beta-host --offline -j 1 -- --test-threads=1
 ```
 
 测试使用全新合成目录、真实 Axum HTTP 与 SQLite，覆盖鉴权、档案隔离、来源、回执重试、重启、根目录互斥、撤销/stop 晚提交、Host/Origin/CORS、请求体上界和凭据初始化失败恢复。另有真实 `exomind-beta` 子进程验收：通过 HTTP 建档、签发能力和提交，随后只对自己创建的 Child 强制终止并 wait，再验证 root 锁释放、身份/凭据/事件与回执恢复。这证明进程崩溃恢复，不是物理掉电保证。Windows ACL 案例只在 Windows 执行；使用 WinPS5.1 的 .NET ACL API，避免跨版本 PSModulePath 导致 `Get-Acl` 模块自动加载失败。源代码和这些测试不等于正式 Tauri UI、Android 本机、跨设备同步或真实模型已验收；具体执行结果由主代理保存。
+
+## B1.3 时间块与自有 Scheduler
+
+`open_with_clock(root, Arc<dyn HostClock>)` 仅供受信 Rust 注入时钟，默认 open 使用系统时钟。`start_services(&ArcHost)` 幂等启动同一 Core 的后台 Scheduler，Native 无 HTTP/无浏览器也可工作；CLI 启动时显式调用。clock sample 在资格 gate 外读取，返回后才进 gate 复验；request_stop 先禁止新提交并唤醒停止，stop 在 gate 外有界等待自有服务/验证退出，再放 root。
+
+已接受 human Start 的 deadline 是独立 Scheduler 负责的既定用户意图，撤销该 human grant 只拒绝其后续控制；不借撤销回改已提交动作。pause/end/rotate、显式 Scheduler owner 撤销、停止或 Core lifecycle 更换使旧 ticket 失效。通知可读取 deadline_envelope（含档案、运行代次、projection revision、nullable deadline），但本文不代表原生通知层已接通。
+
+新增 GET `/beta/v1/profiles/{p}/timeblocks/current|nodes|intervals`，POST同前缀 `/commands`；body 仅 command_id/event_id/expected_revision/action，profile 取 path，不接受 clock/source/scheduler 字段。observer/agent_note 可读，只有 human 可控制。`GET /beta/v1/profiles/{p}/timeline` 是统一 typed capture/timeblock 完整分页；旧 events 仅兼容 capture，不用于完整 coverage。
