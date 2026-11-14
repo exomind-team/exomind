@@ -1,4 +1,4 @@
-# B1.3 时间块合同草案与先行反例
+# B1.3 时间块合同与验证边界
 
 本文件冻结 B1.3 公开接缝。Core/Host 实现已落源码，执行证据由父代理串行验证；不得把源码存在当作 UI、Android 通知或跨端同步通过。当前 Native 媒体验收使用独立 immutable staging，不与本轮 schema-3 工作源码混版。
 
@@ -75,6 +75,6 @@ start_services(self:&Arc<Self>)->ServiceStatus{instance_id,running} 幂等，wak
 
 HTTP GET `/beta/v1/profiles/{p}/timeblocks/current`；POST同前缀 `/commands`，body 为 command_id/event_id/expected_revision/action，profile 来自路径。当前档案 observer 可读，human 可控制，agent_note 拒绝控制。typed nodes/intervals 后续接对应只读端点；无匿名 Scheduler/clock/ticket API。
 
-先运行 Host HTTP 反例确认真实404行为红；Core/HostClock 新 API 反例在未实现时属于预期编译红，不能记成行为证据。生产 structs 当前不改；父授权实现后补齐确定错误与字段，并统一重跑既有 Core/Host、迁移、旧 binary、生命周期及媒体验收。
+先行 Host HTTP 反例已确认真实404行为红；Core/HostClock 新 API 反例在未实现时为编译红，不记成行为证据。当前公开 structs 与实现已落，父串行复验 Core53项、Host34项以及真实 schema-1/schema-2 旧 binary 专项各1项通过。Native命令、UI、媒体验收、跨端和Android后台仍分别记证据，不能由这些库测试代替。
 
 完整记录流使用 `timeline_page(ctx, profile, EventQuery)` / `GET /beta/v1/profiles/{p}/timeline`，items 为 `{"kind":"capture"|"timeblock","record":...}`，共用同一 events/highwater 与分页游标。旧 `events/events_page` 明确只作 capture 兼容投影，不能声称全量覆盖。timeblock_nodes 只索引同一 events.body，不复制事实；Chat/Agent/同步完整覆盖应接统一 timeline，不能分别分页再猜测合并。
