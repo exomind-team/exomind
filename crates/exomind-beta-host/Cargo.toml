@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 exomind-core = { path = "../exomind-core" }
 axum = "0.7"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "signal", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "signal", "time", "io-util"] }
 rusqlite = { version = "0.32", features = ["bundled", "limits"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -19,6 +19,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 sha2 = "0.10"
 rand = "0.8"
 thiserror = "1"
+ring = "=0.17.14"
+rustls = { version = "=0.23.37", default-features = false, features = ["ring", "std"] }
+tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring"] }
 
 [dev-dependencies]
 tempfile = "3"

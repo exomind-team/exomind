@@ -3,11 +3,19 @@
 mod http;
 mod local_intents;
 mod local_sources;
-pub use local_sources::{LocalSourceBegin,LocalSourceInfo,LocalSourceState,MAX_LOCAL_SOURCE_BYTES,MAX_LOCAL_SOURCE_CHUNK_BYTES};
+pub use local_sources::{
+    LocalSourceBegin, LocalSourceInfo, LocalSourceState, MAX_LOCAL_SOURCE_BYTES,
+    MAX_LOCAL_SOURCE_CHUNK_BYTES,
+};
 #[cfg(test)]
 mod original_tests;
 mod originals;
 mod originals_http;
+mod peers;
+pub use peers::{
+    DeviceIdentityInfo, PeerCancellation, PeerChannel, PeerPin, PeerTransportListener,
+    PeerTransportOptions,
+};
 #[cfg(test)]
 mod stop_tests;
 mod storage;
@@ -84,6 +92,22 @@ pub enum HostError {
     LocalSourceHashMismatch,
     #[error("local source verification slots are busy")]
     LocalSourceBusy,
+    #[error("device key requires recovery or completion of initialization")]
+    PeerIdentityRecoveryRequired,
+    #[error("device key persistence could not be confirmed")]
+    PeerIdentityUnavailable,
+    #[error("peer transport is unavailable")]
+    PeerTransportUnavailable,
+    #[error("peer TLS authentication failed")]
+    PeerTls,
+    #[error("peer public key does not match the expected pin")]
+    PeerPinMismatch,
+    #[error("peer operation timed out")]
+    PeerTimeout,
+    #[error("peer operation was cancelled")]
+    PeerCancelled,
+    #[error("peer transport resource limit reached")]
+    PeerBusy,
     #[error("core operation failed")]
     Core(#[from] CoreError),
     #[error("host database operation failed")]
@@ -172,6 +196,7 @@ struct Resources {
     // before persistence releases this Host's exclusive root lock.
     local_intents: Option<local_intents::Store>,
     local_sources: Option<local_sources::Store>,
+    peer_identity: Option<std::sync::Arc<peers::Identity>>,
     core: Core,
     persistence: Persistence,
 }
@@ -187,6 +212,7 @@ pub struct BetaHost {
     gate: Mutex<State>,
     verifications: originals::VerificationRegistry,
     source_jobs: local_sources::Jobs,
+    peers: std::sync::Arc<peers::Runtime>,
     clock: std::sync::Arc<dyn HostClock>,
     services: std::sync::Arc<timeblocks::Services>,
     #[cfg(test)]
@@ -229,12 +255,16 @@ impl BetaHost {
         // Secure recognized core files only after Core has validated its schema
         // and ownership. Never modify a foreign directory to make it acceptable.
         storage::secure_private_tree(&core_root)?;
+        // An existing key/binding is validated before any writable facade is
+        // returned. Older B1 roots initialize only on explicit owner request.
+        let peer_identity = peers::load_identity(&mut persistence, core.device_id(), false)?;
         Ok(Self {
             runtime_id: Uuid::new_v4(),
             device_id: core.device_id(),
             accepting: AtomicBool::new(true),
             verifications: originals::VerificationRegistry::default(),
             source_jobs: local_sources::Jobs::default(),
+            peers: std::sync::Arc::new(peers::Runtime::default()),
             clock,
             services: std::sync::Arc::new(timeblocks::Services::default()),
             #[cfg(test)]
@@ -243,6 +273,7 @@ impl BetaHost {
                 resources: Some(Resources {
                     local_intents: None,
                     local_sources: None,
+                    peer_identity,
                     core,
                     persistence,
                 }),
@@ -268,6 +299,7 @@ impl BetaHost {
     pub fn request_stop(&self) {
         self.accepting.store(false, Ordering::Release);
         self.services.request_stop();
+        self.peers.request_stop();
     }
 
     pub fn status(&self) -> Result<HostStatus, HostError> {
@@ -533,7 +565,10 @@ impl BetaHost {
             .wait_stopped(deadline.saturating_duration_since(std::time::Instant::now()))?;
         self.verifications
             .wait_empty(deadline.saturating_duration_since(std::time::Instant::now()))?;
-        self.source_jobs.wait_empty(deadline.saturating_duration_since(std::time::Instant::now()))?;
+        self.source_jobs
+            .wait_empty(deadline.saturating_duration_since(std::time::Instant::now()))?;
+        self.peers
+            .wait_empty(deadline.saturating_duration_since(std::time::Instant::now()))?;
         // A timeout deliberately retains resources/the root lock: an old read
         // connection must not coexist with a newly opened host for this root.
         self.state()?.resources.take();

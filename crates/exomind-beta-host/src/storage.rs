@@ -67,6 +67,8 @@ fn children_are_owned(root: &Path) -> Result<(), HostError> {
                 | crate::local_intents::INITIALIZED
                 | crate::local_sources::DIRECTORY
                 | crate::local_sources::INITIALIZED
+                | crate::peers::identity::DIRECTORY
+                | crate::peers::identity::INITIALIZED
                 | CONNECTION
         ) && !(name.starts_with("connection.beta.") && name.ends_with(".tmp"))
         {
@@ -352,6 +354,60 @@ impl Persistence {
             [device.to_string()],
         )?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn peer_identity_pin(
+        &self,
+        device: exomind_core::DeviceId,
+    ) -> Result<Option<String>, HostError> {
+        let exists: bool = self.auth.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='peer_identity_binding')",
+            [], |row| row.get(0),
+        ).map_err(|_| HostError::PeerIdentityUnavailable)?;
+        if !exists {
+            return Ok(None);
+        }
+        let (stored, pin): (Option<String>, Option<String>) = self.auth.query_row(
+            "SELECT CASE WHEN length(device_id)=36 THEN device_id END, CASE WHEN length(pin)=64 THEN pin END FROM peer_identity_binding WHERE singleton=1",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).map_err(|_| HostError::PeerIdentityRecoveryRequired)?;
+        let pin = pin.ok_or(HostError::PeerIdentityRecoveryRequired)?;
+        if stored.as_deref() != Some(device.to_string().as_str())
+            || crate::PeerPin::from_sha256(&pin).is_err()
+        {
+            return Err(HostError::PeerIdentityRecoveryRequired);
+        }
+        Ok(Some(pin))
+    }
+
+    pub(crate) fn bind_peer_identity(
+        &mut self,
+        device: exomind_core::DeviceId,
+        pin: &str,
+    ) -> Result<(), HostError> {
+        if let Some(previous) = self.peer_identity_pin(device)? {
+            return if previous == pin {
+                Ok(())
+            } else {
+                Err(HostError::PeerIdentityRecoveryRequired)
+            };
+        }
+        let tx = self
+            .auth
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| HostError::PeerIdentityUnavailable)?;
+        // Additive compatibility extension, as with core_binding. No owner or
+        // grant semantics change; private key bytes never enter host-auth.
+        tx.execute_batch("CREATE TABLE peer_identity_binding(singleton INTEGER PRIMARY KEY CHECK(singleton=1),device_id TEXT NOT NULL,pin TEXT NOT NULL)")
+            .map_err(|_| HostError::PeerIdentityUnavailable)?;
+        tx.execute(
+            "INSERT INTO peer_identity_binding VALUES(1,?1,?2)",
+            rusqlite::params![device.to_string(), pin],
+        )
+        .map_err(|_| HostError::PeerIdentityUnavailable)?;
+        tx.commit()
+            .map_err(|_| HostError::PeerIdentityUnavailable)?;
         Ok(())
     }
 
