@@ -2,7 +2,8 @@ import { BetaApiError, validateReceipt, type BetaClient, type BetaCommand, type 
 import { betaUuid } from './initialization';
 import { IndexedDbFileSourceStore, hashFileSource, sourceKey, type FileSourceStore } from './file-source-store';
 import { ORIGINAL_CHUNK_BYTES, type BetaOriginal, type BetaStage } from './original-types';
-import { openDurableIntentStorage, type DurableIntentStorage, type LocalIntentJournal } from './local-intent-journal';
+import { openDurableIntentStorage, type DurableIntentStorage, type LocalIntentJournal, type IntentPredecessor } from './local-intent-journal';
+import { productionIntentStorage } from './native-intent-journal';
 
 export interface DraftFile {
   id: string; stage_id: string; source_key: string;
@@ -110,9 +111,11 @@ export class BetaDraftController {
   /** Production creation: hydrate/validate strict local intent storage before
    * exposing an editor. The sync constructor remains for explicit legacy tests. */
   static async open(client: BetaClient, deviceId: string, options: {
-    journal?: LocalIntentJournal; legacy?: DraftStorage; sources?: FileSourceStore; uuid?: () => string; clock?: () => number;
+    journal?: LocalIntentJournal; predecessor?: IntentPredecessor; allowLegacyImport?: boolean; legacy?: DraftStorage; sources?: FileSourceStore; uuid?: () => string; clock?: () => number;
   } = {}): Promise<BetaDraftController> {
-    const storage = await openDurableIntentStorage({ key: `exomind:beta:drafts:${deviceId}`, journal: options.journal,
+    const defaults=options.journal?undefined:productionIntentStorage();
+    const storage = await openDurableIntentStorage({ key: `exomind:beta:drafts:${deviceId}`, journal: options.journal??defaults?.journal,
+      predecessor: options.predecessor??defaults?.predecessor, allowLegacyImport: options.allowLegacyImport,
       // Do not even access the global getter until the journal proves absence.
       legacy: options.legacy ?? { getItem: key => globalThis.localStorage?.getItem(key) ?? null },
       validate: raw => { load(raw, deviceId); } });

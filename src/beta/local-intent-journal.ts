@@ -5,6 +5,7 @@ export interface LocalIntentJournal {
   write(key: string, raw: string): Promise<void>;
   close?(): void;
 }
+export type IntentPredecessor = Pick<LocalIntentJournal, 'read'>;
 export interface IntentPersistenceState { state: 'idle' | 'pending' | 'failed'; error: string | null }
 export interface DurableIntentStorage extends Pick<Storage, 'getItem' | 'setItem'> {
   readonly durable: true;
@@ -98,6 +99,44 @@ export class IndexedDbLocalIntentJournal implements LocalIntentJournal {
   close(): void { this.closed = true; void this.database?.then(database => database.close()).catch(() => {}); }
 }
 
+/** Native's previous browser journal is read only. Never probe with open():
+ * Chromium may create a new empty DB after deleting a corrupted database. */
+export class ExistingBrowserIntentJournal implements IntentPredecessor {
+  async read(key: string): Promise<string | null> {
+    let factory: IDBFactory;
+    let enumeration: IDBDatabaseInfo[];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      factory = globalThis.indexedDB;
+      if (!factory || typeof factory.databases !== 'function') throw new Error('enumeration unavailable');
+      enumeration = await Promise.race([factory.databases(), new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('enumeration timeout')),OPERATION_TIMEOUT_MS);})]);
+    } catch { throw new BetaApiError('intent_predecessor_unavailable', '旧本机草稿库无法读取，已停止恢复；不会改用较旧缓存'); }
+    finally { clearTimeout(timer); }
+    if (!enumeration.some(database => database.name === DATABASE)) return null;
+    return new Promise((resolve,reject)=>{
+      let database: IDBDatabase | undefined;let transaction: IDBTransaction | undefined;let settled=false;let raw:string|null=null;let read=false;
+      const finish=(error?:BetaApiError)=>{if(settled)return;settled=true;clearTimeout(timeout);database?.close();if(error)reject(error);else resolve(raw);};
+      const unavailable=()=>new BetaApiError('intent_predecessor_unavailable','旧本机草稿读取未确认，已停止恢复；不会改用较旧缓存');
+      const timeout=setTimeout(()=>{finish(unavailable());try{transaction?.abort();}catch{}},OPERATION_TIMEOUT_MS);
+      try {
+        const request=factory.open(DATABASE); // existing only; do not request an upgrade
+        request.onupgradeneeded=()=>{try{request.transaction?.abort();}catch{}finish(unavailable());};
+        request.onerror=()=>finish(unavailable());request.onblocked=()=>finish(unavailable());
+        request.onsuccess=()=>{
+          database=request.result;if(settled){database.close();return;}
+          if(!database.objectStoreNames.contains(STORE)){finish(new BetaApiError('intent_cache_corrupt','旧本机草稿库结构不匹配，已保留并停止恢复'));return;}
+          try{
+            transaction=database.transaction(STORE,'readonly');
+            transaction.oncomplete=()=>finish(read?undefined:unavailable());transaction.onerror=()=>finish(unavailable());transaction.onabort=()=>finish(unavailable());
+            const get=transaction.objectStore(STORE).get(key);
+            get.onsuccess=()=>{if(get.result!==undefined&&typeof get.result!=='string'){finish(new BetaApiError('intent_cache_corrupt','旧本机草稿内容损坏，已保留并停止恢复'));return;}raw=get.result??null;read=true;};
+          }catch{finish(unavailable());}
+        };
+      }catch{finish(unavailable());}
+    });
+  }
+}
+
 interface CommitWaiter { target: number; resolve(): void; reject(error: unknown): void }
 /** One bound key, one in-flight transaction and one latest snapshot. Never
  * replay a stale whole-state snapshot after a newer setItem was accepted. */
@@ -140,10 +179,11 @@ class JournalStorage implements DurableIntentStorage {
     while (this.committed < this.sequence && this.status.state !== 'failed') {
       const target = this.sequence; const raw = this.raw!;
       try { await this.journal.write(this.key, raw); }
-      catch {
+      catch (error) {
         const waiters = this.waiters.splice(0);
-        this.emit('failed', '本机草稿暂存未确认，请保留窗口并重试；尚未确认的提交不会发送');
-        waiters.forEach(waiter => waiter.reject(failed())); return;
+        const failure=error instanceof BetaApiError?error:failed();
+        this.emit('failed', failure.message);
+        waiters.forEach(waiter => waiter.reject(failure)); return;
       }
       this.committed = target;
       const completed = this.waiters.filter(waiter => waiter.target <= target); this.waiters = this.waiters.filter(waiter => waiter.target > target);
@@ -166,7 +206,7 @@ class JournalStorage implements DurableIntentStorage {
 }
 
 export async function openDurableIntentStorage(options: {
-  key: string; journal?: LocalIntentJournal; legacy?: Pick<Storage, 'getItem'>; validate(raw: string): void;
+  key: string; journal?: LocalIntentJournal; predecessor?: IntentPredecessor; legacy?: Pick<Storage, 'getItem'>; allowLegacyImport?: boolean; validate(raw: string): void;
 }): Promise<DurableIntentStorage> {
   const journal = options.journal ?? new IndexedDbLocalIntentJournal(); const ownsJournal = !options.journal;
   try {
@@ -175,20 +215,34 @@ export async function openDurableIntentStorage(options: {
     let raw: string | null;
     try { raw = await journal.read(options.key); }
     catch (error) { if (error instanceof BetaApiError) throw error; throw new BetaApiError('intent_store_unavailable', '无法读取本机草稿库，已停止恢复和发送'); }
+    if(raw!==null&&typeof raw!=='string')throw new BetaApiError('intent_cache_corrupt','本机草稿响应无法识别，已停止恢复');
     const validate = (value: string) => {
       try { options.validate(value); }
       catch { throw new BetaApiError('intent_cache_corrupt', '本机草稿内容无法识别，已保留原缓存并停止写入'); }
     };
     if (raw !== null) validate(raw);
     else {
+      let predecessor: string | null = null;
+      if(options.predecessor){
+        try{predecessor=await options.predecessor.read(options.key);}
+        catch(error){if(error instanceof BetaApiError)throw error;throw new BetaApiError('intent_predecessor_unavailable','旧本机草稿库无法读取，已停止恢复；不会改用较旧缓存');}
+        if(predecessor!==null&&typeof predecessor!=='string')throw new BetaApiError('intent_cache_corrupt','旧本机草稿响应无法识别，已停止恢复');
+      }
+      if(predecessor!==null){
+        validate(predecessor);
+        try{await journal.write(options.key,predecessor);}catch(error){if(error instanceof BetaApiError)throw error;throw new BetaApiError('intent_migration_failed','旧本机草稿迁移尚未确认，已保留原缓存并停止发送');}
+        raw=predecessor;
+      }else{
       let legacy: string | null;
       try { legacy = options.legacy?.getItem(options.key) ?? null; }
       catch { throw new BetaApiError('intent_legacy_unavailable', '旧草稿缓存无法读取，尚未建立新缓存或启用发送'); }
       if (legacy !== null) {
+        if(options.allowLegacyImport!==true)throw new BetaApiError('intent_recovery_required','可靠草稿库中未找到此缓存；旧缓存可能缺少最近输入，需要明确选择后才能恢复');
         validate(legacy);
         try { await journal.write(options.key, legacy); }
-        catch { throw new BetaApiError('intent_migration_failed', '旧草稿迁移尚未确认，已保留原缓存并停止发送'); }
+        catch(error) { if(error instanceof BetaApiError)throw error;throw new BetaApiError('intent_migration_failed', '旧草稿迁移尚未确认，已保留原缓存并停止发送'); }
         raw = legacy;
+      }
       }
     }
     return new JournalStorage(options.key, journal, ownsJournal, validate, raw);

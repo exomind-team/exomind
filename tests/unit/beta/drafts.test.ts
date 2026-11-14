@@ -34,11 +34,11 @@ describe('Beta reliable drafts', () => {
     const restored=await BetaDraftController.open(client,'device-a',{journal,legacy});
     expect(restored.snapshot().drafts.p.text).toBe('survives rollback');expect(restored.snapshot().persistenceState).toBe('idle');expect(client.capture).not.toHaveBeenCalled();await restored.close();
   });
-  it('production factory lazily migrates default legacy storage only when the journal is truly absent',async()=>{
+  it('production factory explicitly imports default legacy storage only when the journal is truly absent',async()=>{
     const client=fakeClient();const key='exomind:beta:drafts:device-a';const legacy=memoryStorage();
     legacy.setItem(key,JSON.stringify({version:1,drafts:{p:{text:'default legacy',revision:3}},pending:[],confirmed:[]}));vi.stubGlobal('localStorage',legacy);
     const journal={read:vi.fn(async():Promise<string|null>=>null),write:vi.fn(async()=>{})};
-    const draft=await BetaDraftController.open(client,'device-a',{journal});expect(draft.snapshot().drafts.p.text).toBe('default legacy');expect(journal.write).toHaveBeenCalledWith(key,legacy.getItem(key));await draft.close();
+    const draft=await BetaDraftController.open(client,'device-a',{journal,allowLegacyImport:true});expect(draft.snapshot().drafts.p.text).toBe('default legacy');expect(journal.write).toHaveBeenCalledWith(key,legacy.getItem(key));await draft.close();
     const original=Object.getOwnPropertyDescriptor(globalThis,'localStorage');let getterCalled=false;
     Object.defineProperty(globalThis,'localStorage',{configurable:true,get:()=>{getterCalled=true;throw new Error('legacy getter must remain untouched');}});
     try {

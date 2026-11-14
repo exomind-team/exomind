@@ -3,7 +3,8 @@ import { validateReceipt, type BetaClient, type BetaReceipt, type BetaStatus } f
 import { betaUuid } from './initialization';
 import type { BetaTimeblockAction, BetaTimeblockCommand, BetaTimeblockSnapshot } from './timeblocks-types';
 import { validateTimeblockCommand, validateTimeblockSnapshot } from './timeblocks-validation';
-import { openDurableIntentStorage, type DurableIntentStorage, type LocalIntentJournal } from './local-intent-journal';
+import { openDurableIntentStorage, type DurableIntentStorage, type LocalIntentJournal, type IntentPredecessor } from './local-intent-journal';
+import { productionIntentStorage } from './native-intent-journal';
 
 export interface BetaStartDraft { name:string; note:string; mode:'countup'|'countdown'; minutes:number; endMode:'soft'|'hard'; revision:number }
 export interface BetaFeedbackDraft { text:string; revision:number }
@@ -46,9 +47,10 @@ export class BetaTimeblockController {
   private readonly listeners=new Set<()=>void>();private readonly flights=new Map<string,Promise<BetaReceipt|null>>();
   private readonly uuid:()=>string;private readonly now:()=>number;
   private unsubscribePersistence:(()=>void)|undefined;private closing:Promise<void>|undefined;
-  static async open(client:BetaClient,deviceId:string,profileId:string,options:{journal?:LocalIntentJournal;legacy?:Pick<Storage,'getItem'>;uuid?:()=>string;monotonicNow?:()=>number}={}):Promise<BetaTimeblockController>{
+  static async open(client:BetaClient,deviceId:string,profileId:string,options:{journal?:LocalIntentJournal;predecessor?:IntentPredecessor;allowLegacyImport?:boolean;legacy?:Pick<Storage,'getItem'>;uuid?:()=>string;monotonicNow?:()=>number}={}):Promise<BetaTimeblockController>{
     const legacy=options.legacy??{getItem:(key:string)=>globalThis.localStorage?.getItem(key)??null};
-    const storage=await openDurableIntentStorage({key:storageKey(deviceId,profileId),journal:options.journal,legacy,validate:raw=>{load(raw,profileId);}});
+    const defaults=options.journal?undefined:productionIntentStorage();
+    const storage=await openDurableIntentStorage({key:storageKey(deviceId,profileId),journal:options.journal??defaults?.journal,predecessor:options.predecessor??defaults?.predecessor,allowLegacyImport:options.allowLegacyImport,legacy,validate:raw=>{load(raw,profileId);}});
     try{return new BetaTimeblockController(client,deviceId,profileId,storage,options);}catch(error){storage.close();throw error;}
   }
   constructor(private readonly client:BetaClient,private readonly deviceId:string,private readonly profileId:string,private readonly storage:StorageLike,

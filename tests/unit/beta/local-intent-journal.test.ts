@@ -13,11 +13,11 @@ describe('durable local intent bridge',()=>{
     await Promise.resolve();expect(done).toBe(false);expect(storage.snapshot().state).toBe('pending');
     gate.resolve();await committed;expect(storage.snapshot().state).toBe('idle');
   });
-  it('migrates only a validated legacy value and never returns a fake empty cache after read/migration failure',async()=>{
+  it('explicitly imports only a validated legacy value and never returns a fake empty cache after read/migration failure',async()=>{
     const {openDurableIntentStorage}=await import('@/beta/local-intent-journal');
     const legacy=memoryStorage();const key='exomind:beta:drafts:device';legacy.setItem(key,'legacy raw');
     const gate=deferred<void>();const journal={read:vi.fn(async()=>null),write:vi.fn(async()=>gate.promise)};
-    const opened=openDurableIntentStorage({key,journal,legacy,validate:raw=>{if(raw!=='legacy raw')throw Error('invalid');}});
+    const opened=openDurableIntentStorage({key,journal,legacy,allowLegacyImport:true,validate:raw=>{if(raw!=='legacy raw')throw Error('invalid');}});
     let hydrated=false;void opened.then(()=>{hydrated=true;}).catch(()=>{});await Promise.resolve();await Promise.resolve();expect(hydrated).toBe(false);
     gate.reject(new Error('quota'));await expect(opened).rejects.toBeDefined();expect(legacy.getItem(key)).toBe('legacy raw');
     journal.read.mockRejectedValueOnce(new Error('read unavailable'));

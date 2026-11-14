@@ -14,7 +14,7 @@ import { useBetaNow } from './date-clock';
 import type { FileSourceStore } from './file-source-store';
 import { collectOriginalDownload, MAX_BASIC_DOWNLOAD_BYTES } from './original-download';
 import type { BetaOriginal } from './original-types';
-import type { LocalIntentJournal } from './local-intent-journal';
+import type { LocalIntentJournal,IntentPredecessor } from './local-intent-journal';
 import type { BetaTimelinePage,BetaTimeblockNode } from './timeblocks-types';
 import { BetaTimeblockController } from './timeblocks-controller';
 import { BetaFocusTimer } from './BetaFocusTimer';
@@ -24,7 +24,7 @@ const DATE_KEY = 'exomind:beta:date-display';
 const selectClass = 'h-9 max-w-full rounded-md border border-input bg-page px-2 text-sm dark:bg-page-dark';
 
 /** A separate entry: no legacy runtime/profile/event-store bootstrap. */
-export function BetaApp({ client: injected, sourceStore, intentJournal }: { client?: BetaClient; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal }) {
+export function BetaApp({ client: injected, sourceStore, intentJournal, intentPredecessor }: { client?: BetaClient; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor }) {
   const [native] = useState(() => isTauri());
   const [client, setClient] = useState<BetaClient | null>(() => injected ?? (native ? nativeBetaClient() : null));
   const [endpoint, setEndpoint] = useState(() => {
@@ -45,7 +45,7 @@ export function BetaApp({ client: injected, sourceStore, intentJournal }: { clie
       setError(''); setClient(next);
     } catch (failure) { setError(errorMessage(failure)); }
   }
-  if (client) return <ConnectedBeta key={native ? 'native' : undefined} client={client} sourceStore={sourceStore} intentJournal={intentJournal}
+  if (client) return <ConnectedBeta key={native ? 'native' : undefined} client={client} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor}
     onDisconnect={!native && !injected ? () => { setClient(null); setToken(''); sessionStorage.removeItem(SESSION_KEY); } : undefined} />;
   return <PageShell title="外心" subtitle="Beta · 连接本机服务" contentClassName="overflow-y-auto">
     <form onSubmit={connect} className="mx-auto flex max-w-lg flex-col gap-4 px-5 py-8">
@@ -58,7 +58,7 @@ export function BetaApp({ client: injected, sourceStore, intentJournal }: { clie
   </PageShell>;
 }
 
-function ConnectedBeta({ client, onDisconnect, sourceStore, intentJournal }: { client: BetaClient; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal }) {
+function ConnectedBeta({ client, onDisconnect, sourceStore, intentJournal, intentPredecessor }: { client: BetaClient; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor }) {
   const [status, setStatus] = useState<BetaStatus | null>(null);
   const [profiles, setProfiles] = useState<BetaProfile[]>([]);
   const [profileId, setProfileId] = useState('');
@@ -132,20 +132,23 @@ function ConnectedBeta({ client, onDisconnect, sourceStore, intentJournal }: { c
     {loading && <p role="status" className="p-5 text-sm text-muted">正在连接…</p>}
     {error && <div role="alert" className="flex items-center gap-2 px-5 py-3 text-sm text-destructive">{error}
       {!status && <Button variant="outline" onClick={() => setReload(value => value + 1)}>重新连接</Button>}</div>}
-    {status && <DeviceWorkspace key={`${status.device_id}`} client={client} deviceId={status.device_id} profileId={profileId} sourceStore={sourceStore} intentJournal={intentJournal} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} />}
+    {status && <DeviceWorkspace key={`${status.device_id}`} client={client} deviceId={status.device_id} profileId={profileId} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} />}
   </PageShell>;
 }
 
-function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJournal, onPersistenceBusy, prepareSwitch }: { client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:MutableRefObject<(()=>Promise<void>)|null> }) {
+function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch }: { client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:MutableRefObject<(()=>Promise<void>)|null> }) {
   type Owners={capture:BetaDraftController;focus:BetaTimeblockController|null;profileId:string};
   const [owners, setOwners] = useState<Owners | null>(null);
   const [error, setError] = useState('');
+  const [recoveryRequired,setRecoveryRequired]=useState(false);
+  const [legacyConsent,setLegacyConsent]=useState<{client:BetaClient;deviceId:string;profileId:string}|null>(null);
+  const allowLegacyImport=legacyConsent?.client===client&&legacyConsent.deviceId===deviceId&&legacyConsent.profileId===profileId;
   const [lockAttempt, setLockAttempt] = useState(0);
   const lockRequest = useRef<Promise<void> | null>(null);
   useEffect(() => {
     let capture:BetaDraftController|undefined;let focus:BetaTimeblockController|undefined;
     let cancelled=false;let release:(()=>void)|undefined;let switchGuard:(()=>Promise<void>)|undefined;const unsubscribers:Array<()=>void>=[];
-    onPersistenceBusy(true);setOwners(null);
+    onPersistenceBusy(true);setOwners(null);setRecoveryRequired(false);
     // Web Locks prevent two tabs overwriting this device's durable draft cache.
     const locks = navigator.locks;
     if (typeof locks?.request === 'function') {
@@ -160,9 +163,9 @@ function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJourn
           if (cancelled) return;
           if (!lock) { setError('另一窗口正在编辑此设备的草稿，请先关闭该窗口，再重试草稿锁');onPersistenceBusy(false); return; }
           try {
-            capture=await BetaDraftController.open(client,deviceId,{journal:intentJournal,sources:sourceStore});
+            capture=await BetaDraftController.open(client,deviceId,{journal:intentJournal,predecessor:intentPredecessor,allowLegacyImport,sources:sourceStore});
             if(cancelled)return;
-            if(profileId&&client.timeblocks)focus=await BetaTimeblockController.open(client,deviceId,profileId,{journal:intentJournal});
+            if(profileId&&client.timeblocks)focus=await BetaTimeblockController.open(client,deviceId,profileId,{journal:intentJournal,predecessor:intentPredecessor,allowLegacyImport});
             if(cancelled)return;
             switchGuard=async()=>{
               for(let attempt=0;attempt<8;attempt++){
@@ -187,13 +190,14 @@ function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJourn
         });
       })();
       lockRequest.current = operation;
-      void operation.catch(failure => { if (!cancelled) {setError(errorMessage(failure));onPersistenceBusy(false);} });
+      void operation.catch(failure => { if (!cancelled) {setError(errorMessage(failure));setRecoveryRequired(!!failure&&typeof failure==='object'&&'code'in failure&&failure.code==='intent_recovery_required');onPersistenceBusy(false);} });
     }
     else {setError('当前浏览器不支持安全的草稿窗口锁，请使用支持 Web Locks 的浏览器');onPersistenceBusy(false);}
     return () => { cancelled = true;if(prepareSwitch.current===switchGuard)prepareSwitch.current=null;capture?.dispose();focus?.dispose();release?.();setOwners(null); };
-  }, [client, deviceId, profileId, lockAttempt, sourceStore, intentJournal, onPersistenceBusy, prepareSwitch]);
+  }, [client, deviceId, profileId, lockAttempt, sourceStore, intentJournal, intentPredecessor, allowLegacyImport, onPersistenceBusy, prepareSwitch]);
   if (error) return <div className="space-y-3 p-5">
     <p role="alert" className="text-sm text-destructive">{error}</p>
+    {recoveryRequired&&<div className="space-y-2"><p className="text-xs text-secondary">旧缓存可能缺少最近输入或原件源，恢复不代表完整找回新稿。原缓存会保留；缺少的原文件需要重新选择。</p><Button variant="outline" onClick={()=>{setLegacyConsent({client,deviceId,profileId});setError('');setLockAttempt(value=>value+1);}}>恢复旧缓存（保留原缓存）</Button></div>}
     {typeof navigator.locks?.request === 'function' && <Button variant="outline" onClick={() => {
       owners?.capture.dispose();owners?.focus?.dispose();setOwners(null);setError('');setLockAttempt(value=>value+1);
     }}>重试草稿锁</Button>}

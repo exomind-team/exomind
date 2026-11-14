@@ -32,9 +32,14 @@ export function asyncDraftLocks() {
       const granted = !held.has(name);
       if (granted) held.add(name);
       setTimeout(() => {
-        Promise.resolve(callback(granted ? { name, mode: 'exclusive' } as Lock : null)).then(() => {
-          setTimeout(() => { if (granted) held.delete(name); resolve(); }, 0);
-        }, reject);
+        // Web Locks release ownership after either callback outcome. Recovery
+        // opens deliberately reject; retaining that fixture lock would prevent
+        // an explicit retry even though the browser has released the real lock.
+        const settle = (succeeded: boolean, failure?: unknown) => setTimeout(() => {
+          if (granted) held.delete(name);
+          if (succeeded) resolve(); else reject(failure);
+        }, 0);
+        Promise.resolve().then(() => callback(granted ? { name, mode: 'exclusive' } as Lock : null)).then(() => settle(true), failure => settle(false, failure));
       }, 0);
     });
   }));
