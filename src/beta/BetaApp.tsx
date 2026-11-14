@@ -127,7 +127,8 @@ function ConnectedBeta({ client, onDisconnect, sourceStore, intentJournal, inten
         {!profiles.length && <option value="">请创建档案</option>}
         {profiles.map(item => <option key={item.profile_id} value={item.profile_id}>{item.display_name}</option>)}
       </select>
-      <form onSubmit={create} className="flex min-w-0 flex-1 gap-2">
+      {/* Wrap beside long profile names before the form shrinks below its controls. */}
+      <form onSubmit={create} className="flex min-w-0 flex-[1_1_16rem] gap-2">
         <Input aria-label="新档案名称" className="min-w-0 max-w-48" placeholder="新档案名称" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={creating} />
         <Button type="submit" variant="outline" disabled={creating || persistenceBusy || !name.trim()}>{creating ? '创建中…' : '创建档案'}</Button>
       </form>
