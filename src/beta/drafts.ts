@@ -2,6 +2,7 @@ import { BetaApiError, validateReceipt, type BetaClient, type BetaCommand, type 
 import { betaUuid } from './initialization';
 import { IndexedDbFileSourceStore, hashFileSource, sourceKey, type FileSourceStore } from './file-source-store';
 import { ORIGINAL_CHUNK_BYTES, type BetaOriginal, type BetaStage } from './original-types';
+import { openDurableIntentStorage, type DurableIntentStorage, type LocalIntentJournal } from './local-intent-journal';
 
 export interface DraftFile {
   id: string; stage_id: string; source_key: string;
@@ -19,8 +20,12 @@ export interface PendingCapture {
 }
 interface Confirmation { receipt: BetaReceipt; draft_revision: number }
 interface PersistedState { version: 1; drafts: Record<string, Draft>; pending: PendingCapture[]; confirmed: Confirmation[] }
-export interface DraftSnapshot extends PersistedState { persistenceError: string | null }
+export interface DraftSnapshot extends PersistedState { persistenceError: string | null; persistenceState: 'idle' | 'pending' | 'failed' }
 type DraftStorage = Pick<Storage, 'getItem' | 'setItem'>;
+function durable(storage: DraftStorage): storage is DurableIntentStorage {
+  const candidate = storage as Partial<DurableIntentStorage>;
+  return candidate.durable === true && typeof candidate.commit === 'function' && typeof candidate.snapshot === 'function' && typeof candidate.subscribe === 'function';
+}
 
 export function errorMessage(error: unknown): string {
   if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
@@ -99,31 +104,70 @@ export class BetaDraftController {
   private readonly ownsSources: boolean;
   private readonly uploads = new Map<string, Promise<BetaStage>>();
   private uploadTail: Promise<unknown> = Promise.resolve();
+  private unsubscribePersistence: (() => void) | undefined;
+  private closing: Promise<void> | undefined;
+
+  /** Production creation: hydrate/validate strict local intent storage before
+   * exposing an editor. The sync constructor remains for explicit legacy tests. */
+  static async open(client: BetaClient, deviceId: string, options: {
+    journal?: LocalIntentJournal; legacy?: DraftStorage; sources?: FileSourceStore; uuid?: () => string; clock?: () => number;
+  } = {}): Promise<BetaDraftController> {
+    const storage = await openDurableIntentStorage({ key: `exomind:beta:drafts:${deviceId}`, journal: options.journal,
+      // Do not even access the global getter until the journal proves absence.
+      legacy: options.legacy ?? { getItem: key => globalThis.localStorage?.getItem(key) ?? null },
+      validate: raw => { load(raw, deviceId); } });
+    const controller = new BetaDraftController(client, deviceId, storage, options.uuid, options.clock, options.sources);
+    if (controller.restoreBlocked) { controller.dispose(); throw new BetaApiError('intent_cache_corrupt', '本机草稿恢复未完成，已保留原缓存'); }
+    return controller;
+  }
 
   constructor(private readonly client: BetaClient, private readonly deviceId: string, private readonly storage: DraftStorage,
     private readonly uuid: () => string = betaUuid, private readonly clock: () => number = Date.now, sources?: FileSourceStore) {
     this.sources = sources ?? new IndexedDbFileSourceStore(); this.ownsSources = !sources;
     this.key = `exomind:beta:drafts:${deviceId}`;
-    try { this.state = { ...load(storage.getItem(this.key), deviceId), persistenceError: null }; }
+    try { this.state = { ...load(storage.getItem(this.key), deviceId), persistenceError: null, persistenceState: 'idle' }; }
     catch {
       this.restoreBlocked = true;
-      this.state = { version: 1, drafts: {}, pending: [], confirmed: [], persistenceError: '草稿缓存无法读取，已停止写入以保留原缓存' };
+      this.state = { version: 1, drafts: {}, pending: [], confirmed: [], persistenceError: '草稿缓存无法读取，已停止写入以保留原缓存', persistenceState: 'failed' };
     }
+    if (durable(storage)) this.unsubscribePersistence = storage.subscribe(() => {
+      if (this.disposed || this.restoreBlocked) return;
+      const status = storage.snapshot(); this.state = { ...this.state, persistenceState: status.state, persistenceError: status.error };
+      this.listeners.forEach(listener => listener());
+    });
   }
 
   snapshot = (): DraftSnapshot => this.state;
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
-  dispose(): void { this.disposed = true; this.listeners.clear(); if (this.ownsSources) this.sources.close?.(); }
+  dispose(): void {
+    if (!this.disposed) { this.disposed = true; this.listeners.clear(); this.unsubscribePersistence?.(); }
+    if (!this.closing) {
+      this.closing = (async () => { try { if (durable(this.storage)) await this.storage.commit(); }
+        finally { if (durable(this.storage)) this.storage.close?.(); if (this.ownsSources) this.sources.close?.(); } })();
+      void this.closing.catch(() => {});
+    }
+  }
+  async close(): Promise<void> { this.dispose(); await this.closing; }
+  async flush(): Promise<void> { this.active(); if (durable(this.storage)) await this.requiredCommit(); }
+  private async requiredCommit(): Promise<void> {
+    if (!durable(this.storage)) return;
+    try { await this.storage.commit(); }
+    catch {
+      if (!this.disposed) { this.state = { ...this.state, persistenceState: 'failed', persistenceError: '本机草稿暂存未确认，尚未发送；请保留窗口并重试' }; this.listeners.forEach(listener => listener()); }
+      throw new BetaApiError('draft_cache_unavailable', '本机草稿暂存未确认，尚未发送；请重试原提交');
+    }
+  }
   private publish(next: DraftSnapshot, required = false): void {
     if (this.disposed) return;
     if (this.restoreBlocked) throw new BetaApiError('draft_cache_unavailable', '请先处理无法读取的草稿缓存');
     const { version, drafts, pending, confirmed } = next;
     try {
       this.storage.setItem(this.key, JSON.stringify({ version, drafts, pending, confirmed }));
-      this.state = { ...next, persistenceError: null };
+      const status = durable(this.storage) ? this.storage.snapshot() : { state: 'idle' as const, error: null };
+      this.state = { ...next, persistenceError: status.error, persistenceState: status.state };
     } catch {
       if (required) throw new BetaApiError('draft_cache_unavailable', '未能暂存本次提交，尚未向服务发送');
-      this.state = { ...next, persistenceError: '草稿缓存写入失败，请保留此窗口；已确认保存的记录不受影响' };
+      this.state = { ...next, persistenceError: '草稿缓存写入失败，请保留此窗口；已确认保存的记录不受影响', persistenceState: 'failed' };
     }
     this.listeners.forEach(listener => listener());
   }
@@ -162,7 +206,7 @@ export class BetaDraftController {
     if (!incoming.length) return;
     const previous = this.state.drafts[profileId] ?? { text: '', revision: 0 };
     const next = { ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...previous, revision: previous.revision + 1, files: [...(previous.files ?? []), ...incoming] } } };
-    try { this.publish(next, true); }
+    try { this.publish(next, true); if (durable(this.storage)) { await this.requiredCommit(); this.active(); } }
     catch (error) {
       this.publish({ ...next, drafts: { ...next.drafts, [profileId]: { ...next.drafts[profileId], files: [...(previous.files ?? []), ...incoming.map(file => ({ ...file, state: 'failed' as const, message: errorMessage(error) }))] } } });
       return;
@@ -197,6 +241,7 @@ export class BetaDraftController {
     const original: BetaOriginal = { original_id: file.id, sha256: sha, byte_length: file.byte_length, file_name: file.file_name, media_type: file.media_type };
     const prepared: DraftFile = { ...file, original, state: 'uploading', message: undefined };
     this.patchFile(profileId, file.id, prepared, true);
+    if (durable(this.storage)) { await this.requiredCommit(); this.active(); }
     if (this.needed(profileId, file.id)) void this.ensureUploaded(profileId, prepared).catch(() => {});
   }
 
@@ -222,6 +267,7 @@ export class BetaDraftController {
     const current = this.state.drafts[profileId];
     this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...current, revision: current.revision + 1,
       files: current.files?.map(item => item.id === id ? { ...item, state: 'preparing' as const, message: undefined } : item) } } }, true);
+    if (durable(this.storage)) { await this.requiredCommit(); this.active(); }
     try { await this.sources.put(file.source_key, source); this.active(); await this.prepareSource(profileId, file); }
     catch (error) { if (!this.disposed) this.patchFile(profileId, id, { state: 'failed', message: errorMessage(error) }); throw error; }
   }
@@ -248,6 +294,7 @@ export class BetaDraftController {
 
   private async uploadFile(profileId: string, file: DraftFile): Promise<BetaStage> {
     this.active();
+    if (durable(this.storage)) { await this.requiredCommit(); this.active(); }
     if (!this.needed(profileId, file.id)) throw new BetaApiError('selection_removed', '此草稿项已移除，其暂存仍保留');
     const api = this.client.originals; if (!api || !file.original) throw new BetaApiError('unsupported_capability', '原件暂存尚未就绪');
     const original = file.original;
@@ -292,6 +339,11 @@ export class BetaDraftController {
       occurred_at_ms: this.clock(), text: draft.text, tags: [], ...(files.length ? { originals: files.map(file => ({ ...file.original! })) } : {}) });
     const pending: PendingCapture = { command, draft_revision: draft.revision, state: 'pending', ...(files.length ? { files, capture_attempted: false } : {}) };
     this.publish({ ...this.state, pending: [...this.state.pending, pending] }, true);
+    if (durable(this.storage)) {
+      try { await this.requiredCommit(); }
+      catch (error) { if (!this.disposed) this.updatePending(command.command_id, { state: 'failed', message: errorMessage(error), error_code: errorCode(error) }); throw error; }
+      if (this.disposed) return null;
+    }
     return this.send(pending, false);
   }
 
@@ -333,6 +385,11 @@ export class BetaDraftController {
   }
 
   private async perform(pending: PendingCapture, reconcileFirst: boolean): Promise<BetaReceipt | null> {
+    if (durable(this.storage)) {
+      try { await this.requiredCommit(); }
+      catch (error) { if (!this.disposed) this.updatePending(pending.command.command_id, { state: 'failed', message: errorMessage(error), error_code: errorCode(error) }); return null; }
+      if (this.disposed) return null;
+    }
     if (reconcileFirst) {
       try {
         const receipt = await this.client.receipt(pending.command.profile_id, pending.command.command_id);
@@ -349,7 +406,9 @@ export class BetaDraftController {
       for (const file of pending.files ?? []) await this.ensureUploaded(pending.command.profile_id, file);
       if (this.disposed) return null;
       const next = { ...this.state, pending: this.state.pending.map(item => item.command.command_id === pending.command.command_id ? { ...item, capture_attempted: true } : item) };
-      this.publish(next, true); captureAttempted = true;
+      this.publish(next, true);
+      if (durable(this.storage)) { await this.requiredCommit(); if (this.disposed) return null; }
+      captureAttempted = true;
       return this.commit(pending, await this.client.capture(pending.command));
     }
     catch (error) {
