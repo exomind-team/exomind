@@ -3,8 +3,7 @@ use crate::{
     EventQuery, EventRecord, MAX_EVENT_PAGE_SIZE, ProfileId, ProfileInfo, Receipt, WriterContext,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use serde::Serialize;
-use sha2::{Digest, Sha256};
+use crate::capture_fact::CaptureFact;
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
@@ -276,38 +275,7 @@ impl Core {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        #[derive(Serialize)]
-        struct Fact<'a> {
-            kind: &'static str,
-            profile: ProfileId,
-            event: crate::EventId,
-            device: DeviceId,
-            author: Uuid,
-            author_kind: AuthorKind,
-            occurred_at_ms: i64,
-            text: &'a str,
-            tags: &'a [String],
-            #[serde(skip_serializing_if = "Option::is_none")]
-            originals: Option<&'a [crate::OriginalRef]>,
-        }
-        let fact = Fact {
-            kind: if input.originals.is_empty() {
-                "capture/1"
-            } else {
-                "capture/2"
-            },
-            profile: input.profile_id,
-            event: input.event_id,
-            device: context.device_id,
-            author: context.author_id,
-            author_kind: context.author_kind,
-            occurred_at_ms: input.occurred_at_ms,
-            text: &input.text,
-            tags: &tags,
-            originals: (!input.originals.is_empty()).then_some(input.originals.as_slice()),
-        };
-        let canonical = serde_json::to_vec(&fact)?;
-        let digest = format!("{:x}", Sha256::digest(&canonical));
+        let digest = CaptureFact::local(context, input, &tags).digest()?;
         let mut connection = self.connection()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let existing: Option<(String, String)> = transaction

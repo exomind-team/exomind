@@ -4,6 +4,7 @@
 //! Trusted embedding code opens local profile sessions; network authentication
 //! must be completed by an adapter before calling this API.
 
+mod capture_fact;
 mod identity;
 mod migrations;
 mod originals;
