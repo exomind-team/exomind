@@ -17,7 +17,8 @@ runtime bootstrap, profile store, sync store, or eventlog service.
 - [x] Typed Core timeblocks, mixed history and main-owned Native overlay relay.
 - [x] Native private intent journal and bounded private source copies; Web keeps separate IDB storage.
 - [x] Parent checkpoints: actual Native text/timeblock UI, restart and IME/layout acceptance; see the execution ledger for exact source/package scope.
-- [ ] New durable-source APK acceptance and actual desktop overlay/window acceptance.
+- [x] Exact durable-source APK controller acceptance: automatic resume and isolated B-only missing-source recovery.
+- [ ] Actual complete picker UI, current keyboard-layout regression and desktop overlay/window acceptance.
 - [ ] Full Alpha page/layout inheritance, complete scroll anchoring and remaining B2–B5 stories.
 
 ## Connection
