@@ -33,6 +33,14 @@ impl From<HostError> for Failure {
                 ("forbidden", "当前会话无权执行此操作")
             }
             HostError::Stopped => ("stopped", "本机服务已停止"),
+            HostError::IntentCacheCorrupt => (
+                "intent_cache_corrupt",
+                "本机草稿存储需要恢复，原数据已保留；未改用旧缓存",
+            ),
+            HostError::IntentCacheUnavailable => (
+                "intent_cache_unavailable",
+                "本机草稿暂存未确认，请保留窗口并重试",
+            ),
             HostError::InvalidRequest
             | HostError::Core(
                 CoreError::InvalidCapture(_)
@@ -238,6 +246,35 @@ async fn beta_profiles(
 ) -> Result<Vec<ProfileInfo>, Failure> {
     trusted_window(&window, state.inner())?;
     work(state.inner(), |state| state.host.profiles(&state.owner)).await
+}
+
+// Private local UI storage: deliberately absent from the HTTP router and the
+// replicated event stream. Only this trusted Beta window's owner is supplied.
+#[tauri::command]
+async fn beta_read_local_intent(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    key: String,
+) -> Result<Option<String>, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state.host.read_local_intent(&state.owner, &key)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_write_local_intent(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    key: String,
+    raw: String,
+) -> Result<(), Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state.host.write_local_intent(&state.owner, &key, &raw)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -651,6 +688,8 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
         .invoke_handler(tauri::generate_handler![
             beta_status,
             beta_profiles,
+            beta_read_local_intent,
+            beta_write_local_intent,
             beta_provision_profile,
             beta_capture,
             beta_events_page,
@@ -767,6 +806,14 @@ mod tests {
             "conflict"
         );
         assert_eq!(Failure::from(HostError::Stopped).code, "stopped");
+        assert_eq!(
+            Failure::from(HostError::IntentCacheCorrupt).code,
+            "intent_cache_corrupt"
+        );
+        assert_eq!(
+            Failure::from(HostError::IntentCacheUnavailable).code,
+            "intent_cache_unavailable"
+        );
         for (error, code) in [
             (CoreError::TimeblockConflict, "timeblock_conflict"),
             (CoreError::TimeblockControlDenied, "forbidden"),
@@ -796,6 +843,18 @@ mod tests {
             .host
             .provision_profile(&state.owner, profile, "synthetic native")
             .unwrap();
+        let intent_key = format!(
+            "exomind:beta:drafts:{}",
+            state.host.status().unwrap().device_id
+        );
+        state
+            .host
+            .write_local_intent(
+                &state.owner,
+                &intent_key,
+                "{\"draft\":\"retained local text\"}",
+            )
+            .unwrap();
         let command = CaptureCommand {
             command_id: CommandId::new(),
             event_id: exomind_core::EventId::new(),
@@ -813,6 +872,16 @@ mod tests {
         })
         .await;
         assert_eq!(result.unwrap_err().code, "stopped");
+        let late_key = intent_key.clone();
+        let late = work(&state, move |state| {
+            state.host.write_local_intent(
+                &state.owner,
+                &late_key,
+                "{\"draft\":\"late replacement\"}",
+            )
+        })
+        .await;
+        assert_eq!(late.unwrap_err().code, "stopped");
         state.stop().await.unwrap();
         assert!(!state.host.service_status().unwrap().unwrap().running);
         assert!(matches!(
@@ -827,6 +896,13 @@ mod tests {
         // The old Arc still exists. Stopping must release the root explicitly.
         let reopened = BetaHost::open(&root).unwrap();
         let owner = reopened.owner_session().unwrap();
+        assert_eq!(
+            reopened
+                .read_local_intent(&owner, &intent_key)
+                .unwrap()
+                .as_deref(),
+            Some("{\"draft\":\"retained local text\"}")
+        );
         let human = reopened.native_human_session(&owner, profile).unwrap();
         assert!(reopened
             .events_page(&human, profile, &EventQuery::default())
