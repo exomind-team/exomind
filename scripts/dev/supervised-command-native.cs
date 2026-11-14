@@ -292,6 +292,12 @@ public static class SupervisedCommandNative {
       if(args[0]=="supervisor") return Supervisor(args[1]);
       if(args[0]=="watchdog") return Watchdog(args[1]);
       return 2;
-    } catch {return 3;}
+    } catch(Exception error) {
+      // Config/status bootstrap reads precede the ownership guard. Preserve a
+      // safe diagnostic if one fails, without claiming authority to terminate
+      // a process/job whose identity this entrypoint has not verified.
+      if(args.Length==2&&Path.IsPathRooted(args[1])&&(args[0]=="prepare"||args[0]=="supervisor"||args[0]=="watchdog")) Diagnostic(args[1],args[0],"entrypoint",error);
+      return 3;
+    }
   }
 }
