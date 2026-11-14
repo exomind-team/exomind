@@ -18,6 +18,7 @@ import type { LocalIntentJournal,IntentPredecessor } from './local-intent-journa
 import type { BetaTimelinePage,BetaTimeblockNode } from './timeblocks-types';
 import { BetaTimeblockController } from './timeblocks-controller';
 import { BetaFocusTimer } from './BetaFocusTimer';
+import { keepBetaEditableInViewport } from './editable-viewport';
 
 const SESSION_KEY = 'exomind:beta:connection';
 const DATE_KEY = 'exomind:beta:date-display';
@@ -25,6 +26,7 @@ const selectClass = 'h-9 max-w-full rounded-md border border-input bg-page px-2 
 
 /** A separate entry: no legacy runtime/profile/event-store bootstrap. */
 export function BetaApp({ client: injected, sourceStore, intentJournal, intentPredecessor }: { client?: BetaClient; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor }) {
+  useEffect(() => keepBetaEditableInViewport(), []);
   const [native] = useState(() => isTauri());
   const [client, setClient] = useState<BetaClient | null>(() => injected ?? (native ? nativeBetaClient() : null));
   const [endpoint, setEndpoint] = useState(() => {
