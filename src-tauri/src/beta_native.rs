@@ -1,9 +1,12 @@
 //! Isolated Beta embedding. No legacy runtime/config/store is opened here.
 
-use exomind_beta_host::{BetaHost, HostError, HostStatus, RunningServer, Session};
+use exomind_beta_host::{
+    BetaHost, DeadlineEnvelope, HostError, HostStatus, RunningServer, Session,
+};
 use exomind_core::{
-    BeginStageCommand, CaptureCommand, CommandId, CoreError, EventPage, EventQuery, OriginalChunk,
-    OriginalId, ProfileId, ProfileInfo, Receipt, StageId, StageStatus,
+    BeginStageCommand, CaptureCommand, CommandId, CoreError, EventPage, EventQuery, IntervalPage,
+    IntervalQuery, OriginalChunk, OriginalId, ProfileId, ProfileInfo, Receipt, StageId,
+    StageStatus, TimeblockCommand, TimeblockNodePage, TimeblockSnapshot, TimelinePage,
 };
 use serde::Serialize;
 use std::{
@@ -34,6 +37,7 @@ impl From<HostError> for Failure {
             | HostError::Core(
                 CoreError::InvalidCapture(_)
                 | CoreError::InvalidQuery(_)
+                | CoreError::InvalidTimeblock(_)
                 | CoreError::InvalidOriginal(_)
                 | CoreError::InvalidOriginalOffset,
             ) => ("invalid_request", "请求内容无效"),
@@ -49,9 +53,13 @@ impl From<HostError> for Failure {
                 | CoreError::OriginalConflict
                 | CoreError::ChunkConflict,
             ) => ("conflict", "此标识已用于其他内容，请保留待确认稿件"),
+            HostError::Core(CoreError::TimeblockConflict) => {
+                ("timeblock_conflict", "时间块状态已变化，请查证后再操作")
+            }
             HostError::Core(
                 CoreError::ScopeMismatch
                 | CoreError::ForeignContext
+                | CoreError::TimeblockControlDenied
                 | CoreError::OriginalAccessDenied,
             ) => ("forbidden", "会话所属档案不匹配"),
             HostError::RootInUse => ("root_in_use", "此数据目录已由另一个实例使用"),
@@ -77,6 +85,10 @@ impl From<HostError> for Failure {
                 "recovery_required",
                 "现有资料需要恢复，已保留目录并停止创建空档案",
             ),
+            HostError::Core(CoreError::InvalidTimeblockHistory) => (
+                "timeblock_history_incomplete",
+                "时间块历史暂不能完整解释，现有记录已保留",
+            ),
             _ => ("storage_error", "本机存储操作失败，请保留稿件后重试"),
         };
         Self { code, message }
@@ -97,6 +109,7 @@ impl NativeState {
     fn open(root: &std::path::Path, dev_origin: Option<url::Origin>) -> Result<Self, HostError> {
         let host = Arc::new(BetaHost::open(root)?);
         let owner = host.owner_session()?;
+        host.start_services()?;
         Ok(Self {
             host,
             owner,
@@ -270,6 +283,99 @@ async fn beta_events_page(
         state
             .host
             .events_page(&state.human(profile_id)?, profile_id, &query)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_timeblock_command(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    command: TimeblockCommand,
+) -> Result<Receipt, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .apply_timeblock(&state.human(command.profile_id)?, &command)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_timeblock_snapshot(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+) -> Result<TimeblockSnapshot, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .timeblock_snapshot(&state.human(profile_id)?, profile_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_timeblock_nodes(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    query: EventQuery,
+) -> Result<TimeblockNodePage, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .timeblock_nodes(&state.human(profile_id)?, profile_id, &query)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_timeblock_intervals(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    query: IntervalQuery,
+) -> Result<IntervalPage, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .timeblock_intervals(&state.human(profile_id)?, profile_id, &query)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_timeline_page(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    query: EventQuery,
+) -> Result<TimelinePage, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .timeline_page(&state.human(profile_id)?, profile_id, &query)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_deadline_envelope(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+) -> Result<DeadlineEnvelope, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .deadline_envelope(&state.human(profile_id)?, profile_id)
     })
     .await
 }
@@ -548,6 +654,12 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             beta_provision_profile,
             beta_capture,
             beta_events_page,
+            beta_timeblock_command,
+            beta_timeblock_snapshot,
+            beta_timeblock_nodes,
+            beta_timeblock_intervals,
+            beta_timeline_page,
+            beta_deadline_envelope,
             beta_receipt,
             beta_request_exit,
             beta_begin_stage,
@@ -655,6 +767,22 @@ mod tests {
             "conflict"
         );
         assert_eq!(Failure::from(HostError::Stopped).code, "stopped");
+        for (error, code) in [
+            (CoreError::TimeblockConflict, "timeblock_conflict"),
+            (CoreError::TimeblockControlDenied, "forbidden"),
+            (
+                CoreError::InvalidTimeblock("private input"),
+                "invalid_request",
+            ),
+            (
+                CoreError::InvalidTimeblockHistory,
+                "timeblock_history_incomplete",
+            ),
+        ] {
+            let failure = Failure::from(HostError::Core(error));
+            assert_eq!(failure.code, code);
+            assert!(!serde_json::to_string(&failure).unwrap().contains("private"));
+        }
     }
 
     #[tokio::test]
@@ -662,6 +790,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("host");
         let state = Arc::new(NativeState::open(&root, None).unwrap());
+        assert!(state.host.service_status().unwrap().unwrap().running);
         let profile = ProfileId::new();
         state
             .host
@@ -685,6 +814,7 @@ mod tests {
         .await;
         assert_eq!(result.unwrap_err().code, "stopped");
         state.stop().await.unwrap();
+        assert!(!state.host.service_status().unwrap().unwrap().running);
         assert!(matches!(
             state.host.capture(&before_close_session, &command),
             Err(HostError::Stopped)
