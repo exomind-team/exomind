@@ -4,6 +4,7 @@ import {
   cleanup,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
 } from "@testing-library/react";
@@ -65,6 +66,15 @@ const focusMainWindowMock = vi.fn();
 const overlaySetSizeMock = vi.fn();
 const setOverlayPositionMock = vi.fn();
 const useSignalStreamMock = vi.fn();
+
+// Alpha removed task management while retaining this workbench's timer,
+// feedback and quick recording. Historical task data must remain inert.
+function expectTaskDomainUntouched() {
+  for (const call of [listTasksMock, transitionTaskMock, startBlockForTaskMock,
+    calculateSpentMinutesMock, addTaskToBlockMock, onBlockEndForTasksMock,
+    taskStorageOnChangeMock]) expect(call).not.toHaveBeenCalled();
+  expect(taskServiceListener).toBeNull();
+}
 
 vi.mock("@tauri-apps/api/core", () => ({
   isTauri: () => true,
@@ -949,7 +959,7 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     expect(overlayHideMock).not.toHaveBeenCalled();
   });
 
-  it("quick-starts the selected task in idle_with_tasks mode（任务态点击开始后直接按 DAG 语义开启时间块）", async () => {
+  it("records ordinary input without quick-starting historical tasks（存在旧任务也只记录，不自动开启任务时间块）", async () => {
     runtimeStateByUser["overlay-test-user"].tasks = [
       {
         id: "task-1",
@@ -970,20 +980,21 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     render(<NowWorkbenchOverlayPage />);
 
     fireEvent.mouseEnter(await screen.findByTestId("now-overlay-idle-pill"));
-    fireEvent.click(await screen.findByRole("button", { name: "先补测试" }));
+    expect(screen.queryByRole("button", { name: "先补测试" })).toBeNull();
+    expect(screen.queryByTestId("now-overlay-task-choice-list")).toBeNull();
+    const readsBeforeSend = loadEventsMock.mock.calls.length;
+    fireEvent.click(await screen.findByRole("button", { name: "发送模拟输入" }));
 
     await waitFor(() => {
-      expect(startBlockForTaskMock).toHaveBeenCalledWith("task-1", {
-        mode: "countdown",
-        minutes: 33,
-      });
-      expect(screen.getByTestId("new-focus-state-running")).toBeInTheDocument();
+      expect(addEventMock).toHaveBeenCalledWith("补一条当下记录");
+      expect(loadEventsMock.mock.calls.length).toBeGreaterThan(readsBeforeSend);
     });
-    expect(calculateSpentMinutesMock).toHaveBeenCalledWith("task-1");
-    expect(screen.getAllByText("先补测试").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByTestId("new-focus-state-running")).toBeNull();
+    expect(runtimeStateByUser["overlay-test-user"].tasks[0]!.status).toBe("pending");
+    expectTaskDomainUntouched();
   });
 
-  it("renders idle_with_tasks as collapsed task bubble and expands on hover（任务态默认收起并在悬停时展开）", async () => {
+  it("keeps ordinary idle hover and input focus behavior with historical tasks（旧任务不改变普通气泡的悬停和输入交互）", async () => {
     runtimeStateByUser["overlay-test-user"].tasks = [
       {
         id: "task-1",
@@ -1023,15 +1034,20 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       expect(
         screen.getByTestId("now-overlay-idle-expanded"),
       ).toBeInTheDocument();
-      expect(
-        screen.getByTestId("now-overlay-task-choice-list"),
-      ).toBeInTheDocument();
+      expect(screen.queryByTestId("now-overlay-task-choice-list")).toBeNull();
       expect(screen.getByTestId("new-now-input-row")).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: "写周报" }),
-      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "写周报" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "修 bug" })).toBeNull();
     });
+    const input = screen.getByTestId("new-now-input-textarea");
+    fireEvent.focus(input);
+    fireEvent.mouseLeave(screen.getByTestId("now-overlay-idle-expanded"));
+    expect(screen.getByTestId("now-overlay-idle-expanded")).toBeInTheDocument();
+    fireEvent.blur(input);
+    expect(await screen.findByTestId("now-overlay-idle-pill")).toBeInTheDocument();
+    expect(screen.queryByTestId("new-now-input-row")).toBeNull();
     expect(overlaySetSizeMock).toHaveBeenCalled();
+    expectTaskDomainUntouched();
   });
 
   it("adds whole-card press feedback on the idle bubble only while mouse is down（待办气泡按下时整卡瞬态高亮，抬起后回退）", async () => {
@@ -1065,7 +1081,7 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     });
   });
 
-  it("shows task count and ellipsis in collapsed idle bubble when there are more than three tasks（最小待办窗在任务过多时显示总数与省略提示）", async () => {
+  it("does not disclose obsolete task counts or choices even with many historical tasks（大量旧任务不重新引入待办计数和任务入口）", async () => {
     runtimeStateByUser["overlay-test-user"].tasks = [
       {
         id: "task-1",
@@ -1116,8 +1132,19 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     expect(
       await screen.findByTestId("now-overlay-idle-pill"),
     ).toBeInTheDocument();
-    expect(await screen.findByText("待办 (4)")).toBeInTheDocument();
-    expect(await screen.findByText(/· ……/)).toBeInTheDocument();
+    expect(screen.getByText(/随时记录/)).toBeInTheDocument();
+    expect(screen.queryByText("待办 (4)")).toBeNull();
+    expect(screen.queryByText(/· ……/)).toBeNull();
+    fireEvent.mouseEnter(screen.getByTestId("now-overlay-idle-pill"));
+    expect(await screen.findByTestId("new-now-input-row")).toBeInTheDocument();
+    expect(screen.queryByTestId("now-overlay-task-choice-list")).toBeNull();
+    for (const task of runtimeStateByUser["overlay-test-user"].tasks) {
+      expect(screen.queryByRole("button", { name: String(task.title) })).toBeNull();
+      expect(task.status).toBe("pending");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "显示主程序" }));
+    await waitFor(() => expect(focusMainWindowMock).toHaveBeenCalledTimes(1));
+    expectTaskDomainUntouched();
   });
 
   it("keeps idle task panel expanded while input is focused（任务态输入获焦时锁定展开）", async () => {
@@ -1203,7 +1230,7 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     });
   });
 
-  it("submits multi-task outcomes from overlay feedback dialog（悬浮窗反馈弹窗会提交多任务后续状态）", async () => {
+  it("submits plain feedback without outcomes for historical multi-task associations（旧多任务关联不再生成任务反馈或写入）", async () => {
     runtimeStateByUser["overlay-test-user"].activeBlock = {
       startId: "block-feedback-multi",
       name: "结束反馈多任务测试",
@@ -1234,44 +1261,21 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     render(<NowWorkbenchOverlayPage />);
 
     const textarea = await screen.findByTestId("now-overlay-feedback-textarea");
-    expect(
-      await screen.findByTestId("task-dag-end-dialog-task-task-a"),
-    ).toBeInTheDocument();
-    expect(
-      await screen.findByTestId("task-dag-end-dialog-task-task-b"),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getAllByTestId("feedback-task-status-completed")[0]!,
-    );
-    fireEvent.click(
-      screen.getAllByTestId("feedback-task-status-cancelled")[1]!,
-    );
+    expect(screen.queryByTestId("task-dag-end-dialog-task-task-a")).toBeNull();
+    expect(screen.queryByTestId("task-dag-end-dialog-task-task-b")).toBeNull();
+    expect(screen.queryAllByTestId(/^feedback-task-status-/)).toHaveLength(0);
     fireEvent.change(textarea, { target: { value: "多任务反馈提交" } });
     fireEvent.click(screen.getByTestId("now-overlay-feedback-confirm"));
 
     await waitFor(() => {
-      expect(endBlockMock).toHaveBeenCalledWith("多任务反馈提交", {
-        taskStatusOutcomes: {
-          "task-a": "completed",
-          "task-b": "cancelled",
-        },
-        taskTitles: {
-          "task-a": "任务 A",
-          "task-b": "任务 B",
-        },
-      });
+      expect(endBlockMock.mock.calls).toEqual([["多任务反馈提交"]]);
     });
-
-    expect(onBlockEndForTasksMock).toHaveBeenCalledWith(
-      ["task-a", "task-b"],
-      "block-feedback-multi",
-    );
-    expect(transitionTaskMock).not.toHaveBeenCalledWith("task-a", "completed");
-    expect(transitionTaskMock).not.toHaveBeenCalledWith("task-b", "cancelled");
+    expect(await screen.findByTestId("now-overlay-idle-pill")).toBeInTheDocument();
+    expect(runtimeStateByUser["overlay-test-user"].tasks.map(task => task.status)).toEqual(["in_progress", "in_progress"]);
+    expectTaskDomainUntouched();
   });
 
-  it("submits suspended when overlay keeps the displayed default status（issue-735 悬浮窗提交默认值必须与显示默认值一致）", async () => {
+  it("does not silently apply a default task status when submitting plain feedback（纯反馈不暗中应用旧任务默认挂起状态）", async () => {
     runtimeStateByUser["overlay-test-user"].activeBlock = {
       startId: "block-feedback-default",
       name: "结束反馈默认终态测试",
@@ -1297,24 +1301,18 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     render(<NowWorkbenchOverlayPage />);
 
     const textarea = await screen.findByTestId("now-overlay-feedback-textarea");
-    const suspendedOption = await screen.findByTestId(
-      "feedback-task-status-suspended",
-    );
-    expect(suspendedOption).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByTestId("feedback-task-status-suspended")).toBeNull();
+    expect(screen.queryAllByTestId(/^feedback-task-status-/)).toHaveLength(0);
 
     fireEvent.change(textarea, { target: { value: "悬浮窗保持默认状态提交" } });
     fireEvent.click(screen.getByTestId("now-overlay-feedback-confirm"));
 
     await waitFor(() => {
-      expect(endBlockMock).toHaveBeenCalledWith("悬浮窗保持默认状态提交", {
-        taskStatusOutcomes: {
-          "task-default": "suspended",
-        },
-        taskTitles: {
-          "task-default": "默认挂起任务",
-        },
-      });
+      expect(endBlockMock.mock.calls).toEqual([["悬浮窗保持默认状态提交"]]);
     });
+    expect(await screen.findByTestId("now-overlay-idle-pill")).toBeInTheDocument();
+    expect(runtimeStateByUser["overlay-test-user"].tasks[0]!.status).toBe("in_progress");
+    expectTaskDomainUntouched();
   });
 
   it(
@@ -1409,29 +1407,29 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
   );
 
   it(
-    "drops late data from the previous profile after a switch（切档案后丢弃旧档案迟到结果）",
+    "drops late supported event data from the previous profile after a switch（切档案后丢弃旧档案迟到记录）",
     { timeout: 30000 },
     async () => {
-      let resolveOldTasks!: (tasks: Array<Record<string, unknown>>) => void;
-      listTasksMock.mockImplementationOnce(() => new Promise((resolve) => {
-        resolveOldTasks = resolve;
-      }));
-      runtimeStateByUser["profile-live"].tasks = [{
-        id: "profile-live-task",
-        title: "新档案任务",
-        status: "pending",
-        priority: "medium",
-        dependsOn: [],
-        tags: [],
-        createdAt: Date.UTC(2026, 2, 11, 9, 20, 0),
-        updatedAt: Date.UTC(2026, 2, 11, 9, 20, 0),
+      let resolveOldEvents!: (events: Array<Record<string, unknown>>) => void;
+      loadEventsMock.mockImplementationOnce(() => {
+        loadEventsProfileIds.push(currentUserState.userId);
+        return new Promise((resolve) => { resolveOldEvents = resolve; });
+      });
+      runtimeStateByUser["profile-live"].events = [{
+        id: "profile-live-event",
+        content: "新档案记录",
+        createdAt: "2026-03-11T09:20:00.000Z",
       }];
 
-      const { NowWorkbenchOverlayPage } =
-        await import("@/pages/NowWorkbenchOverlayPage");
-      render(<NowWorkbenchOverlayPage />);
+      // The live compact surface intentionally does not render recent records.
+      // Observe its real controller projection instead of inventing a task UI
+      // or a display-only preview to test the profile-generation read fence.
+      const { useNowWorkbenchOverlayController } =
+        await import("@/ui/app/overlay/use-now-workbench-overlay-controller");
+      const { result } = renderHook(() => useNowWorkbenchOverlayController());
       await waitFor(() => {
-        expect(listTasksMock).toHaveBeenCalledTimes(1);
+        expect(loadEventsMock).toHaveBeenCalledTimes(1);
+        expect(loadEventsProfileIds).toEqual(["overlay-test-user"]);
       });
 
       currentUserState.userId = "profile-live";
@@ -1439,24 +1437,25 @@ describe("NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
         profileSyncListener?.({ payload: { profileId: "profile-live" } });
         await Promise.resolve();
       });
-      expect(await screen.findByText(/新档案任务/)).toBeInTheDocument();
+      await waitFor(() => {
+        expect(result.current.model.recentEvents.map(event => event.content)).toEqual(["新档案记录"]);
+        expect(result.current.debugInfo.userId).toBe("profile-live");
+      });
 
       await act(async () => {
-        resolveOldTasks([{
-          id: "late-old-task",
-          title: "旧档案迟到任务",
-          status: "pending",
-          priority: "medium",
-          dependsOn: [],
-          tags: [],
-          createdAt: Date.UTC(2026, 2, 11, 9, 10, 0),
-          updatedAt: Date.UTC(2026, 2, 11, 9, 10, 0),
+        resolveOldEvents([{
+          id: "late-old-event",
+          content: "旧档案迟到记录",
+          timestamp: Date.UTC(2026, 2, 11, 9, 10, 0),
+          tags: new Set<string>(),
         }]);
         await Promise.resolve();
       });
 
-      expect(screen.queryByText(/旧档案迟到任务/)).toBeNull();
-      expect(screen.getByText(/新档案任务/)).toBeInTheDocument();
+      expect(result.current.model.recentEvents.map(event => event.content)).toEqual(["新档案记录"]);
+      expect(result.current.model.recentEvents.some(event => event.id === "late-old-event")).toBe(false);
+      expect(result.current.debugInfo.latestEventContent).toBe("新档案记录");
+      expectTaskDomainUntouched();
     },
   );
 });

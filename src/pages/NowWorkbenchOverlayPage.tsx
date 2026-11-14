@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { ArrowUpRight, Expand, Shrink } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { useSignalStream } from '@/ui/hooks/useSignalStream';
 import { Button } from '@/components/ui/button';
+import { NowWorkbenchOverlayView, NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE, NOW_WORKBENCH_OVERLAY_STYLES as overlayStyles } from '@/ui/app/components/NowWorkbenchOverlayView';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { FocusTimerWidget, type FocusTimerWidgetHandle } from '@/ui/app/components/FocusTimerWidget';
 import { TimeBlockFeedbackDialog } from '@/ui/app/components/TimeBlockFeedbackDialog';
@@ -66,12 +67,10 @@ interface NowWorkbenchOverlayPageContentProps {
 }
 
 const NOW_WORKBENCH_OVERLAY_DEFAULT_SIZE = { width: 412, height: 490 };
-const NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE = { width: 390, height: 192 };
 const NOW_WORKBENCH_OVERLAY_MINI_SIZE = { width: 248, height: 120 };
 const NOW_WORKBENCH_OVERLAY_MINI_PEEK_SIZE = { width: 352, height: 200 };
 const NOW_WORKBENCH_OVERLAY_IDLE_COLLAPSED_SIZE = { width: 276, height: 156 };
 const NOW_WORKBENCH_OVERLAY_IDLE_EXPANDED_SIZE = { width: 428, height: 360 };
-const ACTIVE_VISIBLE_SURFACE_CLASS = 'ring-1 ring-inset ring-[#FDE4DE]/60';
 const VISIBLE_SURFACE_DRAG_GLOW_IDLE_MS = 180;
 const OVERLAY_POSITION_PERSIST_DEBOUNCE_MS = 250;
 const OVERLAY_RUNTIME_READY_RETRY_MS = 500;
@@ -921,323 +920,44 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     setIsIdleInputFocused(false);
   }, []);
 
-  if (isLiveRunningMiniMode) {
-    return (
-      <div className="now-workbench-overlay-root now-workbench-overlay-root--mini">
-        <div className="now-workbench-overlay-shell now-workbench-overlay-shell--mini">
-          <div
-            data-testid="now-overlay-collapsed-pill"
-            onMouseEnter={() => setIsMiniHovered(true)}
-            onMouseLeave={() => setIsMiniHovered(false)}
-            ref={handleVisibleSurfaceMount}
-            data-overlay-visible-surface="true"
-            onMouseDownCapture={handleVisibleSurfaceMouseDownCapture}
-            className={`rounded-[22px] border border-white/55 bg-[rgba(28,25,23,0.78)] text-[#FAFAF9] shadow-[0_16px_40px_-24px_rgba(0,0,0,0.55)] backdrop-blur-[20px] ${
-              isLiveRunningMiniPeekMode
-                ? 'w-[328px] px-4 py-3'
-                : 'w-[224px] px-3 py-2'
-            } ${isVisibleSurfaceActive ? ACTIVE_VISIBLE_SURFACE_CLASS : ''}`}
-          >
-            {isLiveRunningMiniPeekMode ? (
-              <div className="space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div
-                    data-testid="now-overlay-drag-handle"
-                    data-tauri-drag-region
-
-                    className="min-w-0 cursor-grab select-none active:cursor-grabbing"
-                    title="按住这里拖动窗口"
-                  >
-                    <p className="truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[#D6D3D1]" data-tauri-drag-region>
-                      {model.statusLabel}
-                    </p>
-                    <p className="truncate text-[14px] font-semibold text-[#FAFAF9]" data-tauri-drag-region>
-                      {model.title}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setIsMiniCollapsed(false)}
-                      aria-label="展开"
-                      title="展开"
-                      className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/10 p-0 text-[#FAFAF9] hover:bg-white/15"
-                    >
-                      <Expand size={16} />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={onReturnToMain}
-                      aria-label="显示主程序"
-                      title="显示主程序"
-                      className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/10 p-0 text-[#FAFAF9] hover:bg-white/15"
-                    >
-                      <ArrowUpRight size={16} />
-                    </Button>
-                  </div>
-                </div>
-                <p
-                  data-testid="now-overlay-collapsed-clock"
-                  className="font-mono text-[34px] leading-none tracking-[0.08em] text-[#FDE4DE]"
-                >
-                  {miniClock.primaryText}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={onPauseOrResume}
-                    className="h-9 rounded-[12px] bg-white/10 px-4 text-[#FAFAF9] hover:bg-white/15"
-                  >
-                    {model.activeBlock?.paused ? '继续' : '暂停'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="brand"
-                    onClick={onEndBlock}
-                    className="h-9 rounded-[12px] bg-[#C75B3A] px-4 text-white hover:bg-[#B24D2F]"
-                  >
-                    结束
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3">
-                <div
-                  data-testid="now-overlay-drag-handle"
-                  data-tauri-drag-region
-
-                  className="min-w-0 flex-1 cursor-grab select-none active:cursor-grabbing"
-                  title="按住这里拖动窗口"
-                >
-                  <p className="font-mono text-[28px] leading-none tracking-[0.08em] text-[#FDE4DE]" data-testid="now-overlay-collapsed-clock" data-tauri-drag-region>
-                    {miniClock.primaryText}
-                  </p>
-                  <p className="mt-1 truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[#D6D3D1]" data-tauri-drag-region>
-                    {model.statusLabel}
-                  </p>
-                  <p className="truncate text-[12px] text-[#FAFAF9]/85" data-tauri-drag-region>
-                    {model.title}
-                  </p>
-                </div>
-                <div className="ml-auto flex shrink-0 flex-col items-center gap-1.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setIsMiniCollapsed(false)}
-                    aria-label="展开"
-                    title="展开"
-                    className="h-7 w-7 rounded-[10px] border border-white/10 bg-white/10 p-0 text-[#FAFAF9] hover:bg-white/15"
-                  >
-                    <Expand size={14} />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={onReturnToMain}
-                    aria-label="显示主程序"
-                    title="显示主程序"
-                    className="h-7 w-7 rounded-[10px] border border-white/10 bg-white/10 p-0 text-[#FAFAF9] hover:bg-white/15"
-                  >
-                    <ArrowUpRight size={14} />
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {feedbackDialog}
-        <style>{overlayStyles}</style>
-      </div>
-    );
-  }
-
-  if (isLiveIdleBubbleMode) {
-
-    return (
-      <div className="now-workbench-overlay-root now-workbench-overlay-root--mini">
-        <div
-          ref={shouldMeasureIdleBubbleShell ? handleVisibleSurfaceMount : undefined}
-          data-overlay-visible-surface={shouldMeasureIdleBubbleShell ? 'true' : undefined}
-          className="now-workbench-overlay-shell now-workbench-overlay-shell--mini space-y-3"
-        >
-          {model.nudge ? (
-            <section
-              data-testid="now-overlay-ritual-nudge"
-              className="w-[320px] rounded-[18px] border border-[#F0D8D0] bg-[#FFF6F3] px-4 py-3 text-[#7C2D12] shadow-[0_18px_36px_-28px_rgba(0,0,0,0.4)] backdrop-blur-[18px] dark:border-[#4A2C24] dark:bg-[#2A1712] dark:text-[#FED7AA]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[13px] font-semibold">{model.nudge.title}</p>
-                  <p className="mt-1 text-[12px] leading-5 text-[#9A3412] dark:text-[#FCD9B6]">{model.nudge.body}</p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={onReturnToMain}
-                  className="shrink-0 rounded-[10px] border-[#E9B8A7] bg-white/75 text-[#9A3412] hover:bg-[#FFF1EB] dark:border-[#6B3F32] dark:bg-[#3A211A] dark:text-[#FED7AA] dark:hover:bg-[#4A2C24]"
-                >
-                  {model.nudge.ctaLabel}
-                </Button>
-              </div>
-            </section>
-          ) : null}
-
-          {isIdleExpanded ? (
-            <div
-              data-testid="now-overlay-idle-expanded"
-              onMouseEnter={() => setIsIdleHovered(true)}
-              onMouseLeave={() => setIsIdleHovered(false)}
-              onFocusCapture={handleIdleExpandedFocusCapture}
-              onBlurCapture={handleIdleExpandedBlurCapture}
-              ref={shouldMeasureIdleBubbleShell ? undefined : handleVisibleSurfaceMount}
-              data-overlay-visible-surface={shouldMeasureIdleBubbleShell ? undefined : 'true'}
-              onMouseDownCapture={handleVisibleSurfaceMouseDownCapture}
-              className={`w-[396px] rounded-[24px] border border-white/10 bg-[rgba(33,24,20,0.92)] px-4 py-4 text-[#F5EDE7] shadow-[0_20px_48px_-28px_rgba(0,0,0,0.55)] backdrop-blur-[24px] ${
-                isVisibleSurfaceActive ? ACTIVE_VISIBLE_SURFACE_CLASS : ''
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div
-                  data-testid="now-overlay-drag-handle"
-                  data-tauri-drag-region
-
-                  className="min-w-0 cursor-grab select-none active:cursor-grabbing"
-                  title="按住这里拖动窗口"
-                >
-                  <div className="flex items-center gap-2" data-tauri-drag-region>
-                    <span className="h-2.5 w-2.5 rounded-full bg-[#A8A29E]" data-tauri-drag-region />
-                    <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>
-                      当下
-                    </span>
-                  </div>
-                  <p className="mt-1 truncate text-[16px] font-semibold" data-tauri-drag-region>
-                    现在先记点什么
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleIdleCollapse}
-                    aria-label="收起"
-                    title="收起"
-                    className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/8 p-0 text-[#E7D7CF] hover:bg-white/15"
-                  >
-                    <Shrink size={15} />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={onReturnToMain}
-                    aria-label="显示主程序"
-                    title="显示主程序"
-                    className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/8 p-0 text-[#E7D7CF] hover:bg-white/15"
-                  >
-                    <ArrowUpRight size={15} />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                <section
-                  data-testid="now-overlay-empty-state"
-                  className="rounded-[18px] border border-dashed border-white/10 bg-white/6 px-4 py-4 text-center"
-                >
-                  <p className="text-[14px] font-medium text-[#57534E] dark:text-[#D6D3D1]">时间块尚未开始</p>
-                  <p className="mt-1 text-[12px] text-[#A8A29E] dark:text-[#78716C]">可以在这里快速记录，或回主程序开始专注。</p>
-                </section>
-                <section className="overflow-hidden rounded-[18px] border border-white/10 bg-white/8">
-                  <NowInputRow onSend={onSend} placeholder="记录当下的事实..." />
-                </section>
-              </div>
-            </div>
-          ) : (
-            <div
-              data-testid="now-overlay-idle-pill"
-              onMouseEnter={() => setIsIdleHovered(true)}
-              ref={shouldMeasureIdleBubbleShell ? undefined : handleVisibleSurfaceMount}
-              data-overlay-visible-surface={shouldMeasureIdleBubbleShell ? undefined : 'true'}
-              onMouseDownCapture={handleVisibleSurfaceMouseDownCapture}
-              className={`w-[252px] rounded-[22px] border border-white/10 bg-[rgba(33,24,20,0.88)] px-4 py-3 text-[#F5EDE7] shadow-[0_18px_40px_-28px_rgba(0,0,0,0.55)] backdrop-blur-[22px] ${
-                isVisibleSurfaceActive ? ACTIVE_VISIBLE_SURFACE_CLASS : ''
-              }`}
-            >
-              <div
-                data-testid="now-overlay-drag-handle"
-                data-tauri-drag-region
-
-                className="cursor-grab select-none active:cursor-grabbing"
-                title="按住这里拖动窗口"
-              >
-                <div className="flex items-center gap-2" data-tauri-drag-region>
-                  <span className="h-2.5 w-2.5 rounded-full bg-[#A8A29E]" data-tauri-drag-region />
-                  <span className="text-[15px] font-semibold text-[#D6D3D1] dark:text-[#E7E5E4]" data-tauri-drag-region>
-                    当下
-                  </span>
-                </div>
-                <p className="mt-2 text-[13px] font-medium text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>
-                  · 随时记录
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {feedbackDialog}
-        <style>{overlayStyles}</style>
-      </div>
-    );
-  }
-
-  if (isLiveRunningSingleCardMode) {
-    return (
-      <div className="now-workbench-overlay-root now-workbench-overlay-root--single-card">
-        <div
-          data-testid="now-overlay-single-card-shell"
-          className="now-workbench-overlay-shell now-workbench-overlay-shell--single-card"
-        >
-          <main className="flex min-h-0 flex-1 items-center justify-center">
-            <div
-              data-testid="now-overlay-single-card-stage"
-              className="shrink-0"
-              style={{
-                width: NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE.width,
-                maxWidth: NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE.width,
-              }}
-            >
-              <FocusTimerWidget
-                ref={focusTimerWidgetRef}
-                surface="overlay"
-                  taskAssociationsEnabled={false}
-                  showRunningLinkedTasks={false}
-                overlayRunningChrome={{
-                  statusLabel: model.statusLabel,
-                  onCollapse: () => setIsMiniCollapsed(true),
-                  onReturnToMain,
-                  onSurfaceMount: handleVisibleSurfaceMount,
-                  onSurfaceMouseDownCapture: handleVisibleSurfaceMouseDownCapture,
-                  surfacePressed: isVisibleSurfaceActive,
-                }}
-              />
-            </div>
-          </main>
-        </div>
-
-        {feedbackDialog}
-        <style>{overlayStyles}</style>
-      </div>
-    );
+  if (!isStaticPreview) {
+    return <NowWorkbenchOverlayView
+      model={{
+        mode: model.mode === 'running' ? 'running' : 'idle',
+        title: model.title,
+        statusLabel: model.statusLabel,
+        clockText: miniClock.primaryText,
+        paused: Boolean(model.activeBlock?.paused),
+        miniCollapsed: isMiniCollapsed,
+        miniHovered: isMiniHovered,
+        idleExpanded: isIdleExpanded,
+        surfaceActive: isVisibleSurfaceActive,
+        nudge: model.nudge,
+      }}
+      onMiniHover={setIsMiniHovered}
+      onIdleHover={setIsIdleHovered}
+      onIdleFocusCapture={handleIdleExpandedFocusCapture}
+      onIdleBlurCapture={handleIdleExpandedBlurCapture}
+      onIdleCollapse={handleIdleCollapse}
+      onExpand={() => setIsMiniCollapsed(false)}
+      onCollapse={() => setIsMiniCollapsed(true)}
+      onReturnToMain={onReturnToMain}
+      onPauseOrResume={onPauseOrResume}
+      onEndBlock={onEndBlock}
+      onSurfaceMount={handleVisibleSurfaceMount}
+      onSurfaceMouseDownCapture={handleVisibleSurfaceMouseDownCapture}
+      slots={{
+        running: (chrome) => <FocusTimerWidget
+          ref={focusTimerWidgetRef}
+          surface="overlay"
+          taskAssociationsEnabled={false}
+          showRunningLinkedTasks={false}
+          overlayRunningChrome={chrome}
+        />,
+        record: <NowInputRow onSend={onSend} placeholder="记录当下的事实..." />,
+        dialogs: feedbackDialog,
+      }}
+    />;
   }
 
   return (
@@ -1425,66 +1145,3 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     </div>
   );
 }
-
-const overlayStyles = /* css */ `
-  html, body, #root {
-    width: 100%;
-    height: 100%;
-  }
-
-  body {
-    margin: 0;
-    background: transparent !important;
-    overflow: hidden;
-  }
-
-  .now-workbench-overlay-root {
-    display: flex;
-    min-height: 100%;
-    align-items: center;
-    justify-content: center;
-    padding: 10px;
-    box-sizing: border-box;
-  }
-
-  .now-workbench-overlay-shell {
-    width: min(392px, calc(100vw - 20px));
-    height: calc(100vh - 20px);
-    max-height: calc(100vh - 20px);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .now-workbench-overlay-root--single-card {
-    padding: 0;
-    align-items: flex-start;
-    justify-content: flex-start;
-  }
-
-  .now-workbench-overlay-shell--single-card {
-    width: auto;
-    height: auto;
-    max-height: none;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
-    overflow: visible;
-    padding-top: 0;
-  }
-
-  .now-workbench-overlay-root--mini {
-    padding: 0;
-    align-items: flex-start;
-    justify-content: flex-start;
-  }
-
-  .now-workbench-overlay-shell--mini {
-    width: auto;
-    height: auto;
-    max-height: none;
-    min-height: 0;
-    overflow: visible;
-  }
-`;
