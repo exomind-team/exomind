@@ -54,6 +54,17 @@ describe('isolated Beta Android preparation', () => {
     const work = fixture('com.exomind.app.v06'); const before = work.snapshot();
     expect(() => prepareBetaAndroid(work.root)).toThrow(/Beta|namespace/); expect(work.snapshot()).toEqual(before);
   });
+  it('keeps the Beta composer above actual IME insets, including fullscreen', async () => {
+    const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
+    const work = fixture();
+    prepareBetaAndroid(work.root);
+    const activity = work.snapshot().activity;
+    expect(activity).toContain('window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)');
+    expect(activity).toContain('val ime = androidx.core.view.WindowInsetsCompat.Type.ime()');
+    expect(activity).toContain('maxOf(padding.bottom, insets.getInsets(ime).bottom)');
+    expect(activity).toContain('.setInsets(ime, androidx.core.graphics.Insets.NONE)');
+    expect(prepareBetaAndroid(work.root).changedFiles).toEqual([]);
+  });
   it.each(['applicationId','launcher','package','incomplete'])('rejects %s mismatch before writing the manifest', async kind => {
     const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
     const work = fixture();
