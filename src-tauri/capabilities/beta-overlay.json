@@ -1,0 +1,7 @@
+{
+  "$schema":"../gen/schemas/desktop-schema.json",
+  "identifier":"beta-overlay",
+  "description":"Beta pure presentation window; private broker checks every caller",
+  "windows":["beta-focus-overlay"],
+  "permissions":["core:default","core:window:allow-start-dragging","core:event:allow-listen","log:default"]
+}

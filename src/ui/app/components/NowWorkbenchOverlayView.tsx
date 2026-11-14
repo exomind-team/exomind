@@ -22,6 +22,8 @@ export interface NowWorkbenchOverlayViewModel {
 }
 export interface NowWorkbenchOverlayViewProps {
   model: NowWorkbenchOverlayViewModel;
+  actionsDisabled?: boolean;
+  pauseDisabled?: boolean;
   onMiniHover(hovered: boolean): void;
   onIdleHover(hovered: boolean): void;
   onIdleFocusCapture: FocusEventHandler<HTMLDivElement>;
@@ -45,7 +47,7 @@ export interface NowWorkbenchOverlayViewProps {
  * controllers and draft ownership stay with the caller. Slots retain Alpha's
  * original mount/unmount behavior when the visible branch changes. */
 export function NowWorkbenchOverlayView({
-  model, onMiniHover, onIdleHover, onIdleFocusCapture, onIdleBlurCapture,
+  model, actionsDisabled = false, pauseDisabled = false, onMiniHover, onIdleHover, onIdleFocusCapture, onIdleBlurCapture,
   onIdleCollapse, onExpand, onCollapse, onReturnToMain, onPauseOrResume,
   onEndBlock, onSurfaceMount, onSurfaceMouseDownCapture, slots,
 }: NowWorkbenchOverlayViewProps) {
@@ -125,6 +127,7 @@ export function NowWorkbenchOverlayView({
                   <Button
                     type="button"
                     variant="secondary"
+                    disabled={actionsDisabled || pauseDisabled}
                     onClick={onPauseOrResume}
                     className="h-9 rounded-[12px] bg-white/10 px-4 text-[#FAFAF9] hover:bg-white/15"
                   >
@@ -133,6 +136,7 @@ export function NowWorkbenchOverlayView({
                   <Button
                     type="button"
                     variant="brand"
+                    disabled={actionsDisabled}
                     onClick={onEndBlock}
                     className="h-9 rounded-[12px] bg-[#C75B3A] px-4 text-white hover:bg-[#B24D2F]"
                   >

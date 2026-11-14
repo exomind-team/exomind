@@ -77,6 +77,7 @@ htmlcov/
 # === Vite Entry (required) ===
 !index.html
 !beta.html
+!beta-focus-overlay.html
 !voice-overlay.html
 !now-workbench-overlay.html
 

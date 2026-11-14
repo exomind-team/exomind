@@ -146,6 +146,7 @@ export default defineConfig(({ mode }) => {
         input: {
           main: path.resolve(__dirname, "index.html"),
           beta: path.resolve(__dirname, "beta.html"),
+          "beta-focus-overlay": path.resolve(__dirname, "beta-focus-overlay.html"),
           "voice-overlay": path.resolve(__dirname, "voice-overlay.html"),
           "now-workbench-overlay": path.resolve(__dirname, "now-workbench-overlay.html"),
           "action-dock": path.resolve(__dirname, "action-dock.html"),

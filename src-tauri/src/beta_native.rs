@@ -1,5 +1,8 @@
 //! Isolated Beta embedding. No legacy runtime/config/store is opened here.
 
+#[path = "beta_overlay.rs"]
+mod overlay;
+
 use exomind_beta_host::{
     BetaHost, DeadlineEnvelope, HostError, HostStatus, RunningServer, Session,
 };
@@ -111,6 +114,7 @@ struct NativeState {
     server: tokio::sync::Mutex<Option<RunningServer>>,
     closing: AtomicBool,
     exit_ready: AtomicBool,
+    overlay: Mutex<overlay::Broker>,
 }
 
 impl NativeState {
@@ -126,6 +130,7 @@ impl NativeState {
             server: tokio::sync::Mutex::new(None),
             closing: AtomicBool::new(false),
             exit_ready: AtomicBool::new(false),
+            overlay: Mutex::new(overlay::Broker::default()),
         })
     }
 
@@ -635,6 +640,15 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             Some((config, directory))
         });
     let mut builder = tauri::Builder::default()
+        .on_page_load(|window, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                if let Some(state) = window.try_state::<Arc<NativeState>>() {
+                    if let Ok(mut broker) = state.overlay.lock() {
+                        broker.document_started(window.label());
+                    };
+                }
+            }
+        })
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -686,6 +700,11 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            overlay::beta_overlay_main,
+            overlay::beta_overlay_attach,
+            overlay::beta_overlay_read,
+            overlay::beta_overlay_request,
+            overlay::beta_overlay_window,
             beta_status,
             beta_profiles,
             beta_read_local_intent,

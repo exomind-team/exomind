@@ -18,6 +18,17 @@ function props():NowWorkbenchOverlayViewProps {
 }
 
 describe('shared live Alpha overlay presentation',()=>{
+  it('can disable mini pause while keeping the feedback/end entry usable',()=>{
+    const value=props();render(<NowWorkbenchOverlayView {...value} pauseDisabled model={{...value.model,miniCollapsed:true,miniHovered:true,paused:true}}/>);
+    expect(screen.getByRole('button',{name:'继续'})).toBeDisabled();expect(screen.getByRole('button',{name:'结束'})).toBeEnabled();
+    fireEvent.click(screen.getByRole('button',{name:'结束'}));expect(value.onEndBlock).toHaveBeenCalledTimes(1);
+  });
+  it('disables only mini business actions when the Beta owner is unavailable, preserving window chrome',()=>{
+    const value=props();render(<NowWorkbenchOverlayView {...value} actionsDisabled model={{...value.model,miniCollapsed:true,miniHovered:true}}/>);
+    expect(screen.getByRole('button',{name:'暂停'})).toBeDisabled();expect(screen.getByRole('button',{name:'结束'})).toBeDisabled();
+    expect(screen.getByRole('button',{name:'展开'})).toBeEnabled();expect(screen.getByRole('button',{name:'显示主程序'})).toBeEnabled();
+    fireEvent.click(screen.getByRole('button',{name:'暂停'}));expect(value.onPauseOrResume).not.toHaveBeenCalled();
+  });
   it('renders the actual overlay FocusTimerView slot with the original full-card shell and chrome actions',()=>{
     const value=props();const ui=render(<NowWorkbenchOverlayView {...value}/>);
     expect(screen.getByTestId('new-focus-overlay-running-header')).toBeInTheDocument();

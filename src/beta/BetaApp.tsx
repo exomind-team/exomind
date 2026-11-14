@@ -18,6 +18,7 @@ import type { LocalIntentJournal,IntentPredecessor } from './local-intent-journa
 import type { BetaTimelinePage,BetaTimeblockNode } from './timeblocks-types';
 import { BetaTimeblockController } from './timeblocks-controller';
 import { BetaFocusTimer } from './BetaFocusTimer';
+import { MainOverlayBridge } from './overlay/MainOverlayBridge';
 import { keepBetaEditableInViewport } from './editable-viewport';
 
 const SESSION_KEY = 'exomind:beta:connection';
@@ -268,6 +269,7 @@ function ProfileWorkspace({ client, controller, focus, profileId }: { client: Be
   const busy = pending.some(item => item.state === 'pending' && item.draft_revision === draft?.revision);
   const preparing = draft?.files?.some(file => !file.original || file.state === 'preparing') ?? false;
   return <>
+    {focus&&<MainOverlayBridge client={client} capture={controller} focus={focus} profileId={profileId} onCommitted={()=>setRevision(value=>value+1)}/>}
     {focus&&<BetaFocusTimer controller={focus} client={client} profileId={profileId} onCommitted={()=>setRevision(value=>value+1)}/>}
     {!client.timelinePage&&<p className="px-5 py-1 text-[11px] text-muted">此连接仅提供兼容记录历史，尚未提供完整时间线</p>}
     <div className="flex flex-wrap gap-2 border-b border-border-page px-5 py-2">

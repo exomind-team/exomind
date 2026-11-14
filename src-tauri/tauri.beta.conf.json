@@ -17,6 +17,6 @@
         "fullscreen": false
       }
     ],
-    "security": { "capabilities": ["beta"] }
+    "security": { "capabilities": ["beta", "beta-overlay"] }
   }
 }
