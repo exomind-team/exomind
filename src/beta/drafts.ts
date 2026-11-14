@@ -1,6 +1,7 @@
 import { BetaApiError, validateReceipt, type BetaClient, type BetaCommand, type BetaReceipt } from './client';
 import { betaUuid } from './initialization';
-import { IndexedDbFileSourceStore, hashFileSource, sourceKey, type FileSourceStore } from './file-source-store';
+import { hashFileSource, readFileSource, sourceKey, type FileSource, type FileSourceStore } from './file-source-store';
+import { productionFileSources } from './native-source-store';
 import { ORIGINAL_CHUNK_BYTES, type BetaOriginal, type BetaStage } from './original-types';
 import { openDurableIntentStorage, type DurableIntentStorage, type LocalIntentJournal, type IntentPredecessor } from './local-intent-journal';
 import { productionIntentStorage } from './native-intent-journal';
@@ -126,7 +127,7 @@ export class BetaDraftController {
 
   constructor(private readonly client: BetaClient, private readonly deviceId: string, private readonly storage: DraftStorage,
     private readonly uuid: () => string = betaUuid, private readonly clock: () => number = Date.now, sources?: FileSourceStore) {
-    this.sources = sources ?? new IndexedDbFileSourceStore(); this.ownsSources = !sources;
+    this.sources = sources ?? productionFileSources(); this.ownsSources = !sources;
     this.key = `exomind:beta:drafts:${deviceId}`;
     try { this.state = { ...load(storage.getItem(this.key), deviceId), persistenceError: null, persistenceState: 'idle' }; }
     catch {
@@ -218,7 +219,8 @@ export class BetaDraftController {
       const file = incoming[index];
       try {
         this.active();
-        // Strict IDB transaction completion precedes hash metadata and all RPC.
+        // Complete the backend's durable source copy before publishing the
+        // original manifest or beginning Core stage/capture operations.
         await this.sources.put(file.source_key, inputs[index]);
         this.active(); await this.prepareSource(profileId, file);
       } catch (error) {
@@ -236,6 +238,7 @@ export class BetaDraftController {
   }
 
   private async prepareSource(profileId: string, file: DraftFile): Promise<void> {
+    await this.sources.resume?.(file.source_key); this.active();
     const source = await this.sources.get(file.source_key); this.active();
     if (!source) throw new BetaApiError('source_missing', '本机暂存源未找到，请重新选择原文件；不会跳过此项提交');
     if (source.size !== file.byte_length) throw new BetaApiError('source_mismatch', '原件长度与草稿不一致，请重新选择原文件');
@@ -306,13 +309,16 @@ export class BetaDraftController {
     this.active();
     if (stage.state === 'hash_mismatch') throw new BetaApiError('original_hash_mismatch', '原件校验失败，暂存仍保留；请移除此项后重新选择');
     this.patchFile(profileId, file.id, { state: stage.state === 'verified' ? 'verified' : 'uploading', next_offset: stage.next_offset, message: undefined });
+    let usedSource: FileSource | undefined;
     if (stage.next_offset < file.byte_length) {
+      await this.sources.resume?.(file.source_key); this.active();
       const source = await this.sources.get(file.source_key); this.active();
       if (!source) throw new BetaApiError('source_missing', '本机暂存源未找到，请重新选择原文件；不会跳过此项提交');
+      usedSource = source;
       if (source.size !== file.byte_length || await hashFileSource(source, () => this.disposed) !== original.sha256) throw new BetaApiError('source_mismatch', '本机源与固定原件 hash 不同，尚未提交记录');
       while (stage.next_offset < file.byte_length) {
         this.active(); const offset = stage.next_offset;
-        const bytes = new Uint8Array(await source.slice(offset, Math.min(file.byte_length, offset + ORIGINAL_CHUNK_BYTES)).arrayBuffer()); this.active();
+        const bytes = await readFileSource(source, offset, Math.min(ORIGINAL_CHUNK_BYTES, file.byte_length - offset)); this.active();
         if (!bytes.length) throw new BetaApiError('source_incomplete', '原件源读取中断，暂存偏移已保留');
         stage = this.bindStage(profileId, file, await api.write(profileId, file.stage_id, offset, bytes)); this.active();
         if (stage.next_offset < offset + bytes.length) throw new BetaApiError('original_no_progress', '原件暂存未推进，偏移已保留，可重试');
@@ -322,10 +328,10 @@ export class BetaDraftController {
     if (stage.state !== 'verified') { this.active(); stage = this.bindStage(profileId, file, await api.verify(profileId, file.stage_id)); this.active(); }
     if (stage.state !== 'verified') throw new BetaApiError('original_not_ready', '整组原件尚未校验就绪，记录未提交');
     this.patchFile(profileId, file.id, { state: 'verified', next_offset: file.byte_length, message: undefined });
-    // Core owns a durable verified copy now. Only this browser duplicate is
+    // Core owns a durable verified copy now. Only this local source duplicate is
     // released; a failed local cleanup never changes the verified save result.
-    try { await this.sources.remove(file.source_key); }
-    catch { if (!this.disposed) this.patchFile(profileId, file.id, { message: '原件已暂存；浏览器临时副本尚未释放' }); }
+    try { await this.sources.remove(file.source_key, usedSource); }
+    catch { if (!this.disposed) this.patchFile(profileId, file.id, { message: '原件已暂存；本机源清理暂未确认' }); }
     return stage;
   }
 

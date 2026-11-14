@@ -2,6 +2,8 @@
 
 #[path = "beta_overlay.rs"]
 mod overlay;
+#[path = "beta_native_sources.rs"]
+mod local_sources;
 
 use exomind_beta_host::{
     BetaHost, DeadlineEnvelope, HostError, HostStatus, RunningServer, Session,
@@ -43,6 +45,30 @@ impl From<HostError> for Failure {
             HostError::IntentCacheUnavailable => (
                 "intent_cache_unavailable",
                 "本机草稿暂存未确认，请保留窗口并重试",
+            ),
+            HostError::LocalSourceCorrupt => (
+                "local_source_corrupt",
+                "本机文件暂存校验失败，现有数据已保留，请重新选择原文件",
+            ),
+            HostError::LocalSourceUnavailable => (
+                "local_source_unavailable",
+                "本机文件暂存未确认，请保留原文件并重试",
+            ),
+            HostError::LocalSourceConflict => (
+                "local_source_conflict",
+                "文件暂存身份或代次已变化，请查证后重试",
+            ),
+            HostError::LocalSourceIncomplete => (
+                "local_source_incomplete",
+                "本机文件副本尚未完整保存，请保留原文件",
+            ),
+            HostError::LocalSourceHashMismatch => (
+                "local_source_hash_mismatch",
+                "本机文件副本与原文件校验不一致，暂存字节已保留",
+            ),
+            HostError::LocalSourceBusy => (
+                "local_source_busy",
+                "本机文件校验正在处理中，请稍后重试",
             ),
             HostError::InvalidRequest
             | HostError::Core(
@@ -709,6 +735,12 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             beta_profiles,
             beta_read_local_intent,
             beta_write_local_intent,
+            local_sources::beta_begin_local_source,
+            local_sources::beta_local_source_status,
+            local_sources::beta_write_local_source_chunk,
+            local_sources::beta_finish_local_source,
+            local_sources::beta_read_local_source_range,
+            local_sources::beta_remove_local_source,
             beta_provision_profile,
             beta_capture,
             beta_events_page,

@@ -2,6 +2,8 @@
 //! the legacy Runtime and its stores are never instantiated here.
 mod http;
 mod local_intents;
+mod local_sources;
+pub use local_sources::{LocalSourceBegin,LocalSourceInfo,LocalSourceState,MAX_LOCAL_SOURCE_BYTES,MAX_LOCAL_SOURCE_CHUNK_BYTES};
 #[cfg(test)]
 mod original_tests;
 mod originals;
@@ -70,6 +72,18 @@ pub enum HostError {
     IntentCacheCorrupt,
     #[error("local UI intent persistence could not be confirmed")]
     IntentCacheUnavailable,
+    #[error("local source cache requires recovery")]
+    LocalSourceCorrupt,
+    #[error("local source cache persistence could not be confirmed")]
+    LocalSourceUnavailable,
+    #[error("local source identity or generation conflicts")]
+    LocalSourceConflict,
+    #[error("local source copy is not complete")]
+    LocalSourceIncomplete,
+    #[error("local source does not match its expected digest")]
+    LocalSourceHashMismatch,
+    #[error("local source verification slots are busy")]
+    LocalSourceBusy,
     #[error("core operation failed")]
     Core(#[from] CoreError),
     #[error("host database operation failed")]
@@ -157,6 +171,7 @@ struct Resources {
     // Declaration order also governs Drop: close private cache connections
     // before persistence releases this Host's exclusive root lock.
     local_intents: Option<local_intents::Store>,
+    local_sources: Option<local_sources::Store>,
     core: Core,
     persistence: Persistence,
 }
@@ -171,6 +186,7 @@ pub struct BetaHost {
     accepting: AtomicBool,
     gate: Mutex<State>,
     verifications: originals::VerificationRegistry,
+    source_jobs: local_sources::Jobs,
     clock: std::sync::Arc<dyn HostClock>,
     services: std::sync::Arc<timeblocks::Services>,
     #[cfg(test)]
@@ -218,6 +234,7 @@ impl BetaHost {
             device_id: core.device_id(),
             accepting: AtomicBool::new(true),
             verifications: originals::VerificationRegistry::default(),
+            source_jobs: local_sources::Jobs::default(),
             clock,
             services: std::sync::Arc::new(timeblocks::Services::default()),
             #[cfg(test)]
@@ -225,6 +242,7 @@ impl BetaHost {
             gate: Mutex::new(State {
                 resources: Some(Resources {
                     local_intents: None,
+                    local_sources: None,
                     core,
                     persistence,
                 }),
@@ -510,10 +528,12 @@ impl BetaHost {
             }
         }
         self.verifications.cancel_all()?;
+        self.source_jobs.cancel_all()?;
         self.services
             .wait_stopped(deadline.saturating_duration_since(std::time::Instant::now()))?;
         self.verifications
             .wait_empty(deadline.saturating_duration_since(std::time::Instant::now()))?;
+        self.source_jobs.wait_empty(deadline.saturating_duration_since(std::time::Instant::now()))?;
         // A timeout deliberately retains resources/the root lock: an old read
         // connection must not coexist with a newly opened host for this root.
         self.state()?.resources.take();

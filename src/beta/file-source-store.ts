@@ -6,26 +6,38 @@ import { ORIGINAL_CHUNK_BYTES } from './original-types';
  * request success. Metadata/commands are stored separately in the draft cache. */
 export interface FileSourceStore {
   put(key: string, source: Blob): Promise<void>;
-  get(key: string): Promise<Blob | null>;
-  remove(key: string): Promise<void>;
+  resume?(key: string): Promise<void>;
+  get(key: string): Promise<FileSource | null>;
+  remove(key: string, expected?: FileSource): Promise<void>;
   close?(): void;
+}
+export interface RangeFileSource { readonly size: number; readonly sha256?: string; read(offset: number, length: number): Promise<Uint8Array> }
+export type FileSource = Blob | RangeFileSource;
+export async function readFileSource(source: FileSource, offset: number, length: number): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > ORIGINAL_CHUNK_BYTES || !Number.isSafeInteger(offset + length) || offset + length > source.size) throw new BetaApiError('source_incomplete', '原件范围无效，尚未发送');
+  const bytes = 'read' in source ? await source.read(offset, length) : new Uint8Array(await source.slice(offset, offset + length).arrayBuffer());
+  if (bytes.length !== length) throw new BetaApiError('source_incomplete', '本机原件范围未完整读取，尚未发送');
+  return bytes;
 }
 
 export function sourceKey(deviceId: string, profileId: string, id: string): string {
   return JSON.stringify([deviceId, profileId, id]);
 }
 
-export async function hashFileSource(source: Blob, cancelled: () => boolean = () => false): Promise<string> {
+export async function hashFileSource(source: FileSource, cancelled: () => boolean = () => false): Promise<string> {
+  if (!Number.isSafeInteger(source.size) || source.size < 0) throw new BetaApiError('source_incomplete', '原件长度无效，尚未发送');
   const hash = sha256.create();
   for (let offset = 0; offset < source.size; offset += ORIGINAL_CHUNK_BYTES) {
     if (cancelled()) throw new BetaApiError('inactive_session', '当前记录窗口已关闭，原件仍保留在暂存中');
     const end = Math.min(source.size, offset + ORIGINAL_CHUNK_BYTES);
-    const bytes = new Uint8Array(await source.slice(offset, end).arrayBuffer());
+    const bytes = await readFileSource(source, offset, end - offset);
     if (bytes.length !== end - offset) throw new BetaApiError('source_incomplete', '本机原件副本未完整读取，请重新选择');
     hash.update(bytes);
   }
   if (cancelled()) throw new BetaApiError('inactive_session', '当前记录窗口已关闭，原件仍保留在暂存中');
-  return Array.from(hash.digest(), byte => byte.toString(16).padStart(2, '0')).join('');
+  const digest = Array.from(hash.digest(), byte => byte.toString(16).padStart(2, '0')).join('');
+  if ('sha256' in source && source.sha256 !== undefined && source.sha256 !== digest) throw new BetaApiError('source_corrupt', '本机原件与已确认校验不同，旧副本已保留，尚未发送');
+  return digest;
 }
 
 export class IndexedDbFileSourceStore implements FileSourceStore {

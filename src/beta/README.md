@@ -1,6 +1,6 @@
 # Beta capture entry
 
-This is an incremental B1 text client, not the completed Beta or B4 UI migration.
+This is an incremental B1 capture/timeblock client, not the completed Beta or B4 UI migration.
 `beta.html` loads `beta-main.tsx` directly. It does not load the legacy `main.tsx`,
 runtime bootstrap, profile store, sync store, or eventlog service.
 
@@ -13,9 +13,12 @@ runtime bootstrap, profile store, sync store, or eventlog service.
 - [x] Real profile creation/selection, confirmed history, snapshot pagination, literal text search.
 - [x] Existing PageShell, Button, Input, Textarea, EventTimestamp and warm stone tokens.
 - [x] Public behavior tests for retries, stale responses, profile isolation, pagination and failures.
-- [x] Parent verification: 22 focused tests, TypeScript/Web build, 17 actual Edge/Host checks.
-- [ ] Native host integration and actual desktop/device acceptance by parent.
-- [ ] Full existing UI reuse/extracted NowInputRow presentation (B4, subsequent work).
+- [x] Shared Alpha NowInputRowView, FocusTimerView, feedback dialog and live overlay presentation.
+- [x] Typed Core timeblocks, mixed history and main-owned Native overlay relay.
+- [x] Native private intent journal and bounded private source copies; Web keeps separate IDB storage.
+- [x] Parent checkpoints: actual Native text/timeblock UI, restart and IME/layout acceptance; see the execution ledger for exact source/package scope.
+- [ ] New durable-source APK acceptance and actual desktop overlay/window acceptance.
+- [ ] Full Alpha page/layout inheritance, complete scroll anchoring and remaining B2–B5 stories.
 
 ## Connection
 
@@ -31,8 +34,12 @@ runtime on the same device clears cached grants and permits receipt lookup.
 
 ## Draft and history boundaries
 
-LocalStorage key `exomind:beta:drafts:<device_id>` holds a profile-indexed map and
-pending commands. Web Locks grant one editing window per device; unsupported
+Journal key `exomind:beta:drafts:<device_id>` holds a profile-indexed map and
+pending commands. Native uses its private FULL SQLite journal; Web uses a strict
+IDB transaction journal. An existing canonical journal wins over its predecessors.
+Missing reliable storage never silently imports an older localStorage snapshot;
+that recovery requires an explicit, device/profile-bound user action.
+Web Locks grant one editing window per device; unsupported
 browsers fail closed. An occupied lock exposes an explicit retry button after
 the other window releases it; retry only reacquires the same device lock and
 does not submit drafts or recreate profile grants. Effect replay waits for this
@@ -55,8 +62,10 @@ extensions/MIME and empty files. This is functional composition; full Alpha page
 layout inheritance remains a B4 acceptance gate.
 
 The draft cache first journals a clearly `preparing` selection intent with stable
-IDs and a device/profile/source key. A strict IndexedDB transaction then copies
-the Blob; hash reads are incremental at 256 KiB. Missing bytes, IDB quota or cache
+IDs and a device/profile/source key. Native then copies bytes to the owner-only
+[private source cache](../../crates/exomind-beta-host/NATIVE-SOURCES.md), verifies
+the complete hash and exposes a 256 KiB range reader. Web copies a Blob through
+an IDB transaction. Hash reads are incremental at 256 KiB. Missing bytes, quota or cache
 failures retain a failed selection and block submission instead of dropping it
 and sending pure text. Browser File objects themselves are never the persisted
 recovery mechanism. Reopening may resume staging, but never submits a capture.
@@ -66,7 +75,7 @@ Submit freezes text, ordered full original descriptors, command/event/time and
 profile before any capture RPC. Uploads are serialized; capture waits for every
 item to be verified. Later text or attachment edits have a different revision and
 are not cleared by the old receipt. A lost outcome first queries its exact
-receipt. Verified staging alone is never shown as a saved record. The browser
+receipt. Verified staging alone is never shown as a saved record. A temporary
 duplicate may be released after the Core verifies it; removing a selection does
 not delete Core bytes or a source still needed by a frozen command. Interrupted,
 removed, unverified copies are retained for later explicit lifecycle cleanup.
@@ -77,7 +86,13 @@ download, with additional Blob/copy overhead; that limit does not cap uploads.
 Multi-GB native/disk streaming export and throughput are not claimed by this
 entry. Unknown originals are downloaded, never automatically executed or parsed.
 
-Voice, editing/deletion, sync, legacy import, focus timers and full old UI
+Count-up/down, pause/resume/rotate/end/feedback use Core facts; display clocks
+never decide business completion. The overlay is a separate controlled view:
+only Main owns clients, controllers and journals, while Native tickets bind
+requests to runtime/device/profile/owner generation and state revisions.
+Actual desktop window behavior and complete Alpha visual parity still need acceptance.
+
+Voice, editing/deletion, peer sync, model workflows, legacy import and full old UI
 composition are not implemented by this entry. Draft lifecycle/retention remains
 explicit: unresolved commands retain their full snapshots; confirmed commands drop
 their text and keep at most eight receipt/revision metadata entries per device.

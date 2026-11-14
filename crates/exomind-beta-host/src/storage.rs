@@ -65,6 +65,8 @@ fn children_are_owned(root: &Path) -> Result<(), HostError> {
                 | "host-lock.sqlite3-journal"
                 | crate::local_intents::DIRECTORY
                 | crate::local_intents::INITIALIZED
+                | crate::local_sources::DIRECTORY
+                | crate::local_sources::INITIALIZED
                 | CONNECTION
         ) && !(name.starts_with("connection.beta.") && name.ends_with(".tmp"))
         {
