@@ -3,14 +3,17 @@ import { validateReceipt, type BetaClient, type BetaReceipt, type BetaStatus } f
 import { betaUuid } from './initialization';
 import type { BetaTimeblockAction, BetaTimeblockCommand, BetaTimeblockSnapshot } from './timeblocks-types';
 import { validateTimeblockCommand, validateTimeblockSnapshot } from './timeblocks-validation';
+import { openDurableIntentStorage, type DurableIntentStorage, type LocalIntentJournal } from './local-intent-journal';
 
 export interface BetaStartDraft { name:string; note:string; mode:'countup'|'countdown'; minutes:number; endMode:'soft'|'hard'; revision:number }
 export interface BetaFeedbackDraft { text:string; revision:number }
 type DraftLink={kind:'start';revision:number}|{kind:'feedback';block_id:string;revision:number};
 export interface PendingTimeblock { command:BetaTimeblockCommand; state:'pending'|'unknown'|'rejected'; link?:DraftLink; message?:string; code?:string }
 interface Persisted {version:1;draft:BetaStartDraft;feedback:Record<string,BetaFeedbackDraft>;pending:PendingTimeblock[];confirmed:BetaReceipt[]}
-export interface BetaTimeblockState extends Persisted {remote:BetaTimeblockSnapshot|null;identity:BetaStatus|null;receivedAt:number;loading:boolean;error:string|null;cacheError:string|null}
+export interface BetaTimeblockState extends Persisted {remote:BetaTimeblockSnapshot|null;identity:BetaStatus|null;receivedAt:number;loading:boolean;error:string|null;cacheError:string|null;persistenceState:'idle'|'pending'|'failed'}
 type StorageLike=Pick<Storage,'getItem'|'setItem'>;
+const durable=(storage:StorageLike):storage is DurableIntentStorage=>'durable'in storage&&storage.durable===true;
+const storageKey=(device:string,profile:string)=>`exomind:beta:timeblocks:${JSON.stringify([device,profile])}`;
 const message=(error:unknown):string=>error&&typeof error==='object'&&'message'in error&&typeof error.message==='string'?error.message:typeof error==='string'?error:'时间块服务暂时不可用，请查证后重试';
 const code=(error:unknown):string=>error&&typeof error==='object'&&'code'in error&&typeof error.code==='string'?error.code:'unavailable';
 const initial=():Persisted=>({version:1,draft:{name:'',note:'',mode:'countdown',minutes:25,endMode:'soft',revision:0},feedback:{},pending:[],confirmed:[]});
@@ -42,25 +45,37 @@ export class BetaTimeblockController {
   private disposed=false;private blocked=false;private readGeneration=0;
   private readonly listeners=new Set<()=>void>();private readonly flights=new Map<string,Promise<BetaReceipt|null>>();
   private readonly uuid:()=>string;private readonly now:()=>number;
+  private unsubscribePersistence:(()=>void)|undefined;private closing:Promise<void>|undefined;
+  static async open(client:BetaClient,deviceId:string,profileId:string,options:{journal?:LocalIntentJournal;legacy?:Pick<Storage,'getItem'>;uuid?:()=>string;monotonicNow?:()=>number}={}):Promise<BetaTimeblockController>{
+    const legacy=options.legacy??{getItem:(key:string)=>globalThis.localStorage?.getItem(key)??null};
+    const storage=await openDurableIntentStorage({key:storageKey(deviceId,profileId),journal:options.journal,legacy,validate:raw=>{load(raw,profileId);}});
+    try{return new BetaTimeblockController(client,deviceId,profileId,storage,options);}catch(error){storage.close();throw error;}
+  }
   constructor(private readonly client:BetaClient,private readonly deviceId:string,private readonly profileId:string,private readonly storage:StorageLike,
     options:{uuid?:()=>string;monotonicNow?:()=>number}={}){
-    this.storageKey=`exomind:beta:timeblocks:${JSON.stringify([deviceId,profileId])}`;
+    this.storageKey=storageKey(deviceId,profileId);
     this.uuid=options.uuid??betaUuid;this.now=options.monotonicNow??(()=>performance.now());
     let restored=initial();let cacheError:null|string=null;
     try{restored=load(storage.getItem(this.storageKey),profileId);}catch{this.blocked=true;cacheError='时间块草稿缓存无法读取，已保留原缓存并停止提交';}
-    this.state={...restored,remote:null,identity:null,receivedAt:0,loading:false,error:null,cacheError};
+    this.state={...restored,remote:null,identity:null,receivedAt:0,loading:false,error:null,cacheError,persistenceState:cacheError?'failed':'idle'};
+    if(durable(storage))this.unsubscribePersistence=storage.subscribe(()=>{const status=storage.snapshot();this.emit({...this.state,persistenceState:status.state,cacheError:status.error});});
   }
   snapshot=():BetaTimeblockState=>this.state;
   subscribe=(listener:()=>void):(()=>void)=>{this.listeners.add(listener);return()=>this.listeners.delete(listener);};
-  dispose():void{this.disposed=true;++this.readGeneration;this.listeners.clear();}
+  dispose():void{
+    if(!this.disposed){this.disposed=true;++this.readGeneration;this.listeners.clear();this.unsubscribePersistence?.();}
+    if(!this.closing){this.closing=(async()=>{try{if(durable(this.storage))await this.storage.commit();}finally{if(durable(this.storage))this.storage.close();}})();void this.closing.catch(()=>{});}
+  }
+  close():Promise<void>{this.dispose();return this.closing!;}
+  async flush():Promise<void>{if(durable(this.storage))await this.storage.commit();}
   private active():void{if(this.disposed)throw new BetaApiError('inactive_session','当前时间块窗口已关闭');}
   private emit(next:BetaTimeblockState):void{if(this.disposed)return;this.state=next;for(const listener of this.listeners)listener();}
   private save(next:BetaTimeblockState,required=false):void{
     this.active();if(this.blocked)throw new BetaApiError('timeblock_cache_unavailable','请先处理无法读取的时间块草稿缓存');
     const {version,draft,feedback,pending,confirmed}=next;
-    try{this.storage.setItem(this.storageKey,JSON.stringify({version,draft,feedback,pending,confirmed}));this.emit({...next,cacheError:null});}
-    catch{if(required){this.emit({...this.state,cacheError:'本机草稿暂存失败，此次操作尚未发送'});throw new BetaApiError('timeblock_cache_unavailable','本机草稿暂存失败，此次操作尚未发送');}
-      this.emit({...next,cacheError:'本机草稿暂存失败，请保留此窗口；已确认事实不受影响'});}
+    try{this.storage.setItem(this.storageKey,JSON.stringify({version,draft,feedback,pending,confirmed}));const status=durable(this.storage)?this.storage.snapshot():{state:'idle' as const,error:null};this.emit({...next,cacheError:status.error,persistenceState:status.state});}
+    catch{if(required){this.emit({...this.state,persistenceState:'failed',cacheError:'本机草稿暂存失败，此次操作尚未发送'});throw new BetaApiError('timeblock_cache_unavailable','本机草稿暂存失败，此次操作尚未发送');}
+      this.emit({...next,persistenceState:'failed',cacheError:'本机草稿暂存失败，请保留此窗口；已确认事实不受影响'});}
   }
   setStartDraft(patch:Partial<Omit<BetaStartDraft,'revision'>>):void{
     this.active();const draft={...this.state.draft,...patch,revision:this.state.draft.revision+1};validateDraft(draft);this.save({...this.state,draft});
@@ -124,6 +139,10 @@ export class BetaTimeblockController {
     // This is the last synchronous qualification before any mutating RPC.
     this.save({...this.state,pending:[...this.state.pending,pending]},true);++this.readGeneration;
     this.emit({...this.state,loading:false});
+    if(durable(this.storage)){
+      try{await this.flush();}catch(error){if(!this.disposed)this.update(command.command_id,{state:'unknown',message:message(error),code:code(error)});throw error;}
+      if(this.disposed)return null;
+    }
     return this.send(pending,false);
   }
   async retry(commandId:string):Promise<BetaReceipt|null>{
@@ -157,6 +176,7 @@ export class BetaTimeblockController {
     try{
       if(!this.client.timeblocks)throw new BetaApiError('unsupported_timeblocks','当前连接未提供时间块能力');
       this.save({...this.state,pending:this.state.pending.map(item=>item.command.command_id===pending.command.command_id?{...item,state:'pending' as const,message:undefined}:item)},true);
+      if(durable(this.storage)){await this.flush();if(this.disposed)return null;}
       return this.confirm(pending,await this.client.timeblocks.command(pending.command));
     }catch(error){if(!this.disposed)this.update(pending.command.command_id,{state:code(error)==='timeblock_conflict'?'rejected':'unknown',message:message(error),code:code(error)});return null;}
   }

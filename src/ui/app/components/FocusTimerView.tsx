@@ -89,6 +89,7 @@ export interface FocusTimerViewProps {
   actions: FocusTimerViewActions;
   bindings?: FocusTimerViewBindings;
   surface?: FocusTimerSurface;
+  actionsDisabled?: boolean;
   overlayChrome?: FocusTimerOverlayChrome;
   slots?: { keepAwake?: ReactNode; dialogs?: ReactNode };
 }
@@ -130,6 +131,7 @@ export function FocusTimerView({
   actions,
   bindings = {},
   surface = "default",
+  actionsDisabled = false,
   overlayChrome: overlayRunningChrome,
   slots = {},
 }: FocusTimerViewProps) {
@@ -499,6 +501,7 @@ export function FocusTimerView({
               <Button
                 type="button"
                 data-testid="new-focus-start-button"
+                disabled={actionsDisabled}
                 onClick={() => {
                   void handleStart();
                 }}
@@ -632,7 +635,7 @@ export function FocusTimerView({
                   type="button"
                   data-testid="new-focus-pause-resume-button"
                   aria-label={isPaused ? "继续（Resume）" : "暂停（Pause）"}
-                  disabled={feedbackInProgress}
+                  disabled={actionsDisabled || feedbackInProgress}
                   onClick={() => {
                     void handlePauseOrResume();
                   }}
@@ -669,7 +672,7 @@ export function FocusTimerView({
                   data-testid="new-focus-end-button"
                   aria-label={endActionAriaLabel}
                   title={endActionTitle}
-                  disabled={isEndActionDisabled}
+                  disabled={actionsDisabled || isEndActionDisabled}
                   onClick={handleOpenEndDialog}
                   className={endActionButtonClass}
                 >

@@ -174,4 +174,12 @@ describe('shared Alpha FocusTimerView extraction contract', () => {
     expect(screen.queryByTestId('new-focus-running-name-input')).not.toBeInTheDocument();
     fireEvent.click(name);expect(callbacks.beginRename).not.toHaveBeenCalled();
   });
+  it('disables only business actions while leaving next-draft inputs and timing choices usable',()=>{
+    const callbacks=actions();const {rerender}=render(<FocusTimerView model={config()} actions={callbacks} actionsDisabled/>);
+    expect(screen.getByTestId('new-focus-start-button')).toBeDisabled();expect(screen.getByTestId('new-focus-task-input')).toBeEnabled();
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));expect(callbacks.start).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('new-focus-expected-countup'));expect(callbacks.selectTiming).toHaveBeenCalledWith('countup');
+    rerender(<FocusTimerView model={running()} actions={callbacks} actionsDisabled/>);
+    expect(screen.getByTestId('new-focus-pause-resume-button')).toBeDisabled();expect(screen.getByTestId('new-focus-end-button')).toBeDisabled();
+  });
 });

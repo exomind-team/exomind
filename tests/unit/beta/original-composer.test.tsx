@@ -1,3 +1,4 @@
+import { memoryIntentJournal } from './timeblock-ui-fixtures';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
@@ -20,7 +21,7 @@ describe('Beta original composer uses the shared Alpha input',()=>{
       verify:async(_profile,id)=>({...stages.get(id)!,state:'verified'}),readStage:async()=>new Uint8Array(),readOriginal:async()=>new Uint8Array(),
     };
     const client={...fakeClient(),originals};
-    render(<BetaApp client={client} sourceStore={sourceStore}/>);
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} sourceStore={sourceStore}/>);
     await screen.findByRole('textbox',{name:'记录当下'});
     expect(screen.getByTestId('new-now-input-row')).toBeInTheDocument();
     expect(screen.getByRole('button',{name:'附件'})).toBeEnabled();

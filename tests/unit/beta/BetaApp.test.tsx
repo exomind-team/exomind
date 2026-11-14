@@ -1,3 +1,4 @@
+import { memoryIntentJournal } from './timeblock-ui-fixtures';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,7 +40,7 @@ describe('Beta React entry', () => {
     Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
     const client = fakeClient(); let unmount: (() => void) | undefined;
     try {
-      ({ unmount } = render(<StrictMode><BetaApp client={client} /></StrictMode>));
+      ({ unmount } = render(<StrictMode><BetaApp intentJournal={memoryIntentJournal()} client={client} /></StrictMode>));
       expect(await screen.findByRole('textbox', { name: '记录当下' })).toBeInTheDocument();
       await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -66,7 +67,7 @@ describe('Beta React entry', () => {
     Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
     const client = fakeClient(); let unmount: (() => void) | undefined;
     try {
-      ({ unmount } = render(<BetaApp client={client} />));
+      ({ unmount } = render(<BetaApp intentJournal={memoryIntentJournal()} client={client} />));
       expect(await screen.findByRole('alert')).toHaveTextContent('另一窗口');
       expect(screen.queryByRole('textbox', { name: '记录当下' })).not.toBeInTheDocument();
       expect(client.eventsPage).not.toHaveBeenCalled();
@@ -93,28 +94,33 @@ describe('Beta React entry', () => {
   });
   it('shows only confirmed events and a late save cannot clear newer or switched-profile drafts', async () => {
     const client = fakeClient(); const flight = deferred<BetaReceipt>(); client.capture.mockReturnValueOnce(flight.promise);
-    render(<BetaApp client={client} />);
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} />);
     const input = await screen.findByRole('textbox', { name: '记录当下' });
     await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
     fireEvent.change(input, { target: { value: 'old text' } }); fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(client.capture).toHaveBeenCalledTimes(1));
     fireEvent.change(input, { target: { value: 'new text' } });
+    await waitFor(()=>expect(screen.getByRole('combobox',{name:'当前档案'})).toBeEnabled());
     fireEvent.change(screen.getByRole('combobox', { name: '当前档案' }), { target: { value: 'q' } });
-    fireEvent.change(screen.getByRole('textbox', { name: '记录当下' }), { target: { value: 'other profile' } });
+    await waitFor(()=>expect(screen.getByRole('combobox',{name:'当前档案'})).toHaveValue('q'));
+    fireEvent.change(await screen.findByRole('textbox', { name: '记录当下' }), { target: { value: 'other profile' } });
     await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
     await act(async () => { flight.resolve(saved(client.capture.mock.calls[0][0])); await flight.promise; });
     expect(screen.getByRole('textbox', { name: '记录当下' })).toHaveValue('other profile');
+    await waitFor(()=>expect(screen.getByRole('combobox',{name:'当前档案'})).toBeEnabled());
     fireEvent.change(screen.getByRole('combobox', { name: '当前档案' }), { target: { value: 'p' } });
-    expect(screen.getByRole('textbox', { name: '记录当下' })).toHaveValue('new text');
+    await waitFor(()=>expect(screen.getByRole('combobox',{name:'当前档案'})).toHaveValue('p'));
+    expect(await screen.findByRole('textbox', { name: '记录当下' })).toHaveValue('new text');
     await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
   });
   it('discards a stale history response after selecting another profile', async () => {
     const client = fakeClient(); const oldPage = deferred<BetaPage>();
     client.eventsPage.mockImplementationOnce(() => oldPage.promise as ReturnType<typeof client.eventsPage>);
-    render(<BetaApp client={client} />);
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} />);
     const select = await screen.findByRole('combobox', { name: '当前档案' });
     await waitFor(() => expect(client.eventsPage).toHaveBeenCalledTimes(1));
     fireEvent.change(select, { target: { value: 'q' } });
+    await waitFor(()=>expect(select).toHaveValue('q'));
     await act(async () => { oldPage.resolve({ items: [{ event_id:'old',profile_id:'p',device_id:'d',author_id:'a',author_kind:'human',occurred_at_ms:1234,text:'stale record',tags:[],digest:'a'.repeat(64),local_seq:1 }], next_before:null,highwater:1 }); });
     expect(screen.queryByText('stale record')).not.toBeInTheDocument();
     expect(await screen.findByText('还没有记录')).toBeInTheDocument();
@@ -124,7 +130,7 @@ describe('Beta React entry', () => {
     const event = (seq: number, text: string) => ({ event_id:`e${seq}`,profile_id:'p',device_id:'d',author_id:'a',author_kind:'human' as const,occurred_at_ms:1234,text,tags:[],digest:'a'.repeat(64),local_seq:seq });
     client.eventsPage.mockResolvedValueOnce({ items: [event(2, 'recent')], next_before: 2, highwater: 2 });
     client.eventsPage.mockResolvedValueOnce({ items: [event(1, 'older')], next_before: null, highwater: 2 });
-    render(<BetaApp client={client} />);
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} />);
     fireEvent.click(await screen.findByRole('button', { name: '加载更早记录' }));
     expect(await screen.findByText('older')).toBeInTheDocument();
     expect(client.eventsPage).toHaveBeenNthCalledWith(2, 'p', { before: 2, through: 2, limit: 100 });
@@ -135,12 +141,12 @@ describe('Beta React entry', () => {
   });
   it('shows read failures instead of falsely claiming an empty history', async () => {
     const client = fakeClient(); client.eventsPage.mockRejectedValueOnce({ code: 'storage', message: '记录读取失败' });
-    render(<BetaApp client={client} />);
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('记录读取失败');
     expect(screen.queryByText('还没有记录')).not.toBeInTheDocument();
   });
   it('does not label a new unsent draft as saved after an earlier committed command', async () => {
-    const client = fakeClient(); render(<BetaApp client={client} />);
+    const client = fakeClient(); render(<BetaApp intentJournal={memoryIntentJournal()} client={client} />);
     const input = await screen.findByRole('textbox', { name: '记录当下' });
     await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
     fireEvent.change(input, { target: { value: 'saved' } }); fireEvent.click(screen.getByRole('button', { name: '发送' }));

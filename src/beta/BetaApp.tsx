@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type MutableRefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { Download, FileText, RefreshCw, X } from 'lucide-react';
 import { PageShell } from '@/ui/app/components/PageShell';
@@ -7,20 +7,24 @@ import { NowInputRowView, resizeNowInputTextarea } from '@/ui/app/components/Now
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { EventDateDisplayMode } from '@/lib/eventlog/format-event-timestamp';
-import { nativeBetaClient, webBetaClient, type BetaClient, type BetaProfile, type BetaStatus, type BetaPage } from './client';
+import { nativeBetaClient, webBetaClient, type BetaClient, type BetaProfile, type BetaStatus, type BetaQuery } from './client';
 import { BetaDraftController, errorMessage } from './drafts';
 import { betaUuid } from './initialization';
 import { useBetaNow } from './date-clock';
 import type { FileSourceStore } from './file-source-store';
 import { collectOriginalDownload, MAX_BASIC_DOWNLOAD_BYTES } from './original-download';
 import type { BetaOriginal } from './original-types';
+import type { LocalIntentJournal } from './local-intent-journal';
+import type { BetaTimelinePage,BetaTimeblockNode } from './timeblocks-types';
+import { BetaTimeblockController } from './timeblocks-controller';
+import { BetaFocusTimer } from './BetaFocusTimer';
 
 const SESSION_KEY = 'exomind:beta:connection';
 const DATE_KEY = 'exomind:beta:date-display';
 const selectClass = 'h-9 max-w-full rounded-md border border-input bg-page px-2 text-sm dark:bg-page-dark';
 
 /** A separate entry: no legacy runtime/profile/event-store bootstrap. */
-export function BetaApp({ client: injected, sourceStore }: { client?: BetaClient; sourceStore?: FileSourceStore }) {
+export function BetaApp({ client: injected, sourceStore, intentJournal }: { client?: BetaClient; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal }) {
   const [native] = useState(() => isTauri());
   const [client, setClient] = useState<BetaClient | null>(() => injected ?? (native ? nativeBetaClient() : null));
   const [endpoint, setEndpoint] = useState(() => {
@@ -41,7 +45,7 @@ export function BetaApp({ client: injected, sourceStore }: { client?: BetaClient
       setError(''); setClient(next);
     } catch (failure) { setError(errorMessage(failure)); }
   }
-  if (client) return <ConnectedBeta key={native ? 'native' : undefined} client={client} sourceStore={sourceStore}
+  if (client) return <ConnectedBeta key={native ? 'native' : undefined} client={client} sourceStore={sourceStore} intentJournal={intentJournal}
     onDisconnect={!native && !injected ? () => { setClient(null); setToken(''); sessionStorage.removeItem(SESSION_KEY); } : undefined} />;
   return <PageShell title="外心" subtitle="Beta · 连接本机服务" contentClassName="overflow-y-auto">
     <form onSubmit={connect} className="mx-auto flex max-w-lg flex-col gap-4 px-5 py-8">
@@ -54,7 +58,7 @@ export function BetaApp({ client: injected, sourceStore }: { client?: BetaClient
   </PageShell>;
 }
 
-function ConnectedBeta({ client, onDisconnect, sourceStore }: { client: BetaClient; onDisconnect?: () => void; sourceStore?: FileSourceStore }) {
+function ConnectedBeta({ client, onDisconnect, sourceStore, intentJournal }: { client: BetaClient; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal }) {
   const [status, setStatus] = useState<BetaStatus | null>(null);
   const [profiles, setProfiles] = useState<BetaProfile[]>([]);
   const [profileId, setProfileId] = useState('');
@@ -63,11 +67,16 @@ function ConnectedBeta({ client, onDisconnect, sourceStore }: { client: BetaClie
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [reload, setReload] = useState(0);
-  const creation = useRef<{ name: string; id: string } | null>(null);
+  const [persistenceBusy,setPersistenceBusy]=useState(false);
+  const [switching,setSwitching]=useState(false);
+  const prepareSwitch=useRef<(()=>Promise<void>)|null>(null);
+  const switchFlight=useRef(false);
+  const creation = useRef<{ name: string; id: string; client: BetaClient } | null>(null);
   const generation = useRef(0);
   useEffect(() => {
     const current = ++generation.current;
     setStatus(null); setLoading(true); setError(''); setProfiles([]); setProfileId('');
+    switchFlight.current=false;setSwitching(false);setCreating(false);
     void (async () => {
       try {
         const hello = await client.status(); const list = await client.profiles();
@@ -78,54 +87,65 @@ function ConnectedBeta({ client, onDisconnect, sourceStore }: { client: BetaClie
     })();
     return () => { ++generation.current; };
   }, [client, reload]);
+  async function changeProfile(next:string){
+    if(switchFlight.current||next===profileId||!prepareSwitch.current)return;
+    const current=generation.current;const guard=prepareSwitch.current;
+    switchFlight.current=true;setSwitching(true);setError('');
+    try{await guard();if(current!==generation.current||guard!==prepareSwitch.current)return;setProfileId(next);}
+    catch(failure){if(current===generation.current&&guard===prepareSwitch.current)setError(`当前草稿尚未暂存，未切换档案；请保留窗口并重试：${errorMessage(failure)}`);}
+    finally{if(current===generation.current){switchFlight.current=false;setSwitching(false);}}
+  }
   async function create(event: FormEvent) {
-    event.preventDefault(); if (!name.trim() || creating) return;
+    event.preventDefault(); if (!name.trim() || creating || persistenceBusy) return;
     const current = generation.current;
-    try { if (creation.current?.name !== name.trim()) creation.current = { name: name.trim(), id: betaUuid() }; }
+    const guard=prepareSwitch.current;if(!guard)return;
+    try { if (creation.current?.name !== name.trim() || creation.current?.client!==client) creation.current = { name: name.trim(), id: betaUuid(), client }; }
     catch (failure) { setError(errorMessage(failure)); return; }
     const request = creation.current;
     if (!request) return;
     setCreating(true); setError('');
     try {
+      await guard();
+      if(current!==generation.current||guard!==prepareSwitch.current)return;
       const result = await client.provisionProfile(request.id, request.name);
-      if (current !== generation.current) return;
+      if (current !== generation.current || guard!==prepareSwitch.current) return;
+      await guard();
+      if(current!==generation.current||guard!==prepareSwitch.current)return;
       setProfiles(previous => [...previous.filter(item => item.profile_id !== result.profile_id), result]);
       setProfileId(result.profile_id); setName(''); creation.current = null;
     } catch (failure) { if (current === generation.current) setError(errorMessage(failure)); }
     finally { if (current === generation.current) setCreating(false); }
   }
   return <PageShell title="当下" subtitle="Beta · 本机记录" contentClassName="flex flex-col"
-    headerAction={onDisconnect && <Button variant="ghost" onClick={onDisconnect}>断开</Button>}
+    headerAction={onDisconnect && <Button variant="ghost" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}
     headerBottom={status && <div className="flex flex-wrap items-center gap-2">
       <label className="sr-only" htmlFor="beta-profile">当前档案</label>
-      <select id="beta-profile" className={selectClass} value={profileId} onChange={event => setProfileId(event.target.value)}>
+      <select id="beta-profile" className={selectClass} value={profileId} disabled={!prepareSwitch.current||switching||creating} onChange={event => {void changeProfile(event.target.value);}}>
         {!profiles.length && <option value="">请创建档案</option>}
         {profiles.map(item => <option key={item.profile_id} value={item.profile_id}>{item.display_name}</option>)}
       </select>
       <form onSubmit={create} className="flex min-w-0 flex-1 gap-2">
         <Input aria-label="新档案名称" className="min-w-0 max-w-48" placeholder="新档案名称" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={creating} />
-        <Button type="submit" variant="outline" disabled={creating || !name.trim()}>{creating ? '创建中…' : '创建档案'}</Button>
+        <Button type="submit" variant="outline" disabled={creating || persistenceBusy || !name.trim()}>{creating ? '创建中…' : '创建档案'}</Button>
       </form>
     </div>}>
     {loading && <p role="status" className="p-5 text-sm text-muted">正在连接…</p>}
     {error && <div role="alert" className="flex items-center gap-2 px-5 py-3 text-sm text-destructive">{error}
       {!status && <Button variant="outline" onClick={() => setReload(value => value + 1)}>重新连接</Button>}</div>}
-    {status && <DeviceWorkspace key={`${status.device_id}`} client={client} deviceId={status.device_id} profileId={profileId} sourceStore={sourceStore} />}
+    {status && <DeviceWorkspace key={`${status.device_id}`} client={client} deviceId={status.device_id} profileId={profileId} sourceStore={sourceStore} intentJournal={intentJournal} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} />}
   </PageShell>;
 }
 
-function DeviceWorkspace({ client, deviceId, profileId, sourceStore }: { client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore }) {
-  const [controller, setController] = useState<BetaDraftController | null>(null);
+function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJournal, onPersistenceBusy, prepareSwitch }: { client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:MutableRefObject<(()=>Promise<void>)|null> }) {
+  type Owners={capture:BetaDraftController;focus:BetaTimeblockController|null;profileId:string};
+  const [owners, setOwners] = useState<Owners | null>(null);
   const [error, setError] = useState('');
   const [lockAttempt, setLockAttempt] = useState(0);
   const lockRequest = useRef<Promise<void> | null>(null);
   useEffect(() => {
-    let owner: BetaDraftController | undefined; let cancelled = false; let release: (() => void) | undefined;
-    const acquire = () => {
-      if (cancelled) return;
-      try { owner = new BetaDraftController(client, deviceId, localStorage, undefined, undefined, sourceStore); setController(owner); }
-      catch { setError('当前环境无法访问草稿缓存，尚未启用发送'); }
-    };
+    let capture:BetaDraftController|undefined;let focus:BetaTimeblockController|undefined;
+    let cancelled=false;let release:(()=>void)|undefined;let switchGuard:(()=>Promise<void>)|undefined;const unsubscribers:Array<()=>void>=[];
+    onPersistenceBusy(true);setOwners(null);
     // Web Locks prevent two tabs overwriting this device's durable draft cache.
     const locks = navigator.locks;
     if (typeof locks?.request === 'function') {
@@ -138,29 +158,58 @@ function DeviceWorkspace({ client, deviceId, profileId, sourceStore }: { client:
         if (cancelled) return;
         await locks.request(`exomind-beta-drafts:${deviceId}`, { ifAvailable: true }, async lock => {
           if (cancelled) return;
-          if (!lock) { setError('另一窗口正在编辑此设备的草稿，请先关闭该窗口，再重试草稿锁'); return; }
-          acquire(); if (!cancelled) await new Promise<void>(resolve => { release = resolve; });
+          if (!lock) { setError('另一窗口正在编辑此设备的草稿，请先关闭该窗口，再重试草稿锁');onPersistenceBusy(false); return; }
+          try {
+            capture=await BetaDraftController.open(client,deviceId,{journal:intentJournal,sources:sourceStore});
+            if(cancelled)return;
+            if(profileId&&client.timeblocks)focus=await BetaTimeblockController.open(client,deviceId,profileId,{journal:intentJournal});
+            if(cancelled)return;
+            switchGuard=async()=>{
+              for(let attempt=0;attempt<8;attempt++){
+                if(cancelled)throw new Error('当前草稿窗口已关闭');
+                await Promise.all([capture!.flush(),focus?.flush()]);
+                if(cancelled)throw new Error('当前草稿窗口已关闭');
+                if(capture!.snapshot().persistenceState==='idle'&&(!focus||focus.snapshot().persistenceState==='idle'))return;
+              }
+              throw new Error('草稿仍在变化，请停止输入后重试');
+            };
+            prepareSwitch.current=switchGuard;
+            const update=()=>{if(!cancelled)onPersistenceBusy(capture!.snapshot().persistenceState!=='idle'||!!focus&&focus.snapshot().persistenceState!=='idle');};
+            unsubscribers.push(capture.subscribe(update));if(focus)unsubscribers.push(focus.subscribe(update));
+            setOwners({capture,focus:focus??null,profileId});setError('');update();
+            await new Promise<void>(resolve=>{release=resolve;});
+          } finally {
+            for(const unsubscribe of unsubscribers)unsubscribe();capture?.dispose();focus?.dispose();
+            // The Web Lock callback does not settle while an accepted local
+            // transaction is still draining, including StrictMode late opens.
+            await Promise.all([capture?.close(),focus?.close()]);
+          }
         });
       })();
       lockRequest.current = operation;
-      void operation.catch(failure => { if (!cancelled) setError(errorMessage(failure)); });
+      void operation.catch(failure => { if (!cancelled) {setError(errorMessage(failure));onPersistenceBusy(false);} });
     }
-    else setError('当前浏览器不支持安全的草稿窗口锁，请使用支持 Web Locks 的浏览器');
-    return () => { cancelled = true; owner?.dispose(); release?.(); setController(null); };
-  }, [client, deviceId, lockAttempt, sourceStore]);
+    else {setError('当前浏览器不支持安全的草稿窗口锁，请使用支持 Web Locks 的浏览器');onPersistenceBusy(false);}
+    return () => { cancelled = true;if(prepareSwitch.current===switchGuard)prepareSwitch.current=null;capture?.dispose();focus?.dispose();release?.();setOwners(null); };
+  }, [client, deviceId, profileId, lockAttempt, sourceStore, intentJournal, onPersistenceBusy, prepareSwitch]);
   if (error) return <div className="space-y-3 p-5">
     <p role="alert" className="text-sm text-destructive">{error}</p>
     {typeof navigator.locks?.request === 'function' && <Button variant="outline" onClick={() => {
-      controller?.dispose(); setController(null); setError(''); setLockAttempt(value => value + 1);
+      owners?.capture.dispose();owners?.focus?.dispose();setOwners(null);setError('');setLockAttempt(value=>value+1);
     }}>重试草稿锁</Button>}
   </div>;
-  if (!controller || !profileId) return null;
-  return <ProfileWorkspace key={profileId} client={client} controller={controller} profileId={profileId} />;
+  if(!owners||owners.profileId!==profileId)return <p role="status" className="p-5 text-xs text-muted">正在恢复本机草稿…</p>;
+  if(!profileId)return null;
+  return <ProfileWorkspace key={profileId} client={client} controller={owners.capture} focus={owners.focus} profileId={profileId} />;
 }
 
-function ProfileWorkspace({ client, controller, profileId }: { client: BetaClient; controller: BetaDraftController; profileId: string }) {
+async function readTimeline(client:BetaClient,profileId:string,query:BetaQuery):Promise<BetaTimelinePage>{
+  if(client.timelinePage)return client.timelinePage(profileId,query);
+  const page=await client.eventsPage(profileId,query);return{...page,items:page.items.map(record=>({kind:'capture' as const,record}))};
+}
+function ProfileWorkspace({ client, controller, focus, profileId }: { client: BetaClient; controller: BetaDraftController; focus:BetaTimeblockController|null; profileId: string }) {
   const drafts = useSyncExternalStore(controller.subscribe, controller.snapshot);
-  const [page, setPage] = useState<BetaPage | null>(null);
+  const [page, setPage] = useState<BetaTimelinePage | null>(null);
   const [search, setSearch] = useState(''); const [query, setQuery] = useState('');
   const [revision, setRevision] = useState(0); const [loading, setLoading] = useState(false);
   const [error, setError] = useState(''); const generation = useRef(0);
@@ -173,7 +222,7 @@ function ProfileWorkspace({ client, controller, profileId }: { client: BetaClien
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     const current = ++generation.current; setPage(null); setLoading(true); setError('');
-    void client.eventsPage(profileId, { limit: 100, ...(query ? { search: query } : {}) }).then(result => {
+    void readTimeline(client,profileId, { limit: 100, ...(query ? { search: query } : {}) }).then(result => {
       if (current === generation.current) { olderHeight.current = null; setPage(result); }
     }).catch(failure => { if (current === generation.current) setError(errorMessage(failure)); })
       .finally(() => { if (current === generation.current) setLoading(false); });
@@ -189,7 +238,7 @@ function ProfileWorkspace({ client, controller, profileId }: { client: BetaClien
     if (!page || page.next_before === null || loading) return;
     const current = generation.current; setLoading(true); setError('');
     try {
-      const result = await client.eventsPage(profileId, { before: page.next_before, through: page.highwater, limit: 100, ...(query ? { search: query } : {}) });
+      const result = await readTimeline(client,profileId, { before: page.next_before, through: page.highwater, limit: 100, ...(query ? { search: query } : {}) });
       if (current !== generation.current) return;
       olderHeight.current = scroll.current?.scrollHeight ?? null;
       setPage({ ...result, items: [...page.items, ...result.items] });
@@ -213,6 +262,8 @@ function ProfileWorkspace({ client, controller, profileId }: { client: BetaClien
   const busy = pending.some(item => item.state === 'pending' && item.draft_revision === draft?.revision);
   const preparing = draft?.files?.some(file => !file.original || file.state === 'preparing') ?? false;
   return <>
+    {focus&&<BetaFocusTimer controller={focus} client={client} profileId={profileId} onCommitted={()=>setRevision(value=>value+1)}/>}
+    {!client.timelinePage&&<p className="px-5 py-1 text-[11px] text-muted">此连接仅提供兼容记录历史，尚未提供完整时间线</p>}
     <div className="flex flex-wrap gap-2 border-b border-border-page px-5 py-2">
       <form className="flex min-w-0 flex-1 gap-2" onSubmit={event => { event.preventDefault(); setQuery(search); }}>
         <Input aria-label="搜索记录" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索文字" />
@@ -229,11 +280,14 @@ function ProfileWorkspace({ client, controller, profileId }: { client: BetaClien
       {page?.next_before !== null && page && <div className="mb-4 text-center"><Button variant="ghost" disabled={loading} onClick={() => void older()}>加载更早记录</Button></div>}
       {loading && <p role="status" className="text-center text-sm text-muted">正在读取…</p>}
       {page?.items.length === 0 && <p className="py-8 text-center text-sm text-muted">{query ? '没有匹配记录' : '还没有记录'}</p>}
-      <div className="space-y-4">{page && [...page.items].reverse().map(event => <article key={event.event_id} className={`flex flex-col ${event.author_kind === 'human' ? 'items-end' : 'items-start'}`}>
+      <div className="space-y-4">{page && [...page.items].reverse().map(item => item.kind==='timeblock'?<article key={item.record.event_id} data-timeline-kind="timeblock" className="flex flex-col items-start">
+        <div className="mb-1 flex items-center gap-2 text-xs text-muted"><span>{item.record.source.kind==='scheduler'?'计时服务':'我 · 时间块'}</span><EventTimestamp timestamp={item.record.occurred_at_ms} now={now} mode={mode}/></div>
+        <p className="max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-muted/15 px-4 py-3 text-sm leading-relaxed text-foreground">{timeblockSummary(item.record)}</p>
+      </article>:(()=>{const event=item.record;return <article key={event.event_id} data-timeline-kind="capture" className={`flex flex-col ${event.author_kind === 'human' ? 'items-end' : 'items-start'}`}>
         <div className="mb-1 flex items-center gap-2 text-xs text-muted"><span>{event.author_kind === 'human' ? '我' : 'Agent 记录'}</span><EventTimestamp timestamp={event.occurred_at_ms} now={now} mode={mode} /></div>
         <p className={`max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-sm leading-relaxed ${event.author_kind === 'human' ? 'bg-active text-foreground' : 'bg-muted/15 text-foreground'}`}>{event.text}</p>
         {!!event.originals?.length && <OriginalDownloads client={client} profileId={profileId} originals={event.originals} />}
-      </article>)}</div>
+      </article>;})())}</div>
     </div>
     <NowInputRowView
       value={draft?.text ?? ''}
@@ -271,14 +325,21 @@ function ProfileWorkspace({ client, controller, profileId }: { client: BetaClien
         </div>)}
       </div>}
       {drafts.persistenceError && <p role="alert" className="mb-2 text-xs text-destructive">{drafts.persistenceError}</p>}
+      {drafts.persistenceState==='failed'&&<Button variant="outline" size="sm" className="mb-2" onClick={()=>{void controller.flush().catch(failure=>setError(errorMessage(failure)));}}>重试记录草稿暂存</Button>}
       {pending.map(item => <div key={item.command.command_id} className="mb-2 flex items-center gap-2 text-xs text-secondary">
         <div className="min-w-0 flex-1"><p>{item.state === 'pending' ? item.capture_attempted === false ? '正在准备固定整组原件…' : '正在确认保存…' : item.state === 'failed' ? '原件或本机暂存未就绪，记录未提交' : `结果待确认${item.error_code ? `（${item.error_code}）` : ''}`}</p><p className="truncate">{item.command.text}</p>{!!item.command.originals?.length && <p className="truncate">{item.command.originals.map(file => file.file_name).join('、')}</p>}{item.message && <p>{item.message}</p>}</div>
         {item.state !== 'pending' && <Button variant="outline" size="sm" onClick={() => void submit(item.command.command_id)}>查证并重试</Button>}
       </div>)}
       </>}
-      afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{pending.length ? '待确认的提交会保留原文与原命令' : draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision) ? '本机已保存' : 'Ctrl / ⌘ + Enter 发送'}</p>}
+      afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':pending.length ? '待确认的提交会保留原文与原命令' : draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision) ? '本机已保存' : draft?.text.trim()||draft?.files?.length?'记录草稿已暂存 · 尚未提交':'Ctrl / ⌘ + Enter 发送'}</p>}
     />
   </>;
+}
+
+function timeblockSummary(node:BetaTimeblockNode):string{
+  if(node.payload.kind==='deadline_reached')return node.payload.end_mode==='hard'?'倒计时到点，行动结束待反馈':'倒计时到点，继续超时';
+  const action=node.payload.action;
+  switch(action.kind){case'start':return`开始时间块：${action.name}`;case'pause':return'暂停时间块';case'resume':return'继续时间块';case'rotate':return`切换时间块：${action.next.name}`;case'end_action':return'行动结束，待填写反馈';case'submit_feedback':return action.feedback.kind==='skipped'?'已明确跳过反馈':`反馈：${action.feedback.text}`;case'append_feedback':return`追加反馈：${action.text}`;}
 }
 
 function formatBytes(bytes: number): string {
