@@ -26,6 +26,20 @@ npx tsc --noEmit
 npx vitest run <相关测试>
 ```
 
+### Windows 有限命令的执行监督
+
+构建、测试等可能长时间运行的有限命令，使用 [supervised-command 合同](../../scripts/dev/supervised-command-contract.md) 的后台启动/短查询模式，明确总时限与无进展时限。任务输出直写自有日志，不能让子孙进程继承工具输出管道并靠 EOF 判定结束。
+
+```text
+bun scripts/dev/supervised-command.ts start --config <绝对配置路径>
+bun scripts/dev/supervised-command.ts status --dir <本次独立产物目录>
+bun scripts/dev/supervised-command.ts cancel --dir <同一产物目录>
+```
+
+启动回执不等于成功；以同一 runId 的终态、退出码及自有 Job 清理确认判断完成。工具观察超时后先查询同一 run，不自动重开；超时也不代表已完成的副作用回滚。无法核验进程归属时拒绝终止，禁止按镜像名/端口全局清理。启动器、独立看门狗及业务命令各有有限截止；宿主休眠或 UI 回传异常不能计作正常构建时间。
+
+内存密集步骤仍执行现有 Windows 资源门禁并串行；后台启动并不授权并行编译/测试。长驻开发服务应有明确、有限的验收会话及独立生命周期，不把它伪装成永不结束的构建。
+
 ### 联调服务启动（Web-first）
 
 ```bash
