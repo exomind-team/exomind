@@ -11,7 +11,7 @@ use std::{
 };
 use uuid::Uuid;
 
-pub(crate) const SCHEMA_VERSION: i64 = 3;
+pub(crate) const SCHEMA_VERSION: i64 = crate::CORE_SCHEMA_VERSION;
 pub(crate) const APPLICATION_ID: i64 = 0x45584f36;
 
 const ORIGINAL_SCHEMA: &str = "
@@ -73,6 +73,7 @@ pub(crate) fn validate_backup_directory(path: &Path) -> Result<(), CoreError> {
         let id = name
             .strip_prefix("schema-1-")
             .or_else(|| name.strip_prefix("schema-2-"))
+            .or_else(|| name.strip_prefix("schema-3-"))
             .and_then(|name| name.strip_suffix(".sqlite3"))
             .ok_or(CoreError::ForeignRoot)?;
         if Uuid::parse_str(id)
@@ -261,7 +262,7 @@ pub(crate) fn initialize(
     let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
     let application: i64 =
         transaction.pragma_query_value(None, "application_id", |row| row.get(0))?;
-    if ![0, 1, 2, SCHEMA_VERSION].contains(&version) {
+    if ![0, 1, 2, 3, SCHEMA_VERSION].contains(&version) {
         return Err(CoreError::UnsupportedSchema(version));
     }
     if application != 0 && application != APPLICATION_ID {
@@ -317,7 +318,7 @@ pub(crate) fn initialize(
             return Err(CoreError::RecoveryRequired);
         }
     }
-    if version == 1 || version == 2 {
+    if (1..SCHEMA_VERSION).contains(&version) {
         backup_schema(database_path, version)?;
     }
     if version < 2 {
@@ -326,8 +327,14 @@ pub(crate) fn initialize(
             &crate::MAX_ORIGINAL_CHUNK_BYTES.to_string(),
         ))?;
     }
-    if version<3 {transaction.execute_batch(crate::timeblocks::SCHEMA)?;transaction.pragma_update(None,"user_version",SCHEMA_VERSION)?;}
+    if version<3 {transaction.execute_batch(crate::timeblocks::SCHEMA)?;}
     else if transaction.prepare("SELECT e.kind,s.revision,n.request_digest FROM events e LEFT JOIN timeblock_state s ON s.profile_id=e.profile_id LEFT JOIN timeblock_nodes n ON n.event_id=e.event_id LIMIT 0").is_err(){return Err(CoreError::RecoveryRequired);}
+    if version < 4 {
+        crate::replication::migrate(&transaction)?;
+    } else {
+        crate::replication::validate_schema(&transaction)?;
+    }
+    transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     transaction.commit()?;
     Ok(())
 }

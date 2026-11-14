@@ -147,18 +147,29 @@ struct NodeFact<'a> {
     payload: &'a TimeblockPayload,
 }
 pub(super) fn node_digest(node: &TimeblockNodeRecord) -> Result<String, CoreError> {
-    hash(&NodeFact {
-        kind: "timeblock/1",
-        event_id: node.event_id,
-        profile_id: node.profile_id,
-        device_id: node.device_id,
-        source: &node.source,
-        parents: &node.parents,
-        occurred_at_ms: node.occurred_at_ms,
-        effective_at_ms: node.effective_at_ms,
-        clock: &node.clock,
-        payload: &node.payload,
-    })
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(node.canonical_fact_bytes()?)
+    ))
+}
+impl TimeblockNodeRecord {
+    pub fn canonical_fact_bytes(&self) -> Result<Vec<u8>, CoreError> {
+        Ok(serde_json::to_vec(&NodeFact {
+            kind: "timeblock/1",
+            event_id: self.event_id,
+            profile_id: self.profile_id,
+            device_id: self.device_id,
+            source: &self.source,
+            parents: &self.parents,
+            occurred_at_ms: self.occurred_at_ms,
+            effective_at_ms: self.effective_at_ms,
+            clock: &self.clock,
+            payload: &self.payload,
+        })?)
+    }
+    pub fn computed_digest(&self) -> Result<String, CoreError> {
+        node_digest(self)
+    }
 }
 fn receipt(
     transaction: &Transaction<'_>,
@@ -216,8 +227,17 @@ fn append(
     stamp: &ClockStamp,
 ) -> Result<(), CoreError> {
     node.digest = node_digest(node)?;
-    transaction.execute("INSERT INTO events(event_id,profile_id,digest,body,kind) VALUES(?1,?2,?3,?4,'timeblock/1')",params![node.event_id.to_string(),node.profile_id.to_string(),node.digest,serde_json::to_string(node)?])?;
+    let body = crate::fact_encoding::encode_fact(node)?;
+    transaction.execute("INSERT INTO events(event_id,profile_id,digest,body,kind) VALUES(?1,?2,?3,?4,'timeblock/1')",params![node.event_id.to_string(),node.profile_id.to_string(),node.digest,body])?;
     node.local_seq = transaction.last_insert_rowid() as u64;
+    crate::replication::record_local_fact(
+        transaction,
+        node.profile_id,
+        node.device_id,
+        node.event_id,
+        "timeblock/1",
+        &node.digest,
+    )?;
     transaction.execute(
         "INSERT INTO timeblock_nodes VALUES(?1,?2)",
         params![node.event_id.to_string(), input_hash],

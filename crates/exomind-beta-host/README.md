@@ -82,6 +82,8 @@ Owner 可为本机档案创建签名完整邀请，包含 issuer key/device、P�
 
 加入保留原有其他档案；P 的空白本机 profile 按固定 ID 幂等 provision。Core 与 auth 是两个数据库，pending 可以先持久化，provision 失败会显式返回并保留 pending，不能显示 ready。成员、邀请、claim、pending 的 JSON 和数量均有界；auth schema 2 缺表/缺 layout 或损坏记录明确要求恢复，不重新初始化。expiry 在最终 gate 内取可信 clock，持久 wall 高水位防止已观察过期的邀请因回拨复活。
 
-当前远端成员撤销拒绝 `device_id == local device`；离开本机档案还涉及 Scheduler 和 pending 资格，留给独立显式生命周期接口。单边撤销后若另一端仍有旧有效成员，重新邀请会明确冲突；后续需要 Owner 明确替代和代次协商，不能自动清旧 ledger 或换 P ID。
+远端成员撤销拒绝 `device_id == local device`；离开本机档案还涉及 Scheduler 和 pending 资格，留给独立显式生命周期接口。单边撤销后的重新配对需要双方 Owner 明确批准：签发方用 `approve_peer_invitation_replacement` 对旧 claim/代次做 CAS，接收方用 `prepare_peer_rejoin` 核对自己两条旧成员绑定。批准保留 P、原事实和历史 ledger，立即暂停旧网络资格；普通后台 prepare 或另一份旧邀请不能重新授权。重试原批准不会重复推进代次，改 body 明确冲突，两端使用各自实际代次而不强迫计数相同；key/pin 变化仍需独立身份恢复。
+
+原签名 offer/receipt/ready 的标准字节保持不变。合法旧版本证据可读，当前版本的新建或恢复加入另查 protocol/schema，不兼容返回 `PeerProtocolMismatch`，不能把版本差异当损坏删除或改写记录。peer scope 绑定 Host/runtime、实际 TLS 连接以及本机/远端成员代次；每个最终 Core 操作都在 Host gate 内重验当前能力。原件读取另外要求本档案已提交事实引用，不能用 UUID/hash 读取私有上传或其他档案。
 
 本单元提供 Host ledger 和单邀请 TLS exchange，尚无 Native 首配 UI、自动 peer listener/discovery/routes/reconnect 或业务事实/原件 replication。generation 复验现覆盖加入各步骤及其恢复；尚未有业务导入提交入口，不能据此声称撤销在途事实提交已经实测。完整 B2.1 和跨设备同步仍待后续实现与验收。

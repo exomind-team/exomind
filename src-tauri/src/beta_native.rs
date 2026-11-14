@@ -1,9 +1,9 @@
 //! Isolated Beta embedding. No legacy runtime/config/store is opened here.
 
-#[path = "beta_overlay.rs"]
-mod overlay;
 #[path = "beta_native_sources.rs"]
 mod local_sources;
+#[path = "beta_overlay.rs"]
+mod overlay;
 
 use exomind_beta_host::{
     BetaHost, DeadlineEnvelope, HostError, HostStatus, RunningServer, Session,
@@ -19,8 +19,8 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
     },
 };
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
@@ -66,17 +66,20 @@ impl From<HostError> for Failure {
                 "local_source_hash_mismatch",
                 "本机文件副本与原文件校验不一致，暂存字节已保留",
             ),
-            HostError::LocalSourceBusy => (
-                "local_source_busy",
-                "本机文件校验正在处理中，请稍后重试",
-            ),
+            HostError::LocalSourceBusy => {
+                ("local_source_busy", "本机文件校验正在处理中，请稍后重试")
+            }
+            HostError::Core(CoreError::FactTooLarge { .. }) => {
+                ("invalid_request", "本次记录过大，请分条保存")
+            }
             HostError::InvalidRequest
             | HostError::Core(
                 CoreError::InvalidCapture(_)
                 | CoreError::InvalidQuery(_)
                 | CoreError::InvalidTimeblock(_)
                 | CoreError::InvalidOriginal(_)
-                | CoreError::InvalidOriginalOffset,
+                | CoreError::InvalidOriginalOffset
+                | CoreError::InvalidReplication(_),
             ) => ("invalid_request", "请求内容无效"),
             HostError::NotFound
             | HostError::Core(
@@ -873,6 +876,16 @@ mod tests {
                 "invalid_request",
             ),
             (
+                CoreError::InvalidReplication("private input"),
+                "invalid_request",
+            ),
+            (
+                CoreError::FactTooLarge {
+                    max_bytes: exomind_core::MAX_FACT_BYTES,
+                },
+                "invalid_request",
+            ),
+            (
                 CoreError::InvalidTimeblockHistory,
                 "timeblock_history_incomplete",
             ),
@@ -955,10 +968,12 @@ mod tests {
             Some("{\"draft\":\"retained local text\"}")
         );
         let human = reopened.native_human_session(&owner, profile).unwrap();
-        assert!(reopened
-            .events_page(&human, profile, &EventQuery::default())
-            .unwrap()
-            .items
-            .is_empty());
+        assert!(
+            reopened
+                .events_page(&human, profile, &EventQuery::default())
+                .unwrap()
+                .items
+                .is_empty()
+        );
     }
 }

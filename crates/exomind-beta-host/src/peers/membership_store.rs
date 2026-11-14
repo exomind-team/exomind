@@ -143,6 +143,21 @@ pub(super) fn invitation(
         id,
     )
 }
+pub(super) fn replacement_invitation(
+    connection: &Connection,
+    claim_id: Uuid,
+) -> Result<Option<StoredInvitation>, HostError> {
+    let mut statement=connection.prepare("SELECT CASE WHEN length(body)<=16384 THEN body END FROM peer_invitations WHERE json_extract(body,'$.replacement.request.claim_id')=?1 LIMIT 2").map_err(corrupt)?;
+    let mut rows = statement.query([claim_id.to_string()]).map_err(corrupt)?;
+    let found = match rows.next().map_err(corrupt)? {
+        Some(row) => Some(parse(row.get(0).map_err(corrupt)?)?),
+        None => None,
+    };
+    if rows.next().map_err(corrupt)?.is_some() {
+        return Err(HostError::PeerMembershipRecoveryRequired);
+    }
+    Ok(found)
+}
 pub(super) fn claim(connection: &Connection, id: Uuid) -> Result<Option<StoredClaim>, HostError> {
     json(
         connection,
@@ -196,6 +211,25 @@ pub(super) fn validate_member(member: &PeerMember) -> Result<(), HostError> {
         return Err(HostError::PeerMembershipRecoveryRequired);
     }
     Ok(())
+}
+/// A missing current row referenced by immutable join history is damage, not
+/// a fresh member whose counter may restart at one and revive an old scope.
+pub(super) fn member_has_history(
+    connection: &Connection,
+    profile: exomind_core::ProfileId,
+    device: exomind_core::DeviceId,
+) -> Result<bool, HostError> {
+    connection.query_row(
+        "SELECT EXISTS(
+          SELECT 1 FROM peer_claims
+           WHERE json_extract(body,'$.receipt.evidence.profile_id')=?1
+             AND (json_extract(body,'$.receipt.evidence.joiner_device_id')=?2 OR json_extract(body,'$.receipt.evidence.issuer.device_id')=?2)
+          UNION ALL
+          SELECT 1 FROM peer_pending
+           WHERE json_extract(body,'$.receipt.evidence.profile_id')=?1
+             AND (json_extract(body,'$.receipt.evidence.joiner_device_id')=?2 OR json_extract(body,'$.receipt.evidence.issuer.device_id')=?2)
+        )",params![profile.to_string(),device.to_string()],|r|r.get(0),
+    ).map_err(corrupt)
 }
 pub(super) fn members(
     connection: &Connection,

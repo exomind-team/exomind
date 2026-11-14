@@ -194,6 +194,14 @@ pub(crate) fn validate_references(
                 "duplicate original ID in capture",
             ));
         }
+        let (manifest_profile, manifest) =
+            crate::manifests::manifest(transaction, original.original_id)?;
+        if manifest_profile != context.profile_id {
+            return Err(CoreError::ScopeMismatch);
+        }
+        if manifest != *original {
+            return Err(CoreError::OriginalConflict);
+        }
         let stage = stage_for_original(transaction, original.original_id)?;
         if stage.status.profile_id != context.profile_id {
             return Err(CoreError::ScopeMismatch);
@@ -342,6 +350,7 @@ impl Core {
         if exists {
             return Err(CoreError::OriginalConflict);
         }
+        crate::manifests::ensure_manifest(&transaction, input.profile_id, &original)?;
         transaction.execute(
             "INSERT INTO original_stages VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,0,1,'uploading')",
             params![
@@ -559,12 +568,20 @@ impl Core {
     ) -> Result<OriginalChunk, CoreError> {
         self.check_scope(context, profile)?;
         let connection = self.connection()?;
-        let stage = stage_for_original(&connection, id)?;
-        if stage.status.profile_id != profile {
+        let (manifest_profile, original) = crate::manifests::manifest(&connection, id)?;
+        if manifest_profile != profile {
             return Err(CoreError::ScopeMismatch);
         }
         if !referenced(&connection, id, profile)? {
             return Err(CoreError::OriginalAccessDenied);
+        }
+        let stage = match stage_for_original(&connection, id) {
+            Ok(stage) => stage,
+            Err(CoreError::UnknownOriginal) => return Err(CoreError::OriginalNotReady),
+            Err(error) => return Err(error),
+        };
+        if stage.status.profile_id != profile || stage.status.original != original {
+            return Err(CoreError::OriginalConflict);
         }
         if stage.status.state != StageState::Verified {
             return Err(CoreError::OriginalNotReady);
@@ -575,6 +592,39 @@ impl Core {
             offset,
             bytes,
         })
+    }
+
+    /// Metadata known through a profile fact is distinct from local bytes.
+    /// An unreferenced private draft remains private even if its hash is known.
+    pub fn original_availability(
+        &self,
+        context: &WriterContext,
+        profile: ProfileId,
+        id: OriginalId,
+    ) -> Result<crate::OriginalAvailability, CoreError> {
+        self.check_scope(context, profile)?;
+        let connection = self.connection()?;
+        let (stored_profile, original) = crate::manifests::manifest(&connection, id)?;
+        if stored_profile != profile {
+            return Err(CoreError::ScopeMismatch);
+        }
+        if !referenced(&connection, id, profile)? {
+            return Err(CoreError::OriginalAccessDenied);
+        }
+        match stage_for_original(&connection, id) {
+            Ok(stage) => {
+                if stage.status.profile_id != profile || stage.status.original != original {
+                    return Err(CoreError::OriginalConflict);
+                }
+                Ok(crate::OriginalAvailability::Local {
+                    stage: stage.status,
+                })
+            }
+            Err(CoreError::UnknownOriginal) => {
+                Ok(crate::OriginalAvailability::Missing { original })
+            }
+            Err(error) => Err(error),
+        }
     }
 }
 

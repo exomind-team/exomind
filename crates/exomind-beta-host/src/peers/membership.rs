@@ -1,5 +1,7 @@
 //! Profile membership is a Host authority, separate from TLS possession and
 //! local Owner/Grant sessions. All writes requalify under the shared gate.
+#[path = "membership_rejoin.rs"]
+pub(super) mod rejoin;
 #[path = "membership_types.rs"]
 mod types;
 use super::{Identity, PeerChannel, PeerPin, identity, membership_store as store};
@@ -41,6 +43,8 @@ pub(super) struct StoredInvitation {
     pub secret_hash: String,
     pub revoked: bool,
     pub claim_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement: Option<rejoin::IssuerReplacement>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -58,8 +62,14 @@ pub(super) struct StoredPending {
     pub receipt: Option<PeerClaimReceipt>,
     pub ready: Option<PeerReadyReceipt>,
     pub issuer_generation: Option<u64>,
+    // Absent in original protocol-1 ledgers, where this equalled the receipt
+    // generation. New admissions persist their independent local counter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_generation: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement: Option<rejoin::JoinerReplacement>,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct StoredMember {
     pub record: PeerMember,
@@ -107,11 +117,23 @@ fn verify<T: Serialize>(
         .map_err(|_| HostError::PeerMembershipDenied)
 }
 fn validate_offer(signed: &SignedOffer) -> Result<(), HostError> {
-    let offer = &signed.offer;
+    validate_stored_offer(signed)?;
+    require_compatible_offer(&signed.offer)
+}
+fn require_compatible_offer(offer: &PeerInvitationOffer) -> Result<(), HostError> {
     if offer.protocol != PEER_PROTOCOL || offer.schema != PEER_CORE_SCHEMA {
         return Err(HostError::PeerProtocolMismatch);
     }
+    Ok(())
+}
+// A valid historical signature does not become corruption when the running
+// Core wire schema advances. Reading evidence and admitting a join differ.
+fn validate_stored_offer(signed: &SignedOffer) -> Result<(), HostError> {
+    let offer = &signed.offer;
     if offer.invitation_id.is_nil()
+        || offer.protocol.is_empty()
+        || offer.protocol.len() > 64
+        || offer.schema == 0
         || offer.profile_name.trim().is_empty()
         || offer.profile_name.len() > 256
         || offer.expires_at_unix_ms <= 0
@@ -153,13 +175,14 @@ fn binding(claim: &PeerJoinClaim) -> Result<ClaimBinding, HostError> {
     })
 }
 fn validate_invitation(invitation: &StoredInvitation, id: Uuid) -> Result<(), HostError> {
+    rejoin::validate_issuer(invitation)?;
     if invitation.signed.offer.invitation_id != id
         || PeerPin::from_sha256(&invitation.secret_hash).is_err()
         || PeerPin::from_sha256(&invitation.request_hash).is_err()
     {
         return Err(HostError::PeerMembershipRecoveryRequired);
     }
-    validate_offer(&invitation.signed).map_err(|_| HostError::PeerMembershipRecoveryRequired)
+    validate_stored_offer(&invitation.signed).map_err(|_| HostError::PeerMembershipRecoveryRequired)
 }
 fn validate_claim(claim: &StoredClaim, id: Uuid) -> Result<(), HostError> {
     if claim.remote_ready_observed && claim.ready.is_none() {
@@ -196,7 +219,9 @@ fn validate_claim(claim: &StoredClaim, id: Uuid) -> Result<(), HostError> {
     Ok(())
 }
 fn validate_pending(pending: &StoredPending, id: Uuid) -> Result<(), HostError> {
-    validate_offer(&pending.signed).map_err(|_| HostError::PeerMembershipRecoveryRequired)?;
+    rejoin::validate_joiner(pending)?;
+    validate_stored_offer(&pending.signed)
+        .map_err(|_| HostError::PeerMembershipRecoveryRequired)?;
     if pending.binding.claim_id != id
         || pending.binding.invitation_id != pending.signed.offer.invitation_id
         || pending.binding.invitation_digest != digest(&pending.signed)?
@@ -205,6 +230,10 @@ fn validate_pending(pending: &StoredPending, id: Uuid) -> Result<(), HostError> 
         return Err(HostError::PeerMembershipRecoveryRequired);
     }
     if pending.receipt.is_some() != pending.issuer_generation.is_some()
+        || (pending.receipt.is_none() && pending.local_generation.is_some())
+        || pending
+            .local_generation
+            .is_some_and(|g| g == 0 || g > i64::MAX as u64)
         || pending
             .issuer_generation
             .is_some_and(|g| g == 0 || g > i64::MAX as u64)
@@ -306,6 +335,15 @@ fn live_invitation_status(
             }
             Err(error) => return Err(error),
         }
+    } else if let Some(replacement) = &invitation.replacement {
+        match rejoin::require_reserved(connection, &replacement.reserved) {
+            Ok(_) => {}
+            Err(HostError::PeerMembershipDenied) => {
+                result.state = PeerInvitationState::Revoked;
+                result.remote_ready_observed = false;
+            }
+            Err(error) => return Err(error),
+        }
     }
     Ok(result)
 }
@@ -351,7 +389,23 @@ fn pending_members(
         .receipt
         .as_ref()
         .ok_or(HostError::PeerMembershipRecoveryRequired)?;
-    let local = current_member(connection, &receipt.evidence)?;
+    let local = store::member(
+        connection,
+        receipt.evidence.profile_id,
+        receipt.evidence.joiner_device_id,
+    )?
+    .ok_or(HostError::PeerMembershipRecoveryRequired)?;
+    let local_generation = pending
+        .local_generation
+        .unwrap_or(receipt.evidence.generation);
+    if local.record.revoked
+        || local.record.generation != local_generation
+        || local.record.pin != pending.binding.joiner_pin
+        || local.record.capabilities != receipt.evidence.capabilities
+        || local.claim_id != Some(pending.binding.claim_id)
+    {
+        return Err(HostError::PeerMembershipDenied);
+    }
     let issuer = store::member(
         connection,
         pending.signed.offer.profile_id,
@@ -389,6 +443,9 @@ fn local_member(
             return Err(HostError::PeerMembershipDenied);
         }
         return Ok(());
+    }
+    if store::member_has_history(connection, profile, identity.info.device_id)? {
+        return Err(HostError::PeerMembershipRecoveryRequired);
     }
     store::save_member(
         connection,
@@ -440,17 +497,13 @@ fn new_member(
             }
             return Ok(member);
         }
-        Some(member) => {
-            if !member.record.revoked || member.record.pin != pin {
-                return Err(HostError::PeerMembershipConflict);
+        Some(_) => return Err(HostError::PeerMembershipConflict),
+        None => {
+            if store::member_has_history(connection, profile, device)? {
+                return Err(HostError::PeerMembershipRecoveryRequired);
             }
-            member
-                .record
-                .generation
-                .checked_add(1)
-                .ok_or(HostError::PeerMembershipConflict)?
+            1
         }
-        None => 1,
     };
     let generation = generation.unwrap_or(next);
     if generation < next || generation > i64::MAX as u64 {
@@ -535,6 +588,7 @@ impl BetaHost {
             secret_hash: hash_secret(&secret)?,
             revoked: false,
             claim_id: None,
+            replacement: None,
         };
         store::save_invitation(&tx, &invitation)?;
         tx.commit().map_err(store::unavailable)?;
@@ -605,8 +659,16 @@ impl BetaHost {
             }
             if pending.receipt.is_some() {
                 pending_members(&tx, &pending)?;
+            } else if pending.replacement.is_some() {
+                rejoin::joiner_reservations(&tx, &pending)?;
             }
         } else {
+            if store::member(&tx, signed.offer.profile_id, self.device_id)?.is_some()
+                || store::member(&tx, signed.offer.profile_id, signed.offer.issuer.device_id)?
+                    .is_some()
+            {
+                return Err(HostError::PeerMembershipConflict);
+            }
             if now >= signed.offer.expires_at_unix_ms {
                 tx.commit().map_err(store::unavailable)?;
                 return Err(HostError::PeerInvitationExpired);
@@ -620,6 +682,8 @@ impl BetaHost {
                     receipt: None,
                     ready: None,
                     issuer_generation: None,
+                    local_generation: None,
+                    replacement: None,
                 },
             )?;
         }
@@ -657,6 +721,7 @@ impl BetaHost {
             let invitation = store::invitation(&tx, binding.invitation_id)?
                 .ok_or(HostError::PeerMembershipRecoveryRequired)?;
             validate_invitation(&invitation, binding.invitation_id)?;
+            require_compatible_offer(&invitation.signed.offer)?;
             if invitation.revoked && existing.ready.is_none() {
                 return Err(HostError::PeerInvitationRevoked);
             }
@@ -669,6 +734,7 @@ impl BetaHost {
         let mut invitation =
             store::invitation(&tx, binding.invitation_id)?.ok_or(HostError::NotFound)?;
         validate_invitation(&invitation, binding.invitation_id)?;
+        require_compatible_offer(&invitation.signed.offer)?;
         if invitation.revoked {
             return Err(HostError::PeerInvitationRevoked);
         }
@@ -688,15 +754,19 @@ impl BetaHost {
         let offer = &invitation.signed.offer;
         require_local_member(&tx, offer.profile_id, &identity)?;
         store::reserve(&tx, "peer_claims", store::MAX_JOINS)?;
-        let member = new_member(
-            &tx,
-            offer.profile_id,
-            binding.joiner_device_id,
-            &binding.joiner_pin,
-            offer.capabilities,
-            binding.claim_id,
-            None,
-        )?;
+        let member = if invitation.replacement.is_some() {
+            rejoin::issuer_reservation(&tx, &invitation, &binding)?
+        } else {
+            new_member(
+                &tx,
+                offer.profile_id,
+                binding.joiner_device_id,
+                &binding.joiner_pin,
+                offer.capabilities,
+                binding.claim_id,
+                None,
+            )?
+        };
         let evidence = PeerMembershipEvidence {
             claim_id: binding.claim_id,
             invitation_id: binding.invitation_id,
@@ -741,6 +811,7 @@ impl BetaHost {
         let mut pending =
             store::pending(&tx, receipt.evidence.claim_id)?.ok_or(HostError::NotFound)?;
         validate_pending(&pending, receipt.evidence.claim_id)?;
+        require_compatible_offer(&pending.signed.offer)?;
         if pending.signed.offer.issuer.fingerprint_sha256 != pin
             || pending.binding.joiner_device_id != self.device_id
         {
@@ -753,27 +824,34 @@ impl BetaHost {
             }
             pending_members(&tx, &pending)?;
         } else {
-            let local = new_member(
-                &tx,
-                receipt.evidence.profile_id,
-                self.device_id,
-                &pending.binding.joiner_pin,
-                receipt.evidence.capabilities,
-                pending.binding.claim_id,
-                Some(receipt.evidence.generation),
-            )?;
-            let issuer = new_member(
-                &tx,
-                receipt.evidence.profile_id,
-                pending.signed.offer.issuer.device_id,
-                &pin,
-                PeerCapabilities::FULL,
-                pending.binding.claim_id,
-                None,
-            )?;
+            let (local, issuer) = if pending.replacement.is_some() {
+                rejoin::joiner_reservations(&tx, &pending)?
+            } else {
+                (
+                    new_member(
+                        &tx,
+                        receipt.evidence.profile_id,
+                        self.device_id,
+                        &pending.binding.joiner_pin,
+                        receipt.evidence.capabilities,
+                        pending.binding.claim_id,
+                        None,
+                    )?,
+                    new_member(
+                        &tx,
+                        receipt.evidence.profile_id,
+                        pending.signed.offer.issuer.device_id,
+                        &pin,
+                        PeerCapabilities::FULL,
+                        pending.binding.claim_id,
+                        None,
+                    )?,
+                )
+            };
             store::save_member(&tx, &local)?;
             store::save_member(&tx, &issuer)?;
             pending.issuer_generation = Some(issuer.record.generation);
+            pending.local_generation = Some(local.record.generation);
             pending.receipt = Some(receipt.clone());
             store::save_pending(&tx, &pending)?;
         }
@@ -801,6 +879,10 @@ impl BetaHost {
         let tx = store::transaction(&mut r.persistence.auth)?;
         let mut claim = store::claim(&tx, confirmation.claim_id)?.ok_or(HostError::NotFound)?;
         validate_claim(&claim, confirmation.claim_id)?;
+        let invitation = store::invitation(&tx, claim.binding.invitation_id)?
+            .ok_or(HostError::PeerMembershipRecoveryRequired)?;
+        validate_invitation(&invitation, claim.binding.invitation_id)?;
+        require_compatible_offer(&invitation.signed.offer)?;
         if claim.binding.joiner_pin != pin {
             return Err(HostError::PeerMembershipDenied);
         }
@@ -814,9 +896,6 @@ impl BetaHost {
             tx.commit().map_err(store::unavailable)?;
             return Ok(ready);
         }
-        let invitation = store::invitation(&tx, claim.binding.invitation_id)?
-            .ok_or(HostError::PeerMembershipRecoveryRequired)?;
-        validate_invitation(&invitation, claim.binding.invitation_id)?;
         if invitation.revoked {
             return Err(HostError::PeerInvitationRevoked);
         }
@@ -844,6 +923,7 @@ impl BetaHost {
         let id = ready.claim_receipt.evidence.claim_id;
         let mut pending = store::pending(&tx, id)?.ok_or(HostError::NotFound)?;
         validate_pending(&pending, id)?;
+        require_compatible_offer(&pending.signed.offer)?;
         if pending.signed.offer.issuer.fingerprint_sha256 != pin
             || pending.binding.joiner_device_id != self.device_id
         {
@@ -896,6 +976,10 @@ impl BetaHost {
         let tx = store::transaction(&mut r.persistence.auth)?;
         let mut claim = store::claim(&tx, ack.claim_id)?.ok_or(HostError::NotFound)?;
         validate_claim(&claim, ack.claim_id)?;
+        let invitation = store::invitation(&tx, claim.binding.invitation_id)?
+            .ok_or(HostError::PeerMembershipRecoveryRequired)?;
+        validate_invitation(&invitation, claim.binding.invitation_id)?;
+        require_compatible_offer(&invitation.signed.offer)?;
         if claim.binding.joiner_pin != pin {
             return Err(HostError::PeerMembershipDenied);
         }
@@ -932,6 +1016,12 @@ impl BetaHost {
                             PeerJoinState::Accepted
                         }
                     }
+                    Err(HostError::PeerMembershipDenied) => PeerJoinState::Revoked,
+                    Err(error) => return Err(error),
+                }
+            } else if pending.replacement.is_some() {
+                match rejoin::joiner_reservations(&r.persistence.auth, &pending) {
+                    Ok(_) => PeerJoinState::Pending,
                     Err(HostError::PeerMembershipDenied) => PeerJoinState::Revoked,
                     Err(error) => return Err(error),
                 }

@@ -1,6 +1,7 @@
 //! Device-key transport and durable profile membership. A verified key alone is not a profile
 //! member, local owner, human writer or grant.
 pub(crate) mod identity;
+mod authorization;
 mod membership;
 pub(crate) mod membership_store;
 pub use membership::*;

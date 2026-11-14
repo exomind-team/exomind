@@ -13,6 +13,7 @@ mod originals;
 mod originals_http;
 mod peers;
 pub use peers::{
+    ApprovePeerInvitationReplacement, PeerRejoinExpectation,
     CreatePeerInvitation, DeviceIdentityInfo, IssuedPeerInvitation, PEER_CORE_SCHEMA,
     PEER_PROTOCOL, PeerCancellation, PeerCapabilities, PeerChannel, PeerClaimReceipt,
     PeerInvitation, PeerInvitationOffer, PeerInvitationState, PeerInvitationStatus, PeerJoinClaim,

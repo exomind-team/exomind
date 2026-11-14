@@ -7,7 +7,7 @@ use uuid::Uuid;
 pub const PEER_PROTOCOL: &str = "exomind-peer/1";
 // One explicit compatibility seam, updated with the Core wire schema change.
 // This is not a request to reinterpret older/newer facts in the receiver.
-pub const PEER_CORE_SCHEMA: u32 = 3;
+pub const PEER_CORE_SCHEMA: u32 = exomind_core::CORE_SCHEMA_VERSION as u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +32,28 @@ pub struct CreatePeerInvitation {
     pub capabilities: PeerCapabilities,
     pub candidates: Vec<SocketAddr>,
     pub ttl_seconds: u32,
+}
+
+/// Explicit local approval to replace one prior issuer-side member binding.
+/// An invitation alone never authorizes replacing an existing member.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApprovePeerInvitationReplacement {
+    pub invitation_id: Uuid,
+    pub claim_id: Uuid,
+    pub device_id: DeviceId,
+    pub previous_claim_id: Uuid,
+    pub expected_generation: u64,
+}
+
+/// Both counters are local to the joining Host; neither is the issuer's
+/// counter found in a signed ClaimReceipt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PeerRejoinExpectation {
+    pub previous_claim_id: Uuid,
+    pub expected_local_generation: u64,
+    pub expected_issuer_generation: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -296,6 +296,7 @@ enum Request {
     Read(oneshot::Sender<Result<Vec<u8>, HostError>>),
 }
 pub struct PeerChannel {
+    id: uuid::Uuid,
     host: Arc<BetaHost>,
     owner: Session,
     peer: VerifiedTransportPeer,
@@ -307,6 +308,9 @@ pub struct PeerChannel {
     options: PeerTransportOptions,
 }
 impl PeerChannel {
+    pub(super) fn binding_id(&self) -> uuid::Uuid {
+        self.id
+    }
     /// A key-possession proof bound to this Host and a still-live transport.
     /// Callers holding the Host gate can use this without acquiring it again.
     /// This grants no profile capability; membership must be rechecked in the
@@ -477,6 +481,7 @@ fn channel(
         finished.cancel();
     });
     Ok(PeerChannel {
+        id: uuid::Uuid::new_v4(),
         host,
         owner,
         peer,

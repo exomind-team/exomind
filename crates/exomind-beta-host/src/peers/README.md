@@ -51,7 +51,8 @@ Tests use two real local TLS endpoints, including mismatched server pins,
 forged client key claims, valid clients without ALPN, cancellation, timeouts,
 connection budgets, retained channels and identity corruption/replacement.
 Native pairing UI, listener lifecycle, Windows-to-Android TLS, LAN/EasyTier
-recovery and business replication are separate acceptance gates. Explicit
-re-pairing after one-sided revocation also remains unfinished; rejected old
-evidence never causes implicit ID replacement or ledger cleanup. See the Host
-README for management and storage boundaries.
+recovery and business replication are separate acceptance gates. Re-pairing
+after one-sided revocation requires explicit Owner replacement approvals on
+both Hosts, preserving the profile and old claims. Each Host advances its own
+actual generation; a background retry cannot replace a healthy old member.
+See the Host README for management and storage boundaries.

@@ -7,6 +7,8 @@ use std::sync::{
     atomic::{AtomicI64, Ordering},
 };
 use tempfile::{TempDir, tempdir};
+#[path = "membership_rejoin_tests.rs"]
+mod rejoin;
 
 fn host() -> (TempDir, Arc<BetaHost>, Session) {
     let root = tempdir().unwrap();

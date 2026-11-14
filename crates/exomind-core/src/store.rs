@@ -1,9 +1,9 @@
+use crate::capture_fact::CaptureFact;
 use crate::{
     AgentId, AuthorKind, CaptureCommand, CommandId, CoreError, DeviceId, Durability, EventPage,
     EventQuery, EventRecord, MAX_EVENT_PAGE_SIZE, ProfileId, ProfileInfo, Receipt, WriterContext,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use crate::capture_fact::CaptureFact;
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
@@ -162,6 +162,11 @@ impl Core {
         transaction.execute(
             "INSERT INTO profiles(id, display_name) VALUES (?1,?2)",
             params![profile_id.to_string(), name],
+        )?;
+        crate::replication::provision_local_origin(&transaction, profile_id, self.device_id)?;
+        transaction.execute(
+            "INSERT INTO replication_projection_status VALUES(?1,'complete',0)",
+            [profile_id.to_string()],
         )?;
         transaction.commit()?;
         Ok(ProfileInfo {
@@ -326,7 +331,7 @@ impl Core {
                     input.event_id.to_string(),
                     input.profile_id.to_string(),
                     digest,
-                    serde_json::to_string(&event)?
+                    crate::fact_encoding::encode_fact(&event)?
                 ],
             )?;
             let event_sequence = transaction.last_insert_rowid();
@@ -340,6 +345,18 @@ impl Core {
                     ],
                 )?;
             }
+            crate::replication::record_local_fact(
+                &transaction,
+                input.profile_id,
+                context.device_id,
+                input.event_id,
+                if input.originals.is_empty() {
+                    "capture/1"
+                } else {
+                    "capture/2"
+                },
+                &digest,
+            )?;
             event_sequence
         };
         let receipt = Receipt {

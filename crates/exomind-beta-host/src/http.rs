@@ -86,13 +86,14 @@ impl IntoResponse for HostError {
                 | CoreError::InvalidQuery(_)
                 | CoreError::InvalidOriginal(_)
                 | CoreError::InvalidOriginalOffset
+                | CoreError::InvalidReplication(_)
                 | CoreError::InvalidTimeblock(_),
             ) => (
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "Invalid request",
             ),
-            Self::PayloadTooLarge => (
+            Self::PayloadTooLarge | Self::Core(CoreError::FactTooLarge { .. }) => (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "payload_too_large",
                 "Request body exceeds the permitted size",

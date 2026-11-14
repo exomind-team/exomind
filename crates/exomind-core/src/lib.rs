@@ -5,9 +5,12 @@
 //! must be completed by an adapter before calling this API.
 
 mod capture_fact;
+mod fact_encoding;
 mod identity;
+mod manifests;
 mod migrations;
 mod originals;
+mod replication;
 mod store;
 mod timeblocks;
 
@@ -15,12 +18,18 @@ pub use identity::{
     AgentId, CommandId, DeviceId, EventId, InvalidIdentifier, OriginalId, ProfileId, StageId,
     TimeblockId,
 };
+pub use manifests::OriginalAvailability;
 pub use originals::{
     BeginStageCommand, MAX_CAPTURE_ORIGINALS, MAX_ORIGINAL_CHUNK_BYTES, OriginalChunk, OriginalRef,
     StageState, StageStatus, VerificationProof, VerificationTicket,
 };
+pub use replication::{OriginCursor, OriginIdentity, ReplicaContext};
 use serde::{Deserialize, Serialize};
 pub use store::Core;
+pub const CORE_SCHEMA_VERSION: i64 = 4;
+/// Durable UTF-8 JSON fact encoding, independent of the smaller wire-page
+/// budget. Includes worst-case escaping of all existing capture input limits.
+pub const MAX_FACT_BYTES: usize = 2 * 1024 * 1024;
 pub use timeblocks::*;
 
 #[derive(Debug, thiserror::Error)]
@@ -43,6 +52,10 @@ pub enum CoreError {
     ProfileConflict,
     #[error("invalid event query: {0}")]
     InvalidQuery(&'static str),
+    #[error("invalid replication operation: {0}")]
+    InvalidReplication(&'static str),
+    #[error("encoded fact exceeds {max_bytes} bytes")]
+    FactTooLarge { max_bytes: usize },
     #[error("requested profile differs from the authenticated scope")]
     ScopeMismatch,
     #[error("context belongs to another core lifecycle")]

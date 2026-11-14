@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 #[test]
 #[ignore = "requires EXOMIND_SCHEMA2_CLI pointing to the retained actual schema-2 binary"]
-fn actual_schema_two_cli_refuses_schema_three_without_rewriting_main_or_backups() {
+fn actual_schema_two_cli_refuses_current_schema_without_rewriting_main_or_backups() {
     use std::{
         process::{Command, Stdio},
         time::{Duration, Instant},
@@ -87,7 +87,7 @@ fn actual_schema_two_cli_refuses_schema_three_without_rewriting_main_or_backups(
         }
         assert!(
             Instant::now() < deadline,
-            "old schema-2 fixture kept running against schema 3"
+            "old schema-2 fixture kept running against the current schema"
         );
         std::thread::sleep(Duration::from_millis(10));
     };
@@ -113,7 +113,7 @@ struct SchemaTwoFact<'a> {
 }
 
 #[test]
-fn schema_two_to_three_backup_restores_original_bytes_references_identity_and_receipt_from_one_file()
+fn schema_two_to_current_backup_restores_original_bytes_references_identity_and_receipt_from_one_file()
  {
     let root = tempfile::tempdir().unwrap();
     let main = root.path().join("beta-core.sqlite3");
@@ -237,7 +237,8 @@ fn schema_two_to_three_backup_restores_original_bytes_references_identity_and_re
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(
-        version, 3,
+        version,
+        exomind_core::CORE_SCHEMA_VERSION,
         "timeblock typed facts require an explicit schema migration"
     );
     let context = core.local_human(profile).unwrap();

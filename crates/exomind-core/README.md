@@ -14,6 +14,18 @@
 
 HTTP、Tauri、React 由独立 Host/Native/UI 适配器接入，本 crate 不持有外部 token。时间块、复制、模型任务和回收按 Beta 计划继续，不以本机单元测试代替端到端验收。固定格式 capture 的规范化由 Rust 权威执行：字段顺序固定、标签排序去重、正文不改写；未实现通用 JSON 数值/媒体内容的跨语言规范化协议。未知 capture 字段在反序列化时拒绝，不静默丢弃作者字段。
 
+## schema 4 复制准备切片
+
+`CORE_SCHEMA_VERSION` 是唯一公开版本常量。schema 1/2/3 升级先执行独立、含 live WAL 的一致备份并核对，随后同事务建立 schema 4。`original_manifests` 保存不可变的档案/原件描述；事件引用它，而非要求接收端已有本机暂存。`declare_original_manifest` 只登记元数据，不创建 stage、verified 字节、事件或回执，也不授予读取权限。`original_availability` 在档案事实读取授权后区分 missing 与本机 stage；本机提交仍要求完整 verified 整组。
+
+每个档案在创建/迁移事务里生成独立的持久 restoration epoch，空档案亦如此。`replication_identity` / `origin_checkpoint` 使用本机 `WriterContext`，只读且不生成 epoch。每个真正新 capture/typed timeblock 与其 origin 序号、规范事实摘要、前缀 hash 链及原有 receipt 同事务；重试不重复推进。链绑定档案、设备、epoch、序号、事实类型与事件 ID，不包含接收端 `local_seq`。checkpoint 验证实际链端点及其事实，坏元数据不伪装为空。
+
+`ReplicaContext` 是不可反序列化、绑定本次 Core 生命周期的受信宿主 capability，只支持已认证的 direct origin；Host 必须在最终 gate 内核对成员代次，Core 不复制成员授权表。本切片尚未提供事实导入/导出 API：已建立其持久 schema，后续页事务需一起提交事实与接收游标，并显式处理 origin epoch 变化；不能以本切片宣称 B2 同步完成。
+
+保留的真实 Core3 seed/probe 专项通过 `EXOMIND_SCHEMA3_FIXTURE` 显式运行。它核对 provenance、含原件的 capture/2、typed fact、原 receipt、全部原件字节和含 WAL 的单文件备份，再确认旧程序精确拒绝 schema4，拒写后重开对账。夹具/二进制/数据库不提交源码；独立旧依赖锁与发布二进制的差异必须保留在证据中。
+
+本机事实的 JSON 编码共用 `MAX_FACT_BYTES`（2 MiB）：迁移、origin checkpoint 与新事实写入采用同一界限。原有文字、标签和256原件组合同保持，合法控制字符的 JSON 转义膨胀不会导致已回执事实随后不可读。复制单页的传输预算独立且更小；单条超出传输预算必须明确报错，不能跳过、截正文或先推进游标。
+
 ## B1.2 原件事务与恢复
 
 schema 2 将暂存分块与 verified 原件保存在同一 SQLite 内，默认每块最多 256 KiB；不沿用 Node 的 64 MiB 总文件上限，长度合同上界为 SQLite 的有符号64位字节位置。单次 capture 的整组上限是 `MAX_CAPTURE_ORIGINALS`，字节读写上限来自 `MAX_ORIGINAL_CHUNK_BYTES`。零长度、未知扩展名、未知媒体类型和任意二进制均可保存；不执行附件、不递归收集播放列表引用资源，不自动向模型发送内容。
