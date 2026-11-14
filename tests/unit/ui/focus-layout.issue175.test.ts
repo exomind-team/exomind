@@ -1,18 +1,43 @@
-import path from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { createElement, type ReactNode } from 'react';
+import { cleanup, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FocusPage } from '@/ui/app/pages/FocusPage';
 
-describe('new focus layout issue-175 structure', () => {
-  const focusPagePath = path.resolve('src/ui/app/pages/FocusPage.tsx');
-  const source = readFileSync(focusPagePath, 'utf-8');
+const { gate, nowPage, directChat } = vi.hoisted(() => ({
+  gate: { open: false }, nowPage: vi.fn(), directChat: vi.fn(),
+}));
+// Actual profile selection/login behavior is covered by local-profile-guard.
+// These probes protect the composition: the guard owns NowPage mounting and
+// FocusPage must not render a second ChatPage directly.
+vi.mock('@/ui/app/components/LocalProfileGuard', () => ({
+  LocalProfileGuard: ({ children }: { children: ReactNode }) => gate.open
+    ? createElement('section', { 'data-testid': 'profile-guard-content' }, children)
+    : createElement('p', null, 'guard is waiting for a profile'),
+}));
+vi.mock('@/ui/app/pages/NowPage', () => ({
+  NowPage: () => { nowPage(); return createElement('div', { 'data-testid': 'now-page-content' }); },
+}));
+vi.mock('@/components/Chat/ChatPage', () => ({
+  ChatPage: () => { directChat(); return createElement('div', { 'data-testid': 'unexpected-direct-chat' }); },
+}));
 
-  it('turns FocusPage into a thin shell over NowPage（FocusPage 退化为 NowPage 壳层）', () => {
-    expect(source).toContain("import { NowPage } from './NowPage'");
-    expect(source).toContain('return <NowPage />');
+beforeEach(() => { gate.open = false; vi.clearAllMocks(); });
+afterEach(cleanup);
+
+describe('FocusPage delegates to the guarded NowPage', () => {
+  it('does not mount record/timer content before its profile guard opens', () => {
+    const { rerender } = render(createElement(FocusPage));
+    expect(screen.getByText('guard is waiting for a profile')).toBeInTheDocument();
+    expect(nowPage).not.toHaveBeenCalled();
+    expect(directChat).not.toHaveBeenCalled();
+    gate.open = true; rerender(createElement(FocusPage));
+    expect(within(screen.getByTestId('profile-guard-content')).getByTestId('now-page-content')).toBeInTheDocument();
   });
 
-  it('no longer renders ChatPage directly inside FocusPage（FocusPage 不再直接渲染 ChatPage）', () => {
-    expect(source).not.toContain('data-testid="new-now-chat-section"');
-    expect(source).not.toContain('<ChatPage variant="new-mobile" hideHeader />');
+  it('mounts the existing NowPage without adding a separate ChatPage layout', () => {
+    gate.open = true; render(createElement(FocusPage));
+    expect(screen.getAllByTestId('now-page-content')).toHaveLength(1);
+    expect(directChat).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('unexpected-direct-chat')).not.toBeInTheDocument();
   });
 });
