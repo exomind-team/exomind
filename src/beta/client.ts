@@ -2,9 +2,11 @@ import { invoke } from '@tauri-apps/api/core';
 import type { BetaOriginal, BetaOriginalClient } from './original-types';
 import { BetaApiError } from './api-error';
 import { boundedOriginalBody, nativeOriginalClient, webOriginalClient, validateOriginal } from './original-client';
+import { nativeTimeblockFeatures, webTimeblockFeatures } from './timeblocks-client';
+import type { BetaTimeblockClient, BetaTimelinePage } from './timeblocks-types';
 export { BetaApiError } from './api-error';
 
-export interface BetaStatus { protocol: string; device_id: string; runtime_id?: string; running: boolean; capabilities?: { originals?: boolean; max_original_chunk_bytes?: number } }
+export interface BetaStatus { protocol: string; device_id: string; runtime_id?: string; running: boolean; capabilities?: { originals?: boolean; max_original_chunk_bytes?: number; timeblocks?: boolean; typed_timeline?: boolean } }
 export interface BetaProfile { profile_id: string; display_name: string }
 export interface BetaCommand {
   command_id: string; event_id: string; profile_id: string;
@@ -25,6 +27,8 @@ export interface BetaQuery { before?: number; through?: number; limit?: number; 
 export interface BetaPage { items: BetaEvent[]; next_before: number | null; highwater: number }
 export interface BetaClient {
   originals?: BetaOriginalClient;
+  timeblocks?: BetaTimeblockClient;
+  timelinePage?(profileId: string, query: BetaQuery): Promise<BetaTimelinePage>;
   status(): Promise<BetaStatus>;
   profiles(): Promise<BetaProfile[]>;
   provisionProfile(profileId: string, name: string): Promise<BetaProfile>;
@@ -37,7 +41,7 @@ function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BetaApiError('invalid_response', '服务返回了无法识别的数据');
   return value as Record<string, unknown>;
 }
-export function validateReceipt(value: unknown, command?: BetaCommand): BetaReceipt {
+export function validateReceipt(value: unknown, command?: Pick<BetaCommand, 'command_id' | 'event_id' | 'profile_id'>): BetaReceipt {
   const item = object(value);
   if (item.durability !== 'local_committed' || typeof item.command_id !== 'string' || typeof item.event_id !== 'string'
     || typeof item.profile_id !== 'string' || !Number.isSafeInteger(item.local_seq) || Number(item.local_seq) <= 0
@@ -108,6 +112,7 @@ export function nativeBetaClient(call: NativeInvoke = invoke): BetaClient {
     return call<T>(name, args);
   }
   return {
+    ...nativeTimeblockFeatures(call, async () => check(await call('beta_status'))),
     originals: nativeOriginalClient(async <T>(name: string,args?:Record<string,unknown>) => {
       const current=check(await call('beta_status'));
       if(current.capabilities?.originals!==true) throw new BetaApiError('unsupported_originals','本机服务尚不支持原件，请更新后重试');
@@ -176,6 +181,7 @@ export function webBetaClient(endpoint: string, ownerToken: string, fetcher: typ
     return grant;
   }
   return {
+    ...webTimeblockFeatures({ identity: hello, async json(profileId,path,method,body) { return request(path,await humanToken(profileId),method,body); } }),
     originals: webOriginalClient({
       async json(profileId,path,method,body) { return request(path,await humanToken(profileId,true),method,body); },
       async binary(profileId,path,method,body,responseLimit) { return request(path,await humanToken(profileId,true),method,body,body!==undefined,responseLimit); },

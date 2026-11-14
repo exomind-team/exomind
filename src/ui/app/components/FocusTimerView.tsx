@@ -36,7 +36,7 @@ export type FocusTimerViewModel =
     }
   | {
       phase: "running";
-      name: { text: string; draft: string; editing: boolean; saving: boolean };
+      name: { text: string; draft: string; editing: boolean; saving: boolean; readOnly?: boolean };
       // The controller supplies these strings from its authoritative clock.
       // This presentation never advances time or submits an ending itself.
       clock: { text: string; warning: boolean; endTimeText?: string };
@@ -252,6 +252,20 @@ export function FocusTimerView({
   );
   const renderRunningNameControl = (variant: "default" | "overlay") => {
     const isOverlayVariant = variant === "overlay";
+    if (running?.name.readOnly) {
+      return (
+        <span
+          data-testid="new-focus-running-name-display"
+          className={`block min-w-0 max-w-full truncate rounded-[8px] text-left font-semibold ${
+            isOverlayVariant
+              ? "pt-0.5 text-[18px] leading-[1.35] text-[#F5EDE7]"
+              : `text-[20px] leading-[1.4] ${isOverlaySurface ? "text-[#F5EDE7]" : "text-[#1C1917] dark:text-[#FAFAF9]"}`
+          }`}
+        >
+          {runningNameDisplayText}
+        </span>
+      );
+    }
     if (isRunningNameEditing) {
       return (
         <Input

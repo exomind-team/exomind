@@ -164,4 +164,14 @@ describe('shared Alpha FocusTimerView extraction contract', () => {
     fireEvent.click(audio); expect(callbacks.openBgm).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('controlled-dialog-slot').parentElement).toBe(screen.getByTestId('new-focus-timer-widget'));
   });
+  it('shows the same running name as noninteractive text when rename is not a supported capability', () => {
+    const callbacks=actions();const model=running();
+    render(<FocusTimerView model={{...model,name:{...model.name,readOnly:true,editing:true}}} actions={callbacks}/>);
+    const name=screen.getByTestId('new-focus-running-name-display');
+    expect(name.tagName).toBe('SPAN');expect(name).toHaveTextContent(model.name.text);
+    expect(name).toHaveClass('text-[20px]','leading-[1.4]','truncate');
+    expect(name).not.toHaveAttribute('title','编辑时间块名称');
+    expect(screen.queryByTestId('new-focus-running-name-input')).not.toBeInTheDocument();
+    fireEvent.click(name);expect(callbacks.beginRename).not.toHaveBeenCalled();
+  });
 });
