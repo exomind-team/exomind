@@ -1,6 +1,7 @@
 //! The authenticated Beta host. HTTP and trusted native IPC share this facade;
 //! the legacy Runtime and its stores are never instantiated here.
 mod http;
+mod local_intents;
 #[cfg(test)]
 mod original_tests;
 mod originals;
@@ -65,6 +66,10 @@ pub enum HostError {
     PayloadTooLarge,
     #[error("all original verification slots are in use")]
     VerificationBusy,
+    #[error("local UI intent requires recovery or completion of initialization")]
+    IntentCacheCorrupt,
+    #[error("local UI intent persistence could not be confirmed")]
+    IntentCacheUnavailable,
     #[error("core operation failed")]
     Core(#[from] CoreError),
     #[error("host database operation failed")]
@@ -149,6 +154,9 @@ pub struct HostCapabilities {
 }
 
 struct Resources {
+    // Declaration order also governs Drop: close private cache connections
+    // before persistence releases this Host's exclusive root lock.
+    local_intents: Option<local_intents::Store>,
     core: Core,
     persistence: Persistence,
 }
@@ -215,7 +223,11 @@ impl BetaHost {
             #[cfg(test)]
             capture_admitted: Mutex::new(None),
             gate: Mutex::new(State {
-                resources: Some(Resources { core, persistence }),
+                resources: Some(Resources {
+                    local_intents: None,
+                    core,
+                    persistence,
+                }),
                 listener_shutdown: None,
             }),
         })
