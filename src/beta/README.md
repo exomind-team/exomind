@@ -19,7 +19,8 @@ runtime bootstrap, profile store, sync store, or eventlog service.
 - [x] Parent checkpoints: actual Native text/timeblock UI, restart and IME/layout acceptance; see the execution ledger for exact source/package scope.
 - [x] Exact durable-source APK controller acceptance: automatic resume and isolated B-only missing-source recovery.
 - [x] Actual Android Downloads picker multi-selection, UI Send, restart and exact original-byte acceptance.
-- [ ] Current landscape overflow/scale regression and desktop overlay/window acceptance.
+- [x] Exact shared Android candidate: complete IME/layout matrix, picker originals and timer flows.
+- [ ] Desktop overlay/window acceptance and complete Alpha page/scroll-anchor inheritance.
 - [ ] Full Alpha page/layout inheritance, complete scroll anchoring and remaining B2–B5 stories.
 
 ## Connection
