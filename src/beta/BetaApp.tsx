@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type MutableRefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
-import { Bot, Download, FileText, RefreshCw, Timer, X } from 'lucide-react';
+import { Bot, FileText, RefreshCw, Timer, X } from 'lucide-react';
 import { PageShell } from '@/ui/app/components/PageShell';
 import { EventTimestamp } from '@/ui/app/components/EventTimestamp';
 import { NowInputRowView, resizeNowInputTextarea } from '@/ui/app/components/NowInputRowView';
@@ -12,8 +12,7 @@ import { BetaDraftController, errorMessage } from './drafts';
 import { betaUuid } from './initialization';
 import { useBetaNow } from './date-clock';
 import type { FileSourceStore } from './file-source-store';
-import { exportOriginalDownload, MAX_BASIC_DOWNLOAD_BYTES } from './original-download';
-import type { BetaOriginal } from './original-types';
+import { OriginalDownloads } from './OriginalDownloads';
 import type { LocalIntentJournal,IntentPredecessor } from './local-intent-journal';
 import type { BetaTimelinePage,BetaTimeblockNode } from './timeblocks-types';
 import { BetaTimeblockController } from './timeblocks-controller';
@@ -149,15 +148,17 @@ function ConnectedBeta({ client, peers, onDisconnect, sourceStore, intentJournal
   return <><BetaAppShell section={section} onSectionChange={setSection} profileName={profileName} onProfileClick={()=>setProfileDialog(true)}
     sync={<BetaPeersPage peers={peers} profileId={profileId} profileName={profileName} runtimeId={status?.runtime_id??''} deviceId={status?.device_id??''} onJoined={joined} onEventsChanged={changed=>{if(changed===profileId)setEventRevision(value=>value+1);}}/>}
     settings={<BetaSettingsPage profileName={profileName} onDisconnect={persistenceBusy?undefined:onDisconnect}/>}
-    now={<PageShell title="当下" contentClassName="flex flex-col"
-    headerAction={onDisconnect && <Button variant="ghost" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}
-    headerBottom={status && <div className="flex flex-wrap items-center gap-2">
+    now={<PageShell title="当下" className="min-h-0 overflow-y-auto" headerClassName="shrink-0" contentClassName="flex flex-col"
+    headerAction={<div className="flex max-w-[15rem] items-center gap-1">{status&&profileId&&<>
       <label className="sr-only" htmlFor="beta-profile">当前档案</label>
-      <select id="beta-profile" className={selectClass} value={profileId} disabled={!prepareSwitch.current||switching||creating} onChange={event => {void changeProfile(event.target.value);}}>
-        {!profiles.length && <option value="">请创建档案</option>}
+      <select id="beta-profile" className={`${selectClass} min-w-0 max-w-36`} value={profileId} disabled={!prepareSwitch.current||switching||creating} onChange={event => {void changeProfile(event.target.value);}}>
         {profiles.map(item => <option key={item.profile_id} value={item.profile_id}>{item.display_name}</option>)}
       </select>
-      {/* Wrap beside long profile names before the form shrinks below its controls. */}
+      </>}
+      <Button variant="ghost" size="sm" aria-label="管理档案" onClick={()=>setProfileDialog(true)}>档案</Button>
+      {onDisconnect&&<Button variant="ghost" size="sm" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}
+    </div>}
+    headerBottom={status&&!profileId&&<div className="space-y-2"><p className="text-xs text-muted">先创建本机档案，或从同步页加入已授权档案。</p>
       <form onSubmit={create} className="flex min-w-0 flex-[1_1_16rem] gap-2">
         <Input aria-label="新档案名称" className="min-w-0 max-w-48" placeholder="新档案名称" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={creating} />
         <Button type="submit" variant="outline" disabled={creating || persistenceBusy || !name.trim()}>{creating ? '创建中…' : '创建档案'}</Button>
@@ -167,7 +168,7 @@ function ConnectedBeta({ client, peers, onDisconnect, sourceStore, intentJournal
     {error && <div role="alert" className="flex items-center gap-2 px-5 py-3 text-sm text-destructive">{error}
       {!status && <Button variant="outline" onClick={() => setReload(value => value + 1)}>重新连接</Button>}</div>}
     {status && <DeviceWorkspace key={`${status.device_id}`} active={section==='now'} eventRevision={eventRevision} client={client} deviceId={status.device_id} profileId={profileId} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} />}
-  </PageShell>}/><BetaProfileDialog open={profileDialog} onOpenChange={setProfileDialog} profiles={profiles} profileId={profileId} loading={loading} disabled={persistenceBusy||switching||!prepareSwitch.current} creating={creating} name={name} onNameChange={setName} onCreate={create} onSelect={changeProfile}/></>;
+  </PageShell>}/><BetaProfileDialog open={profileDialog} onOpenChange={setProfileDialog} profiles={profiles} profileId={profileId} loading={loading} disabled={persistenceBusy||switching||!prepareSwitch.current} creating={creating} name={name} onNameChange={setName} onCreate={create} onSelect={changeProfile} error={error}/></>;
 }
 
 function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision }: { client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:MutableRefObject<(()=>Promise<void>)|null>; active:boolean;eventRevision:number }) {
@@ -322,7 +323,7 @@ function ProfileWorkspace({ client, controller, focus, profileId, visible, exter
       <Button variant="ghost" size="icon" aria-label="刷新记录" onClick={() => setRevision(value => value + 1)}><RefreshCw className="size-4" /></Button>
     </div>
     {error && <p role="alert" className="px-5 py-2 text-sm text-destructive">{error}</p>}
-    <div ref={scroll} className="min-h-0 flex-1 overflow-y-auto px-5 py-4" aria-label="记录历史" aria-busy={loading} onScroll={event=>{if(!visible)return;const element=event.currentTarget;readingTop.current=element.scrollTop;followTail.current=element.scrollHeight-element.clientHeight-element.scrollTop<64;}}>
+    <div ref={scroll} className="min-h-[8rem] flex-1 overflow-y-auto px-5 py-4" aria-label="记录历史" aria-busy={loading} onScroll={event=>{if(!visible)return;const element=event.currentTarget;readingTop.current=element.scrollTop;followTail.current=element.scrollHeight-element.clientHeight-element.scrollTop<64;}}>
       {page?.next_before !== null && page && <div className="mb-4 text-center"><Button variant="ghost" disabled={loading} onClick={() => void older()}>加载更早记录</Button></div>}
       {loading && <p role="status" className="text-center text-sm text-muted">正在读取…</p>}
       {page?.items.length === 0 && <p className="py-8 text-center text-sm text-muted">{query ? '没有匹配记录' : '还没有记录'}</p>}
@@ -393,37 +394,4 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-}
-
-function OriginalDownloads({ client, profileId, originals }: { client: BetaClient; profileId: string; originals: BetaOriginal[] }) {
-  const [busy, setBusy] = useState<string | null>(null); const [error, setError] = useState('');const [notice,setNotice]=useState('');
-  const active = useRef(true);const request=useRef<{id:string;client:BetaClient}|null>(null);
-  useEffect(() => { active.current = true; return () => { active.current = false;const owned=request.current;if(owned?.client.originalExports)void owned.client.originalExports.cancel(owned.id).catch(()=>{}); }; }, []);
-  async function download(original: BetaOriginal) {
-    if(request.current)return;
-    let id:string;
-    try{id=betaUuid();}catch(failure){setError(errorMessage(failure));return;}
-    const owned={id,client};request.current=owned;
-    setBusy(original.original_id); setError('');setNotice('');
-    try {
-      const result = await exportOriginalDownload(client, profileId, original,owned.id); if (!active.current||request.current!==owned) return;
-      if(result.kind==='native'){
-        setNotice(result.result.cancelled?result.result.partial_output?'导出已取消，所选位置可能保留未完成的新文档，请检查后清理':'导出已取消':'原件已导出并完成校验');return;
-      }
-      const url = URL.createObjectURL(result.blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = original.file_name;
-      document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1_000);
-      setNotice('已准备浏览器下载，请查看下载位置');
-    } catch (failure) { if (active.current&&request.current===owned) setError(errorMessage(failure)); }
-    finally { if(request.current===owned){request.current=null;if(active.current)setBusy(null);} }
-  }
-  async function cancel(){
-    const owned=request.current;if(!owned?.client.originalExports)return;
-    try{const accepted=await owned.client.originalExports.cancel(owned.id);if(active.current&&request.current===owned)setNotice(accepted?'正在取消导出…':'导出已进入完成阶段，正在等待确认');}
-    catch(failure){if(active.current&&request.current===owned)setError(errorMessage(failure));}
-  }
-  return <div className="mt-2 max-w-[90%] space-y-1">{originals.map(original => <div key={original.original_id} className="flex items-center gap-2 rounded-2xl border border-[#E7E5E4] bg-white/90 px-3 py-2 dark:border-[#292524] dark:bg-[#1C1917]">
-    <FileText size={16} className="shrink-0 text-[#C75B3A] dark:text-[#FDBA74]" />
-    <div className="min-w-0 flex-1"><p className="break-all text-xs font-medium">{original.file_name}</p><p className="text-[10px] text-muted">{formatBytes(original.byte_length)}</p>{!client.originalExports&&original.byte_length > MAX_BASIC_DOWNLOAD_BYTES && <p className="text-xs text-muted">网页下载支持 64 MiB 以内；更大原件请在独立应用中导出</p>}</div>
-    <Button variant="ghost" size="icon" aria-label={`下载 ${original.file_name}`} disabled={busy !== null || !client.originalExports&&original.byte_length > MAX_BASIC_DOWNLOAD_BYTES} onClick={() => void download(original)}><Download size={14} /></Button>
-  </div>)}{busy && <div className="flex items-center gap-2 text-xs text-muted"><p role="status">{client.originalExports?'正在流式导出并校验原件…':'正在读取并校验原件…'}</p>{client.originalExports&&<Button variant="ghost" size="sm" onClick={()=>{void cancel();}}>取消导出</Button>}</div>}{notice&&<p role="status" className="text-xs text-muted">{notice}</p>}{error && <p role="alert" className="text-xs text-destructive">{error}</p>}</div>;
 }

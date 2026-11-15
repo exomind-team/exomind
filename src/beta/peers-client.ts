@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { BetaApiError } from './client';
+import { BetaApiError } from './api-error';
 
 export interface BetaPeer {
   device_id: string;

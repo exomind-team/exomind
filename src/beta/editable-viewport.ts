@@ -50,12 +50,35 @@ export function keepBetaEditableInViewport(doc: Document = document, view: Windo
     const element = active.element;
     const rect = element.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
-    const top = viewport?.offsetTop ?? 0, left = viewport?.offsetLeft ?? 0;
+    let top = viewport?.offsetTop ?? 0, left = viewport?.offsetLeft ?? 0;
     const height = viewport?.height ?? view.innerHeight, width = viewport?.width ?? view.innerWidth;
-    if (height > 0 && width > 0 && (rect.top < top || rect.bottom > top + height
-      || rect.left < left || rect.right > left + width)) {
-      element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+    if(height<=0||width<=0)return;
+    let bottom=top+height,right=left+width;
+    let verticalScroller:HTMLElement|undefined;
+    for(let ancestor=element.parentElement;ancestor;ancestor=ancestor.parentElement){
+      const style=view.getComputedStyle(ancestor);const box=ancestor.getBoundingClientRect();
+      if(/^(auto|scroll|hidden|clip)$/.test(style.overflowY)&&box.height>0){
+        const edge=box.top+ancestor.clientTop;top=Math.max(top,edge);bottom=Math.min(bottom,edge+(ancestor.clientHeight||box.height));
+        if(!verticalScroller&&/^(auto|scroll)$/.test(style.overflowY)&&ancestor.scrollHeight>ancestor.clientHeight)verticalScroller=ancestor;
+      }
+      if(/^(auto|scroll|hidden|clip)$/.test(style.overflowX)&&box.width>0){const edge=box.left+ancestor.clientLeft;left=Math.max(left,edge);right=Math.min(right,edge+(ancestor.clientWidth||box.width));}
     }
+    // The Alpha bottom bar occupies real space above the IME. A field can be
+    // inside visualViewport yet covered by that bar (the API35 regression).
+    // Dialog portals sit above the bar and use their own clipping ancestors.
+    if(element.closest('[data-beta-view]')){
+      const navigation=doc.querySelector('[data-testid="mobile-bottom-tab"]')?.getBoundingClientRect();
+      if(navigation&&navigation.width>0&&navigation.height>0&&navigation.top<bottom&&navigation.bottom>top&&navigation.left<rect.right&&navigation.right>rect.left)bottom=navigation.top;
+    }
+    if(bottom<=top||right<=left)return;
+    const vertical=rect.top<top||rect.bottom>bottom;
+    const horizontal=rect.left<left||rect.right>right;
+    if(vertical&&verticalScroller){
+      // Scroll the actual content owner, rather than panning the whole Shell
+      // behind its fixed navigation. Oversized fields align at their start.
+      const destination=rect.height>bottom-top?top:top+(bottom-top-rect.height)/2;
+      verticalScroller.scrollTop=Math.max(0,Math.min(verticalScroller.scrollHeight-verticalScroller.clientHeight,verticalScroller.scrollTop+rect.top-destination));
+    }else if(vertical||horizontal){element.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});}
   };
   const queueCheck = (active: Settlement) => {
     if (!current(active) || pendingCheck !== undefined) return;

@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { BetaProfile } from './client';
 
-export function BetaProfileDialog({ open, onOpenChange, profiles, profileId, loading, disabled, creating, name, onNameChange, onCreate, onSelect }: {
+export function BetaProfileDialog({ open, onOpenChange, profiles, profileId, loading, disabled, creating, name, onNameChange, onCreate, onSelect, error }: {
   open:boolean;onOpenChange:(open:boolean)=>void;profiles:BetaProfile[];profileId:string;loading:boolean;disabled:boolean;creating:boolean;
   name:string;onNameChange:(name:string)=>void;onCreate:(event:FormEvent)=>Promise<void>;onSelect:(profileId:string)=>Promise<boolean>;
+  error?:string;
 }) {
   const openedProfile=useRef(profileId);
   useEffect(()=>{if(!open)openedProfile.current=profileId;else if(profileId!==openedProfile.current)onOpenChange(false);},[open,profileId,onOpenChange]);
@@ -19,6 +20,7 @@ export function BetaProfileDialog({ open, onOpenChange, profiles, profileId, loa
         <Input id="beta-dialog-profile-name" aria-label="新档案名称" value={name} maxLength={200} onChange={event=>onNameChange(event.target.value)} placeholder="档案名称" disabled={creating}/>
         <Button type="submit" disabled={disabled||creating||!name.trim()}>{creating?'创建中…':'创建档案'}</Button>
       </form>
+      {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
     </DialogContent>
   </Dialog>;
 }

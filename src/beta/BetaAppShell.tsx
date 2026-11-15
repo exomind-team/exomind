@@ -24,7 +24,7 @@ export function BetaAppShell({ section, onSectionChange, profileName, onProfileC
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(SIDEBAR_KEY) === 'true'; } catch { return false; } });
   const [preferenceError, setPreferenceError] = useState('');
   const [workspaceHost] = useState(() => {
-    const host = document.createElement('div'); host.className = 'h-full min-h-0'; return host;
+    const host = document.createElement('div'); host.className = 'h-full min-h-0 overflow-hidden'; return host;
   });
   const mountPoint = useRef<HTMLDivElement | null>(null);
   const activeBeforeLayout = useRef<HTMLElement | null>(null);
@@ -49,13 +49,13 @@ export function BetaAppShell({ section, onSectionChange, profileName, onProfileC
   const content = <>
     {preferenceError && <p role="alert" className="px-5 py-2 text-xs text-destructive">{preferenceError}</p>}
     {/* Navigation changes visibility, not the sole draft writer's lifecycle. */}
-    <section data-beta-view="now" hidden={section !== 'now'} className={section === 'now' ? 'h-full min-h-0' : 'hidden'}>{now}</section>
-    <section data-beta-view="sync" hidden={section !== 'sync'} className={section === 'sync' ? 'h-full min-h-0' : 'hidden'}>{sync}</section>
-    <section data-beta-view="settings" hidden={section !== 'settings'} className={section === 'settings' ? 'h-full min-h-0' : 'hidden'}>{settings}</section>
+    <section data-beta-view="now" hidden={section !== 'now'} className={section === 'now' ? 'h-full min-h-0 overflow-hidden' : 'hidden'}>{now}</section>
+    <section data-beta-view="sync" hidden={section !== 'sync'} className={section === 'sync' ? 'h-full min-h-0 overflow-hidden' : 'hidden'}>{sync}</section>
+    <section data-beta-view="settings" hidden={section !== 'settings'} className={section === 'settings' ? 'h-full min-h-0 overflow-hidden' : 'hidden'}>{settings}</section>
   </>;
   const renderNavigationItem = (item: typeof items[number], view: { className: string; children: ReactNode; testId?: string }) =>
     <button type="button" data-testid={view.testId} aria-label={item.title} aria-current={item.active ? 'page' : undefined} title={item.title} className={view.className} onClick={() => select(item.key)}>{view.children}</button>;
-  const slot=<div ref={attachWorkspace} className="h-full min-h-0"/>;
+  const slot=<div ref={attachWorkspace} className="h-full min-h-0 overflow-hidden"/>;
   const shell=!desktop?<AlphaMobileShellView items={items} fillContainer renderNavigationItem={renderNavigationItem}>{slot}</AlphaMobileShellView>
     :<AlphaDesktopShellView fillContainer sidebar={<AlphaDesktopSidebarView items={items} collapsed={collapsed}
     subtitle="外心 · Beta" renderNavigationItem={renderNavigationItem}

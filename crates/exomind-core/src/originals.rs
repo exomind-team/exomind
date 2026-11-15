@@ -492,6 +492,85 @@ impl Core {
         })
     }
 
+    /// Revalidate an already published, verified original without borrowing
+    /// its creator's writer identity or changing its stage state. Readers may
+    /// run this ticket outside the embedding gate, then confirm the same
+    /// immutable generation under their current authorization.
+    pub fn verified_original_ticket(
+        &self,
+        context: &WriterContext,
+        profile: ProfileId,
+        id: OriginalId,
+    ) -> Result<VerificationTicket, CoreError> {
+        self.check_scope(context, profile)?;
+        let connection = self.connection()?;
+        let (bound, original) = crate::manifests::manifest(&connection, id)?;
+        if bound != profile {
+            return Err(CoreError::ScopeMismatch);
+        }
+        if !referenced(&connection, id, profile)? {
+            return Err(CoreError::OriginalAccessDenied);
+        }
+        let stage = stage_for_original(&connection, id)?;
+        if stage.status.profile_id != profile || stage.status.original != original {
+            return Err(CoreError::OriginalConflict);
+        }
+        if stage.status.state != StageState::Verified
+            || stage.status.next_offset != original.byte_length
+        {
+            return Err(CoreError::OriginalNotReady);
+        }
+        Ok(VerificationTicket {
+            database_path: self.database_path().to_owned(),
+            lifecycle: self.lifecycle(),
+            stage,
+        })
+    }
+
+    /// Read-only confirmation: a valid proof never writes, promotes a partial
+    /// stage, or changes another author's upload. Authorization remains the
+    /// embedding's responsibility at the final operation boundary.
+    pub fn confirm_verified_original(
+        &self,
+        context: &WriterContext,
+        profile: ProfileId,
+        proof: &VerificationProof,
+    ) -> Result<OriginalRef, CoreError> {
+        self.check_scope(context, profile)?;
+        if proof.lifecycle != self.lifecycle() {
+            return Err(CoreError::StaleVerification);
+        }
+        let connection = self.connection()?;
+        let stage = load_stage(&connection, proof.stage.status.stage_id)?;
+        if stage.status.profile_id != profile {
+            return Err(CoreError::ScopeMismatch);
+        }
+        if !referenced(&connection, stage.status.original.original_id, profile)? {
+            return Err(CoreError::OriginalAccessDenied);
+        }
+        let (bound, manifest) =
+            crate::manifests::manifest(&connection, stage.status.original.original_id)?;
+        if bound != profile || stage.status.original != manifest {
+            return Err(CoreError::OriginalConflict);
+        }
+        if stage.status.generation != proof.stage.status.generation
+            || stage.status.original != proof.stage.status.original
+            || stage.author != proof.stage.author
+            || stage.author_kind != proof.stage.author_kind
+        {
+            return Err(CoreError::StaleVerification);
+        }
+        if stage.status.state != StageState::Verified
+            || stage.status.next_offset != manifest.byte_length
+        {
+            return Err(CoreError::OriginalNotReady);
+        }
+        if proof.actual_length != manifest.byte_length || proof.actual_sha256 != manifest.sha256 {
+            return Err(CoreError::OriginalIntegrityMismatch);
+        }
+        Ok(manifest)
+    }
+
     pub fn finish_stage(
         &self,
         context: &WriterContext,

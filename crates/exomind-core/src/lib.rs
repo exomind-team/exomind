@@ -9,6 +9,7 @@ mod fact_encoding;
 mod identity;
 mod manifests;
 mod migrations;
+mod original_query;
 mod originals;
 mod replication;
 mod store;
@@ -19,6 +20,7 @@ pub use identity::{
     TimeblockId,
 };
 pub use manifests::OriginalAvailability;
+pub use original_query::MissingOriginalsPage;
 pub use originals::{
     BeginStageCommand, MAX_CAPTURE_ORIGINALS, MAX_ORIGINAL_CHUNK_BYTES, OriginalChunk, OriginalRef,
     StageState, StageStatus, VerificationProof, VerificationTicket,

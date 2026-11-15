@@ -155,9 +155,10 @@ impl From<HostError> for Failure {
             HostError::Core(CoreError::VerificationCancelled) => {
                 ("cancelled", "文件校验已停止，暂存字节已保留")
             }
-            HostError::Core(CoreError::StageIncomplete | CoreError::OriginalNotReady) => {
-                ("original_not_ready", "整组文件尚未完成保存与校验")
-            }
+            HostError::Core(CoreError::StageIncomplete | CoreError::OriginalNotReady) => (
+                "original_not_ready",
+                "原件尚未完成保存与校验，已保留现有字节",
+            ),
             HostError::Core(CoreError::StageNotUploading | CoreError::StaleVerification) => {
                 ("stage_conflict", "文件暂存状态已变化，请查证后重试")
             }
@@ -859,6 +860,9 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             peer_commands::beta_peer_join_invitation,
             peer_commands::beta_peer_sync,
             peer_commands::beta_peer_revoke,
+            peer_commands::beta_peer_original_status,
+            peer_commands::beta_peer_original_fetch,
+            peer_commands::beta_peer_original_cancel,
             overlay::beta_overlay_main,
             overlay::beta_overlay_attach,
             overlay::beta_overlay_read,

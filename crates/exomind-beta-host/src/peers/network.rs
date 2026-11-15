@@ -19,6 +19,9 @@ use tokio::{
     task::{JoinHandle, JoinSet},
 };
 use uuid::Uuid;
+#[path = "original_network.rs"]
+mod original_network;
+pub use original_network::PeerOriginalStatus;
 
 const DISCOVERY_PORT: u16 = 43343;
 const DISCOVERY_GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 77, 68);
@@ -87,9 +90,11 @@ pub struct PeerNetwork {
     lifecycle: tokio::sync::Mutex<Option<Running>>,
     control: tokio::sync::Mutex<()>,
     shared: Arc<Mutex<Shared>>,
+    originals: Arc<original_network::OriginalJobs>,
 }
 impl Drop for PeerNetwork {
     fn drop(&mut self) {
+        self.originals.cancel_all();
         drop(self.lifecycle.get_mut().take());
     }
 }
@@ -235,6 +240,7 @@ impl PeerNetwork {
                 candidates: HashMap::new(),
                 route_cursor: 0,
             })),
+            originals: Arc::new(original_network::OriginalJobs::default()),
         }))
     }
     fn worker(&self) -> Worker {
@@ -333,6 +339,7 @@ impl PeerNetwork {
         self.stop_work().await
     }
     async fn stop_work(&self) -> Result<(), HostError> {
+        self.originals.cancel_all();
         let mut running = self.lifecycle.lock().await;
         {
             let mut state = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
@@ -356,7 +363,7 @@ impl PeerNetwork {
                 }
             }
         }
-        Ok(())
+        self.originals.wait_empty().await
     }
     pub fn status(&self, profile: ProfileId) -> Result<PeerNetworkStatus, HostError> {
         let settings = self.host.peer_network_settings(&self.owner)?;
@@ -734,6 +741,11 @@ impl Worker {
                     self.publish(key, generation, member_generation, None, &Ok(Some(result)));
                 }
             }
+            PeerServiceOutcome::OriginalTransferred {
+                profile_id,
+                device_id,
+                ..
+            } => self.touch((profile_id, device_id), generation),
             PeerServiceOutcome::Probed {
                 profile_id,
                 device_id,

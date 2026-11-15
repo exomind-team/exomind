@@ -1,5 +1,5 @@
 import { memoryIntentJournal } from './timeblock-ui-fixtures';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
@@ -16,6 +16,19 @@ afterEach(() => {
   else Reflect.deleteProperty(navigator, 'locks');
 });
 describe('Beta React entry', () => {
+  it('uses the existing profile dialog for creation, retains a failed draft there and closes after a confirmed creation',async()=>{
+    const client=fakeClient();client.provisionProfile.mockRejectedValueOnce(new Error('synthetic profile failure'));
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client}/>);
+    await screen.findByRole('textbox',{name:'记录当下'});expect(screen.queryByRole('textbox',{name:'新档案名称'})).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox',{name:'当前档案'})).toHaveAttribute('id','beta-profile');
+    fireEvent.click(screen.getByRole('button',{name:'管理档案'}));fireEvent.change(screen.getByRole('textbox',{name:'新档案名称'}),{target:{value:'Created in profile dialog'}});
+    await waitFor(()=>expect(screen.getByRole('button',{name:'创建档案'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'创建档案'}));
+    expect(await within(screen.getByRole('dialog')).findByText('synthetic profile failure')).toBeVisible();expect(screen.getByRole('dialog')).toBeVisible();expect(screen.getByRole('textbox',{name:'新档案名称'})).toHaveValue('Created in profile dialog');
+    await waitFor(()=>expect(screen.getByRole('button',{name:'创建档案'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'创建档案'}));
+    await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(client.provisionProfile).toHaveBeenCalledTimes(2);expect(client.provisionProfile.mock.calls[1][0]).toBe(client.provisionProfile.mock.calls[0][0]);
+    expect(screen.getByRole('combobox',{name:'当前档案'})).toHaveValue(client.provisionProfile.mock.calls[1][0]);
+  });
   it('keeps the sole writer, unsent draft and reading position mounted while opening settings',async()=>{
     const client=fakeClient();
     render(<BetaApp intentJournal={memoryIntentJournal()} client={client}/>);

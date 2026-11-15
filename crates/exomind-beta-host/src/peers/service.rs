@@ -2,7 +2,8 @@
 //! authentication: joins still require the signed one-use invitation, and all
 //! other services seal their profile scope before reading further input.
 use super::{
-    PeerChannel, PeerJoinStatus, PeerSyncOptions, PeerSyncResult, authorization::PeerOriginState,
+    OriginalTransferOptions, OriginalTransferResult, PeerChannel, PeerJoinStatus, PeerSyncOptions,
+    PeerSyncResult, authorization::PeerOriginState,
 };
 use crate::{BetaHost, HostError, Session};
 use exomind_core::{DeviceId, ProfileId};
@@ -19,6 +20,7 @@ pub enum PeerServiceKind {
     Join,
     Sync,
     Probe,
+    Originals,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,10 +47,18 @@ pub enum PeerServiceOutcome {
     Synchronized {
         profile_id: ProfileId,
         device_id: DeviceId,
-        member_generation:u64,
+        member_generation: u64,
         result: PeerSyncResult,
     },
-    Probed { profile_id:ProfileId,device_id:DeviceId },
+    Probed {
+        profile_id: ProfileId,
+        device_id: DeviceId,
+    },
+    OriginalTransferred {
+        profile_id: ProfileId,
+        device_id: DeviceId,
+        result: OriginalTransferResult,
+    },
 }
 fn canonical_ip(ip: IpAddr) -> IpAddr {
     match ip {
@@ -60,19 +70,46 @@ fn canonical_ip(ip: IpAddr) -> IpAddr {
     }
 }
 impl BetaHost {
-    fn save_observed_peer_route(&self,owner:&Session,profile:ProfileId,device:DeviceId,ip:IpAddr,port:u16)->Result<(),HostError>{
-        if port==0{return Ok(());}
-        let settings=self.peer_network_settings(owner)?;
-        if port==settings.preferred_port && (ip.is_loopback() || if_addrs::get_if_addrs().unwrap_or_default().iter().any(|interface|interface.ip()==ip)) {
+    fn save_observed_peer_route(
+        &self,
+        owner: &Session,
+        profile: ProfileId,
+        device: DeviceId,
+        ip: IpAddr,
+        port: u16,
+    ) -> Result<(), HostError> {
+        if port == 0 {
+            return Ok(());
+        }
+        let settings = self.peer_network_settings(owner)?;
+        if port == settings.preferred_port
+            && (ip.is_loopback()
+                || if_addrs::get_if_addrs()
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|interface| interface.ip() == ip))
+        {
             // User-mode emulator/NAT can present this host's own address.
             // Never turn it into a route back to our own listener.
             return Ok(());
         }
-        let endpoint=SocketAddr::new(ip,port);
-        let old=self.peer_routes(owner)?.into_iter().find(|route|route.profile==profile&&route.device==device).map(|route|route.endpoints).unwrap_or_default();
-        if old.first()==Some(&endpoint){return Ok(());}
-        let mut endpoints=vec![endpoint];endpoints.extend(old.into_iter().filter(|address|*address!=endpoint).take(7));
-        self.save_peer_routes(owner,profile,device,endpoints)
+        let endpoint = SocketAddr::new(ip, port);
+        let old = self
+            .peer_routes(owner)?
+            .into_iter()
+            .find(|route| route.profile == profile && route.device == device)
+            .map(|route| route.endpoints)
+            .unwrap_or_default();
+        if old.first() == Some(&endpoint) {
+            return Ok(());
+        }
+        let mut endpoints = vec![endpoint];
+        endpoints.extend(
+            old.into_iter()
+                .filter(|address| *address != endpoint)
+                .take(7),
+        );
+        self.save_peer_routes(owner, profile, device, endpoints)
     }
     pub async fn select_peer_service(
         &self,
@@ -137,16 +174,43 @@ impl BetaHost {
                     return Err(HostError::PeerMembershipDenied);
                 }
                 if header.listen_port != 0 {
-                    self.save_observed_peer_route(owner,status.profile_id,status.joiner_device_id,observed,header.listen_port)?;
+                    self.save_observed_peer_route(
+                        owner,
+                        status.profile_id,
+                        status.joiner_device_id,
+                        observed,
+                        header.listen_port,
+                    )?;
                 }
                 Ok(PeerServiceOutcome::Joined(status))
             }
-            PeerServiceKind::Sync | PeerServiceKind::Probe => {
+            PeerServiceKind::Sync | PeerServiceKind::Probe | PeerServiceKind::Originals => {
                 if header.target_device != Some(self.device_id) {
                     return Err(HostError::PeerMembershipDenied);
                 }
                 let profile = header.profile_id.ok_or(HostError::InvalidRequest)?;
                 let scope = self.peer_profile_scope(&channel, profile, header.device_id)?;
+                if matches!(header.service, PeerServiceKind::Originals) {
+                    let result = self
+                        .serve_peer_original_over_transport(
+                            channel,
+                            scope,
+                            OriginalTransferOptions::default(),
+                        )
+                        .await?;
+                    self.save_observed_peer_route(
+                        owner,
+                        profile,
+                        header.device_id,
+                        observed,
+                        header.listen_port,
+                    )?;
+                    return Ok(PeerServiceOutcome::OriginalTransferred {
+                        profile_id: profile,
+                        device_id: header.device_id,
+                        result,
+                    });
+                }
                 let permissions = self.peer_sync_permissions(&channel, &scope)?;
                 if matches!(header.service, PeerServiceKind::Probe) {
                     let source: Option<PeerOriginState> = if permissions.send {
@@ -167,9 +231,18 @@ impl BetaHost {
                             serde_json::to_vec(&response).map_err(|_| HostError::InvalidRequest)?,
                         )
                         .await?;
-                    self.peer_sync_permissions(&channel,&scope)?;
-                    self.save_observed_peer_route(owner,profile,header.device_id,observed,header.listen_port)?;
-                    Ok(PeerServiceOutcome::Probed {profile_id:profile,device_id:header.device_id})
+                    self.peer_sync_permissions(&channel, &scope)?;
+                    self.save_observed_peer_route(
+                        owner,
+                        profile,
+                        header.device_id,
+                        observed,
+                        header.listen_port,
+                    )?;
+                    Ok(PeerServiceOutcome::Probed {
+                        profile_id: profile,
+                        device_id: header.device_id,
+                    })
                 } else {
                     let result = self
                         .accept_peer_profile_sync_scoped(
@@ -179,12 +252,18 @@ impl BetaHost {
                         )
                         .await?;
                     if header.listen_port != 0 {
-                        self.save_observed_peer_route(owner,profile,header.device_id,observed,header.listen_port)?;
+                        self.save_observed_peer_route(
+                            owner,
+                            profile,
+                            header.device_id,
+                            observed,
+                            header.listen_port,
+                        )?;
                     }
                     Ok(PeerServiceOutcome::Synchronized {
                         profile_id: profile,
                         device_id: header.device_id,
-                        member_generation:result.peer_member_generation,
+                        member_generation: result.peer_member_generation,
                         result,
                     })
                 }

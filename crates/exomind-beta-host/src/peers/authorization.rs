@@ -21,6 +21,7 @@ pub(super) enum PeerOperation {
     ReadTimeline,
     AppendFacts,
     ReadOriginals,
+    MaterializeOriginals,
 }
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -34,6 +35,7 @@ impl PeerOperation {
             Self::ReadTimeline => capabilities.read_timeline,
             Self::AppendFacts => capabilities.append_facts,
             Self::ReadOriginals => capabilities.read_originals,
+            Self::MaterializeOriginals => true,
         }
     }
 }
@@ -50,8 +52,12 @@ pub(super) struct PeerProfileScope {
     local_generation: u64,
 }
 impl PeerProfileScope {
-    pub(super) fn member_generation(&self) -> u64 { self.member_generation }
-    pub(super) fn local_generation(&self) -> u64 { self.local_generation }
+    pub(super) fn member_generation(&self) -> u64 {
+        self.member_generation
+    }
+    pub(super) fn local_generation(&self) -> u64 {
+        self.local_generation
+    }
     pub(super) fn identifies(&self, profile: ProfileId, device: DeviceId) -> bool {
         self.profile_id == profile && self.origin_device == device
     }
@@ -282,6 +288,11 @@ impl BetaHost {
         let mut state = self.active_state()?;
         let resources = state.resources.as_mut().ok_or(HostError::Stopped)?;
         let qualified = self.qualify_peer_scope(resources, channel, scope)?;
+        if matches!(operation, PeerOperation::MaterializeOriginals)
+            && !qualified.local_capabilities.read_originals
+        {
+            return Err(HostError::PeerMembershipDenied);
+        }
         let member = qualified.remote;
         if !operation.permitted(member.capabilities) {
             return Err(HostError::PeerMembershipDenied);

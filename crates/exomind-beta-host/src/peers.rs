@@ -1,13 +1,15 @@
 //! Device-key transport and durable profile membership. A verified key alone is not a profile
 //! member, local owner, human writer or grant.
 mod authorization;
+mod original_transfer;
+pub use original_transfer::{OriginalTransferOptions, OriginalTransferResult};
 pub(crate) mod framing;
 pub(crate) mod identity;
 mod network;
 mod network_management;
 mod network_store;
 pub(crate) mod sync_store;
-pub use network::{PeerConnectionView, PeerNetwork, PeerNetworkStatus};
+pub use network::{PeerConnectionView, PeerNetwork, PeerNetworkStatus, PeerOriginalStatus};
 mod service;
 pub use network_store::PeerNetworkSettings;
 pub use service::{PeerProbe, PeerServiceKind, PeerServiceOutcome};

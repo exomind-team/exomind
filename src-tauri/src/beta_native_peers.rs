@@ -1,9 +1,10 @@
 //! Main-window owner management. Invitation secrets stay out of logs and URLs.
 use super::{Failure, NativeState, trusted_window, work};
 use exomind_beta_host::{
-    HostError, PEER_CORE_SCHEMA, PEER_PROTOCOL, PeerInvitation, PeerNetworkStatus, PeerSyncResult,
+    HostError, OriginalTransferResult, PEER_CORE_SCHEMA, PEER_PROTOCOL, PeerInvitation,
+    PeerNetworkStatus, PeerOriginalStatus, PeerSyncResult,
 };
-use exomind_core::{DeviceId, ProfileId};
+use exomind_core::{DeviceId, OriginalId, ProfileId};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -241,6 +242,55 @@ pub(super) async fn beta_peer_revoke(
             expected_generation,
         )?;
         Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub(super) async fn beta_peer_original_status(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    original_id: OriginalId,
+) -> Result<PeerOriginalStatus, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state.peers.original_status(profile_id, original_id)
+    })
+    .await
+}
+#[tauri::command]
+pub(super) async fn beta_peer_original_fetch(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    original_id: OriginalId,
+    peer_device_id: DeviceId,
+    request_id: Uuid,
+) -> Result<OriginalTransferResult, Failure> {
+    trusted_window(&window, state.inner())?;
+    if state.closing.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(HostError::Stopped.into());
+    }
+    state
+        .peers
+        .fetch_original(profile_id, peer_device_id, original_id, request_id)
+        .await
+        .map_err(Failure::from)
+}
+#[tauri::command]
+pub(super) async fn beta_peer_original_cancel(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    original_id: OriginalId,
+    request_id: Uuid,
+) -> Result<bool, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .peers
+            .cancel_original(profile_id, original_id, request_id)
     })
     .await
 }

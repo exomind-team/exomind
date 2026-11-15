@@ -14,11 +14,12 @@ mod originals_http;
 mod peers;
 pub use peers::{
     ApprovePeerInvitationReplacement, CreatePeerInvitation, DeviceIdentityInfo,
-    IssuedPeerInvitation, PEER_CORE_SCHEMA, PEER_PROTOCOL, PeerCancellation, PeerCapabilities,
-    PeerChannel, PeerClaimReceipt, PeerConnectionView, PeerInvitation, PeerInvitationOffer,
-    PeerInvitationState, PeerInvitationStatus, PeerJoinClaim, PeerJoinConfirmation, PeerJoinState,
-    PeerJoinStatus, PeerMember, PeerMembershipEvidence, PeerNetwork, PeerNetworkSettings,
-    PeerNetworkStatus, PeerPin, PeerProbe, PeerReadyAcknowledgement, PeerReadyReceipt,
+    IssuedPeerInvitation, OriginalTransferOptions, OriginalTransferResult, PEER_CORE_SCHEMA,
+    PEER_PROTOCOL, PeerCancellation, PeerCapabilities, PeerChannel, PeerClaimReceipt,
+    PeerConnectionView, PeerInvitation, PeerInvitationOffer, PeerInvitationState,
+    PeerInvitationStatus, PeerJoinClaim, PeerJoinConfirmation, PeerJoinState, PeerJoinStatus,
+    PeerMember, PeerMembershipEvidence, PeerNetwork, PeerNetworkSettings, PeerNetworkStatus,
+    PeerOriginalStatus, PeerPin, PeerProbe, PeerReadyAcknowledgement, PeerReadyReceipt,
     PeerRejoinExpectation, PeerServiceKind, PeerServiceOutcome, PeerSyncOptions, PeerSyncResult,
     PeerTransportListener, PeerTransportOptions,
 };

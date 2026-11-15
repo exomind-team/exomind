@@ -31,6 +31,17 @@ function observers(){
   vi.stubGlobal('ResizeObserver',Resize);vi.stubGlobal('MutationObserver',Mutation);return{resize,mutation};
 }
 describe('Beta editable visibility after keyboard resize',()=>{
+  it('scrolls the real content owner when a field is inside visualViewport but covered by the Alpha bottom bar',()=>{
+    const target=field(254,292);const region=document.createElement('div');region.dataset.betaView='now';region.style.overflowY='auto';document.body.append(region);region.append(target.input);
+    vi.spyOn(region,'getBoundingClientRect').mockReturnValue({top:58,bottom:281,left:0,right:360,width:360,height:223}as DOMRect);
+    Object.defineProperties(region,{clientHeight:{value:223},scrollHeight:{value:696}});
+    let offset=0;Object.defineProperty(region,'scrollTop',{get:()=>offset,set:value=>{offset=value;target.setRect(254-value,292-value);}});
+    const bar=document.createElement('nav');bar.dataset.testid='mobile-bottom-tab';document.body.append(bar);
+    vi.spyOn(bar,'getBoundingClientRect').mockReturnValue({top:272,bottom:341,left:0,right:360,width:360,height:69}as DOMRect);
+    target.input.focus();const viewport=install(341,360);viewport.dispatchEvent(new Event('resize'));vi.advanceTimersByTime(20);
+    expect(offset).toBeGreaterThan(0);expect(target.input.getBoundingClientRect().top).toBeGreaterThanOrEqual(58);expect(target.input.getBoundingClientRect().bottom).toBeLessThanOrEqual(272);
+    expect(target.scroll).not.toHaveBeenCalled();expect(document.activeElement).toBe(target.input);
+  });
   it('does not reopen observers for hidden resize/input and waits for a new visible focus',()=>{
     let hidden=false;vi.spyOn(document,'hidden','get').mockImplementation(()=>hidden);
     const events=observers(),target=field(20,116);target.input.focus();const viewport=install(317,360);viewport.dispatchEvent(new Event('resize'));vi.advanceTimersByTime(20);
