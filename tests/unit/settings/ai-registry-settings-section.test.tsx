@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
-import { saveAIRegistryOfferingDraft } from '@/lib/ai-registry/admin';
+import { listAIRegistryOfferings, saveAIRegistryOfferingDraft } from '@/lib/ai-registry/admin';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -71,5 +71,21 @@ describe('SettingsPage AI registry section（设置页 AI 注册中心分组）'
     expect(shell.className).toContain('max-h-[calc(100vh-32px)]');
     expect(scrollRegion.className).toContain('overflow-y-auto');
     expect(scrollRegion.className).toContain('overscroll-contain');
+  });
+
+  it('keeps Alpha create/edit persistence wired through the extracted shared offering form', () => {
+    render(<SettingsPage/>);
+    fireEvent.click(screen.getByText('AI Registry').closest('button') as HTMLButtonElement);
+    fireEvent.change(screen.getByPlaceholderText('Primary LLM Channel'), { target: { value: 'Adapter parity channel' } });
+    fireEvent.change(screen.getByPlaceholderText('gpt-4o'), { target: { value: 'synthetic-alpha-model' } });
+    fireEvent.change(screen.getByPlaceholderText('sk-...'), { target: { value: 'synthetic-alpha-key' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    const created = listAIRegistryOfferings().find(item => item.channelName === 'Adapter parity channel');
+    expect(created).toMatchObject({ modelName: 'synthetic-alpha-model', apiKeyConfigured: true });
+    expect(screen.getByText('AI Registry 已保存：Adapter parity channel / llm.chat')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    fireEvent.change(screen.getByPlaceholderText('gpt-4o'), { target: { value: 'synthetic-alpha-updated' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(listAIRegistryOfferings().filter(item => item.channelName === 'Adapter parity channel')).toEqual([expect.objectContaining({ offeringId: created!.offeringId, modelName: 'synthetic-alpha-updated' })]);
   });
 });
