@@ -1,4 +1,4 @@
-import { useEffect,useRef,useState,useSyncExternalStore,type KeyboardEvent } from 'react';
+import { useEffect,useLayoutEffect,useRef,useState,useSyncExternalStore,type KeyboardEvent } from 'react';
 import { FocusTimerView,type FocusTimerViewModel } from '@/ui/app/components/FocusTimerView';
 import { TimeBlockFeedbackDialog } from '@/ui/app/components/TimeBlockFeedbackDialog';
 import { Button } from '@/components/ui/button';
@@ -8,15 +8,18 @@ import { BetaTimeblockController } from './timeblocks-controller';
 const message=(error:unknown)=>error&&typeof error==='object'&&'message'in error?String(error.message):'时间块操作尚未确认，请查证后重试';
 type Panel={kind:'start'}|{kind:'rotate';from:string;name:string}|null;
 type FeedbackTarget={id:string;kind:'submit'|'append'}|null;
+export interface BetaFocusHandoffTarget {handoffId:string;blockId:string;attempt:number}
 
 /** Presentation is the actual Alpha View. This component owns only transient
  * panel/dialog choices; controller/journal/Host own intent and business state. */
-export function BetaFocusTimer({controller,client,profileId,onCommitted}:{controller:BetaTimeblockController;client:BetaClient;profileId:string;onCommitted?:()=>void}){
+export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffTarget,onHandoffReady}:{controller:BetaTimeblockController;client:BetaClient;profileId:string;onCommitted?:()=>void;handoffTarget?:BetaFocusHandoffTarget;onHandoffReady?:(id:string,hint:string,attempt:number)=>void}){
   const state=useSyncExternalStore(controller.subscribe,controller.snapshot);
   const [panel,setPanel]=useState<Panel>(null);
   const initializedOwner=useRef<BetaTimeblockController|null>(null);
   const [custom,setCustom]=useState({editing:false,text:String(state.draft.minutes)});
   const [feedback,setFeedback]=useState<FeedbackTarget>(null);
+  const [openedHandoff,setOpenedHandoff]=useState('');const readyHandoff=useRef('');
+  const [feedbackPortal,setFeedbackPortal]=useState<HTMLDivElement|null>(null);
   const [error,setError]=useState('');const [roster,setRoster]=useState<Record<string,string>>({});const [choice,setChoice]=useState('');
   const [,tick]=useState(0);const alive=useRef(true);
   const configInput=useRef<HTMLTextAreaElement>(null);const customInput=useRef<HTMLInputElement>(null);
@@ -58,6 +61,33 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted}:{contro
   const quick=(event:KeyboardEvent<HTMLElement>)=>!event.nativeEvent.isComposing&&event.key==='Enter'&&(event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey;
   function applyMinutes(raw:string){const number=Number.parseInt(raw,10);const minutes=Number.isFinite(number)?Math.max(1,Math.min(720,number)):state.draft.minutes;setDraft({mode:'countdown',minutes});setCustom({editing:false,text:String(minutes)});}
   const active=state.remote?.active;const clock=controller.displayClock();
+  const pendingFeedback=[...new Set([...(state.remote?.pending_feedback??[]),...(active?.phase==='feedback_pending'?[active.block_id]:[])])];
+  const handoffKey=handoffTarget?`${handoffTarget.handoffId}:${handoffTarget.attempt}`:'';
+  const handoffPending=!!handoffTarget&&pendingFeedback.includes(handoffTarget.blockId);
+  useEffect(()=>{
+    if(!handoffTarget||!state.remote||disabled)return;
+    if(openedHandoff!==handoffKey){
+      setOpenedHandoff(handoffKey);
+      // Only this explicit notification/open attempt opens a dialog. A closed
+      // dialog stays closed across the controller's periodic snapshot reads.
+      setPanel(null);setFeedback(handoffPending?{id:handoffTarget.blockId,kind:'submit'}:null);
+    }else if(!handoffPending&&feedback?.id===handoffTarget.blockId&&feedback.kind==='submit')setFeedback(null);
+  },[handoffKey,handoffTarget,state.remote,disabled,handoffPending,feedback,openedHandoff]);
+  useLayoutEffect(()=>{
+    if(!handoffTarget||!state.remote||disabled||openedHandoff!==handoffKey||readyHandoff.current===handoffKey)return;
+    if(handoffPending){
+      if(feedback?.id!==handoffTarget.blockId||feedback.kind!=='submit')return;
+      const marker=feedbackPortal?.dataset.betaFeedbackBlockId===handoffTarget.blockId&&feedbackPortal.dataset.betaFeedbackKind==='submit'?feedbackPortal:null;
+      const dialog=marker?.closest('[role="dialog"]');
+      if(!marker?.isConnected||dialog?.getAttribute('data-state')!=='open'||!dialog.querySelector('[data-testid="new-focus-feedback-textarea"]'))return;
+    }else if(feedback?.id===handoffTarget.blockId&&feedback.kind==='submit')return;
+    // The section alone is mounted before remote hydration. ACK readiness now
+    // requires its real snapshot, and pending sources require the exact form.
+    readyHandoff.current=handoffKey;
+    const prefix=`提醒时间块 ${handoffTarget.blockId.slice(0,8)}：`;
+    const hint=handoffPending?prefix+'行动已结束，等待反馈。':active?.block_id===handoffTarget.blockId?prefix+(active.phase==='completed'?'已完成；已打开来源档案的时间块。':active.phase==='paused'?'当前已暂停。':'当前仍在运行。'):'';
+    onHandoffReady?.(handoffTarget.handoffId,hint,handoffTarget.attempt);
+  },[handoffKey,handoffTarget,state.remote,disabled,openedHandoff,handoffPending,feedback,feedbackPortal,active,onHandoffReady]);
   let model:FocusTimerViewModel={phase:'idle'};
   if(panel)model={phase:'config',name:state.draft.name,mode:state.draft.mode,minutes:state.draft.minutes,custom:{editing:custom.editing,draft:custom.text}};
   else if(active&&clock)model={phase:'running',name:{text:active.name||'未命名时间块',draft:'',editing:false,saving:false,readOnly:true},clock,
@@ -101,9 +131,9 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted}:{contro
         onSubmit={()=>submitFeedback()} submitLabel={feedback?.kind==='append'?'确认追加':'确认反馈'} submitDisabled={disabled||!feedbackDraft.trim()} submitTestId="new-focus-feedback-confirm" tasks={[]}
         textareaClassName="min-h-[96px] resize-none dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
         submitButtonClassName="inline-flex items-center justify-center rounded-[10px] bg-brand-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 hover:bg-brand-accent/90"
-        extraContent={feedback?.kind==='submit'?<Button variant="outline" disabled={disabled} onClick={()=>submitFeedback(true)}>明确跳过反馈</Button>:undefined}/>}}/>
+        extraContent={feedback?<div ref={setFeedbackPortal} data-beta-feedback-block-id={feedback.id} data-beta-feedback-kind={feedback.kind}>{feedback.kind==='submit'&&<Button variant="outline" disabled={disabled} onClick={()=>submitFeedback(true)}>明确跳过反馈</Button>}</div>:undefined}/>}}/>
       {clock?.stale&&<p className="px-5 text-xs text-muted">显示等待服务刷新；界面不会自行结束时间块</p>}
-      <div className="flex flex-wrap gap-2 px-5 pb-2">{state.remote.pending_feedback.filter(id=>id!==active?.block_id).map(id=><Button key={id} variant="ghost" size="sm" disabled={disabled} onClick={()=>setFeedback({id,kind:'submit'})}>填写反馈 {id.slice(0,8)}</Button>)}</div>
+      <div className="flex flex-wrap gap-2 px-5 pb-2">{pendingFeedback.map(id=><Button key={id} aria-label={`填写反馈 ${id.slice(0,8)}`} variant="ghost" size="sm" disabled={disabled} onClick={()=>setFeedback({id,kind:'submit'})}>填写反馈 {roster[id]??id.slice(0,8)}</Button>)}</div>
     </>}
   </section>;
 }

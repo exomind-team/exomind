@@ -77,7 +77,7 @@ export function BetaApp({ client: injected, sourceStore, intentJournal, intentPr
   </PageShell>;
 }
 
-type DeadlineLocation={handoffId:string;profileId:string};
+type DeadlineLocation={handoffId:string;profileId:string;blockId:string;attempt:number};
 function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, intentJournal, intentPredecessor }: { client: BetaClient; peers:BetaPeersClient|null; handoffs:BetaDeadlineHandoffsClient|null; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor }) {
   const [status, setStatus] = useState<BetaStatus | null>(null);
   const [profiles, setProfiles] = useState<BetaProfile[]>([]);
@@ -99,7 +99,8 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   const generation = useRef(0);
   const selectionScope=useRef<{generation:number;deviceId:string;profiles:BetaProfile[]}|null>(null);
   const [deadlineLocation,setDeadlineLocation]=useState<DeadlineLocation|null>(null);
-  const locationWaiter=useRef<{id:string;finish(error?:Error):void}|null>(null);
+  const locationWaiter=useRef<{id:string;attempt:number;finish(error?:Error,hint?:string):void}|null>(null);
+  const locationSequence=useRef(0);
   useEffect(()=>()=>{locationWaiter.current?.finish(new BetaApiError('handoff_location_pending','来源档案已变化'));},[client]);
   useEffect(() => {
     const current = ++generation.current;
@@ -179,17 +180,18 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     const active=document.activeElement;if(active instanceof HTMLElement&&active.closest('[data-beta-view]'))active.blur();
     setSection('now');
     try{
-      await new Promise<void>((resolve,reject)=>{
+      const hint=await new Promise<string>((resolve,reject)=>{
         locationWaiter.current?.finish(new BetaApiError('handoff_location_pending','通知入口已变化'));
         let timer:ReturnType<typeof setTimeout>|undefined;
         const abort=()=>owned.finish(new BetaApiError('handoff_location_pending','通知入口已变化'));
-        const owned={id:target.handoff_id,finish(error?:Error){clearTimeout(timer);signal.removeEventListener('abort',abort);if(locationWaiter.current===owned)locationWaiter.current=null;if(error)reject(error);else resolve();}};
+        const attempt=++locationSequence.current;
+        const owned={id:target.handoff_id,attempt,finish(error?:Error,hint?:string){clearTimeout(timer);signal.removeEventListener('abort',abort);if(locationWaiter.current===owned)locationWaiter.current=null;if(error)reject(error);else resolve(hint??'');}};
         locationWaiter.current=owned;timer=setTimeout(()=>owned.finish(new BetaApiError('handoff_location_pending','来源档案尚未完成定位')),8000);
         signal.addEventListener('abort',abort,{once:true});if(signal.aborted){abort();return;}
-        setDeadlineLocation({handoffId:target.handoff_id,profileId:target.profile_id});
+        setDeadlineLocation({handoffId:target.handoff_id,profileId:target.profile_id,blockId:target.block_id,attempt});
       });
       if(!wanted())throw new BetaApiError('handoff_location_pending','通知入口已变化');
-      return message;
+      return hint||message;
     }finally{if(current===generation.current&&selectionScope.current===scope)setDeadlineLocation(previous=>previous?.handoffId===target.handoff_id?null:previous);}
   }
   const handoff=useBetaDeadlineHandoff(handoffs,status?`${status.device_id}:${status.runtime_id??''}:${generation.current}`:'',!!status&&!!prepareSwitch.current&&!switching&&!creating,openDeadlineHandoff);
@@ -217,11 +219,11 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     {loading && <p role="status" className="p-5 text-sm text-muted">正在连接…</p>}
     {error && <div role="alert" className="flex items-center gap-2 px-5 py-3 text-sm text-destructive">{error}
       {!status && <Button variant="outline" onClick={() => setReload(value => value + 1)}>重新连接</Button>}</div>}
-    {status && <DeviceWorkspace key={`${status.device_id}`} active={section==='now'} eventRevision={eventRevision} client={client} deviceId={status.device_id} profileId={profileId} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} deadlineLocation={deadlineLocation} onDeadlineLocated={id=>{const waiter=locationWaiter.current;if(waiter?.id===id)waiter.finish();}} />}
+    {status && <DeviceWorkspace key={`${status.device_id}`} active={section==='now'} eventRevision={eventRevision} client={client} deviceId={status.device_id} profileId={profileId} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} deadlineLocation={deadlineLocation} onDeadlineLocated={(id,hint,attempt)=>{const waiter=locationWaiter.current;if(waiter?.id===id&&waiter.attempt===attempt)waiter.finish(undefined,hint);}} />}
   </PageShell>}/><BetaProfileDialog open={profileDialog} onOpenChange={setProfileDialog} profiles={profiles} profileId={profileId} loading={loading} disabled={persistenceBusy||switching||!prepareSwitch.current} creating={creating} name={name} onNameChange={setName} onCreate={create} onSelect={changeProfile} error={error}/></>;
 }
 
-function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision, deadlineLocation, onDeadlineLocated }: { client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:MutableRefObject<(()=>Promise<void>)|null>; active:boolean;eventRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string)=>void }) {
+function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision, deadlineLocation, onDeadlineLocated }: { client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?:LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:MutableRefObject<(()=>Promise<void>)|null>; active:boolean;eventRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void }) {
   type Owners={capture:BetaDraftController;focus:BetaTimeblockController|null;profileId:string};
   const [owners, setOwners] = useState<Owners | null>(null);
   const [error, setError] = useState('');
@@ -296,7 +298,7 @@ async function readTimeline(client:BetaClient,profileId:string,query:BetaQuery):
   if(client.timelinePage)return client.timelinePage(profileId,query);
   const page=await client.eventsPage(profileId,query);return{...page,items:page.items.map(record=>({kind:'capture' as const,record}))};
 }
-function ProfileWorkspace({ client, controller, focus, profileId, visible, externalRevision, deadlineLocation, onDeadlineLocated }: { client: BetaClient; controller: BetaDraftController; focus:BetaTimeblockController|null; profileId: string; visible:boolean;externalRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string)=>void }) {
+function ProfileWorkspace({ client, controller, focus, profileId, visible, externalRevision, deadlineLocation, onDeadlineLocated }: { client: BetaClient; controller: BetaDraftController; focus:BetaTimeblockController|null; profileId: string; visible:boolean;externalRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void }) {
   const drafts = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const [page, setPage] = useState<BetaTimelinePage | null>(null);
   const pageRef=useRef(page);pageRef.current=page;
@@ -308,11 +310,6 @@ function ProfileWorkspace({ client, controller, focus, profileId, visible, exter
   const alive = useRef(true); const now = useBetaNow();
   const mode=useBetaDateDisplayMode();
   const readingTop=useRef(0);const followTail=useRef(true);
-  useLayoutEffect(()=>{
-    if(!visible||!focus||deadlineLocation?.profileId!==profileId)return;
-    const region=scroll.current?.parentElement?.querySelector<HTMLElement>('section[aria-label="时间块"]');
-    if(region){region.scrollIntoView({block:'start',inline:'nearest',behavior:'instant'});onDeadlineLocated(deadlineLocation.handoffId);}
-  },[deadlineLocation,profileId,visible,focus,onDeadlineLocated]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     const same=pageOwner.current.client===client&&pageOwner.current.profileId===profileId&&pageOwner.current.query===query;
@@ -364,7 +361,17 @@ function ProfileWorkspace({ client, controller, focus, profileId, visible, exter
   const preparing = draft?.files?.some(file => !file.original || file.state === 'preparing') ?? false;
   return <>
     {focus&&<MainOverlayBridge client={client} capture={controller} focus={focus} profileId={profileId} onCommitted={()=>setRevision(value=>value+1)}/>}
-    {focus&&<BetaFocusTimer controller={focus} client={client} profileId={profileId} onCommitted={()=>setRevision(value=>value+1)}/>}
+    {focus&&<BetaFocusTimer controller={focus} client={client} profileId={profileId}
+      onCommitted={()=>setRevision(value=>value+1)}
+      handoffTarget={visible&&deadlineLocation?.profileId===profileId?deadlineLocation:undefined}
+      onHandoffReady={(id,hint,attempt)=>{
+        const region=scroll.current?.parentElement?.querySelector<HTMLElement>('section[aria-label="时间块"]');
+        if(region){
+          region.scrollIntoView({block:'start',inline:'nearest',behavior:'instant'});
+          onDeadlineLocated(id,hint,attempt);
+        }
+      }}/>
+    }
     {!client.timelinePage&&<p className="px-5 py-1 text-[11px] text-muted">此连接仅提供兼容记录历史，尚未提供完整时间线</p>}
     <div className="flex flex-wrap gap-2 border-b border-border-page px-5 py-2">
       <form className="flex min-w-0 flex-1 gap-2" onSubmit={event => { event.preventDefault(); setQuery(search); }}>
