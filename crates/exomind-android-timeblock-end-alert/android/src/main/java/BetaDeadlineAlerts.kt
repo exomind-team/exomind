@@ -9,6 +9,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import app.tauri.plugin.JSObject
@@ -26,6 +27,12 @@ object BetaDeadlineAlerts {
   private val gate=BetaDeadlineGate()
   private var handoffFailure=false
   @Synchronized fun noteHandoffFailure() { handoffFailure=true }
+  internal fun traceHandoff(stage:String,handoffId:String?=null,profileId:String?=null,blockId:String?=null,deadlineId:String?=null) {
+    if(!stage.matches(Regex("[a-z_]{1,48}")))return
+    fun safe(value:String?)=if(BetaHandoffPolicy.uuid(value))value else "none"
+    // Diagnostic availability must not change commit/ACK/launch semantics.
+    runCatching { Log.i("ExoMindBetaHandoff","stage=$stage handoff=${safe(handoffId)} profile=${safe(profileId)} block=${safe(blockId)} deadline=${safe(deadlineId)}") }
+  }
   private fun prefs(context: Context) = context.getSharedPreferences("exomind.beta.deadline.alerts", Context.MODE_PRIVATE)
   private fun manager(context: Context) = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
   private fun exact(context: Context): Boolean = runCatching { manager(context)?.let { Build.VERSION.SDK_INT < Build.VERSION_CODES.S || it.canScheduleExactAlarms() } ?: false }.getOrDefault(false)
@@ -78,6 +85,7 @@ object BetaDeadlineAlerts {
     val currentPending=pending(context)
     val acknowledged=if(BetaHandoffPolicy.acknowledge(currentPending?.optString("handoffId"),acknowledgeHandoffId)) {
       check(prefs(context).edit().remove("pending_handoff").commit()) { "handoff acknowledgement persistence failed" }
+      traceHandoff("ack_committed",handoffId=acknowledgeHandoffId)
       acknowledgeHandoffId
     }else null
     val current=receipts(context);val entries=load(context)
@@ -120,18 +128,20 @@ object BetaDeadlineAlerts {
   }
   @Synchronized
   fun recordHandoff(context:Context,intent:Intent?):Boolean {
-    val uri=intent?.data ?: return false
-    if(uri.scheme!="exomind-beta" || uri.host!="open-deadline" || uri.pathSegments.size!=1 || uri.port!=-1 || uri.query!=null || uri.fragment!=null)return false
+    val uri=intent?.data ?: run { traceHandoff("tap_missing_marker");return false }
+    if(uri.scheme!="exomind-beta" || uri.host!="open-deadline" || uri.pathSegments.size!=1 || uri.port!=-1 || uri.query!=null || uri.fragment!=null){traceHandoff("tap_invalid_marker");return false}
     val id=uri.lastPathSegment ?: return false
     val profile=intent.getStringExtra("betaProfileId");val block=intent.getStringExtra("betaBlockId")
     val known=scopes(context).optJSONObject(id)
-    if(!BetaHandoffPolicy.accepts(receipts(context).contains(id),known?.optString("profile"),known?.optString("block"),profile,block,id))return false
+    if(!BetaHandoffPolicy.accepts(receipts(context).contains(id),known?.optString("profile"),known?.optString("block"),profile,block,id)){traceHandoff("tap_unknown_source",profileId=profile,blockId=block,deadlineId=id);return false}
     // Latest explicit tap wins the one durable slot. Old ACKs cannot clear it.
     val handoff=JSONObject().put("handoffId",UUID.randomUUID().toString()).put("profileId",profile).put("blockId",block).put("deadlineId",id)
     check(prefs(context).edit().putString("pending_handoff",handoff.toString()).commit()) { "notification handoff persistence failed" }
+    traceHandoff("tap_committed",handoffId=handoff.getString("handoffId"),profileId=profile,blockId=block,deadlineId=id)
     handoffFailure=false
     // Ordinary Activity recreation must not manufacture a fresh handoff.
     intent.data=null;intent.removeExtra("betaProfileId");intent.removeExtra("betaBlockId")
+    traceHandoff("tap_markers_consumed",handoffId=handoff.getString("handoffId"),profileId=profile,blockId=block,deadlineId=id)
     return true
   }
   private fun schedule(context: Context,id:String,trigger:Long) {
@@ -152,7 +162,7 @@ object BetaDeadlineAlerts {
     val notifications=NotificationManagerCompat.from(context)
     if(!notificationAllowed(context))return
     if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O) notifications.createNotificationChannel(NotificationChannel(CHANNEL,"时间块到点",NotificationManager.IMPORTANCE_HIGH))
-    val launch=context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return
+    val launch=Intent(context,BetaDeadlineHandoffActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     // Scope extras are hints for presentation, never Core commands or authority.
     launch.putExtra("betaProfileId",entry.getString("profile")).putExtra("betaBlockId",entry.getString("block"))
     launch.data=Uri.parse("exomind-beta://open-deadline/$id")

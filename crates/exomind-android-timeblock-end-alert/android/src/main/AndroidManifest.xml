@@ -6,6 +6,13 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application>
+        <activity
+            android:name="app.tauri.exomindtimeblockendalert.BetaDeadlineHandoffActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
         <receiver
             android:name="app.tauri.exomindtimeblockendalert.TimeblockEndAlertReceiver"
             android:enabled="true"

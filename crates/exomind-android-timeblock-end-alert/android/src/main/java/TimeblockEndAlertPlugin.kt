@@ -61,11 +61,13 @@ class TimeblockEndAlertPlugin(private val activity: Activity) : Plugin(activity)
 
   override fun load(webView: WebView) {
     super.load(webView)
+    BetaDeadlineAlerts.traceHandoff("plugin_load")
     handleIntent(activity.intent)
   }
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
+    BetaDeadlineAlerts.traceHandoff("plugin_new_intent")
     handleIntent(intent)
   }
 
