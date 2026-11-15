@@ -42,6 +42,7 @@ src-tauri/gen/android/*.iml
 src-tauri/gen/android/.idea/
 src-tauri/gen/android/gradle-app.setting*
 crates/exomind-android-keepalive/android/.tauri/
+crates/exomind-android-timeblock-end-alert/android/.tauri/
 *.jks
 *.keystore
 
