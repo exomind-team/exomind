@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Settings, Target, Waypoints } from 'lucide-react';
 import { AlphaDesktopShellView, AlphaDesktopSidebarView, AlphaMobileShellView } from '@/ui/app/components/AlphaAppShellView';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import { observeBetaCompactEditing } from './compact-editing';
 
 export type BetaSection = 'now' | 'sync' | 'settings';
 const NAVIGATION = [
@@ -21,6 +22,7 @@ export function BetaAppShell({ section, onSectionChange, profileName, onProfileC
   settings: ReactNode;
 }) {
   const desktop = useIsDesktop();
+  const [compactEditing, setCompactEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(SIDEBAR_KEY) === 'true'; } catch { return false; } });
   const [preferenceError, setPreferenceError] = useState('');
   const [workspaceHost] = useState(() => {
@@ -39,6 +41,10 @@ export function BetaAppShell({ section, onSectionChange, profileName, onProfileC
   // A breakpoint changes only the shell's placement. The sole writer/Chat
   // portal keeps its identity and Web Lock while moving between shell mains.
   useEffect(() => { mountPoint.current?.append(workspaceHost); return () => workspaceHost.remove(); }, [workspaceHost]);
+  useEffect(() => {
+    if (desktop) { setCompactEditing(false); return; }
+    return observeBetaCompactEditing(workspaceHost, setCompactEditing);
+  }, [desktop, workspaceHost]);
   const items = NAVIGATION.map(item => ({ ...item, active: section === item.key }));
   const select = (next: BetaSection) => {
     if (next === section) return;
@@ -56,7 +62,7 @@ export function BetaAppShell({ section, onSectionChange, profileName, onProfileC
   const renderNavigationItem = (item: typeof items[number], view: { className: string; children: ReactNode; testId?: string }) =>
     <button type="button" data-testid={view.testId} aria-label={item.title} aria-current={item.active ? 'page' : undefined} title={item.title} className={view.className} onClick={() => select(item.key)}>{view.children}</button>;
   const slot=<div ref={attachWorkspace} className="h-full min-h-0 overflow-hidden"/>;
-  const shell=!desktop?<AlphaMobileShellView items={items} fillContainer renderNavigationItem={renderNavigationItem}>{slot}</AlphaMobileShellView>
+  const shell=!desktop?<AlphaMobileShellView items={items} fillContainer fullscreen={compactEditing} renderNavigationItem={renderNavigationItem}>{slot}</AlphaMobileShellView>
     :<AlphaDesktopShellView fillContainer sidebar={<AlphaDesktopSidebarView items={items} collapsed={collapsed}
     subtitle="外心 · Beta" renderNavigationItem={renderNavigationItem}
     onToggleCollapsed={() => {
