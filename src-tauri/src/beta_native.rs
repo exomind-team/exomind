@@ -922,7 +922,10 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
         builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
     }
     #[cfg(debug_assertions)]
-    {
+    if matches!(
+        std::env::var("EXOMIND_BETA_ENABLE_DEV_BRIDGE").as_deref(),
+        Ok("1")
+    ) {
         let mut bridge = tauri_plugin_mcp_bridge::Builder::new().bind_address("127.0.0.1");
         if let Some(port) = crate::dev_instance_paths::resolve_mcp_bridge_base_port() {
             bridge = bridge.base_port(port);

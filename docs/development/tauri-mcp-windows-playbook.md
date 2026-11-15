@@ -6,6 +6,8 @@
 
 > 本文中的实例名、端口、窗口标题、route、SQLite 路径、报告路径、session/anchor id 等，除非明确写成“通用规则”，否则都只表示对应阶段的现场样例，复用时必须替换为当前实例真值。
 
+> **Beta 独立入口**：默认不注册 MCP 调试桥，即使是 debug 内测构建。需要对隔离开发实例联调时，显式设置 `EXOMIND_BETA_ENABLE_DEV_BRIDGE=1`，再按实例端口设置 `EXOMIND_MCP_BRIDGE_BASE_PORT`。普通独立 exe/APK 启动不需要这两个变量；Alpha/旧入口行为不在此变更范围。
+
 ## 目的
 
 - 为后续 Agent 提供可复用的 Tauri MCP 调试路径，而不是每次从零摸索。
