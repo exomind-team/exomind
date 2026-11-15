@@ -40,6 +40,26 @@ struct FailureDetail {
 impl IntoResponse for HostError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::ModelConfigurationInvalid => (
+                StatusCode::BAD_REQUEST,
+                "model_configuration_invalid",
+                "Check the summary model address, model and credential fields",
+            ),
+            Self::ModelConfigurationConflict => (
+                StatusCode::CONFLICT,
+                "model_configuration_conflict",
+                "Summary model settings changed; reload before saving",
+            ),
+            Self::ModelConfigurationRecoveryRequired => (
+                StatusCode::CONFLICT,
+                "model_configuration_recovery_required",
+                "Summary model settings require recovery; recording remains available",
+            ),
+            Self::ModelConfigurationUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "model_configuration_unavailable",
+                "Summary model settings could not be read or saved",
+            ),
             Self::ClockUnavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "clock_unavailable",
@@ -434,6 +454,7 @@ fn router(host: Arc<BetaHost>, address: SocketAddr, frontend_origins: Vec<String
         .route("/beta/v1/profiles/:profile/receipts/:command", get(receipt))
         .merge(crate::originals_http::router())
         .merge(crate::timeblocks_http::router())
+        .merge(crate::model_config_http::router())
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(middleware::from_fn_with_state(
             Boundary {

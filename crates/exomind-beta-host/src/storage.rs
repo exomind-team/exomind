@@ -69,6 +69,9 @@ fn children_are_owned(root: &Path) -> Result<(), HostError> {
                 | crate::local_sources::INITIALIZED
                 | crate::peers::identity::DIRECTORY
                 | crate::peers::identity::INITIALIZED
+                | crate::model_config::DATABASE
+                | crate::model_config::JOURNAL
+                | crate::model_config::INITIALIZED
                 | CONNECTION
         ) && !(name.starts_with("connection.beta.") && name.ends_with(".tmp"))
         {

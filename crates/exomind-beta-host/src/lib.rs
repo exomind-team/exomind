@@ -3,9 +3,15 @@
 mod http;
 mod local_intents;
 mod local_sources;
+mod model_config;
+mod model_config_http;
+mod model_provider;
 pub use local_sources::{
     LocalSourceBegin, LocalSourceInfo, LocalSourceState, MAX_LOCAL_SOURCE_BYTES,
     MAX_LOCAL_SOURCE_CHUNK_BYTES,
+};
+pub use model_config::{
+    SummaryModelConfiguration, SummaryModelConfigurationCommand, SummaryModelSecretUpdate,
 };
 #[cfg(test)]
 mod original_tests;
@@ -83,6 +89,14 @@ pub enum HostError {
     Shutdown,
     #[error("request body exceeds the permitted size")]
     PayloadTooLarge,
+    #[error("summary model configuration requires recovery")]
+    ModelConfigurationRecoveryRequired,
+    #[error("summary model configuration persistence is unavailable")]
+    ModelConfigurationUnavailable,
+    #[error("summary model configuration changed; reload before saving")]
+    ModelConfigurationConflict,
+    #[error("summary model configuration is invalid")]
+    ModelConfigurationInvalid,
     #[error("all original verification slots are in use")]
     VerificationBusy,
     #[error("local UI intent requires recovery or completion of initialization")]
