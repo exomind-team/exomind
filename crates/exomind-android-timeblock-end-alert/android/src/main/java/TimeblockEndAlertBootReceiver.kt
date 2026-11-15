@@ -9,7 +9,10 @@ class TimeblockEndAlertBootReceiver : BroadcastReceiver() {
     when (intent.action) {
       Intent.ACTION_BOOT_COMPLETED,
       Intent.ACTION_MY_PACKAGE_REPLACED,
-      -> TimeblockEndAlertState.rescheduleAfterBoot(context)
+      -> {
+        TimeblockEndAlertState.rescheduleAfterBoot(context)
+        runCatching { BetaDeadlineAlerts.rescheduleAfterBoot(context) }.onFailure { android.util.Log.w("ExoMindBetaDeadline", "deadline reminders require recovery", it) }
+      }
     }
   }
 }

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::{plugin::TauriPlugin, Manager, Runtime};
+use tauri::{Manager, Runtime, plugin::TauriPlugin};
 
 #[cfg(target_os = "android")]
 use tauri::plugin::PluginHandle;
@@ -11,6 +11,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[cfg(target_os = "android")]
+    #[error("Android monotonic clock unavailable")]
+    ClockUnavailable,
     #[cfg(target_os = "android")]
     #[error(transparent)]
     PluginInvoke(#[from] tauri::plugin::mobile::PluginInvokeError),
@@ -40,6 +43,48 @@ pub struct NotificationPermissionStatus {
     pub state: String,
 }
 
+/// Native-only projection of accepted local operational deadlines. This is
+/// separate from Alpha's single timer contract and never authorizes Core writes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BetaDeadlineAlert {
+    pub deadline_id: String,
+    pub profile_id: String,
+    pub block_id: String,
+    pub due_at: i64,
+    pub remaining_ms: u64,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BetaDeadlineAlertStatus {
+    pub notification_permission: String,
+    pub exact_alarm: bool,
+    pub scheduled_count: usize,
+    pub delivered_count: usize,
+    pub pending_handoff: Option<BetaDeadlineHandoff>,
+    pub acknowledged_handoff_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BetaDeadlineHandoff {
+    pub handoff_id: String,
+    pub profile_id: String,
+    pub block_id: String,
+    pub deadline_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BetaDeadlineAlertsRequest {
+    alerts: Vec<BetaDeadlineAlert>,
+    expires_at_elapsed_ms: u64,
+    acknowledge_handoff_id: Option<String>,
+    preserve_alerts: bool,
+}
+
 pub struct AndroidTimeblockEndAlert<R: Runtime> {
     #[cfg(target_os = "android")]
     mobile_plugin_handle: PluginHandle<R>,
@@ -48,6 +93,50 @@ pub struct AndroidTimeblockEndAlert<R: Runtime> {
 }
 
 impl<R: Runtime> AndroidTimeblockEndAlert<R> {
+    pub fn sync_beta_deadlines(
+        &self,
+        alerts: Vec<BetaDeadlineAlert>,
+        acknowledge_handoff_id: Option<String>,
+        preserve_alerts: bool,
+    ) -> Result<BetaDeadlineAlertStatus> {
+        #[cfg(target_os = "android")]
+        {
+            let mut sample = std::mem::MaybeUninit::<libc::timespec>::uninit();
+            // SAFETY: CLOCK_BOOTTIME writes one ABI-correct timespec to a live
+            // aligned allocation. Android elapsedRealtime uses this same clock,
+            // including suspend; wall-clock rollback cannot revive queued work.
+            if unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, sample.as_mut_ptr()) } != 0 {
+                return Err(Error::ClockUnavailable);
+            }
+            let sample = unsafe { sample.assume_init() };
+            let now = (sample.tv_sec as u64)
+                .saturating_mul(1000)
+                .saturating_add(sample.tv_nsec as u64 / 1_000_000);
+            self.mobile_plugin_handle
+                .run_mobile_plugin(
+                    "syncBetaDeadlines",
+                    BetaDeadlineAlertsRequest {
+                        alerts,
+                        expires_at_elapsed_ms: now.saturating_add(5000),
+                        acknowledge_handoff_id,
+                        preserve_alerts,
+                    },
+                )
+                .map_err(Into::into)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (alerts, acknowledge_handoff_id, preserve_alerts);
+            Ok(BetaDeadlineAlertStatus {
+                notification_permission: "unavailable".into(),
+                exact_alarm: false,
+                scheduled_count: 0,
+                delivered_count: 0,
+                pending_handoff: None,
+                acknowledged_handoff_id: None,
+            })
+        }
+    }
     pub fn schedule_end_alert(&self, request: ScheduleTimeblockEndAlertRequest) -> Result<()> {
         #[cfg(target_os = "android")]
         {

@@ -237,6 +237,7 @@ fn assert_no_fake_capture(r: &Rig) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_controller_explicit_original_fetch_is_verified_then_idle_and_offline_is_truthful() {
+    let _discovery = crate::peers::test_discovery::lease().await;
     let bytes: Vec<u8> = (0..(MAX_ORIGINAL_CHUNK_BYTES * 2 + 713))
         .map(|i| ((i as u64 * 131 + 255) % 256) as u8)
         .collect();

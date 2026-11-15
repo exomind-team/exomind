@@ -2,6 +2,8 @@
 //! member, local owner, human writer or grant.
 mod authorization;
 mod original_transfer;
+#[cfg(test)]
+mod test_discovery;
 pub use original_transfer::{OriginalTransferOptions, OriginalTransferResult};
 pub(crate) mod framing;
 pub(crate) mod identity;

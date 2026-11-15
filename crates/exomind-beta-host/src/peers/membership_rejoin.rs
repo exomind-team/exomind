@@ -231,7 +231,7 @@ impl BetaHost {
         }
         let r = state.resources.as_mut().ok_or(HostError::Stopped)?;
         let tx = store::transaction(&mut r.persistence.auth)?;
-        let now = store::now(&tx, self.clock.sample().wall_ms)?;
+        let now = store::now(&tx, self.clock.sample()?.wall_ms)?;
         let mut invitation =
             store::invitation(&tx, request.invitation_id)?.ok_or(HostError::NotFound)?;
         validate_invitation(&invitation, request.invitation_id)?;
@@ -336,7 +336,7 @@ impl BetaHost {
         let r = state.resources.as_mut().ok_or(HostError::Stopped)?;
         r.core.local_human(signed.offer.profile_id)?;
         let tx = store::transaction(&mut r.persistence.auth)?;
-        let now = store::now(&tx, self.clock.sample().wall_ms)?;
+        let now = store::now(&tx, self.clock.sample()?.wall_ms)?;
         let mut pending = store::pending(&tx, claim_id)?;
         if let Some(existing) = &pending {
             validate_pending(existing, claim_id)?;

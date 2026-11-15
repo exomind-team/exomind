@@ -560,7 +560,7 @@ impl BetaHost {
             .find(|p| p.profile_id == request.profile_id)
             .ok_or(HostError::NotFound)?;
         let tx = store::transaction(&mut resources.persistence.auth)?;
-        let now = store::now(&tx, self.clock.sample().wall_ms)?;
+        let now = store::now(&tx, self.clock.sample()?.wall_ms)?;
         if let Some(existing) = store::invitation(&tx, request.invitation_id)? {
             validate_invitation(&existing, request.invitation_id)?;
             if existing.request_hash != request_hash {
@@ -622,7 +622,7 @@ impl BetaHost {
         self.owner(owner)?;
         let r = state.resources.as_mut().ok_or(HostError::Stopped)?;
         let tx = store::transaction(&mut r.persistence.auth)?;
-        let now = store::now(&tx, self.clock.sample().wall_ms)?;
+        let now = store::now(&tx, self.clock.sample()?.wall_ms)?;
         let invitation = store::invitation(&tx, id)?.ok_or(HostError::NotFound)?;
         validate_invitation(&invitation, id)?;
         let result = live_invitation_status(&tx, &invitation, now)?;
@@ -663,7 +663,7 @@ impl BetaHost {
         self.owner(owner)?;
         let r = state.resources.as_mut().ok_or(HostError::Stopped)?;
         let tx = store::transaction(&mut r.persistence.auth)?;
-        let now = store::now(&tx, self.clock.sample().wall_ms)?;
+        let now = store::now(&tx, self.clock.sample()?.wall_ms)?;
         if let Some(pending) = store::pending(&tx, claim_id)? {
             validate_pending(&pending, claim_id)?;
             if pending.signed != signed || pending.binding != binding {
@@ -724,7 +724,7 @@ impl BetaHost {
             .cloned()
             .ok_or(HostError::PeerIdentityUnavailable)?;
         let tx = store::transaction(&mut r.persistence.auth)?;
-        let now = store::now(&tx, self.clock.sample().wall_ms)?;
+        let now = store::now(&tx, self.clock.sample()?.wall_ms)?;
         if let Some(existing) = store::claim(&tx, binding.claim_id)? {
             validate_claim(&existing, binding.claim_id)?;
             if existing.binding != binding {

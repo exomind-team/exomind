@@ -19,6 +19,7 @@ class KeepaliveArgs {
 
 @TauriPlugin
 class RuntimeKeepalivePlugin(private val activity: Activity) : Plugin(activity) {
+    private var background = false
     private val appContext: Context
         get() = activity.applicationContext
 
@@ -33,8 +34,8 @@ class RuntimeKeepalivePlugin(private val activity: Activity) : Plugin(activity) 
                 args.text,
             )
 
-            if (args.enabled) {
-                RuntimeKeepaliveState.stopService(appContext)
+            if (args.enabled && background) {
+                RuntimeKeepaliveState.startService(appContext)
             } else {
                 RuntimeKeepaliveState.stopService(appContext)
             }
@@ -46,12 +47,14 @@ class RuntimeKeepalivePlugin(private val activity: Activity) : Plugin(activity) 
     }
 
     override fun onStop() {
+        background = true
         if (RuntimeKeepaliveState.isEnabled(appContext)) {
             RuntimeKeepaliveState.startService(appContext)
         }
     }
 
     override fun onResume() {
+        background = false
         RuntimeKeepaliveState.stopService(appContext)
     }
 }

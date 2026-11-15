@@ -349,7 +349,7 @@ struct Clock {
     host: std::sync::Mutex<std::sync::Weak<BetaHost>>,
 }
 impl HostClock for Clock {
-    fn sample(&self) -> HostClockSample {
+    fn sample(&self) -> Result<HostClockSample, HostError> {
         if let Some(host) = self.host.lock().unwrap().upgrade() {
             // Verify the decision boundary even without a competing holder.
             // A started-worker signal alone cannot prove an old gate-external
@@ -359,11 +359,11 @@ impl HostClock for Clock {
                 Err(std::sync::TryLockError::WouldBlock)
             ));
         }
-        HostClockSample {
+        Ok(HostClockSample {
             epoch_id: Uuid::nil(),
             wall_ms: self.wall.load(Ordering::SeqCst),
             elapsed_ms: 0,
-        }
+        })
     }
 }
 #[test]

@@ -6,6 +6,10 @@ import android.content.Intent
 
 class TimeblockEndAlertReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
+    if (intent.action == BetaDeadlineAlerts.ACTION_FIRE) {
+      runCatching { BetaDeadlineAlerts.fire(context, intent.data?.lastPathSegment ?: return) }.onFailure { android.util.Log.w("ExoMindBetaDeadline", "deadline reminder could not be delivered", it) }
+      return
+    }
     if (intent.action != TimeblockEndAlertState.ACTION_FIRE_END_ALERT) {
       return
     }

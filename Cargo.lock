@@ -1464,6 +1464,7 @@ dependencies = [
 name = "exomind-android-timeblock-end-alert"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "serde",
  "tauri",
  "tauri-plugin",
@@ -1477,6 +1478,7 @@ dependencies = [
  "axum",
  "exomind-core",
  "if-addrs",
+ "libc",
  "rand 0.8.5",
  "reqwest 0.12.28",
  "ring",

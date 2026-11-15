@@ -10,6 +10,8 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+#[path = "alerts.rs"]
+mod alerts;
 
 fn hash(value: &impl Serialize) -> Result<String, CoreError> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(value)?)))

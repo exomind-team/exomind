@@ -1,5 +1,7 @@
 //! Isolated Beta embedding. No legacy runtime/config/store is opened here.
 
+#[path = "beta_native_deadlines.rs"]
+mod deadlines;
 #[path = "beta_native_export.rs"]
 mod export;
 #[path = "beta_native_sources.rs"]
@@ -38,6 +40,10 @@ struct Failure {
 impl From<HostError> for Failure {
     fn from(error: HostError) -> Self {
         let (code, message) = match error {
+            HostError::ClockUnavailable => (
+                "clock_unavailable",
+                "本机计时时钟暂不可用，未按未知时钟执行操作",
+            ),
             HostError::Unauthorized | HostError::Forbidden => {
                 ("forbidden", "当前会话无权执行此操作")
             }
@@ -185,6 +191,7 @@ struct NativeState {
     owner: Session,
     peers: Arc<exomind_beta_host::PeerNetwork>,
     exports: Arc<export::ExportManager>,
+    deadlines: deadlines::Bridge,
     dev_origin: Option<url::Origin>,
     sessions: Mutex<HashMap<ProfileId, Session>>,
     server: tokio::sync::Mutex<Option<RunningServer>>,
@@ -206,6 +213,7 @@ impl NativeState {
             owner,
             peers,
             exports: Arc::new(export::ExportManager::default()),
+            deadlines: deadlines::Bridge::default(),
             dev_origin,
             sessions: Mutex::new(HashMap::new()),
             server: tokio::sync::Mutex::new(None),
@@ -243,6 +251,7 @@ impl NativeState {
     }
 
     async fn stop(&self) -> Result<(), HostError> {
+        self.deadlines.stop().await?;
         self.exports.request_stop();
         self.peers.stop().await?;
         let exports = self.exports.clone();
@@ -775,6 +784,8 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(exomind_android_timeblock_end_alert::init())
+        .plugin(exomind_android_keepalive::init())
         .setup(move |app| {
             let port = match std::env::var("EXOMIND_BETA_PORT") {
                 Ok(value) => value
@@ -788,6 +799,10 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                 dev_origin.clone(),
             )?);
             app.manage(state.clone());
+            #[cfg(target_os = "android")]
+            state
+                .deadlines
+                .start(app.handle().clone(), Arc::downgrade(&state));
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 if crate::system_tray::install_with_exit_handler(app.handle(), request_exit).is_ok()
@@ -887,6 +902,10 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             beta_timeblock_intervals,
             beta_timeline_page,
             beta_deadline_envelope,
+            deadlines::beta_deadline_alert_status,
+            deadlines::beta_deadline_alert_request_permission,
+            deadlines::beta_deadline_handoff_pending,
+            deadlines::beta_deadline_handoff_ack,
             beta_receipt,
             beta_request_exit,
             beta_desktop_status,

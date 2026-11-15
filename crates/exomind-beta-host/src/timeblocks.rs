@@ -4,15 +4,20 @@ use exomind_core::{
     TimeblockCommand, TimeblockNodePage, TimeblockRevision, TimeblockSnapshot, TimelinePage,
 };
 use serde::Serialize;
+#[cfg(not(target_os = "android"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     sync::{
         Arc, Condvar, Mutex, Weak,
         atomic::{AtomicBool, Ordering},
     },
     thread::JoinHandle,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 use uuid::Uuid;
+#[cfg(any(target_os = "android", test))]
+#[path = "boot_clock.rs"]
+mod boot_clock;
 
 const SCHEDULER_POLL: Duration = Duration::from_millis(100);
 const SCHEDULER_BATCH: usize = 16;
@@ -23,12 +28,16 @@ pub struct HostClockSample {
     pub elapsed_ms: u64,
 }
 pub trait HostClock: Send + Sync {
-    fn sample(&self) -> HostClockSample;
+    /// Failed samples must remain errors; never substitute zero or switch
+    /// elapsed domains inside an epoch. Android elapsed includes suspend.
+    fn sample(&self) -> Result<HostClockSample, HostError>;
 }
+#[cfg(not(target_os = "android"))]
 pub(crate) struct SystemHostClock {
     epoch: Uuid,
     started: Instant,
 }
+#[cfg(not(target_os = "android"))]
 impl Default for SystemHostClock {
     fn default() -> Self {
         Self {
@@ -37,9 +46,16 @@ impl Default for SystemHostClock {
         }
     }
 }
+#[cfg(not(target_os = "android"))]
+impl SystemHostClock {
+    pub(crate) fn new() -> Result<Self, HostError> {
+        Ok(Self::default())
+    }
+}
+#[cfg(not(target_os = "android"))]
 impl HostClock for SystemHostClock {
-    fn sample(&self) -> HostClockSample {
-        HostClockSample {
+    fn sample(&self) -> Result<HostClockSample, HostError> {
+        Ok(HostClockSample {
             epoch_id: self.epoch,
             wall_ms: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -47,7 +63,21 @@ impl HostClock for SystemHostClock {
                 .as_millis()
                 .min(i64::MAX as u128) as i64,
             elapsed_ms: self.started.elapsed().as_millis().min(i64::MAX as u128) as u64,
-        }
+        })
+    }
+}
+#[cfg(target_os = "android")]
+pub(crate) struct SystemHostClock(boot_clock::BootClock<boot_clock::AndroidSource>);
+#[cfg(target_os = "android")]
+impl SystemHostClock {
+    pub(crate) fn new() -> Result<Self, HostError> {
+        Ok(Self(boot_clock::BootClock::new(boot_clock::AndroidSource)?))
+    }
+}
+#[cfg(target_os = "android")]
+impl HostClock for SystemHostClock {
+    fn sample(&self) -> Result<HostClockSample, HostError> {
+        self.0.sample()
     }
 }
 #[derive(Debug, Clone, Serialize)]
@@ -129,7 +159,7 @@ fn run(weak: Weak<BetaHost>, services: Arc<Services>, clock: Arc<dyn HostClock>)
         let Some(host) = weak.upgrade() else {
             break;
         };
-        let result = host.reconcile_clock(sample);
+        let result = sample.and_then(|sample| host.reconcile_clock(sample));
         drop(host);
         if matches!(result, Err(HostError::Stopped)) {
             break;
@@ -139,7 +169,14 @@ fn run(weak: Weak<BetaHost>, services: Arc<Services>, clock: Arc<dyn HostClock>)
                 .state
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            state.last_error = Some("scheduler_operation_failed".into());
+            state.last_error = Some(
+                if matches!(result, Err(HostError::ClockUnavailable)) {
+                    "clock_unavailable"
+                } else {
+                    "scheduler_operation_failed"
+                }
+                .into(),
+            );
         }
         let state = services
             .state
@@ -163,6 +200,19 @@ pub struct DeadlineEnvelope {
 }
 
 impl BetaHost {
+    /// Native platform only: owner-scoped, all profiles, one Core read snapshot.
+    /// This exposes reminder metadata, never a scheduler write context.
+    pub fn local_deadline_alerts(
+        &self,
+        session: &Session,
+    ) -> Result<Vec<exomind_core::LocalDeadlineAlert>, HostError> {
+        let sample = self.clock.sample()?;
+        let state = self.active_state()?;
+        self.owner(session)?;
+        let core = &resources(&state)?.core;
+        let stamp = core.trusted_clock_stamp(sample.epoch_id, sample.wall_ms, sample.elapsed_ms)?;
+        Ok(core.local_deadline_alerts(&core.local_scheduler(), &stamp)?)
+    }
     pub fn start_services(self: &Arc<Self>) -> Result<ServiceStatus, HostError> {
         let _gate = self.active_state()?;
         let mut state = self
@@ -244,7 +294,7 @@ impl BetaHost {
         session: &Session,
         command: &TimeblockCommand,
     ) -> Result<Receipt, HostError> {
-        let sample = self.clock.sample();
+        let sample = self.clock.sample()?;
         let state = self.active_state()?;
         let resources = resources(&state)?;
         let authority = self.profile_authority(resources, session, command.profile_id, true)?;
@@ -289,7 +339,7 @@ impl BetaHost {
         session: &Session,
         profile: ProfileId,
     ) -> Result<TimeblockSnapshot, HostError> {
-        let sample = self.clock.sample();
+        let sample = self.clock.sample()?;
         let state = self.active_state()?;
         let resources = resources(&state)?;
         let authority = self.profile_authority(resources, session, profile, false)?;

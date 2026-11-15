@@ -40,6 +40,11 @@ struct FailureDetail {
 impl IntoResponse for HostError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::ClockUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "clock_unavailable",
+                "Host clock sample is unavailable; no clock-dependent operation was applied",
+            ),
             Self::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",

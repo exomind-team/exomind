@@ -28,3 +28,6 @@ socket2 = "=0.6.3"
 [dev-dependencies]
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+libc = "0.2"

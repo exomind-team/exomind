@@ -194,6 +194,17 @@ pub struct DeadlineSnapshot {
     pub end_mode: CountdownEndMode,
     pub eligible: bool,
 }
+pub const MAX_LOCAL_DEADLINE_ALERTS: usize = 128;
+/// Read-only platform reminder projection. No author or mutation capability.
+#[derive(Debug, Clone, Serialize)]
+pub struct LocalDeadlineAlert {
+    pub deadline_id: Uuid,
+    pub profile_id: ProfileId,
+    pub block_id: TimeblockId,
+    pub due_at_ms: i64,
+    pub remaining_ms: u64,
+    pub completed: bool,
+}
 #[derive(Debug, Clone, Serialize)]
 pub struct ActiveTimeblock {
     pub block_id: TimeblockId,

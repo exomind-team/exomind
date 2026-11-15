@@ -2,13 +2,15 @@ import { act,cleanup,fireEvent,render,screen,waitFor,within } from '@testing-lib
 import { afterEach,describe,expect,it } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
 import { asyncDraftLocks,deferred,fakeClient } from './fixtures';
+import { rememberLastBetaProfile,restoreLastBetaProfile } from '@/beta/last-profile';
 
 const originalLocks=Object.getOwnPropertyDescriptor(navigator,'locks');
-afterEach(()=>{cleanup();if(originalLocks)Object.defineProperty(navigator,'locks',originalLocks);else Reflect.deleteProperty(navigator,'locks');});
+afterEach(()=>{cleanup();localStorage.clear();if(originalLocks)Object.defineProperty(navigator,'locks',originalLocks);else Reflect.deleteProperty(navigator,'locks');});
 function clientFor(device:string,profiles:Array<{profile_id:string;display_name:string}>){
   const client=fakeClient();client.status.mockResolvedValue({protocol:'exomind-beta/1',device_id:device,runtime_id:`runtime-${device}`,running:true});client.profiles.mockResolvedValue(profiles);return client;
 }
 function context(){
+  localStorage.clear();rememberLastBetaProfile('scope-old','old-p',[{profile_id:'old-p'},{profile_id:'old-q'}]);
   Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
   const old=clientFor('scope-old',[{profile_id:'old-p',display_name:'Old P'},{profile_id:'old-q',display_name:'Old Q'}]);
   const next=clientFor('scope-new',[{profile_id:'new-p',display_name:'New P'},{profile_id:'new-q',display_name:'New Q'}]);
@@ -36,6 +38,7 @@ describe('late profile operations stay in their original client/device generatio
       expect(within(current).getAllByRole('option').map(option=>option.getAttribute('value'))).toEqual(['new-p','new-q']);
       expect(JSON.parse(f.values.get('exomind:beta:drafts:scope-old')!).drafts['old-p'].text).toBe('old P durable draft');
       expect(f.old.capture).not.toHaveBeenCalled();expect(f.next.capture).not.toHaveBeenCalled();
+      expect(restoreLastBetaProfile('scope-old',[{profile_id:'old-q'},{profile_id:'old-p'}])).toBe('old-p');
     }finally{f.gate.resolve();ui.unmount();}
   });
   it('a created old profile awaiting its second flush cannot be appended to the replacement device list',async()=>{
@@ -55,6 +58,7 @@ describe('late profile operations stay in their original client/device generatio
       expect(within(current).queryByRole('option',{name:'Late old profile'})).not.toBeInTheDocument();
       expect(within(current).getAllByRole('option')).toHaveLength(2);expect(f.next.provisionProfile).not.toHaveBeenCalled();
       expect(JSON.parse(f.values.get('exomind:beta:drafts:scope-old')!).drafts['old-p'].text).toBe('P input while provisioning');
+      expect(restoreLastBetaProfile('scope-old',[{profile_id:id},{profile_id:'old-p'}])).toBe('old-p');
     }finally{f.gate.resolve();ui.unmount();}
   });
 });

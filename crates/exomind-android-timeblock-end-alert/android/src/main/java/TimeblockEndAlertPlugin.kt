@@ -23,14 +23,41 @@ class ScheduleEndAlertArgs {
   var autoOpenFocus: Boolean = false
 }
 
+@InvokeArg
+class BetaDeadlineAlertArgs {
+  lateinit var deadlineId: String
+  lateinit var profileId: String
+  lateinit var blockId: String
+  var dueAt: Long = 0
+  var remainingMs: Long = 0
+  var completed: Boolean = false
+}
+@InvokeArg
+class SyncBetaDeadlinesArgs {
+  var alerts: Array<BetaDeadlineAlertArgs> = emptyArray()
+  var expiresAtElapsedMs: Long = 0
+  var acknowledgeHandoffId: String? = null
+  var preserveAlerts: Boolean = false
+}
+
 @TauriPlugin(
   permissions = [
     Permission(strings = [Manifest.permission.POST_NOTIFICATIONS], alias = "notifications"),
   ],
 )
 class TimeblockEndAlertPlugin(private val activity: Activity) : Plugin(activity) {
+  private val betaSession = java.util.UUID.randomUUID().toString()
+  init { runCatching { BetaDeadlineAlerts.activate(activity.applicationContext, betaSession) }.onFailure { android.util.Log.w("ExoMindBetaDeadline", "platform reminder state requires recovery", it) } }
   private val appContext: android.content.Context
     get() = activity.applicationContext
+
+  @Command
+  fun syncBetaDeadlines(invoke: Invoke) {
+    try {
+      val args = invoke.parseArgs(SyncBetaDeadlinesArgs::class.java)
+      invoke.resolve(BetaDeadlineAlerts.sync(appContext, args.alerts.toList(), betaSession, args.expiresAtElapsedMs, args.acknowledgeHandoffId, args.preserveAlerts))
+    } catch (error: Exception) { invoke.reject(error.message, error) }
+  }
 
   override fun load(webView: WebView) {
     super.load(webView)
@@ -43,6 +70,12 @@ class TimeblockEndAlertPlugin(private val activity: Activity) : Plugin(activity)
   }
 
   private fun handleIntent(intent: Intent?) {
+    val beta=runCatching { BetaDeadlineAlerts.recordHandoff(appContext,intent) }
+      .onFailure { BetaDeadlineAlerts.noteHandoffFailure();android.util.Log.w("ExoMindBetaDeadline","notification handoff was not saved",it) }.getOrDefault(false)
+    if(beta) {
+      trigger("betaDeadlineHandoffAvailable",JSObject())
+      return
+    }
     if (!TimeblockEndAlertState.recordPendingHandoffFromIntent(appContext, intent)) {
       return
     }

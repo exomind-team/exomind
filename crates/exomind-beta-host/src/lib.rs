@@ -51,6 +51,8 @@ pub const PROTOCOL: &str = "exomind-beta/1";
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
+    #[error("host clock sample is unavailable or invalid")]
+    ClockUnavailable,
     #[error("an absolute independent root is required")]
     InvalidRoot,
     #[error("the root belongs to another application")]
@@ -258,7 +260,7 @@ impl BetaHost {
     pub fn open(root: &Path) -> Result<Self, HostError> {
         Self::open_with_clock(
             root,
-            std::sync::Arc::new(timeblocks::SystemHostClock::default()),
+            std::sync::Arc::new(timeblocks::SystemHostClock::new()?),
         )
     }
     pub fn open_with_clock(

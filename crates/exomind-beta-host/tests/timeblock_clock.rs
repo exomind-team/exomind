@@ -46,13 +46,13 @@ impl ManualClock {
     }
 }
 impl HostClock for ManualClock {
-    fn sample(&self) -> HostClockSample {
+    fn sample(&self) -> Result<HostClockSample, HostError> {
         let pause = self.pause.lock().unwrap().take();
         if let Some(pause) = pause {
             let _ = pause.entered.send(());
             pause.release.recv_timeout(Duration::from_secs(5)).unwrap();
         }
-        self.value.lock().unwrap().clone()
+        Ok(self.value.lock().unwrap().clone())
     }
 }
 fn wait_until(mut condition: impl FnMut() -> bool) {

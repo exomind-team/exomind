@@ -70,6 +70,85 @@ async fn until(mut condition: impl FnMut() -> bool) {
         tokio::time::sleep(Duration::from_millis(40)).await;
     }
 }
+fn discovery_snapshot(network: &PeerNetwork, profile: ProfileId, peer: DeviceId) -> String {
+    let shared = {
+        let state = network.shared.lock().unwrap();
+        let candidates = state.candidates.get(&peer).map(|rows| {
+            rows.iter()
+                .map(|row| {
+                    (
+                        row.endpoint,
+                        row.expires.saturating_duration_since(Instant::now()),
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+        let progress = state.progress.get(&(profile, peer)).map(|row| {
+            (
+                row.busy,
+                row.connection,
+                row.error,
+                row.failures,
+                row.retry
+                    .map(|at| at.saturating_duration_since(Instant::now())),
+            )
+        });
+        format!(
+            "generation={} addresses={:?} candidates={candidates:?} progress={progress:?} forced={} cursor={}",
+            state.generation,
+            state.addresses,
+            state.forced.contains(&(profile, peer)),
+            state.route_cursor
+        )
+    };
+    let routes = network.host.peer_routes(&network.owner).map(|rows| {
+        rows.into_iter()
+            .filter(|row| row.profile == profile && row.device == peer)
+            .map(|row| row.endpoints)
+            .collect::<Vec<_>>()
+    });
+    format!("{shared} durable_routes={routes:?}")
+}
+async fn until_hint(
+    stage: &str,
+    socket: &UdpSocket,
+    hints: &[Vec<u8>],
+    mut condition: impl FnMut() -> bool,
+    snapshot: impl Fn() -> String,
+) {
+    let end = Instant::now() + Duration::from_secs(18);
+    loop {
+        if condition() {
+            return;
+        }
+        assert!(
+            Instant::now() < end,
+            "discovery stage {stage} timed out: {}",
+            snapshot()
+        );
+        // Real discovery advertises periodically. Keep the same finite stage
+        // deadline, but don't assume the worker bound UDP before start returned.
+        for bytes in hints {
+            let sent = tokio::time::timeout(
+                end.saturating_duration_since(Instant::now()),
+                socket.send_to(
+                    bytes,
+                    SocketAddr::from((Ipv4Addr::LOCALHOST, DISCOVERY_PORT)),
+                ),
+            )
+            .await;
+            assert!(
+                matches!(sent, Ok(Ok(_))),
+                "discovery stage {stage} hint send failed: {}",
+                snapshot()
+            );
+        }
+        tokio::time::sleep(
+            Duration::from_millis(200).min(end.saturating_duration_since(Instant::now())),
+        )
+        .await;
+    }
+}
 async fn pair_hosts(a: &Arc<BetaHost>, oa: &Session, b: &Arc<BetaHost>, ob: &Session) -> ProfileId {
     let p = ProfileId::new();
     a.provision_profile(oa, p, "same native profile").unwrap();
@@ -138,6 +217,7 @@ fn loopback(network: &PeerNetwork) -> SocketAddr {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn enabled_network_preference_restores_after_host_restart_and_disable_drains_listener() {
+    let _discovery = crate::peers::test_discovery::lease().await;
     let (root, a, oa) = host();
     let device = a.device_id;
     let network = PeerNetwork::new(a.clone(), oa.clone()).unwrap();
@@ -170,6 +250,7 @@ async fn enabled_network_preference_restores_after_host_restart_and_disable_drai
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_owned_controllers_sync_without_ui_and_notice_new_local_or_remote_heads() {
+    let _discovery = crate::peers::test_discovery::lease().await;
     let (_ra, a, oa) = host();
     let (_rb, b, ob) = host();
     let p = ProfileId::new();
@@ -217,6 +298,7 @@ async fn native_owned_controllers_sync_without_ui_and_notice_new_local_or_remote
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn discovery_is_only_a_ttl_hint_until_pinned_service_promotes_it_and_keeps_old_routes() {
+    let _discovery = crate::peers::test_discovery::lease().await;
     let (_ra, a, oa) = host();
     let (_rb, b, ob) = host();
     let p = pair_hosts(&a, &oa, &b, &ob).await;
@@ -230,6 +312,7 @@ async fn discovery_is_only_a_ttl_hint_until_pinned_service_promotes_it_and_keeps
     let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let pin = b.device_identity(&ob).unwrap().fingerprint_sha256;
     let unknown = DeviceId::new();
+    let mut hints = vec![];
     for device in [unknown, b.device_id] {
         let bytes = serde_json::to_vec(&Announcement {
             protocol: "exomind-discovery/1".into(),
@@ -238,23 +321,23 @@ async fn discovery_is_only_a_ttl_hint_until_pinned_service_promotes_it_and_keeps
             listen_port: bad.port(),
         })
         .unwrap();
-        socket
-            .send_to(
-                &bytes,
-                SocketAddr::from((Ipv4Addr::LOCALHOST, DISCOVERY_PORT)),
-            )
-            .await
-            .unwrap();
+        hints.push(bytes);
     }
-    until(|| {
-        network
-            .shared
-            .lock()
-            .unwrap()
-            .candidates
-            .get(&b.device_id)
-            .is_some_and(|v| v.iter().any(|c| c.endpoint == bad))
-    })
+    until_hint(
+        "unverified candidate observed",
+        &socket,
+        &hints,
+        || {
+            network
+                .shared
+                .lock()
+                .unwrap()
+                .candidates
+                .get(&b.device_id)
+                .is_some_and(|v| v.iter().any(|c| c.endpoint == bad))
+        },
+        || discovery_snapshot(&network, p, b.device_id),
+    )
     .await;
     assert!(
         !network
@@ -264,15 +347,21 @@ async fn discovery_is_only_a_ttl_hint_until_pinned_service_promotes_it_and_keeps
             .candidates
             .contains_key(&unknown)
     );
-    until(|| {
-        network
-            .shared
-            .lock()
-            .unwrap()
-            .progress
-            .get(&(p, b.device_id))
-            .is_some_and(|v| v.error.is_some())
-    })
+    until_hint(
+        "unverified route fails pinned TLS",
+        &socket,
+        &hints,
+        || {
+            network
+                .shared
+                .lock()
+                .unwrap()
+                .progress
+                .get(&(p, b.device_id))
+                .is_some_and(|v| v.error.is_some())
+        },
+        || discovery_snapshot(&network, p, b.device_id),
+    )
     .await;
     assert_eq!(
         a.peer_routes(&oa)
@@ -312,19 +401,17 @@ async fn discovery_is_only_a_ttl_hint_until_pinned_service_promotes_it_and_keeps
         listen_port: address.port(),
     })
     .unwrap();
-    socket
-        .send_to(
-            &bytes,
-            SocketAddr::from((Ipv4Addr::LOCALHOST, DISCOVERY_PORT)),
-        )
-        .await
-        .unwrap();
-    until(|| {
-        a.peer_routes(&oa)
-            .unwrap()
-            .iter()
-            .any(|r| r.profile == p && r.device == b.device_id && r.endpoints.contains(&address))
-    })
+    until_hint(
+        "verified candidate promoted preserving previous route",
+        &socket,
+        &[bytes],
+        || {
+            a.peer_routes(&oa).unwrap().iter().any(|r| {
+                r.profile == p && r.device == b.device_id && r.endpoints.contains(&address)
+            })
+        },
+        || discovery_snapshot(&network, p, b.device_id),
+    )
     .await;
     let routes = a.peer_routes(&oa).unwrap();
     let route = routes
@@ -345,6 +432,7 @@ async fn discovery_is_only_a_ttl_hint_until_pinned_service_promotes_it_and_keeps
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dropped_attempt_clears_busy_and_dropped_controller_has_no_strong_task_cycle() {
+    let _discovery = crate::peers::test_discovery::lease().await;
     let (ra, a, oa) = host();
     let (_rb, b, ob) = host();
     let p = pair_hosts(&a, &oa, &b, &ob).await;
