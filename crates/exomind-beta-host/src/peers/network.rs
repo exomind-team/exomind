@@ -1123,7 +1123,7 @@ impl Worker {
             tokio::select! {
                 _=cancel.cancelled()=>break,
                 _=self.host.peers.cancel.cancelled()=>break,
-                result=listener.accept(cancel.clone())=>{match result {Ok(channel)=>{if jobs.len()>=8{drop(channel);continue;}let network=self.clone();let lease=match self.host.peers.register(false){Ok(l)=>l,Err(_)=>break};jobs.spawn(async move{let _lease=lease;if let Ok(outcome)=network.host.accept_peer_service(&network.owner,channel).await{network.incoming(generation,outcome);}});},Err(HostError::PeerTimeout)=>{},Err(_)=>break}},
+                result=listener.accept(cancel.clone())=>{match result {Ok(channel)=>{if jobs.len()>=8{drop(channel);continue;}let network=self.clone();let lease=match self.host.peers.register(false){Ok(l)=>l,Err(_)=>break};jobs.spawn(async move{let _lease=lease;if let Ok(outcome)=network.host.accept_peer_service(&network.owner,channel).await{network.incoming(generation,outcome);}});},Err(HostError::PeerTimeout|HostError::PeerTls)=>{},Err(_)=>break}},
                 received=async{match &udp {Some(socket)=>socket.recv_from(&mut packet).await,None=>std::future::pending().await}}=>{
                     if let Ok((n,source))=received{if n<=1024{if let Ok(value)=serde_json::from_slice::<Announcement>(&packet[..n]){let _=self.remember_announcement(value,source,generation);}}}
                 },

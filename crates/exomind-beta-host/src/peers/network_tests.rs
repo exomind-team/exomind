@@ -501,3 +501,95 @@ async fn dropped_attempt_clears_busy_and_dropped_controller_has_no_strong_task_c
     reopened.stop().unwrap();
     stopped(b).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tcp_eof_keeps_original_listener_generation_and_signed_join_available() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_ra, a, oa) = host();
+    let (_rb, b, ob) = host();
+    let p = ProfileId::new();
+    a.provision_profile(&oa, p, "TLS rejection isolation")
+        .unwrap();
+    let na = PeerNetwork::new(a.clone(), oa.clone()).unwrap();
+    let nb = PeerNetwork::new(b.clone(), ob.clone()).unwrap();
+    na.set_enabled(true).await.unwrap();
+    let original_address = loopback(&na);
+    let original_generation = na.shared.lock().unwrap().generation;
+    let invitation = a
+        .create_peer_invitation(
+            &oa,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: p,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![original_address],
+                ttl_seconds: 120,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+    let capacity = a.peers.connections.available_permits();
+    assert!(capacity > 0);
+    let observed = tokio::time::timeout(Duration::from_secs(18), async {
+        // Hold a real unauthenticated TCP connection until the server has
+        // admitted its TLS handshake and owns its bounded connection permit.
+        let raw = tokio::net::TcpStream::connect(original_address)
+            .await
+            .unwrap();
+        until(|| a.peers.connections.available_permits() < capacity).await;
+        drop(raw); // EOF without sending any TLS bytes, like nc -z.
+        // The driver releases ownership only after its error was sent to the
+        // listener's accepted queue. The following genuine join also proves
+        // the consumer handled that earlier queued rejection without dying.
+        until(|| a.peers.connections.available_permits() == capacity).await;
+        let untrusted_created_member = a
+            .peer_members(&oa, p)
+            .unwrap()
+            .iter()
+            .any(|member| member.device_id != a.device_id);
+
+        // Deliberately never call A.ensure_started/create_invitation again:
+        // a hidden listener restart would invalidate this regression proof.
+        let joined = nb.join(&invitation, Uuid::new_v4()).await;
+        let address_stable = na.local_addresses().unwrap().contains(&original_address);
+        let generation = na.shared.lock().unwrap().generation;
+        let member_ready = a.peer_members(&oa, p).unwrap().iter().any(|member| {
+            member.device_id == b.device_id
+                && !member.revoked
+                && member.state == PeerJoinState::Ready
+        });
+        (
+            untrusted_created_member,
+            joined,
+            address_stable,
+            generation,
+            member_ready,
+        )
+    })
+    .await;
+    nb.stop().await.unwrap();
+    na.stop().await.unwrap();
+    drop(nb);
+    drop(na);
+    stopped(a).await;
+    stopped(b).await;
+    let (untrusted_created_member, joined, address_stable, generation, member_ready) =
+        observed.expect("original finite 18s controller acceptance deadline");
+    assert!(
+        !untrusted_created_member,
+        "raw TCP EOF must not authorize a device"
+    );
+    assert_eq!(
+        generation, original_generation,
+        "one rejected handshake must not stop/replace the listener generation"
+    );
+    assert!(
+        address_stable,
+        "the original bound address must remain available"
+    );
+    let joined =
+        joined.expect("the original signed invitation must still complete real pinned TLS join");
+    assert_eq!(joined.state, PeerJoinState::Ready);
+    assert!(joined.remote_ready_observed && member_ready);
+}
