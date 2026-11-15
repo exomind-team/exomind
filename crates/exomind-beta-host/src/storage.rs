@@ -195,7 +195,7 @@ fn checked_database(
     if found == application
         && (version == 1
             || (application == AUTH_APPLICATION
-                && version == crate::peers::membership_store::AUTH_VERSION))
+                && (1..=crate::peers::membership_store::AUTH_VERSION).contains(&version)))
     {
         transaction.commit()?;
         return Ok(());
@@ -248,7 +248,7 @@ impl Persistence {
                 auth.pragma_query_value(None, "application_id", |row| row.get(0))?;
             let version: i64 = auth.pragma_query_value(None, "user_version", |row| row.get(0))?;
             if application != AUTH_APPLICATION
-                || ![1, crate::peers::membership_store::AUTH_VERSION].contains(&version)
+                || !(1..=crate::peers::membership_store::AUTH_VERSION).contains(&version)
             {
                 return Err(HostError::Core(exomind_core::CoreError::RecoveryRequired));
             }
@@ -352,8 +352,8 @@ impl Persistence {
         let transaction = self
             .auth
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        // Host auth schema remains 1 for older owner/grant readers. This extra
-        // table is a durable one-time binding, never an automatic rebind.
+        // This additive table is a durable one-time binding. Subsequent auth
+        // migrations preserve it; no upgrade is an automatic device rebind.
         transaction.execute_batch("CREATE TABLE IF NOT EXISTS core_binding(singleton INTEGER PRIMARY KEY CHECK(singleton=1),device_id TEXT NOT NULL)")?;
         transaction.execute(
             "INSERT OR IGNORE INTO core_binding VALUES(1,?1)",

@@ -1,15 +1,17 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ExoMind Beta Dev",
+  "productName": "ExoMind Beta",
+  "version": "0.6.0-beta01",
   "identifier": "com.exomind.app.v06.beta",
   "build": {
+    "beforeBuildCommand": "bun run build:web",
     "devUrl": "http://localhost:1420/beta.html"
   },
   "app": {
     "windows": [
       {
         "label": "main",
-        "title": "ExoMind Beta Dev",
+        "title": "外心 Beta",
         "url": "beta.html",
         "width": 1200,
         "height": 800,
@@ -18,5 +20,6 @@
       }
     ],
     "security": { "capabilities": ["beta", "beta-overlay"] }
-  }
+  },
+  "bundle": { "android": { "versionCode": 6001 } }
 }

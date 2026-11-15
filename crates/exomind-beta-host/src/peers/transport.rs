@@ -23,7 +23,7 @@ use tokio::{
     sync::{OwnedSemaphorePermit, mpsc, oneshot, watch},
 };
 const ALPN: &[u8] = b"exomind-peer-transport/1";
-const MAX_FRAME: usize = 256 * 1024;
+pub(super) const MAX_FRAME: usize = 256 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct PeerPin([u8; 32]);
 impl PeerPin {
@@ -69,7 +69,7 @@ impl PeerCancellation {
     pub(super) fn is_cancelled(&self) -> bool {
         *self.flag.borrow()
     }
-    async fn cancelled(&self) {
+    pub(super) async fn cancelled(&self) {
         let mut state = self.flag.subscribe();
         loop {
             if *state.borrow_and_update() {
@@ -297,6 +297,7 @@ enum Request {
 }
 pub struct PeerChannel {
     id: uuid::Uuid,
+    remote_address: SocketAddr,
     host: Arc<BetaHost>,
     owner: Session,
     peer: VerifiedTransportPeer,
@@ -336,6 +337,9 @@ impl PeerChannel {
     }
     pub fn peer_fingerprint(&self) -> PeerPin {
         self.peer.pin
+    }
+    pub fn remote_address(&self) -> SocketAddr {
+        self.remote_address
     }
     pub fn tls_version(&self) -> &'static str {
         "TLS1.3"
@@ -408,6 +412,15 @@ fn channel(
     {
         Ok(peer) => peer,
         Err(error) => return Err(ChannelAdmissionFailure { error, ownership }),
+    };
+    let remote_address = match stream.get_ref().0.peer_addr() {
+        Ok(address) => address,
+        Err(_) => {
+            return Err(ChannelAdmissionFailure {
+                error: HostError::PeerTransportUnavailable,
+                ownership,
+            });
+        }
     };
     let (put, mut requests) = mpsc::channel(1);
     let own = PeerCancellation::new();
@@ -482,6 +495,7 @@ fn channel(
     });
     Ok(PeerChannel {
         id: uuid::Uuid::new_v4(),
+        remote_address,
         host,
         owner,
         peer,
@@ -553,9 +567,32 @@ impl BetaHost {
             &PeerCancellation::new(),
             options.handshake_timeout,
             async {
-                TcpListener::bind(address)
-                    .await
-                    .map_err(|_| HostError::PeerTransportUnavailable)
+                if address.is_ipv6() {
+                    let socket = socket2::Socket::new(
+                        socket2::Domain::IPV6,
+                        socket2::Type::STREAM,
+                        Some(socket2::Protocol::TCP),
+                    )
+                    .map_err(|_| HostError::PeerTransportUnavailable)?;
+                    socket
+                        .set_only_v6(false)
+                        .map_err(|_| HostError::PeerTransportUnavailable)?;
+                    socket
+                        .set_nonblocking(true)
+                        .map_err(|_| HostError::PeerTransportUnavailable)?;
+                    socket
+                        .bind(&address.into())
+                        .map_err(|_| HostError::PeerTransportUnavailable)?;
+                    socket
+                        .listen(16)
+                        .map_err(|_| HostError::PeerTransportUnavailable)?;
+                    TcpListener::from_std(socket.into())
+                        .map_err(|_| HostError::PeerTransportUnavailable)
+                } else {
+                    TcpListener::bind(address)
+                        .await
+                        .map_err(|_| HostError::PeerTransportUnavailable)
+                }
             },
         )
         .await?;

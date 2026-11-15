@@ -163,7 +163,7 @@ impl BetaHost {
     pub async fn accept_peer_join_over_transport(
         self: &Arc<Self>,
         channel: PeerChannel,
-    ) -> Result<(), HostError> {
+    ) -> Result<PeerJoinStatus, HostError> {
         channel.binding_pin(self)?;
         let channel = Arc::new(channel);
         let claim = match read(&channel).await? {
@@ -207,7 +207,7 @@ impl BetaHost {
         })
         .await
         {
-            Ok(_) => Ok(()),
+            Ok(status) => Ok(status),
             Err(error) => Err(reject(&channel, error).await),
         }
     }

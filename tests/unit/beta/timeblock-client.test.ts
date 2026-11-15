@@ -56,6 +56,28 @@ describe('timeblock transports and typed reply boundaries',()=>{
     response={items:[{event_id:B,profile_id:Q,local_seq:1}],highwater:1,next_before:null};
     await expect(client.timeblocks!.nodes(P,{limit:5})).rejects.toMatchObject({code:'invalid_timeblock_response'});
   });
+  it('reads legacy deadlines and stable-run deadlines through the same Native typed timeline',async()=>{
+    const deadline={block_id:B,deadline_id:C,generation:2,end_mode:'hard',due_wall_ms:1334,due_elapsed_ms:1000,clock_epoch:R};
+    const node={event_id:C,profile_id:P,device_id:D,source:{kind:'scheduler',author_id:D,owner_generation:1},parents:[Q],occurred_at_ms:1334,effective_at_ms:1334,clock:{epoch_id:R,elapsed_ms:1000},digest:revision,local_seq:1};
+    let payload:unknown={kind:'deadline_reached',...deadline};
+    const call=vi.fn(async(name:string)=>name==='beta_status'?status():{items:[{kind:'timeblock',record:{...node,payload}}],highwater:1,next_before:null});
+    const client=nativeBetaClient(call as Parameters<typeof nativeBetaClient>[0]);
+    expect((await client.timelinePage!(P,{})).items[0]).toMatchObject({record:{payload:{kind:'deadline_reached'}}});
+    payload={kind:'run_deadline_reached',run_event_id:Q,...deadline};
+    expect((await client.timelinePage!(P,{})).items[0]).toMatchObject({record:{payload:{kind:'run_deadline_reached',run_event_id:Q}}});
+  });
+  it('does not treat an absent or malformed stable run identity as a legacy deadline',async()=>{
+    const payload={kind:'run_deadline_reached',run_event_id:Q,block_id:B,deadline_id:C,generation:2,end_mode:'hard',due_wall_ms:1334,due_elapsed_ms:1000,clock_epoch:R};
+    const node={event_id:C,profile_id:P,device_id:D,source:{kind:'scheduler',author_id:D,owner_generation:1},parents:[Q],occurred_at_ms:1334,effective_at_ms:1334,clock:{epoch_id:R,elapsed_ms:1000},digest:revision,local_seq:1};
+    let response:unknown={...node,payload:{...payload,run_event_id:'00000000-0000-0000-0000-000000000000'}};
+    const call=vi.fn(async(name:string)=>name==='beta_status'?status():{items:[response],highwater:1,next_before:null});
+    const client=nativeBetaClient(call as Parameters<typeof nativeBetaClient>[0]);
+    await expect(client.timeblocks!.nodes(P,{})).rejects.toMatchObject({code:'invalid_timeblock_response'});
+    const {run_event_id:_,...missing}=payload;response={...node,payload:missing};
+    await expect(client.timeblocks!.nodes(P,{})).rejects.toMatchObject({code:'invalid_timeblock_response'});
+    response={...node,source:{kind:'human',author_id:D,owner_generation:null},payload};
+    await expect(client.timeblocks!.nodes(P,{})).rejects.toMatchObject({code:'invalid_timeblock_response'});
+  });
   it.each(['runtime','device','profile','revision','block','generation'] as const)('rejects a stale %s deadline envelope without scheduling anything',field=>{
     const value=structuredClone(envelope());
     if(field==='runtime')value.runtime_id=Q;else if(field==='device')value.device_id=Q;else if(field==='profile')value.profile_id=Q;else if(field==='revision')value.projection_revision='b'.repeat(64);else if(field==='block')value.block_id=Q;else value.deadline!.generation++;

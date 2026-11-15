@@ -14,17 +14,25 @@
 
 HTTP、Tauri、React 由独立 Host/Native/UI 适配器接入，本 crate 不持有外部 token。时间块、复制、模型任务和回收按 Beta 计划继续，不以本机单元测试代替端到端验收。固定格式 capture 的规范化由 Rust 权威执行：字段顺序固定、标签排序去重、正文不改写；未实现通用 JSON 数值/媒体内容的跨语言规范化协议。未知 capture 字段在反序列化时拒绝，不静默丢弃作者字段。
 
-## schema 4 复制准备切片
+## 来源复制合同（schema 4 引入）
 
 `CORE_SCHEMA_VERSION` 是唯一公开版本常量。schema 1/2/3 升级先执行独立、含 live WAL 的一致备份并核对，随后同事务建立 schema 4。`original_manifests` 保存不可变的档案/原件描述；事件引用它，而非要求接收端已有本机暂存。`declare_original_manifest` 只登记元数据，不创建 stage、verified 字节、事件或回执，也不授予读取权限。`original_availability` 在档案事实读取授权后区分 missing 与本机 stage；本机提交仍要求完整 verified 整组。
 
 每个档案在创建/迁移事务里生成独立的持久 restoration epoch，空档案亦如此。`replication_identity` / `origin_checkpoint` 使用本机 `WriterContext`，只读且不生成 epoch。每个真正新 capture/typed timeblock 与其 origin 序号、规范事实摘要、前缀 hash 链及原有 receipt 同事务；重试不重复推进。链绑定档案、设备、epoch、序号、事实类型与事件 ID，不包含接收端 `local_seq`。checkpoint 验证实际链端点及其事实，坏元数据不伪装为空。
 
-`ReplicaContext` 是不可反序列化、绑定本次 Core 生命周期的受信宿主 capability，只支持已认证的 direct origin；Host 必须在最终 gate 内核对成员代次，Core 不复制成员授权表。本切片尚未提供事实导入/导出 API：已建立其持久 schema，后续页事务需一起提交事实与接收游标，并显式处理 origin epoch 变化；不能以本切片宣称 B2 同步完成。
+`ReplicaContext` 是不可反序列化、绑定本次 Core 生命周期的受信宿主 capability，只支持已认证的 direct origin；Host 必须在最终 gate 内核对成员代次，Core 不复制成员授权表。`replication_cursor` 只读已确认来源进度；同档案/设备已有另一 restoration epoch 时明确返回 `OriginEpochChanged`，不因新主键缺行而自动从0接收，也不清旧事实。恢复资格和新 epoch 的显式接纳流程仍由后续受信恢复操作衔接。
+
+`export_origin_page(WriterContext, profile, query)` 仅导出本机 own-origin；接收其他设备的事实不构成第三方 relay provenance。`after` 是已知前缀的 seq/hash，`through` 冻结首次响应的来源上界，均核对真实链端点。每页最多100条，按实际 serde JSON 字节计量；默认192 KiB，逻辑页最大 `MAX_ORIGIN_PAGE_BYTES = MAX_FACT_BYTES + 64 KiB`。单条放不下时 `OriginPageOversize` 返回 `required_bytes` 和 `origin_seq`，不跳过该条、不推进游标。Host 可在逻辑上限内增预算并经自己的有界256 KiB物理帧分片。
+
+`import_origin_page(ReplicaContext, page)` 单独执行原始 capture/typed timeblock 事实导入，保留来源设备、作者、原时间和 canonical；接收端只分配自己的 `local_seq`。事实、原件引用、来源条目/head、接收 cursor 和已接受 epoch 同事务，完全不调用本机 submit/apply，也不伪造 command receipt 或 timeblock 请求摘要。固定范围重放核每项链与真实 canonical，而非仅检查 cursor 已够大。相同事件 ID 异内容整页回滚，随后独立事务仅记录 ID、范围、摘要及原因；SQLite busy/IO 等存储失败不伪装为内容冲突。
+
+原件 metadata 可先到而 bytes 缺失：`ImportAck.missing_originals` 只对本页描述去重，不扫描全部档案，不假建 verified stage。远端猜中同档案私有 stage 的 ID/hash/描述也不能靠新引用将其公开；首次引用这种现存未发布本机原件返回 `OriginalConflict`。跨档案同 ID 同样不能借用字节；metadata-first 的正常流程为先导入事实、再由授权本机 stage materialize。
+
+时间块读取直接使用 typed events，`timeblock_nodes.request_digest` 仅关联本机命令。导入重建可丢弃的 projection；缺失 parents 时保留 raw事实/cursor、标记 incomplete 并拒绝 current/control，不能返回旧缓存冒充完整。补齐后按 DAG 确定性重建。run device 从 Start/Rotate/Resume 原事实恢复，兼容旧缓存缺字段；导入不会创建远端运行块的本机 deadline，只取消已失效的本机 pending。网络鉴权、恢复授权、Host同步driver及端到端验收仍属独立能力，不以这些 Core API 宣称完整 B2 已验收。
 
 保留的真实 Core3 seed/probe 专项通过 `EXOMIND_SCHEMA3_FIXTURE` 显式运行。它核对 provenance、含原件的 capture/2、typed fact、原 receipt、全部原件字节和含 WAL 的单文件备份，再确认旧程序精确拒绝 schema4，拒写后重开对账。夹具/二进制/数据库不提交源码；独立旧依赖锁与发布二进制的差异必须保留在证据中。
 
-本机事实的 JSON 编码共用 `MAX_FACT_BYTES`（2 MiB）：迁移、origin checkpoint 与新事实写入采用同一界限。原有文字、标签和256原件组合同保持，合法控制字符的 JSON 转义膨胀不会导致已回执事实随后不可读。复制单页的传输预算独立且更小；单条超出传输预算必须明确报错，不能跳过、截正文或先推进游标。
+本机事实的 JSON 编码共用 `MAX_FACT_BYTES`（2 MiB）：迁移、origin checkpoint、导入/导出与新事实写入采用同一界限。原有文字、标签和256原件组合同保持，合法控制字符的 JSON 转义膨胀不会导致已回执事实随后不可读。复制默认页预算与物理传输帧独立且更小；单条超预算必须明确报错，不能跳过、截正文或先推进游标。
 
 ## B1.2 原件事务与恢复
 
@@ -84,4 +92,14 @@ schema 3 新增开始/暂停/恢复/轮转/行动结束/反馈等 typed 节点�
 
 `timeline_page` 是完整 typed 流，capture 与 timeblock 共用同一 events 序号、高水位及冻结分页。旧 `events/events_page` 仅保留 capture-only 兼容投影，timeblock_nodes 只是事件索引，不是另一份事实；不能把旧接口返回当作全量覆盖。
 
-schema 1/2 升级前完整备份对应已提交版本，包含所有表（原件块、引用、layout、事实及回执），目标持久 DELETE mode 并校验单文件恢复。新库直接初始化 3，不创建未提交的中间版本备份；布局缺失、缺库/换库等 recovery/open_bound 保护继续生效。实现及相关回归等待父代理串行复验；不代表 Native/UI、通知或 Android 时间块已经验收。
+schema 1/2 升级前完整备份对应已提交版本，包含所有表（原件块、引用、layout、事实及回执），目标持久 DELETE mode 并校验单文件恢复。该历史阶段的新库初始化 3；当前版本按下述 schema 5 初始化，不创建未提交的中间版本备份。布局缺失、缺库/换库等 recovery/open_bound 保护继续生效。实现及相关回归等待父代理串行复验；不代表 Native/UI、通知或 Android 时间块已经验收。
+
+## schema 5：保留本机已接受的计时意图
+
+deadline 的稳定身份是本机已接受的 Start/Rotate/Resume 事件 ID，而不是合并后可变化的投影计数。私有 deadline 行保存该 `run_event_id`，继续保留原 due、command/event/deadline ID 与 owner generation。导入缺少父节点时只暂停该档案的到点资格；独立档案仍可计时。父节点补齐后，同一本机 run 恢复资格并重绑当前投影 generation，不重算原 due。显式撤销、已结束或另一个 run 不会复活，远端 run 不会在接收端产生调度意图。倒计时剩余量也读取这个既定 due，而不被新到历史中的 work 计算改写。
+
+新到点事实使用 `run_deadline_reached`，按稳定 run ID 和来源设备判断是否仍适用。旧 `deadline_reached` 的字段顺序与 canonical 字节保持原样可读。schema 5 的协商阻止不理解该变体的旧 peer 写入；本机请求回执不随远端事实复制。
+
+真实 schema4 升级先备份完整 4，再严格对照旧 raw DAG、已接受命令回执、缓存/时钟和 owner 绑定 pending run；无法证明时拒绝恢复，不猜测绑定。旧非 pending 行可没有 run 绑定，且不能重新获得资格。旧 1/2/3 一次事务升级到 5，只备份入口已提交版本，不为未提交的中间 4 创建伪备份。旧原件、事实、回执与 origin epoch/head/cursor不重置。
+
+`tests/schema5_migration.rs` 的真实旧4专项通过 `EXOMIND_SCHEMA4_FIXTURE` 指向保留的独立 Core4 seed/probe。验证旧 Start 与暂停/恢复后的 pending hard deadline、完整字节、原回执及源链；核对单文件 schema4 备份可被旧程序打开，并在旧程序拒绝新5后检查数据未改。它是旧源码独立依赖锁的实际夹具，不冒称精确发布候选。源码仅经格式与静态复核，运行结果由父代理有限监督串行记录。

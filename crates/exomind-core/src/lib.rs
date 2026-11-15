@@ -23,10 +23,13 @@ pub use originals::{
     BeginStageCommand, MAX_CAPTURE_ORIGINALS, MAX_ORIGINAL_CHUNK_BYTES, OriginalChunk, OriginalRef,
     StageState, StageStatus, VerificationProof, VerificationTicket,
 };
-pub use replication::{OriginCursor, OriginIdentity, ReplicaContext};
+pub use replication::{
+    DEFAULT_ORIGIN_PAGE_BYTES, ImportAck, MAX_ORIGIN_PAGE_BYTES, OriginCursor, OriginEntry,
+    OriginIdentity, OriginPage, OriginPageQuery, ReplicaContext, ReplicatedFact,
+};
 use serde::{Deserialize, Serialize};
 pub use store::Core;
-pub const CORE_SCHEMA_VERSION: i64 = 4;
+pub const CORE_SCHEMA_VERSION: i64 = 5;
 /// Durable UTF-8 JSON fact encoding, independent of the smaller wire-page
 /// budget. Includes worst-case escaping of all existing capture input limits.
 pub const MAX_FACT_BYTES: usize = 2 * 1024 * 1024;
@@ -56,6 +59,15 @@ pub enum CoreError {
     InvalidReplication(&'static str),
     #[error("encoded fact exceeds {max_bytes} bytes")]
     FactTooLarge { max_bytes: usize },
+    #[error("origin page entry {origin_seq} requires {required_bytes} encoded page bytes")]
+    OriginPageOversize {
+        required_bytes: usize,
+        origin_seq: u64,
+    },
+    #[error("origin restoration epoch changed; explicit recovery admission is required")]
+    OriginEpochChanged,
+    #[error("origin fact conflicts at sequence {origin_seq}, event {event_id}")]
+    ReplicationConflict { event_id: EventId, origin_seq: u64 },
     #[error("requested profile differs from the authenticated scope")]
     ScopeMismatch,
     #[error("context belongs to another core lifecycle")]

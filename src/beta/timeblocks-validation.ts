@@ -90,9 +90,12 @@ export function validateTimeblockNode(value: unknown, profileId: string): BetaTi
   if(raw?.kind==='action'){
     const body=object(raw,['kind','action']);if(source.kind!=='human')return invalid();payload={kind:'action',action:validateTimeblockAction(body.action)};
   }else{
-    const body=object(raw,['kind','block_id','deadline_id','generation','end_mode','due_wall_ms','due_elapsed_ms','clock_epoch']);
-    if(body.kind!=='deadline_reached'||source.kind!=='scheduler')return invalid('未知时间块节点类型');
-    payload={kind:'deadline_reached',block_id:uuid(body.block_id),deadline_id:uuid(body.deadline_id),generation:integer(body.generation,1),end_mode:mode(body.end_mode),due_wall_ms:integer(body.due_wall_ms),due_elapsed_ms:integer(body.due_elapsed_ms),clock_epoch:uuid(body.clock_epoch)};
+    const stableRun=raw?.kind==='run_deadline_reached';
+    const fields=['kind','block_id','deadline_id','generation','end_mode','due_wall_ms','due_elapsed_ms','clock_epoch'];
+    const body=object(raw,stableRun?[...fields,'run_event_id']:fields);
+    if((body.kind!=='deadline_reached'&&!stableRun)||source.kind!=='scheduler')return invalid('未知时间块节点类型');
+    const deadline={block_id:uuid(body.block_id),deadline_id:uuid(body.deadline_id),generation:integer(body.generation,1),end_mode:mode(body.end_mode),due_wall_ms:integer(body.due_wall_ms),due_elapsed_ms:integer(body.due_elapsed_ms),clock_epoch:uuid(body.clock_epoch)};
+    payload=stableRun?{kind:'run_deadline_reached',run_event_id:uuid(body.run_event_id),...deadline}:{kind:'deadline_reached',...deadline};
   }
   const parents=ids(item.parents);const event_id=uuid(item.event_id);if(parents.includes(event_id))return invalid();
   if(source.kind==='human'&&source.owner_generation!==null)return invalid();

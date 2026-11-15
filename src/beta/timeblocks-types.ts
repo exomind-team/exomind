@@ -33,6 +33,10 @@ export interface BetaTimeblockNode {
   payload: { kind: 'action'; action: BetaTimeblockAction } | {
     kind: 'deadline_reached'; block_id: string; deadline_id: string; generation: number;
     end_mode: 'soft' | 'hard'; due_wall_ms: number; due_elapsed_ms: number; clock_epoch: string;
+  } | {
+    kind: 'run_deadline_reached'; run_event_id: string;
+    block_id: string; deadline_id: string; generation: number;
+    end_mode: 'soft' | 'hard'; due_wall_ms: number; due_elapsed_ms: number; clock_epoch: string;
   };
   digest: string; local_seq: number;
 }

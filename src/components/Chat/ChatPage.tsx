@@ -1,3 +1,4 @@
+import { ChatMessageRowView } from '@/ui/app/components/ChatMessageRowView';
 /**
  * EventLogPage - 事件日志页面
  *
@@ -1191,94 +1192,22 @@ export function ChatPage({
               const voiceInput = isVoiceInputEvent(event);
               if (systemEvent) {
                 const isAgentFeedback = event.tags.has('agent_feedback');
-                return (
-                  <div
-                    key={event.id}
-                    ref={assignEventRowRef(event.id)}
-                    className={`flex items-start gap-2 ${getEventRowHighlightClassName(event.id)}`}
-                    data-event-id={event.id}
-                    data-testid="new-mobile-system-message-row"
-                  >
-                    <Avatar className="mt-0.5 h-8 w-8 shrink-0">
-                      <AvatarFallback className={`rounded-full flex items-center justify-center text-white ${getEventAvatarColor(event)}`}>
-                        {getEventIcon(event)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0 max-w-[85%] flex-1">
-                      <div
-                        className="mb-1 flex flex-wrap items-center gap-1 text-[11px] leading-[1.4]"
-                        data-testid="new-mobile-message-meta"
-                      >
-                        <span className="text-xs font-semibold text-strong">{getSystemEventActorLabel(event)}</span>
-                        <span className="text-muted">{eventSourceLabel}</span>
-                        <EventTimestamp timestamp={event.timestamp} now={dateDisplayNow} mode={eventDateMode} />
-                      </div>
-                      <div
-                        className={`rounded-2xl border px-[14px] py-3 text-[13px] leading-[1.6] ${
-                          isAgentFeedback
-                            ? 'border-violet-200 bg-violet-50 text-violet-950 dark:border-violet-800 dark:bg-violet-950/35 dark:text-violet-100'
-                            : 'border-card bg-card text-strong'
-                        }`}
-                        data-testid={isAgentFeedback ? 'new-mobile-agent-feedback-bubble' : undefined}
-                      >
-                        <EventMarkdown content={event.content} />
-                      </div>
-                      {renderForwardRefsSummary(event)}
-                      <MessageActions
-                        content={event.content}
-                        align="start"
-                        permalink={buildEventlogRecordPermalink(event.id)}
-                        onQuote={variant === 'new-mobile' ? () => handleQuoteEvent(event) : undefined}
-                        features={{
-                          permalink: true,
-                          quote: variant === 'new-mobile',
-                        }}
-                      />
-                    </div>
-                  </div>
-                );
+                return <ChatMessageRowView key={event.id} eventId={event.id}
+                  rowRef={assignEventRowRef(event.id)} className={getEventRowHighlightClassName(event.id)}
+                  tone={isAgentFeedback ? 'agent-feedback' : 'system'}
+                  avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className={`rounded-full flex items-center justify-center text-white ${getEventAvatarColor(event)}`}>{getEventIcon(event)}</AvatarFallback></Avatar>}
+                  metadata={<><span className="text-xs font-semibold text-strong">{getSystemEventActorLabel(event)}</span><span className="text-muted">{eventSourceLabel}</span><EventTimestamp timestamp={event.timestamp} now={dateDisplayNow} mode={eventDateMode}/></>}
+                  content={<EventMarkdown content={event.content}/>}
+                  afterBubble={renderForwardRefsSummary(event)}
+                  actions={<MessageActions content={event.content} align="start" permalink={buildEventlogRecordPermalink(event.id)} onQuote={variant === 'new-mobile' ? () => handleQuoteEvent(event) : undefined} features={{permalink:true,quote:variant === 'new-mobile'}}/>}/>;
               }
-
-              return (
-                <div
-                  key={event.id}
-                  ref={assignEventRowRef(event.id)}
-                  className={`flex justify-end gap-2 ${getEventRowHighlightClassName(event.id)}`}
-                  data-event-id={event.id}
-                  data-testid="new-mobile-user-message-row"
-                >
-                  <div className="flex max-w-[84%] flex-col items-end">
-                    <div
-                      className="mb-1 flex flex-wrap items-center justify-end gap-1 text-[11px] leading-[1.4]"
-                      data-testid="new-mobile-message-meta"
-                    >
-                      <span className="text-muted">{eventSourceLabel}</span>
-                      {voiceInput ? <VoiceInputBadge /> : null}
-                      <EventTimestamp timestamp={event.timestamp} now={dateDisplayNow} mode={eventDateMode} />
-                      <span className="text-xs font-semibold text-strong">{userDisplayName}</span>
-                    </div>
-                    <div className="rounded-2xl bg-user-bubble px-[14px] py-[10px] text-[13px] leading-[1.6] text-user-bubble-text [&_.prose]:text-inherit [&_.prose_p]:text-inherit [&_.prose_li]:text-inherit">
-                      <EventMarkdown content={event.content} />
-                    </div>
-                    {renderForwardRefsSummary(event)}
-                    <MessageActions
-                      content={event.content}
-                      align="end"
-                      permalink={buildEventlogRecordPermalink(event.id)}
-                      onQuote={() => handleQuoteEvent(event)}
-                      features={{
-                        permalink: true,
-                        quote: true,
-                      }}
-                    />
-                  </div>
-                  <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarFallback className="rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100">
-                      {userAvatarInitial}
-                    </AvatarFallback>
-                  </Avatar>
-                </div>
-              );
+              return <ChatMessageRowView key={event.id} eventId={event.id}
+                rowRef={assignEventRowRef(event.id)} className={getEventRowHighlightClassName(event.id)} tone="user"
+                avatar={<Avatar className="h-8 w-8 shrink-0"><AvatarFallback className="rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100">{userAvatarInitial}</AvatarFallback></Avatar>}
+                metadata={<><span className="text-muted">{eventSourceLabel}</span>{voiceInput ? <VoiceInputBadge/> : null}<EventTimestamp timestamp={event.timestamp} now={dateDisplayNow} mode={eventDateMode}/><span className="text-xs font-semibold text-strong">{userDisplayName}</span></>}
+                content={<EventMarkdown content={event.content}/>}
+                afterBubble={renderForwardRefsSummary(event)}
+                actions={<MessageActions content={event.content} align="end" permalink={buildEventlogRecordPermalink(event.id)} onQuote={()=>handleQuoteEvent(event)} features={{permalink:true,quote:true}}/>}/>;
             })}
           </div>
         ) : (

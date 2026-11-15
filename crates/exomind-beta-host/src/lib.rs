@@ -13,13 +13,14 @@ mod originals;
 mod originals_http;
 mod peers;
 pub use peers::{
-    ApprovePeerInvitationReplacement, PeerRejoinExpectation,
-    CreatePeerInvitation, DeviceIdentityInfo, IssuedPeerInvitation, PEER_CORE_SCHEMA,
-    PEER_PROTOCOL, PeerCancellation, PeerCapabilities, PeerChannel, PeerClaimReceipt,
-    PeerInvitation, PeerInvitationOffer, PeerInvitationState, PeerInvitationStatus, PeerJoinClaim,
-    PeerJoinConfirmation, PeerJoinState, PeerJoinStatus, PeerMember, PeerMembershipEvidence,
-    PeerPin, PeerReadyAcknowledgement, PeerReadyReceipt, PeerTransportListener,
-    PeerTransportOptions,
+    ApprovePeerInvitationReplacement, CreatePeerInvitation, DeviceIdentityInfo,
+    IssuedPeerInvitation, PEER_CORE_SCHEMA, PEER_PROTOCOL, PeerCancellation, PeerCapabilities,
+    PeerChannel, PeerClaimReceipt, PeerConnectionView, PeerInvitation, PeerInvitationOffer,
+    PeerInvitationState, PeerInvitationStatus, PeerJoinClaim, PeerJoinConfirmation, PeerJoinState,
+    PeerJoinStatus, PeerMember, PeerMembershipEvidence, PeerNetwork, PeerNetworkSettings,
+    PeerNetworkStatus, PeerPin, PeerProbe, PeerReadyAcknowledgement, PeerReadyReceipt,
+    PeerRejoinExpectation, PeerServiceKind, PeerServiceOutcome, PeerSyncOptions, PeerSyncResult,
+    PeerTransportListener, PeerTransportOptions,
 };
 #[cfg(test)]
 mod stop_tests;
@@ -129,6 +130,12 @@ pub enum HostError {
     PeerInvitationConsumed,
     #[error("peer protocol or core schema requires an explicit upgrade")]
     PeerProtocolMismatch,
+    #[error("peer sync acknowledgement storage requires recovery")]
+    PeerSyncRecoveryRequired,
+    #[error("peer sync acknowledgement persistence could not be confirmed")]
+    PeerSyncUnavailable,
+    #[error("peer replica checkpoint requires explicit reconstruction")]
+    PeerSyncResetRequired,
     #[error("core operation failed")]
     Core(#[from] CoreError),
     #[error("host database operation failed")]

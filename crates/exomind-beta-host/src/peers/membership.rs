@@ -19,6 +19,18 @@ const READY_DOMAIN: &[u8] = b"exomind-peer-membership-ready/1\0";
 const MAX_CANDIDATES: usize = 8;
 const MAX_TTL_SECONDS: u32 = 86400;
 
+pub(super) fn verified_invitation_offer(
+    invitation: &PeerInvitation,
+) -> Result<PeerInvitationOffer, HostError> {
+    let signed = SignedOffer {
+        offer: invitation.offer.clone(),
+        signature: invitation.signature.clone(),
+    };
+    validate_stored_offer(&signed)?;
+    hash_secret(&invitation.secret)?;
+    Ok(signed.offer)
+}
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SignedOffer {

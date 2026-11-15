@@ -99,6 +99,7 @@ pub enum IntervalKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodeClock {
     pub epoch_id: Uuid,
     pub elapsed_ms: u64,
@@ -122,6 +123,7 @@ pub enum TimeblockSourceKind {
     Scheduler,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TimeblockSource {
     pub kind: TimeblockSourceKind,
     pub author_id: Uuid,
@@ -142,6 +144,16 @@ pub enum TimeblockPayload {
         due_wall_ms: i64,
         due_elapsed_ms: u64,
         clock_epoch: Uuid,
+    },
+    RunDeadlineReached {
+        block_id: TimeblockId,
+        deadline_id: Uuid,
+        generation: u64,
+        end_mode: CountdownEndMode,
+        due_wall_ms: i64,
+        due_elapsed_ms: u64,
+        clock_epoch: Uuid,
+        run_event_id: EventId,
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]

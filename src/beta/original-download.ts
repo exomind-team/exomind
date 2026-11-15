@@ -1,14 +1,28 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { BetaApiError, type BetaClient } from './client';
 import { ORIGINAL_CHUNK_BYTES, type BetaOriginal } from './original-types';
+import type { BetaOriginalExportResult } from './original-export';
 
 // This basic browser download intentionally has a bounded Blob allocation.
-// Uploads are streamed independently; native/disk streaming export is separate.
+// Native uses its own bounded disk/SAF export and never allocates this Blob.
 export const MAX_BASIC_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+export type OriginalDownloadResult = { kind: 'native'; result: BetaOriginalExportResult } | { kind: 'browser'; blob: Blob };
+/** Native owns its picker and bounded disk/SAF stream. Web deliberately keeps
+ * the Blob ceiling; a native invocation failure never falls back to a Blob. */
+export async function exportOriginalDownload(client: BetaClient, profileId: string, original: BetaOriginal, requestId: string): Promise<OriginalDownloadResult> {
+  if (client.originalExports) {
+    const result = await client.originalExports.save(profileId, original.original_id, requestId);
+    if (!result.cancelled && (result.byte_length !== original.byte_length || result.sha256 !== original.sha256)) {
+      throw new BetaApiError('original_integrity', '导出回执与原件不一致，请查证所选位置，未声明导出成功');
+    }
+    return { kind: 'native', result };
+  }
+  return { kind: 'browser', blob: await collectOriginalDownload(client, profileId, original) };
+}
 export async function collectOriginalDownload(client: BetaClient, profileId: string, original: BetaOriginal): Promise<Blob> {
   if (!Number.isSafeInteger(original.byte_length) || original.byte_length < 0 || !/^[a-f0-9]{64}$/.test(original.sha256)) throw new BetaApiError('original_integrity', '原件描述无效，未准备下载');
   if (!client.originals) throw new BetaApiError('unsupported_capability', '当前服务尚未提供原件读取');
-  if (original.byte_length > MAX_BASIC_DOWNLOAD_BYTES) throw new BetaApiError('download_too_large', '当前下载入口支持 64 MiB 以内的文件；更大原件的流式导出尚未接入');
+  if (original.byte_length > MAX_BASIC_DOWNLOAD_BYTES) throw new BetaApiError('download_too_large', '网页下载支持 64 MiB 以内的文件；更大原件请在独立应用中导出');
   const chunks: ArrayBuffer[] = []; const hash = sha256.create();
   if (original.byte_length === 0) {
     const empty = await client.originals.readOriginal(profileId, original.original_id, 0, 1);

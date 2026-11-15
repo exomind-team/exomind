@@ -1,5 +1,5 @@
 use exomind_core::{
-    BeginStageCommand, CaptureCommand, CommandId, Core, CoreError, EventId, OriginalId, StageId,
+    BeginStageCommand, CaptureCommand, CommandId, Core, CoreError, EventId, OriginalId, StageId,CORE_SCHEMA_VERSION,
 };
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
@@ -82,7 +82,7 @@ fn refuses_damaged_schema_without_reinitializing(damage: &str) {
     assert_eq!(
         db.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
             .unwrap(),
-        4
+        CORE_SCHEMA_VERSION
     );
 }
 

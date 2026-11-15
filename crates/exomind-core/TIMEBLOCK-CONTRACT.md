@@ -51,7 +51,7 @@ TimeblockNodeRecord 是 typed 事件记录，保存 causal parents、source、�
 
 ## Deadline
 
-Soft 到点只追加一次 DeadlineReached，继续超时；Hard 到点一次结束行动，停在反馈待填。pause/resume/rotate/end 使旧 deadline generation 失效。DeadlineOutcome 为 Applied(Receipt) 或 Stale；同已执行 ticket 重试返回 Applied 且 receipt.replayed=true，不新增节点。旧 lifecycle ticket 不得提交。
+Soft 到点只追加一次到点事实，继续超时；Hard 到点一次结束行动，停在反馈待填。schema5 的私有 deadline 绑定已接受 Start/Rotate/Resume 的事件 ID，数字 generation 仅表示当前投影版本；并发重排不会改写同一 run 已接受的到期时间。缺父节点时暂停该档案资格，补齐后同一本机 run 可恢复，不替远端 run 创建 scheduler。pause/resume/rotate/end 及显式 owner 撤销使旧 run/ticket 失效，不因再次导入复活。新事实使用 RunDeadlineReached，旧 DeadlineReached 字节和读取语义保留。DeadlineOutcome 为 Applied(Receipt) 或 Stale；同已执行 ticket 重试返回 Applied 且 receipt.replayed=true，不新增节点。旧 lifecycle ticket 不得提交。
 
 Deadline 预留稳定 command_id/event_id；重启由受信 Host 显式 reconcile。相同 clock epoch 使用 elapsed 单调时间，跨 epoch 采用已持久 UTC 边界并显示重新锚定/回拨异常，不负计时、不重写历史。UI 只按服务快照平滑显示，到零不调用结束。
 

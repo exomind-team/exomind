@@ -1,11 +1,18 @@
 //! Data-plane origin positions. Membership/revocation truth stays in Host.
+mod facts;
+mod ingest;
 mod origin;
 mod schema;
+mod transfer;
 use crate::{Core, CoreError, DeviceId, ProfileId};
+pub use facts::ReplicatedFact;
 pub(crate) use origin::{provision_local_origin, record_local_fact};
-pub(crate) use schema::{migrate, validate_schema};
+pub(crate) use schema::{migrate, validate_objects, validate_schema};
 use serde::{Deserialize, Serialize};
+pub use transfer::{ImportAck, OriginEntry, OriginPage, OriginPageQuery};
 use uuid::Uuid;
+pub const MAX_ORIGIN_PAGE_BYTES: usize = crate::MAX_FACT_BYTES + 64 * 1024;
+pub const DEFAULT_ORIGIN_PAGE_BYTES: usize = 192 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

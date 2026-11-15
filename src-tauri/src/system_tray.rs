@@ -10,6 +10,14 @@ const QUIT_ITEM_ID: &str = "system-tray-quit";
 
 /// Install and retain the desktop tray icon and its menu.
 pub fn install(app: &AppHandle) -> Result<(), io::Error> {
+    install_with_exit_handler(app, crate::app_lifecycle::request_exit)
+}
+
+/// Shared native tray view. Each isolated host supplies its own shutdown owner.
+pub(crate) fn install_with_exit_handler(
+    app: &AppHandle,
+    exit: fn(&AppHandle, i32),
+) -> Result<(), io::Error> {
     let icon = app.default_window_icon().cloned().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
@@ -28,13 +36,13 @@ pub fn install(app: &AppHandle) -> Result<(), io::Error> {
 
     let tray = TrayIconBuilder::new()
         .icon(icon)
-        .tooltip(format!("外心 {}", env!("CARGO_PKG_VERSION")))
+        .tooltip(format!("外心 {}", app.config().version.as_deref().unwrap_or(env!("CARGO_PKG_VERSION"))))
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id().as_ref() {
+        .on_menu_event(move |app, event| match event.id().as_ref() {
             SHOW_MAIN_ITEM_ID => show_main_window(app),
             HIDE_MAIN_ITEM_ID => hide_main_window(app),
-            QUIT_ITEM_ID => crate::app_lifecycle::request_exit(app, 0),
+            QUIT_ITEM_ID => exit(app, 0),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

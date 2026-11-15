@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent, type MutableRefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
-import { Download, FileText, RefreshCw, X } from 'lucide-react';
+import { Bot, Download, FileText, RefreshCw, Timer, X } from 'lucide-react';
 import { PageShell } from '@/ui/app/components/PageShell';
 import { EventTimestamp } from '@/ui/app/components/EventTimestamp';
 import { NowInputRowView, resizeNowInputTextarea } from '@/ui/app/components/NowInputRowView';
@@ -12,7 +12,7 @@ import { BetaDraftController, errorMessage } from './drafts';
 import { betaUuid } from './initialization';
 import { useBetaNow } from './date-clock';
 import type { FileSourceStore } from './file-source-store';
-import { collectOriginalDownload, MAX_BASIC_DOWNLOAD_BYTES } from './original-download';
+import { exportOriginalDownload, MAX_BASIC_DOWNLOAD_BYTES } from './original-download';
 import type { BetaOriginal } from './original-types';
 import type { LocalIntentJournal,IntentPredecessor } from './local-intent-journal';
 import type { BetaTimelinePage,BetaTimeblockNode } from './timeblocks-types';
@@ -20,15 +20,26 @@ import { BetaTimeblockController } from './timeblocks-controller';
 import { BetaFocusTimer } from './BetaFocusTimer';
 import { MainOverlayBridge } from './overlay/MainOverlayBridge';
 import { keepBetaEditableInViewport } from './editable-viewport';
+import { BetaAppShell, type BetaSection } from './BetaAppShell';
+import { BetaSettingsPage } from './BetaSettingsPage';
+import { BetaPeersPage } from './BetaPeersPage';
+import { nativeBetaPeersClient, type BetaPeersClient } from './peers-client';
+import { setBetaDateDisplayMode, useBetaDateDisplayMode, useBetaThemePresentation } from './preferences';
+import { ChatMessageRowView } from '@/ui/app/components/ChatMessageRowView';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { mergeTimelineItems, refreshTimelineWindow } from './timeline-refresh';
+import { BetaProfileDialog } from './BetaProfileDialog';
 
 const SESSION_KEY = 'exomind:beta:connection';
-const DATE_KEY = 'exomind:beta:date-display';
 const selectClass = 'h-9 max-w-full rounded-md border border-input bg-page px-2 text-sm dark:bg-page-dark';
 
 /** A separate entry: no legacy runtime/profile/event-store bootstrap. */
-export function BetaApp({ client: injected, sourceStore, intentJournal, intentPredecessor }: { client?: BetaClient; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor }) {
+export function BetaApp({ client: injected, sourceStore, intentJournal, intentPredecessor, peers: injectedPeers }: { client?: BetaClient; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; peers?:BetaPeersClient|null }) {
   useEffect(() => keepBetaEditableInViewport(), []);
+  useBetaThemePresentation();
   const [native] = useState(() => isTauri());
+  const [nativePeers] = useState(() => native ? nativeBetaPeersClient() : null);
+  const peers = injectedPeers === undefined ? injected ? null : nativePeers : injectedPeers;
   const [client, setClient] = useState<BetaClient | null>(() => injected ?? (native ? nativeBetaClient() : null));
   const [endpoint, setEndpoint] = useState(() => {
     try { return (JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? '{}') as { endpoint?: string }).endpoint ?? window.location.origin; }
@@ -48,7 +59,7 @@ export function BetaApp({ client: injected, sourceStore, intentJournal, intentPr
       setError(''); setClient(next);
     } catch (failure) { setError(errorMessage(failure)); }
   }
-  if (client) return <ConnectedBeta key={native ? 'native' : undefined} client={client} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor}
+  if (client) return <ConnectedBeta key={native ? 'native' : undefined} client={client} peers={peers} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor}
     onDisconnect={!native && !injected ? () => { setClient(null); setToken(''); sessionStorage.removeItem(SESSION_KEY); } : undefined} />;
   return <PageShell title="外心" subtitle="Beta · 连接本机服务" contentClassName="overflow-y-auto">
     <form onSubmit={connect} className="mx-auto flex max-w-lg flex-col gap-4 px-5 py-8">
@@ -61,7 +72,7 @@ export function BetaApp({ client: injected, sourceStore, intentJournal, intentPr
   </PageShell>;
 }
 
-function ConnectedBeta({ client, onDisconnect, sourceStore, intentJournal, intentPredecessor }: { client: BetaClient; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor }) {
+function ConnectedBeta({ client, peers, onDisconnect, sourceStore, intentJournal, intentPredecessor }: { client: BetaClient; peers:BetaPeersClient|null; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor }) {
   const [status, setStatus] = useState<BetaStatus | null>(null);
   const [profiles, setProfiles] = useState<BetaProfile[]>([]);
   const [profileId, setProfileId] = useState('');
@@ -72,6 +83,10 @@ function ConnectedBeta({ client, onDisconnect, sourceStore, intentJournal, inten
   const [reload, setReload] = useState(0);
   const [persistenceBusy,setPersistenceBusy]=useState(false);
   const [switching,setSwitching]=useState(false);
+  const [section,setSection]=useState<BetaSection>('now');
+  const sectionRef=useRef(section);sectionRef.current=section;
+  const [eventRevision,setEventRevision]=useState(0);
+  const [profileDialog,setProfileDialog]=useState(false);
   const prepareSwitch=useRef<(()=>Promise<void>)|null>(null);
   const switchFlight=useRef(false);
   const creation = useRef<{ name: string; id: string; client: BetaClient } | null>(null);
@@ -90,12 +105,13 @@ function ConnectedBeta({ client, onDisconnect, sourceStore, intentJournal, inten
     })();
     return () => { ++generation.current; };
   }, [client, reload]);
-  async function changeProfile(next:string){
-    if(switchFlight.current||next===profileId||!prepareSwitch.current)return;
+  async function changeProfile(next:string,stillWanted:()=>boolean=()=>true){
+    if(next===profileId)return true;
+    if(switchFlight.current||!prepareSwitch.current)return false;
     const current=generation.current;const guard=prepareSwitch.current;
     switchFlight.current=true;setSwitching(true);setError('');
-    try{await guard();if(current!==generation.current||guard!==prepareSwitch.current)return;setProfileId(next);}
-    catch(failure){if(current===generation.current&&guard===prepareSwitch.current)setError(`当前草稿尚未暂存，未切换档案；请保留窗口并重试：${errorMessage(failure)}`);}
+    try{await guard();if(current!==generation.current||guard!==prepareSwitch.current||!stillWanted())return false;setProfileId(next);return true;}
+    catch(failure){if(current===generation.current&&guard===prepareSwitch.current)setError(`当前草稿尚未暂存，未切换档案；请保留窗口并重试：${errorMessage(failure)}`);return false;}
     finally{if(current===generation.current){switchFlight.current=false;setSwitching(false);}}
   }
   async function create(event: FormEvent) {
@@ -119,7 +135,21 @@ function ConnectedBeta({ client, onDisconnect, sourceStore, intentJournal, inten
     } catch (failure) { if (current === generation.current) setError(errorMessage(failure)); }
     finally { if (current === generation.current) setCreating(false); }
   }
-  return <PageShell title="当下" subtitle="Beta · 本机记录" contentClassName="flex flex-col"
+  const profileName=profiles.find(profile=>profile.profile_id===profileId)?.display_name??'';
+  async function joined(nextProfile:string){
+    const current=generation.current;
+    const list=await client.profiles();
+    if(current!==generation.current)throw new Error('本机服务已变化，请重新打开已加入的档案');
+    if(!list.some(profile=>profile.profile_id===nextProfile))throw new Error('已加入档案尚未出现在本机列表，请刷新后打开');
+    setProfiles(list);
+    if(sectionRef.current!=='sync')throw new Error('当前页面已切换，请从档案菜单打开已加入的档案');
+    if(!(await changeProfile(nextProfile,()=>sectionRef.current==='sync')))throw new Error('请等待当前草稿暂存后，再选择已加入的档案');
+    if(current===generation.current)setSection('now');
+  }
+  return <><BetaAppShell section={section} onSectionChange={setSection} profileName={profileName} onProfileClick={()=>setProfileDialog(true)}
+    sync={<BetaPeersPage peers={peers} profileId={profileId} profileName={profileName} runtimeId={status?.runtime_id??''} deviceId={status?.device_id??''} onJoined={joined} onEventsChanged={changed=>{if(changed===profileId)setEventRevision(value=>value+1);}}/>}
+    settings={<BetaSettingsPage profileName={profileName} onDisconnect={persistenceBusy?undefined:onDisconnect}/>}
+    now={<PageShell title="当下" contentClassName="flex flex-col"
     headerAction={onDisconnect && <Button variant="ghost" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}
     headerBottom={status && <div className="flex flex-wrap items-center gap-2">
       <label className="sr-only" htmlFor="beta-profile">当前档案</label>
@@ -136,11 +166,11 @@ function ConnectedBeta({ client, onDisconnect, sourceStore, intentJournal, inten
     {loading && <p role="status" className="p-5 text-sm text-muted">正在连接…</p>}
     {error && <div role="alert" className="flex items-center gap-2 px-5 py-3 text-sm text-destructive">{error}
       {!status && <Button variant="outline" onClick={() => setReload(value => value + 1)}>重新连接</Button>}</div>}
-    {status && <DeviceWorkspace key={`${status.device_id}`} client={client} deviceId={status.device_id} profileId={profileId} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} />}
-  </PageShell>;
+    {status && <DeviceWorkspace key={`${status.device_id}`} active={section==='now'} eventRevision={eventRevision} client={client} deviceId={status.device_id} profileId={profileId} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} />}
+  </PageShell>}/><BetaProfileDialog open={profileDialog} onOpenChange={setProfileDialog} profiles={profiles} profileId={profileId} loading={loading} disabled={persistenceBusy||switching||!prepareSwitch.current} creating={creating} name={name} onNameChange={setName} onCreate={create} onSelect={changeProfile}/></>;
 }
 
-function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch }: { client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:MutableRefObject<(()=>Promise<void>)|null> }) {
+function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision }: { client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:MutableRefObject<(()=>Promise<void>)|null>; active:boolean;eventRevision:number }) {
   type Owners={capture:BetaDraftController;focus:BetaTimeblockController|null;profileId:string};
   const [owners, setOwners] = useState<Owners | null>(null);
   const [error, setError] = useState('');
@@ -208,40 +238,47 @@ function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJourn
   </div>;
   if(!owners||owners.profileId!==profileId)return <p role="status" className="p-5 text-xs text-muted">正在恢复本机草稿…</p>;
   if(!profileId)return null;
-  return <ProfileWorkspace key={profileId} client={client} controller={owners.capture} focus={owners.focus} profileId={profileId} />;
+  return <ProfileWorkspace key={profileId} visible={active} externalRevision={eventRevision} client={client} controller={owners.capture} focus={owners.focus} profileId={profileId} />;
 }
 
 async function readTimeline(client:BetaClient,profileId:string,query:BetaQuery):Promise<BetaTimelinePage>{
   if(client.timelinePage)return client.timelinePage(profileId,query);
   const page=await client.eventsPage(profileId,query);return{...page,items:page.items.map(record=>({kind:'capture' as const,record}))};
 }
-function ProfileWorkspace({ client, controller, focus, profileId }: { client: BetaClient; controller: BetaDraftController; focus:BetaTimeblockController|null; profileId: string }) {
+function ProfileWorkspace({ client, controller, focus, profileId, visible, externalRevision }: { client: BetaClient; controller: BetaDraftController; focus:BetaTimeblockController|null; profileId: string; visible:boolean;externalRevision:number }) {
   const drafts = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const [page, setPage] = useState<BetaTimelinePage | null>(null);
+  const pageRef=useRef(page);pageRef.current=page;
+  const pageOwner=useRef({client,profileId,query:''});
   const [search, setSearch] = useState(''); const [query, setQuery] = useState('');
   const [revision, setRevision] = useState(0); const [loading, setLoading] = useState(false);
   const [error, setError] = useState(''); const generation = useRef(0);
   const scroll = useRef<HTMLDivElement>(null); const olderHeight = useRef<number | null>(null);
   const alive = useRef(true); const now = useBetaNow();
-  const [mode, setMode] = useState<EventDateDisplayMode>(() => {
-    try { const stored = localStorage.getItem(DATE_KEY); return stored === 'full' || stored === 'weekday' ? stored : 'compact'; }
-    catch { return 'compact'; }
-  });
+  const mode=useBetaDateDisplayMode();
+  const readingTop=useRef(0);const followTail=useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
-    const current = ++generation.current; setPage(null); setLoading(true); setError('');
-    void readTimeline(client,profileId, { limit: 100, ...(query ? { search: query } : {}) }).then(result => {
+    const same=pageOwner.current.client===client&&pageOwner.current.profileId===profileId&&pageOwner.current.query===query;
+    const previous=same?pageRef.current:null;
+    if(!same){setPage(null);pageRef.current=null;followTail.current=true;readingTop.current=0;}
+    pageOwner.current={client,profileId,query};
+    const current = ++generation.current; setLoading(true); setError('');
+    void refreshTimelineWindow(next=>readTimeline(client,profileId,next),previous,query).then(result => {
       if (current === generation.current) { olderHeight.current = null; setPage(result); }
     }).catch(failure => { if (current === generation.current) setError(errorMessage(failure)); })
       .finally(() => { if (current === generation.current) setLoading(false); });
     return () => { ++generation.current; };
-  }, [client, profileId, query, revision]);
+  }, [client, profileId, query, revision,externalRevision]);
   useLayoutEffect(() => {
     const element = scroll.current; if (!element) return;
+    if(!visible)return;
     if (olderHeight.current !== null) element.scrollTop += element.scrollHeight - olderHeight.current;
-    else element.scrollTop = element.scrollHeight;
+    else if(followTail.current)element.scrollTop = element.scrollHeight;
+    else element.scrollTop=readingTop.current;
+    readingTop.current=element.scrollTop;
     olderHeight.current = null;
-  }, [page]);
+  }, [page,visible]);
   async function older() {
     if (!page || page.next_before === null || loading) return;
     const current = generation.current; setLoading(true); setError('');
@@ -249,7 +286,7 @@ function ProfileWorkspace({ client, controller, focus, profileId }: { client: Be
       const result = await readTimeline(client,profileId, { before: page.next_before, through: page.highwater, limit: 100, ...(query ? { search: query } : {}) });
       if (current !== generation.current) return;
       olderHeight.current = scroll.current?.scrollHeight ?? null;
-      setPage({ ...result, items: [...page.items, ...result.items] });
+      setPage({ ...result, items: mergeTimelineItems(page.items,result.items) });
     } catch (failure) { if (current === generation.current) setError(errorMessage(failure)); }
     finally { if (current === generation.current) setLoading(false); }
   }
@@ -279,24 +316,25 @@ function ProfileWorkspace({ client, controller, focus, profileId }: { client: Be
         <Button variant="outline" type="submit">搜索</Button>
       </form>
       <select aria-label="日期显示" className={selectClass} value={mode} onChange={event => {
-        const value = event.target.value as EventDateDisplayMode; setMode(value);
-        try { localStorage.setItem(DATE_KEY, value); } catch { setError('日期偏好暂时无法保存'); }
+        const value = event.target.value as EventDateDisplayMode;
+        try { setBetaDateDisplayMode(value); } catch { setError('日期偏好暂时无法保存'); }
       }}><option value="compact">简略日期</option><option value="full">完整日期</option><option value="weekday">星期日期</option></select>
       <Button variant="ghost" size="icon" aria-label="刷新记录" onClick={() => setRevision(value => value + 1)}><RefreshCw className="size-4" /></Button>
     </div>
     {error && <p role="alert" className="px-5 py-2 text-sm text-destructive">{error}</p>}
-    <div ref={scroll} className="min-h-0 flex-1 overflow-y-auto px-5 py-4" aria-label="记录历史" aria-busy={loading}>
+    <div ref={scroll} className="min-h-0 flex-1 overflow-y-auto px-5 py-4" aria-label="记录历史" aria-busy={loading} onScroll={event=>{if(!visible)return;const element=event.currentTarget;readingTop.current=element.scrollTop;followTail.current=element.scrollHeight-element.clientHeight-element.scrollTop<64;}}>
       {page?.next_before !== null && page && <div className="mb-4 text-center"><Button variant="ghost" disabled={loading} onClick={() => void older()}>加载更早记录</Button></div>}
       {loading && <p role="status" className="text-center text-sm text-muted">正在读取…</p>}
       {page?.items.length === 0 && <p className="py-8 text-center text-sm text-muted">{query ? '没有匹配记录' : '还没有记录'}</p>}
-      <div className="space-y-4">{page && [...page.items].reverse().map(item => item.kind==='timeblock'?<article key={item.record.event_id} data-timeline-kind="timeblock" className="flex flex-col items-start">
-        <div className="mb-1 flex items-center gap-2 text-xs text-muted"><span>{item.record.source.kind==='scheduler'?'计时服务':'我 · 时间块'}</span><EventTimestamp timestamp={item.record.occurred_at_ms} now={now} mode={mode}/></div>
-        <p className="max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-muted/15 px-4 py-3 text-sm leading-relaxed text-foreground">{timeblockSummary(item.record)}</p>
-      </article>:(()=>{const event=item.record;return <article key={event.event_id} data-timeline-kind="capture" className={`flex flex-col ${event.author_kind === 'human' ? 'items-end' : 'items-start'}`}>
-        <div className="mb-1 flex items-center gap-2 text-xs text-muted"><span>{event.author_kind === 'human' ? '我' : 'Agent 记录'}</span><EventTimestamp timestamp={event.occurred_at_ms} now={now} mode={mode} /></div>
-        <p className={`max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-sm leading-relaxed ${event.author_kind === 'human' ? 'bg-active text-foreground' : 'bg-muted/15 text-foreground'}`}>{event.text}</p>
-        {!!event.originals?.length && <OriginalDownloads client={client} profileId={profileId} originals={event.originals} />}
-      </article>;})())}</div>
+      <div className="space-y-4">{page && [...page.items].reverse().map(item => item.kind==='timeblock'?<ChatMessageRowView key={item.record.event_id} eventId={item.record.event_id} timelineKind="timeblock" tone="system"
+        avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className="bg-surface text-brand-accent"><Timer size={16}/></AvatarFallback></Avatar>}
+        metadata={<><span className="text-xs font-semibold text-strong">{item.record.source.kind==='scheduler'?'计时服务':'我 · 时间块'}</span><EventTimestamp timestamp={item.record.occurred_at_ms} now={now} mode={mode}/></>}
+        content={<p className="whitespace-pre-wrap break-words">{timeblockSummary(item.record)}</p>}/>
+      :(()=>{const event=item.record;return <ChatMessageRowView key={event.event_id} eventId={event.event_id} timelineKind="capture" tone={event.author_kind==='human'?'user':'system'}
+        avatar={<Avatar className={`${event.author_kind==='human'?'':'mt-0.5 '}h-8 w-8 shrink-0`}><AvatarFallback className={event.author_kind==='human'?'rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100':'bg-surface text-brand-accent'}>{event.author_kind==='human'?'我':<Bot size={16}/>}</AvatarFallback></Avatar>}
+        metadata={<><span className="text-muted">设备 {event.device_id.slice(0,8)}</span><EventTimestamp timestamp={event.occurred_at_ms} now={now} mode={mode}/><span className="text-xs font-semibold text-strong">{event.author_kind==='human'?'我':'Agent 记录'}</span></>}
+        content={event.text?<p className="whitespace-pre-wrap break-words">{event.text}</p>:null}
+        afterBubble={!!event.originals?.length&&<OriginalDownloads client={client} profileId={profileId} originals={event.originals}/>}/>;})())}</div>
     </div>
     <NowInputRowView
       value={draft?.text ?? ''}
@@ -346,7 +384,7 @@ function ProfileWorkspace({ client, controller, focus, profileId }: { client: Be
 }
 
 function timeblockSummary(node:BetaTimeblockNode):string{
-  if(node.payload.kind==='deadline_reached')return node.payload.end_mode==='hard'?'倒计时到点，行动结束待反馈':'倒计时到点，继续超时';
+  if(node.payload.kind==='deadline_reached'||node.payload.kind==='run_deadline_reached')return node.payload.end_mode==='hard'?'倒计时到点，行动结束待反馈':'倒计时到点，继续超时';
   const action=node.payload.action;
   switch(action.kind){case'start':return`开始时间块：${action.name}`;case'pause':return'暂停时间块';case'resume':return'继续时间块';case'rotate':return`切换时间块：${action.next.name}`;case'end_action':return'行动结束，待填写反馈';case'submit_feedback':return action.feedback.kind==='skipped'?'已明确跳过反馈':`反馈：${action.feedback.text}`;case'append_feedback':return`追加反馈：${action.text}`;}
 }
@@ -358,20 +396,34 @@ function formatBytes(bytes: number): string {
 }
 
 function OriginalDownloads({ client, profileId, originals }: { client: BetaClient; profileId: string; originals: BetaOriginal[] }) {
-  const [busy, setBusy] = useState<string | null>(null); const [error, setError] = useState('');
-  const active = useRef(true); useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+  const [busy, setBusy] = useState<string | null>(null); const [error, setError] = useState('');const [notice,setNotice]=useState('');
+  const active = useRef(true);const request=useRef<{id:string;client:BetaClient}|null>(null);
+  useEffect(() => { active.current = true; return () => { active.current = false;const owned=request.current;if(owned?.client.originalExports)void owned.client.originalExports.cancel(owned.id).catch(()=>{}); }; }, []);
   async function download(original: BetaOriginal) {
-    setBusy(original.original_id); setError('');
+    if(request.current)return;
+    let id:string;
+    try{id=betaUuid();}catch(failure){setError(errorMessage(failure));return;}
+    const owned={id,client};request.current=owned;
+    setBusy(original.original_id); setError('');setNotice('');
     try {
-      const blob = await collectOriginalDownload(client, profileId, original); if (!active.current) return;
-      const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = original.file_name;
+      const result = await exportOriginalDownload(client, profileId, original,owned.id); if (!active.current||request.current!==owned) return;
+      if(result.kind==='native'){
+        setNotice(result.result.cancelled?result.result.partial_output?'导出已取消，所选位置可能保留未完成的新文档，请检查后清理':'导出已取消':'原件已导出并完成校验');return;
+      }
+      const url = URL.createObjectURL(result.blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = original.file_name;
       document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1_000);
-    } catch (failure) { if (active.current) setError(errorMessage(failure)); }
-    finally { if (active.current) setBusy(null); }
+      setNotice('已准备浏览器下载，请查看下载位置');
+    } catch (failure) { if (active.current&&request.current===owned) setError(errorMessage(failure)); }
+    finally { if(request.current===owned){request.current=null;if(active.current)setBusy(null);} }
+  }
+  async function cancel(){
+    const owned=request.current;if(!owned?.client.originalExports)return;
+    try{const accepted=await owned.client.originalExports.cancel(owned.id);if(active.current&&request.current===owned)setNotice(accepted?'正在取消导出…':'导出已进入完成阶段，正在等待确认');}
+    catch(failure){if(active.current&&request.current===owned)setError(errorMessage(failure));}
   }
   return <div className="mt-2 max-w-[90%] space-y-1">{originals.map(original => <div key={original.original_id} className="flex items-center gap-2 rounded-2xl border border-[#E7E5E4] bg-white/90 px-3 py-2 dark:border-[#292524] dark:bg-[#1C1917]">
     <FileText size={16} className="shrink-0 text-[#C75B3A] dark:text-[#FDBA74]" />
-    <div className="min-w-0 flex-1"><p className="break-all text-xs font-medium">{original.file_name}</p><p className="text-[10px] text-muted">{formatBytes(original.byte_length)}</p>{original.byte_length > MAX_BASIC_DOWNLOAD_BYTES && <p className="text-xs text-muted">当前下载入口支持 64 MiB 以内；更大原件的流式导出尚未接入</p>}</div>
-    <Button variant="ghost" size="icon" aria-label={`下载 ${original.file_name}`} disabled={busy !== null || original.byte_length > MAX_BASIC_DOWNLOAD_BYTES} onClick={() => void download(original)}><Download size={14} /></Button>
-  </div>)}{busy && <p role="status" className="text-xs text-muted">正在读取并校验原件…</p>}{error && <p role="alert" className="text-xs text-destructive">{error}</p>}</div>;
+    <div className="min-w-0 flex-1"><p className="break-all text-xs font-medium">{original.file_name}</p><p className="text-[10px] text-muted">{formatBytes(original.byte_length)}</p>{!client.originalExports&&original.byte_length > MAX_BASIC_DOWNLOAD_BYTES && <p className="text-xs text-muted">网页下载支持 64 MiB 以内；更大原件请在独立应用中导出</p>}</div>
+    <Button variant="ghost" size="icon" aria-label={`下载 ${original.file_name}`} disabled={busy !== null || !client.originalExports&&original.byte_length > MAX_BASIC_DOWNLOAD_BYTES} onClick={() => void download(original)}><Download size={14} /></Button>
+  </div>)}{busy && <div className="flex items-center gap-2 text-xs text-muted"><p role="status">{client.originalExports?'正在流式导出并校验原件…':'正在读取并校验原件…'}</p>{client.originalExports&&<Button variant="ghost" size="sm" onClick={()=>{void cancel();}}>取消导出</Button>}</div>}{notice&&<p role="status" className="text-xs text-muted">{notice}</p>}{error && <p role="alert" className="text-xs text-destructive">{error}</p>}</div>;
 }

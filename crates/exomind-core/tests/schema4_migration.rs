@@ -12,7 +12,7 @@ fn actual_new_database_separates_manifest_reference_schema_from_local_materializ
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
     assert_eq!(
-        version, 4,
+        version, exomind_core::CORE_SCHEMA_VERSION,
         "metadata-first replication requires an actual migration, not an advertised constant"
     );
     let targets = db
@@ -53,6 +53,34 @@ struct Probe {
     success: bool,
     stdout: String,
     stderr: String,
+}
+fn assert_legacy_timer(core: &Core, expected: &serde_json::Value) {
+    let profile = expected["profile_id"].as_str().unwrap().parse().unwrap();
+    let node = &expected["timeblock_nodes"]["items"][0];
+    let stamp = core
+        .trusted_clock_stamp(
+            node["clock"]["epoch_id"].as_str().unwrap().parse().unwrap(),
+            node["occurred_at_ms"].as_i64().unwrap(),
+            node["clock"]["elapsed_ms"].as_u64().unwrap(),
+        )
+        .unwrap();
+    let snapshot = core
+        .timeblock_snapshot(&core.local_human(profile).unwrap(), profile, &stamp)
+        .unwrap();
+    assert!(
+        snapshot
+            .active
+            .as_ref()
+            .unwrap()
+            .deadline
+            .as_ref()
+            .unwrap()
+            .eligible
+    );
+    assert_eq!(
+        serde_json::to_value(snapshot).unwrap(),
+        expected["timeblock_snapshot"]
+    );
 }
 fn probe(executable: &Path, root: &Path) -> Probe {
     use std::{
@@ -110,7 +138,7 @@ fn probe(executable: &Path, root: &Path) -> Probe {
 }
 #[test]
 #[ignore = "requires EXOMIND_SCHEMA3_FIXTURE pointing to the retained actual Core3 seed/probe directory"]
-fn actual_schema_three_seed_migrates_all_bytes_facts_and_receipts_and_old_binary_refuses_four() {
+fn actual_schema_three_seed_migrates_all_bytes_facts_and_receipts_and_old_binary_refuses_current() {
     let fixture =
         std::env::var_os("EXOMIND_SCHEMA3_FIXTURE").expect("retained schema3 fixture required");
     let fixture = Path::new(&fixture);
@@ -162,6 +190,7 @@ fn actual_schema_three_seed_migrates_all_bytes_facts_and_receipts_and_old_binary
     let wal = root.join("beta-core.sqlite3-wal");
     assert!(std::fs::metadata(&wal).unwrap().len() > 0);
     let core = Core::open(&root).unwrap();
+    assert_legacy_timer(&core, &expected);
     let human = core.local_human(profile).unwrap();
     let empty_context = core.local_human(empty_profile).unwrap();
     let empty_identity = core
@@ -313,10 +342,11 @@ fn actual_schema_three_seed_migrates_all_bytes_facts_and_receipts_and_old_binary
     assert!(!version_rejected.success);
     assert_eq!(
         version_rejected.stderr.trim(),
-        "legacy-core3-fixture: unsupported core schema version 4"
+        format!("legacy-core3-fixture: unsupported core schema version {}",exomind_core::CORE_SCHEMA_VERSION)
     );
     assert_eq!(std::fs::read(&version_probe_db).unwrap(), before);
     let reopened = Core::open(&root).unwrap();
+    assert_legacy_timer(&reopened, &expected);
     let human = reopened.local_human(profile).unwrap();
     assert_eq!(
         reopened

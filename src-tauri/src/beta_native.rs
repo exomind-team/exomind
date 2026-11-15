@@ -1,9 +1,13 @@
 //! Isolated Beta embedding. No legacy runtime/config/store is opened here.
 
+#[path = "beta_native_export.rs"]
+mod export;
 #[path = "beta_native_sources.rs"]
 mod local_sources;
 #[path = "beta_overlay.rs"]
 mod overlay;
+#[path = "beta_native_peers.rs"]
+mod peer_commands;
 
 use exomind_beta_host::{
     BetaHost, DeadlineEnvelope, HostError, HostStatus, RunningServer, Session,
@@ -38,6 +42,46 @@ impl From<HostError> for Failure {
                 ("forbidden", "当前会话无权执行此操作")
             }
             HostError::Stopped => ("stopped", "本机服务已停止"),
+            HostError::PeerProtocolMismatch => {
+                ("protocol_mismatch", "两端版本不兼容，请使用同版安装包")
+            }
+            HostError::PeerPinMismatch | HostError::PeerTls => {
+                ("identity_mismatch", "对端身份未通过验证，未发送资料")
+            }
+            HostError::PeerMembershipDenied => {
+                ("membership_denied", "当前档案的设备授权已变化或被撤销")
+            }
+            HostError::PeerMembershipConflict => {
+                ("membership_conflict", "已有连接需要双方明确确认后重新授权")
+            }
+            HostError::PeerInvitationExpired => {
+                ("invitation_expired", "邀请已过期，请从原设备生成新邀请")
+            }
+            HostError::PeerInvitationRevoked => ("invitation_revoked", "邀请已撤销，未重新授权"),
+            HostError::PeerInvitationConsumed => {
+                ("invitation_consumed", "邀请已被领取，请查证原加入结果")
+            }
+            HostError::PeerIdentityRecoveryRequired => (
+                "identity_recovery_required",
+                "设备身份需要恢复，原资料已保留",
+            ),
+            HostError::PeerSyncRecoveryRequired | HostError::PeerMembershipRecoveryRequired => (
+                "network_recovery_required",
+                "连接记录需要恢复，未清空原资料或授权",
+            ),
+            HostError::PeerSyncResetRequired | HostError::Core(CoreError::OriginEpochChanged) => (
+                "peer_reset_required",
+                "对端资料副本发生变化，请确认恢复后再补齐",
+            ),
+            HostError::PeerBusy => ("peer_busy", "连接正在处理，请稍后重试"),
+            HostError::PeerTimeout => ("peer_timeout", "连接超时，本机记录已保留"),
+            HostError::PeerCancelled => ("cancelled", "连接已停止，本机记录已保留"),
+            HostError::PeerTransportUnavailable | HostError::PeerSyncUnavailable => {
+                ("unreachable", "暂时无法连接对端，本机记录可继续使用")
+            }
+            HostError::Core(CoreError::ReplicationConflict { .. }) => {
+                ("data_conflict", "资料存在冲突，原记录已保留，请核对后继续")
+            }
             HostError::IntentCacheCorrupt => (
                 "intent_cache_corrupt",
                 "本机草稿存储需要恢复，原数据已保留；未改用旧缓存",
@@ -138,11 +182,15 @@ impl From<HostError> for Failure {
 struct NativeState {
     host: Arc<BetaHost>,
     owner: Session,
+    peers: Arc<exomind_beta_host::PeerNetwork>,
+    exports: Arc<export::ExportManager>,
     dev_origin: Option<url::Origin>,
     sessions: Mutex<HashMap<ProfileId, Session>>,
     server: tokio::sync::Mutex<Option<RunningServer>>,
     closing: AtomicBool,
     exit_ready: AtomicBool,
+    desktop_tray_ready: AtomicBool,
+    desktop_shortcut: Mutex<Option<String>>,
     overlay: Mutex<overlay::Broker>,
 }
 
@@ -151,14 +199,19 @@ impl NativeState {
         let host = Arc::new(BetaHost::open(root)?);
         let owner = host.owner_session()?;
         host.start_services()?;
+        let peers = exomind_beta_host::PeerNetwork::new(host.clone(), owner.clone())?;
         Ok(Self {
             host,
             owner,
+            peers,
+            exports: Arc::new(export::ExportManager::default()),
             dev_origin,
             sessions: Mutex::new(HashMap::new()),
             server: tokio::sync::Mutex::new(None),
             closing: AtomicBool::new(false),
             exit_ready: AtomicBool::new(false),
+            desktop_tray_ready: AtomicBool::new(false),
+            desktop_shortcut: Mutex::new(None),
             overlay: Mutex::new(overlay::Broker::default()),
         })
     }
@@ -189,6 +242,14 @@ impl NativeState {
     }
 
     async fn stop(&self) -> Result<(), HostError> {
+        self.exports.request_stop();
+        self.peers.stop().await?;
+        let exports = self.exports.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            exports.wait_empty(std::time::Duration::from_secs(10))
+        })
+        .await
+        .map_err(|_| HostError::Shutdown)??;
         // Host's transaction gate synchronously fences queued work before we
         // await the owned HTTP task; native capture never depends on that task.
         let host = self.host.clone();
@@ -586,6 +647,7 @@ fn request_exit(app: &AppHandle, code: i32) {
         return;
     }
     // Fence HTTP as well as IPC immediately, before scheduling resource close.
+    state.exports.request_stop();
     state.host.request_stop();
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -612,6 +674,27 @@ fn beta_request_exit(
     trusted_window(&window, state.inner())?;
     request_exit(&app, 0);
     Ok(())
+}
+
+#[derive(Serialize)]
+struct DesktopInfo {
+    close_to_tray: bool,
+    shortcut: Option<String>,
+}
+#[tauri::command]
+fn beta_desktop_status(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+) -> Result<DesktopInfo, Failure> {
+    trusted_window(&window, state.inner())?;
+    Ok(DesktopInfo {
+        close_to_tray: state.desktop_tray_ready.load(Ordering::Acquire),
+        shortcut: state
+            .desktop_shortcut
+            .lock()
+            .map_err(|_| Failure::from(HostError::StatePoisoned))?
+            .clone(),
+    })
 }
 
 fn data_root(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -688,6 +771,8 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(move |app| {
             let port = match std::env::var("EXOMIND_BETA_PORT") {
@@ -703,12 +788,48 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             )?);
             app.manage(state.clone());
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                if crate::system_tray::install_with_exit_handler(app.handle(), request_exit).is_ok()
+                {
+                    state.desktop_tray_ready.store(true, Ordering::Release);
+                }
+                for shortcut in ["Control+Shift+Space", "Control+Alt+Space"] {
+                    if crate::commands::shortcut_commands::register_main_window_shortcut_listener(
+                        app.handle(),
+                        shortcut,
+                    )
+                    .is_ok()
+                    {
+                        *state
+                            .desktop_shortcut
+                            .lock()
+                            .map_err(|_| "Beta shortcut state unavailable")? =
+                            Some(shortcut.into());
+                        break;
+                    }
+                }
+            }
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let Some((config, directory)) = isolated_window.as_ref() {
                 tauri::WebviewWindowBuilder::from_config(app, config)?
                     .data_directory(directory.clone())
                     .build()?;
             }
             let handle = app.handle().clone();
+            let peer_state = state.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = peer_state.peers.restore().await {
+                    if !peer_state.closing.load(Ordering::Acquire) {
+                        log::warn!(
+                            "Beta peer network did not start: {}",
+                            match error {
+                                HostError::PeerSyncRecoveryRequired => "recovery_required",
+                                _ => "unavailable",
+                            }
+                        );
+                    }
+                }
+            });
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = state.start_listener(port).await {
                     if state.closing.load(Ordering::Acquire) {
@@ -729,6 +850,15 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            export::beta_export_original,
+            export::beta_cancel_original_export,
+            peer_commands::beta_peer_status,
+            peer_commands::beta_peer_set_enabled,
+            peer_commands::beta_peer_create_invitation,
+            peer_commands::beta_peer_inspect_invitation,
+            peer_commands::beta_peer_join_invitation,
+            peer_commands::beta_peer_sync,
+            peer_commands::beta_peer_revoke,
             overlay::beta_overlay_main,
             overlay::beta_overlay_attach,
             overlay::beta_overlay_read,
@@ -755,6 +885,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             beta_deadline_envelope,
             beta_receipt,
             beta_request_exit,
+            beta_desktop_status,
             beta_begin_stage,
             beta_stage_status,
             beta_write_stage_chunk,
@@ -763,6 +894,10 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             beta_read_original_range,
             crate::commands::mobile_display_commands::mobile_fullscreen_set
         ]);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    }
     #[cfg(debug_assertions)]
     {
         let mut bridge = tauri_plugin_mcp_bridge::Builder::new().bind_address("127.0.0.1");
@@ -780,6 +915,13 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                 let state = window.state::<Arc<NativeState>>();
                 if !state.exit_ready.load(Ordering::Acquire) {
                     api.prevent_close();
+                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                    if state.desktop_tray_ready.load(Ordering::Acquire)
+                        && !state.closing.load(Ordering::Acquire)
+                    {
+                        let _ = window.hide();
+                        return;
+                    }
                     request_exit(window.app_handle(), 0);
                 }
             }

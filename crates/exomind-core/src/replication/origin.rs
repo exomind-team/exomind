@@ -113,7 +113,7 @@ pub(super) fn head(
 
 // A checkpoint is not permission to silently ignore a missing endpoint or a
 // changed fact. Full prefix validation belongs to bounded export/import pages.
-fn verify_endpoint(
+pub(super) fn verify_endpoint(
     connection: &Connection,
     identity: &OriginIdentity,
     seq: u64,
@@ -136,6 +136,19 @@ fn verify_endpoint(
     let chain = chain.ok_or(CoreError::RecoveryRequired)?;
     let body = body.ok_or(CoreError::RecoveryRequired)?;
     if chain != expected || stored_digest.as_ref() != Some(&digest) {
+        return Err(CoreError::RecoveryRequired);
+    }
+    let expected_kind = if kind == "capture/1" || kind == "capture/2" {
+        "capture"
+    } else {
+        "timeblock/1"
+    };
+    let matches_kind: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM events WHERE event_id=?1 AND kind=?2)",
+        params![event.to_string(), expected_kind],
+        |row| row.get(0),
+    )?;
+    if !matches_kind {
         return Err(CoreError::RecoveryRequired);
     }
     let valid = match kind.as_str() {

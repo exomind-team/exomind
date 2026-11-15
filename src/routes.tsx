@@ -1,7 +1,7 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Waypoints, Brain, PanelLeftClose, PanelLeftOpen, Orbit, type LucideIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Target, Settings, Waypoints, Orbit, type LucideIcon } from 'lucide-react';
+import { AlphaDesktopShellView, AlphaDesktopSidebarView, AlphaMobileShellView } from '@/ui/app/components/AlphaAppShellView';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getGoalsPageEnabled, subscribeGoalsPageEnabledChanges } from '@/config/goals-page-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
@@ -108,81 +108,22 @@ function isMobileFullscreenRoute(pathname: string): boolean {
 }
 
 function MobileShell({
-  locationPath,
-  navItems,
-  desktopFrame = false,
-  commandPaletteActive = false,
-  commandContext,
-}: {
-  locationPath: string;
-  navItems: ShellNavItem[];
-  desktopFrame?: boolean;
-  commandPaletteActive?: boolean;
-  commandContext?: CommandContext;
+  locationPath, navItems, desktopFrame = false, commandPaletteActive = false, commandContext,
+}: { locationPath: string; navItems: ShellNavItem[]; desktopFrame?: boolean;
+  commandPaletteActive?: boolean; commandContext?: CommandContext;
 }) {
   const previewFrame = desktopFrame && resolveRuntimePlatform() !== 'tauri';
   const fullscreenRoute = isMobileFullscreenRoute(locationPath);
-
-  return (
-    <div className={cn('min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09]', previewFrame && 'p-6')}>
-      <div
-        className={cn(
-          'relative h-[100dvh] w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]',
-          previewFrame && 'mx-auto max-w-[393px] h-[852px] rounded-[40px] border border-[#E6DFD8] dark:border-[#292524] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]'
-        )}
-      >
-        <main
-          className={cn(
-            'absolute inset-x-0 overflow-y-auto',
-            fullscreenRoute && 'scrollbar-none',
-            fullscreenRoute
-              ? (previewFrame ? 'top-0 bottom-0' : 'top-[env(safe-area-inset-top,0px)] bottom-0')
-              : cn(
-                'bottom-[calc(env(safe-area-inset-bottom,0px)+60px)]',
-                previewFrame ? 'top-0' : 'top-[env(safe-area-inset-top,0px)]',
-              ),
-          )}
-        >
-          <Outlet />
-        </main>
-
-        {commandPaletteActive && commandContext ? (
-          <CommandPalette context={commandContext} />
-        ) : null}
-
-        {!fullscreenRoute ? (
-          <nav
-            data-testid="mobile-bottom-tab"
-            className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] dark:border-[#292524] bg-[#FAF7F5]/95 dark:bg-[#0C0A09]/95 backdrop-blur"
-          >
-            <div className="flex items-center px-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const active = locationPath === item.path
-                  || (item.path === '/eventlog' && locationPath.startsWith('/eventlog'))
-                  || (item.path === '/goals' && locationPath.startsWith('/goals'))
-                  || (item.path === '/agents' && locationPath.startsWith('/agents'))
-                  || (item.path === '/settings' && locationPath.startsWith('/settings'));
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={cn(
-                      'flex flex-1 min-w-0 flex-col items-center gap-1 rounded-xl py-1 text-[11px] transition-colors',
-                      active ? 'text-[#C75B3A] dark:text-[#E8734E] font-semibold' : 'text-stone-400 dark:text-[#57534E]'
-                    )}
-                  >
-                    <Icon size={20} />
-                    <span>{item.title}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          </nav>
-        ) : null}
-      </div>
-    </div>
-  );
+  const items = navItems.map(item => ({ ...item, key: item.path, active: locationPath === item.path
+    || (item.path === '/eventlog' && locationPath.startsWith('/eventlog'))
+    || (item.path === '/goals' && locationPath.startsWith('/goals'))
+    || (item.path === '/agents' && locationPath.startsWith('/agents'))
+    || (item.path === '/settings' && locationPath.startsWith('/settings')) }));
+  return <AlphaMobileShellView items={items} previewFrame={previewFrame} fullscreen={fullscreenRoute}
+    commandPalette={commandPaletteActive && commandContext ? <CommandPalette context={commandContext}/> : null}
+    renderNavigationItem={(item, view) => <Link to={item.path} className={view.className}>{view.children}</Link>}>
+    <Outlet/>
+  </AlphaMobileShellView>;
 }
 
 function DesktopSidebar({
@@ -217,87 +158,11 @@ function DesktopSidebar({
     { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
 
-  return (
-    <aside
-      data-testid="desktop-sidebar"
-      data-state={collapsed ? 'collapsed' : 'expanded'}
-      className={cn(
-        'flex h-full shrink-0 flex-col border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] transition-[width] duration-200 ease-out',
-        collapsed ? 'w-16' : 'w-64',
-      )}
-    >
-      <div className={cn('border-b border-[hsl(var(--sidebar-border))]', collapsed ? 'p-2' : 'p-3')}>
-        {collapsed ? (
-          <div className="flex flex-col items-center gap-2 rounded-md py-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
-              <Brain size={16} />
-            </div>
-            <button
-              type="button"
-              data-testid="desktop-sidebar-toggle"
-              aria-label="展开侧边栏"
-              aria-expanded="false"
-              onClick={onToggleCollapsed}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[hsl(var(--sidebar-border))] text-[hsl(var(--sidebar-muted))] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-accent-foreground))]"
-            >
-              <PanelLeftOpen size={16} />
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3 rounded-md px-2 py-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
-              <Brain size={16} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">ExoMind</p>
-              <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">外心</p>
-            </div>
-            <button
-              type="button"
-              data-testid="desktop-sidebar-toggle"
-              aria-label="收起侧边栏"
-              aria-expanded="true"
-              onClick={onToggleCollapsed}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--sidebar-border))] text-[hsl(var(--sidebar-muted))] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-accent-foreground))]"
-            >
-              <PanelLeftClose size={16} />
-            </button>
-          </div>
-        )}
-      </div>
-
-      <nav className="flex-1 space-y-1 p-2">
-        {desktopNavItems.map((item) => {
-          const Icon = item.icon;
-          const active = item.match(activePath);
-          const itemClassName = cn(
-            'relative flex w-full items-center rounded-md text-sm transition-colors',
-            collapsed ? 'justify-center px-0 py-3' : 'gap-2 px-3 py-2',
-            active
-              ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] font-medium'
-              : 'text-[hsl(var(--sidebar-foreground))]'
-          );
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              data-testid={`desktop-sidebar-item-${item.key}`}
-              aria-label={item.title}
-              title={item.title}
-              className={itemClassName}
-            >
-              <Icon size={16} />
-              {collapsed ? <span className="sr-only">{item.title}</span> : <span>{item.title}</span>}
-            </Link>
-          );
-        })}
-      </nav>
-
-      <div className={cn('border-t border-[hsl(var(--sidebar-border))]', collapsed ? 'p-2' : 'p-3')}>
-        <DesktopSidebarAccountEntry collapsed={collapsed} />
-      </div>
-    </aside>
-  );
+  const items = desktopNavItems.map(item => ({ ...item, active: item.match(activePath) }));
+  return <AlphaDesktopSidebarView items={items} collapsed={collapsed} onToggleCollapsed={onToggleCollapsed}
+    footer={<DesktopSidebarAccountEntry collapsed={collapsed}/>}
+    renderNavigationItem={(item, view) => <Link to={item.path} data-testid={view.testId}
+      aria-label={item.title} title={item.title} className={view.className}>{view.children}</Link>}/>;
 }
 
 function DesktopLayout({
@@ -313,22 +178,11 @@ function DesktopLayout({
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
-  return (
-    <div className="h-[100dvh] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
-      <div className="flex h-full w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
-        <DesktopSidebar
-          activePath={activePath}
-          agentPageEnabled={agentPageEnabled}
-          goalsPageEnabled={goalsPageEnabled}
-          collapsed={collapsed}
-          onToggleCollapsed={onToggleCollapsed}
-        />
-        <main data-testid="desktop-settings-content" className="min-w-0 flex-1 overflow-y-auto bg-[#FAF7F5] dark:bg-[#0C0A09]">
-          <Outlet />
-        </main>
-      </div>
-    </div>
-  );
+  return <AlphaDesktopShellView sidebar={<DesktopSidebar activePath={activePath}
+    agentPageEnabled={agentPageEnabled} goalsPageEnabled={goalsPageEnabled}
+    collapsed={collapsed} onToggleCollapsed={onToggleCollapsed}/>}>
+    <Outlet/>
+  </AlphaDesktopShellView>;
 }
 
 function GoalsRouteGate() {

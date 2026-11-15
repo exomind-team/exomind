@@ -1420,6 +1420,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
@@ -1475,6 +1476,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "exomind-core",
+ "if-addrs",
  "rand 0.8.5",
  "reqwest 0.12.28",
  "ring",
@@ -1483,6 +1485,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "socket2 0.6.3",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",

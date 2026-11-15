@@ -1,5 +1,5 @@
 use super::model::*;
-use crate::{CoreError, EventId, ProfileId, TimeblockId};
+use crate::{CoreError, DeviceId, EventId, ProfileId, TimeblockId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
@@ -20,6 +20,10 @@ pub(super) struct Block {
     pub deadline_reached: bool,
     pub generation: u64,
     pub pending_feedback: bool,
+    #[serde(default)]
+    pub run_device_id: Option<DeviceId>,
+    #[serde(default)]
+    pub run_event_id: Option<EventId>,
 }
 impl Block {
     pub fn work_at(&self, point: &Point) -> u64 {
@@ -157,7 +161,7 @@ impl State {
         }
         Ok(())
     }
-    fn begin(&mut self, spec: StartBlockSpec, point: &Point) {
+    fn begin(&mut self, spec: StartBlockSpec, point: &Point, device: DeviceId, event: EventId) {
         self.active = Some(spec.block_id);
         self.blocks.insert(
             spec.block_id.to_string(),
@@ -170,6 +174,8 @@ impl State {
                 deadline_reached: false,
                 generation: 1,
                 pending_feedback: false,
+                run_device_id: Some(device),
+                run_event_id: Some(event),
             },
         );
     }
@@ -221,7 +227,7 @@ impl State {
                         if self.active.is_some() {
                             conflicts.push(format!("concurrent start retained: {}", node.event_id));
                         }
-                        self.begin(spec, &point);
+                        self.begin(spec, &point, node.device_id, node.event_id);
                         lane = Some((IntervalKind::Running, Some(*block_id)));
                     }
                     TimeblockAction::Rotate {
@@ -230,7 +236,7 @@ impl State {
                     } => {
                         validate_spec(next)?;
                         self.end(*from_block_id, &point)?;
-                        self.begin(next.clone(), &point);
+                        self.begin(next.clone(), &point, node.device_id, node.event_id);
                         lane = Some((IntervalKind::Running, Some(next.block_id)));
                     }
                     TimeblockAction::Pause { block_id } => {
@@ -252,6 +258,8 @@ impl State {
                             .ok_or(CoreError::InvalidTimeblockHistory)?;
                         block.freeze(&point);
                         block.run_anchor = Some(point.clone());
+                        block.run_device_id = Some(node.device_id);
+                        block.run_event_id = Some(node.event_id);
                         block.phase = TimeblockPhase::Running;
                         block.generation = block.generation.saturating_add(1);
                         if self.active == Some(*block_id) {
@@ -297,6 +305,15 @@ impl State {
                 due_elapsed_ms,
                 clock_epoch,
                 ..
+            }
+            | TimeblockPayload::RunDeadlineReached {
+                block_id,
+                generation,
+                end_mode,
+                due_wall_ms,
+                due_elapsed_ms,
+                clock_epoch,
+                ..
             } => {
                 if node.source.kind != TimeblockSourceKind::Scheduler {
                     return Err(CoreError::InvalidTimeblockHistory);
@@ -305,7 +322,18 @@ impl State {
                     .blocks
                     .get_mut(&block_id.to_string())
                     .ok_or(CoreError::InvalidTimeblockHistory)?;
-                if block.generation != *generation || block.phase != TimeblockPhase::Running {
+                let same_run = match &node.payload {
+                    TimeblockPayload::RunDeadlineReached { run_event_id, .. } => {
+                        block.run_event_id == Some(*run_event_id)
+                    }
+                    _ => block.generation == *generation,
+                };
+                if !same_run
+                    || block.phase != TimeblockPhase::Running
+                    || block
+                        .run_device_id
+                        .is_some_and(|device| device != node.device_id)
+                {
                     conflicts.push(format!("superseded deadline retained: {}", node.event_id));
                 } else {
                     block.deadline_reached = true;

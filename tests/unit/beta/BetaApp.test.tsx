@@ -16,6 +16,24 @@ afterEach(() => {
   else Reflect.deleteProperty(navigator, 'locks');
 });
 describe('Beta React entry', () => {
+  it('keeps the sole writer, unsent draft and reading position mounted while opening settings',async()=>{
+    const client=fakeClient();
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client}/>);
+    const input=await screen.findByRole('textbox',{name:'记录当下'});
+    const history=screen.getByLabelText('记录历史');
+    await waitFor(()=>expect(history).toHaveAttribute('aria-busy','false'));
+    fireEvent.change(input,{target:{value:'unsent while reading'}});
+    Object.defineProperties(history,{scrollHeight:{configurable:true,value:1000},clientHeight:{configurable:true,value:200}});
+    history.scrollTop=300;fireEvent.scroll(history);
+    const calls=client.eventsPage.mock.calls.length;
+    fireEvent.click(screen.getByRole('button',{name:'设置'}));
+    expect(screen.getByRole('heading',{name:'设置'})).toBeInTheDocument();
+    expect(input).toBeInTheDocument();expect(input).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button',{name:'当下'}));
+    expect(screen.getByRole('textbox',{name:'记录当下'})).toBe(input);
+    expect(input).toHaveValue('unsent while reading');expect(history.scrollTop).toBe(300);
+    expect(client.eventsPage).toHaveBeenCalledTimes(calls);expect(client.capture).not.toHaveBeenCalled();
+  });
   it('allows one StrictMode window to edit when lock grant and release settle asynchronously', async () => {
     const descriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
     let held = false; let grants = 0; let releases = 0;

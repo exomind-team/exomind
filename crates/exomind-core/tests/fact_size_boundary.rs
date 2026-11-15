@@ -63,6 +63,54 @@ fn largest_legal_escaped_capture_remains_readable_and_does_not_block_the_next_ap
     assert!(serde_json::to_vec(record).unwrap().len() > 1024 * 1024);
     assert_eq!(record.text.len(), command.text.len());
     assert_eq!(record.originals.len(), 256);
+    let sender = core.local_human(profile).unwrap();
+    let required = match core
+        .export_origin_page(&sender, profile, &exomind_core::OriginPageQuery::default())
+        .unwrap_err()
+    {
+        exomind_core::CoreError::OriginPageOversize {
+            required_bytes,
+            origin_seq: 1,
+        } => required_bytes,
+        error => panic!("unexpected export category: {error}"),
+    };
+    assert!(required <= exomind_core::MAX_ORIGIN_PAGE_BYTES);
+    let page = core
+        .export_origin_page(
+            &sender,
+            profile,
+            &exomind_core::OriginPageQuery {
+                max_bytes: required,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(serde_json::to_vec(&page).unwrap().len(), required);
+    let received_root = tempfile::tempdir().unwrap();
+    let receiver = Core::open(received_root.path()).unwrap();
+    receiver
+        .provision_profile(profile, "legal fact encoding boundary")
+        .unwrap();
+    let context = receiver
+        .trusted_replica_context(profile, core.device_id(), page.origin.restoration_epoch, 1)
+        .unwrap();
+    let ack = receiver.import_origin_page(&context, &page).unwrap();
+    assert_eq!(ack.inserted, 1);
+    assert_eq!(ack.missing_originals.len(), 256);
+    assert_eq!(
+        receiver
+            .events(&receiver.local_human(profile).unwrap(), profile)
+            .unwrap()[0]
+            .canonical_fact_bytes()
+            .unwrap(),
+        record.canonical_fact_bytes().unwrap()
+    );
+    assert!(
+        receiver
+            .receipt(&receiver.local_human(profile).unwrap(), command.command_id)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(core.origin_checkpoint(&human, profile).unwrap().seq, 1);
     let next = CaptureCommand {
         command_id: CommandId::new(),

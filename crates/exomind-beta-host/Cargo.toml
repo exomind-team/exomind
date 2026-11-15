@@ -22,6 +22,8 @@ thiserror = "1"
 ring = "=0.17.14"
 rustls = { version = "=0.23.37", default-features = false, features = ["ring", "std"] }
 tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring"] }
+if-addrs = "=0.13.4"
+socket2 = "=0.6.3"
 
 [dev-dependencies]
 tempfile = "3"

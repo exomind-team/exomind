@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use serde::{Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
-pub(crate) const AUTH_VERSION: i64 = 2;
+pub(crate) const AUTH_VERSION: i64 = 4;
 const LAYOUT: &str = "exomind-peer-membership/1";
 pub(super) const MAX_JSON: usize = 16384;
 pub(super) const MAX_MEMBERS: i64 = 256;
@@ -46,25 +46,42 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), HostError> {
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(unavailable)?;
-    if version == 1 {
-        let existing: i64 = connection.query_row(
+    if (1..=3).contains(&version) {
+        super::network_store::absent(connection)?;
+        if version < 3 {
+            super::sync_store::ensure_absent(connection)?;
+        } else {
+            super::sync_store::validate(connection)?;
+        }
+        if version >= 2 {
+            validate_membership_layout(connection)?;
+        }
+        if version == 1 {
+            let existing: i64 = connection.query_row(
             "SELECT count(*) FROM sqlite_master WHERE name IN ('peer_membership_layout','peer_members','peer_invitations','peer_claims','peer_pending')",
             [], |r| r.get(0),
         ).map_err(unavailable)?;
-        if existing != 0 {
-            return Err(HostError::PeerMembershipRecoveryRequired);
+            if existing != 0 {
+                return Err(HostError::PeerMembershipRecoveryRequired);
+            }
         }
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(unavailable)?;
-        for (_, schema) in SCHEMAS {
-            tx.execute_batch(schema).map_err(unavailable)?;
+        if version == 1 {
+            for (_, schema) in SCHEMAS {
+                tx.execute_batch(schema).map_err(unavailable)?;
+            }
+            tx.execute(
+                "INSERT INTO peer_membership_layout VALUES(1,?1,0)",
+                [LAYOUT],
+            )
+            .map_err(unavailable)?;
         }
-        tx.execute(
-            "INSERT INTO peer_membership_layout VALUES(1,?1,0)",
-            [LAYOUT],
-        )
-        .map_err(unavailable)?;
+        if version < 3 {
+            super::sync_store::create_schema(&tx)?;
+        }
+        super::network_store::create(&tx)?;
         tx.pragma_update(None, "user_version", AUTH_VERSION)
             .map_err(unavailable)?;
         tx.commit().map_err(unavailable)?;
@@ -80,6 +97,11 @@ pub(super) fn validate(connection: &Connection) -> Result<(), HostError> {
     if version != AUTH_VERSION {
         return Err(HostError::PeerMembershipRecoveryRequired);
     }
+    validate_membership_layout(connection)?;
+    super::sync_store::validate(connection)?;
+    super::network_store::validate(connection)
+}
+fn validate_membership_layout(connection: &Connection) -> Result<(), HostError> {
     for (name, schema) in SCHEMAS {
         let found:Option<Option<String>>=connection.query_row(
             "SELECT CASE WHEN length(sql)<=1024 THEN sql END FROM sqlite_master WHERE type='table' AND name=?1",

@@ -4,6 +4,7 @@ import { BetaApiError } from './api-error';
 import { boundedOriginalBody, nativeOriginalClient, webOriginalClient, validateOriginal } from './original-client';
 import { nativeTimeblockFeatures, webTimeblockFeatures } from './timeblocks-client';
 import type { BetaTimeblockClient, BetaTimelinePage } from './timeblocks-types';
+import { nativeOriginalExports, type BetaOriginalExportsClient } from './original-export';
 export { BetaApiError } from './api-error';
 
 export interface BetaStatus { protocol: string; device_id: string; runtime_id?: string; running: boolean; capabilities?: { originals?: boolean; max_original_chunk_bytes?: number; timeblocks?: boolean; typed_timeline?: boolean } }
@@ -26,6 +27,7 @@ export interface BetaEvent {
 export interface BetaQuery { before?: number; through?: number; limit?: number; search?: string }
 export interface BetaPage { items: BetaEvent[]; next_before: number | null; highwater: number }
 export interface BetaClient {
+  originalExports?: BetaOriginalExportsClient;
   originals?: BetaOriginalClient;
   timeblocks?: BetaTimeblockClient;
   timelinePage?(profileId: string, query: BetaQuery): Promise<BetaTimelinePage>;
@@ -112,6 +114,11 @@ export function nativeBetaClient(call: NativeInvoke = invoke): BetaClient {
     return call<T>(name, args);
   }
   return {
+    originalExports: nativeOriginalExports(async <T>(name:string,args?:Record<string,unknown>) => {
+      const current=check(await call('beta_status'));
+      if(current.capabilities?.originals!==true) throw new BetaApiError('unsupported_originals','本机服务尚不支持原件导出，请更新后重试');
+      return call<T>(name,args);
+    }),
     ...nativeTimeblockFeatures(call, async () => check(await call('beta_status'))),
     originals: nativeOriginalClient(async <T>(name: string,args?:Record<string,unknown>) => {
       const current=check(await call('beta_status'));

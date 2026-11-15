@@ -152,12 +152,26 @@ pub(crate) fn migrate(transaction: &Transaction<'_>) -> Result<(), CoreError> {
     validate_schema(transaction)
 }
 pub(crate) fn validate_schema(transaction: &Transaction<'_>) -> Result<(), CoreError> {
+    validate_objects(transaction, OBJECTS)?;
+    let layout: (i64, i64) = transaction.query_row(
+        "SELECT count(*),COALESCE(sum(CASE WHEN typeof(singleton)='integer' AND singleton=1 AND typeof(layout_revision)='integer' AND layout_revision=1 THEN 1 ELSE 0 END),0) FROM replication_layout",
+        [], |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if layout != (1, 1) {
+        return Err(CoreError::RecoveryRequired);
+    }
+    Ok(())
+}
+pub(crate) fn validate_objects(
+    connection: &Connection,
+    objects: &[(&str, &str, &str)],
+) -> Result<(), CoreError> {
     // A constant-sized, disposable reference gives SQLite itself authority over
     // PK order, UNIQUE indexes, nullability and composite FK interpretation. It
     // contains no business rows, does not touch disk, and cannot repair storage.
     let reference = Connection::open_in_memory()?;
-    for (kind, name, definition) in OBJECTS {
-        let actual: Option<Option<String>> = transaction.query_row(
+    for (kind, name, definition) in objects {
+        let actual: Option<Option<String>> = connection.query_row(
             "SELECT CASE WHEN typeof(sql)='text' AND length(CAST(sql AS BLOB))<=16384 THEN sql END FROM sqlite_schema WHERE type=?1 AND name=?2",
             params![kind, name], |row| row.get(0),
         ).optional()?;
@@ -166,29 +180,22 @@ pub(crate) fn validate_schema(transaction: &Transaction<'_>) -> Result<(), CoreE
         }
         reference.execute_batch(definition)?;
     }
-    for (kind, name, _) in OBJECTS {
+    for (kind, name, _) in objects {
         if *kind == "table" {
             for query in [
                 "SELECT * FROM pragma_table_info(?1)",
                 "SELECT * FROM pragma_foreign_key_list(?1)",
             ] {
-                if structure_rows(transaction, query, name)?
+                if structure_rows(connection, query, name)?
                     != structure_rows(&reference, query, name)?
                 {
                     return Err(CoreError::RecoveryRequired);
                 }
             }
-            if unique_indexes(transaction, name)? != unique_indexes(&reference, name)? {
+            if unique_indexes(connection, name)? != unique_indexes(&reference, name)? {
                 return Err(CoreError::RecoveryRequired);
             }
         }
-    }
-    let layout: (i64, i64) = transaction.query_row(
-        "SELECT count(*),COALESCE(sum(CASE WHEN typeof(singleton)='integer' AND singleton=1 AND typeof(layout_revision)='integer' AND layout_revision=1 THEN 1 ELSE 0 END),0) FROM replication_layout",
-        [], |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    if layout != (1, 1) {
-        return Err(CoreError::RecoveryRequired);
     }
     Ok(())
 }

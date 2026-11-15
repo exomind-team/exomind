@@ -14,24 +14,127 @@ use uuid::Uuid;
 fn hash(value: &impl Serialize) -> Result<String, CoreError> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(value)?)))
 }
-fn load_nodes(
+pub(super) fn load_nodes(
     connection: &Connection,
     profile: ProfileId,
 ) -> Result<Vec<TimeblockNodeRecord>, CoreError> {
-    let mut statement=connection.prepare("SELECT local_seq,body FROM events WHERE profile_id=?1 AND kind='timeblock/1' ORDER BY local_seq")?;
-    let rows = statement.query_map([profile.to_string()], |row| {
-        Ok((row.get::<_, u64>(0)?, row.get::<_, String>(1)?))
+    let mut statement=connection.prepare("SELECT local_seq,CASE WHEN typeof(body)='text' AND length(CAST(body AS BLOB))<=?2 THEN body END FROM events WHERE profile_id=?1 AND kind='timeblock/1' ORDER BY local_seq")?;
+    let rows = statement.query_map(params![profile.to_string(), crate::MAX_FACT_BYTES], |row| {
+        Ok((row.get::<_, u64>(0)?, row.get::<_, Option<String>>(1)?))
     })?;
     let mut nodes = vec![];
     for row in rows {
         let (seq, body) = row?;
-        let mut node: TimeblockNodeRecord = serde_json::from_str(&body)?;
+        let mut node: TimeblockNodeRecord =
+            serde_json::from_str(&body.ok_or(CoreError::RecoveryRequired)?)?;
         node.local_seq = seq;
         nodes.push(node);
     }
     Ok(nodes)
 }
+
+/// Raw typed import never calls append/apply_timeblock or creates an operational
+/// deadline. The source DAG is authoritative; this cache can always be rebuilt.
+pub(crate) fn rebuild_after_import(
+    transaction: &Transaction<'_>,
+    profile: ProfileId,
+    local_device: DeviceId,
+) -> Result<bool, CoreError> {
+    use std::collections::{HashMap, HashSet};
+    let nodes = load_nodes(transaction, profile)?;
+    let known: HashSet<_> = nodes.iter().map(|node| node.event_id).collect();
+    let mut missing = HashSet::new();
+    let mut remaining = HashMap::new();
+    for node in &nodes {
+        super::validate_import_node(node)?;
+        if node.computed_digest()? != node.digest {
+            return Err(CoreError::InvalidTimeblockHistory);
+        }
+        for parent in &node.parents {
+            if !known.contains(parent) {
+                missing.insert(*parent);
+            }
+        }
+        remaining.insert(
+            node.event_id,
+            node.parents
+                .iter()
+                .filter(|id| known.contains(*id))
+                .copied()
+                .collect::<HashSet<_>>(),
+        );
+    }
+    // Detect cycles among the known nodes even while external parents are still
+    // missing. Unknown parents do not make a malformed local cycle acceptable.
+    while !remaining.is_empty() {
+        let Some(next) = remaining
+            .iter()
+            .find(|(_, parents)| parents.is_empty())
+            .map(|(id, _)| *id)
+        else {
+            return Err(CoreError::InvalidTimeblockHistory);
+        };
+        remaining.remove(&next);
+        for parents in remaining.values_mut() {
+            parents.remove(&next);
+        }
+    }
+    transaction.execute(
+        "DELETE FROM timeblock_state WHERE profile_id=?1",
+        [profile.to_string()],
+    )?;
+    if !missing.is_empty() {
+        transaction.execute("UPDATE replication_projection_status SET status='incomplete',missing_parents=?2 WHERE profile_id=?1",params![profile.to_string(),missing.len()])?;
+        return Ok(false);
+    }
+    let mut projected = State::default();
+    for node in ordered(&nodes, profile)? {
+        projected.apply(&node, &mut vec![])?;
+    }
+    store_state(transaction, profile, &projected)?;
+    transaction.execute("UPDATE replication_projection_status SET status='complete',missing_parents=0 WHERE profile_id=?1",[profile.to_string()])?;
+    reconcile_deadlines(transaction, profile, &projected, local_device)?;
+    Ok(true)
+}
+fn reconcile_deadlines(
+    transaction: &Transaction<'_>,
+    profile: ProfileId,
+    projected: &State,
+    local_device: DeviceId,
+) -> Result<(), CoreError> {
+    let (_, owner_generation, active) = owner(transaction)?;
+    let candidate = projected
+        .active
+        .and_then(|id| projected.blocks.get(&id.to_string()))
+        .filter(|block| {
+            block.phase == TimeblockPhase::Running
+                && !block.deadline_reached
+                && block.run_device_id == Some(local_device)
+                && block.run_event_id.is_some()
+                && matches!(block.spec.timer, TimerSpec::CountDown { .. })
+                && active
+        });
+    match candidate {
+        Some(block) => {
+            let run = block.run_event_id.ok_or(CoreError::RecoveryRequired)?;
+            transaction.execute("UPDATE timeblock_deadlines SET state='cancelled' WHERE profile_id=?1 AND state='pending' AND (block_id<>?2 OR run_event_id<>?3 OR owner_generation<>?4)",params![profile.to_string(),block.spec.block_id.to_string(),run.to_string(),owner_generation])?;
+            transaction.execute("UPDATE timeblock_deadlines SET generation=?4 WHERE profile_id=?1 AND block_id=?2 AND run_event_id=?3 AND state='pending' AND owner_generation=?5",params![profile.to_string(),block.spec.block_id.to_string(),run.to_string(),block.generation,owner_generation])?;
+        }
+        None => {
+            transaction.execute("UPDATE timeblock_deadlines SET state='cancelled' WHERE profile_id=?1 AND state='pending'",[profile.to_string()])?;
+        }
+    }
+    Ok(())
+}
 fn state(connection: &Connection, profile: ProfileId) -> Result<State, CoreError> {
+    let complete: bool = connection.query_row(
+        "SELECT status='complete' FROM replication_projection_status WHERE profile_id=?1",
+        [profile.to_string()],
+        |row| row.get(0),
+    )?;
+    if !complete {
+        return Err(CoreError::InvalidTimeblockHistory);
+    }
     let cached: Option<(String, String)> = connection
         .query_row(
             "SELECT revision,body FROM timeblock_state WHERE profile_id=?1",
@@ -44,7 +147,15 @@ fn state(connection: &Connection, profile: ProfileId) -> Result<State, CoreError
         if state.revision().0 != revision {
             return Err(CoreError::InvalidTimeblockHistory);
         }
-        return Ok(state);
+        if state
+            .blocks
+            .values()
+            .all(|block| block.run_device_id.is_some() && block.run_event_id.is_some())
+        {
+            return Ok(state);
+        }
+        // Old schema3/schema4 cache JSON had no run attribution. Recover it
+        // from immutable Start/Rotate/Resume facts, never guess a remote owner.
     }
     // It is a rebuildable projection, not another source of business truth.
     let mut state = State::default();
@@ -53,7 +164,105 @@ fn state(connection: &Connection, profile: ProfileId) -> Result<State, CoreError
     }
     Ok(state)
 }
-fn store_state(
+
+/// Schema4 pending rows predate a durable run FK. Only a unique, currently
+/// accepted local run whose original clock/due and cache agree can be bound.
+pub(super) fn legacy_run_binding(
+    connection: &Connection,
+    local: DeviceId,
+    profile: ProfileId,
+    block_id: TimeblockId,
+    generation: u64,
+    owner_generation: u64,
+    wall: i64,
+    elapsed: u64,
+    epoch: &str,
+    mode: &str,
+    projected: &State,
+) -> Result<EventId, CoreError> {
+    let (device, current_owner, active) = owner(connection)?;
+    let complete: bool = connection.query_row(
+        "SELECT status='complete' FROM replication_projection_status WHERE profile_id=?1",
+        [profile.to_string()],
+        |row| row.get(0),
+    )?;
+    if !complete
+        || !active
+        || device != local
+        || current_owner != owner_generation
+        || projected.active != Some(block_id)
+    {
+        return Err(CoreError::RecoveryRequired);
+    }
+    let block = projected
+        .blocks
+        .get(&block_id.to_string())
+        .ok_or(CoreError::RecoveryRequired)?;
+    let run = block.run_event_id.ok_or(CoreError::RecoveryRequired)?;
+    let anchor = block
+        .run_anchor
+        .as_ref()
+        .ok_or(CoreError::RecoveryRequired)?;
+    let TimerSpec::CountDown {
+        duration_ms,
+        end_mode,
+    } = block.spec.timer
+    else {
+        return Err(CoreError::RecoveryRequired);
+    };
+    let remaining = duration_ms.saturating_sub(block.work_ms);
+    if block.phase != TimeblockPhase::Running
+        || block.deadline_reached
+        || block.generation != generation
+        || block.run_device_id != Some(local)
+        || mode_name(end_mode) != mode
+        || anchor.clock.epoch_id.to_string() != epoch
+        || anchor.wall_ms.checked_add(remaining as i64) != Some(wall)
+        || anchor.clock.elapsed_ms.checked_add(remaining) != Some(elapsed)
+    {
+        return Err(CoreError::RecoveryRequired);
+    }
+    let accepted:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM timeblock_nodes n JOIN events e ON e.event_id=n.event_id JOIN command_receipts r ON r.input_digest=n.request_digest AND r.profile_id=e.profile_id WHERE n.event_id=?1 AND e.profile_id=?2 AND json_extract(r.receipt,'$.event_id')=n.event_id AND json_extract(r.receipt,'$.event_digest')=e.digest AND json_extract(r.receipt,'$.profile_id')=e.profile_id)",params![run.to_string(),profile.to_string()],|row|row.get(0))?;
+    if !accepted {
+        return Err(CoreError::RecoveryRequired);
+    }
+    let cached: Option<(String, String)> = connection
+        .query_row(
+            "SELECT revision,body FROM timeblock_state WHERE profile_id=?1",
+            [profile.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((revision, body)) = cached {
+        let old: State = serde_json::from_str(&body).map_err(|_| CoreError::RecoveryRequired)?;
+        let old_block = old
+            .blocks
+            .get(&block_id.to_string())
+            .ok_or(CoreError::RecoveryRequired)?;
+        let old_anchor = old_block
+            .run_anchor
+            .as_ref()
+            .ok_or(CoreError::RecoveryRequired)?;
+        if revision != projected.revision().0
+            || old.revision() != projected.revision()
+            || old.active != Some(block_id)
+            || old_block.generation != generation
+            || old_block.phase != block.phase
+            || old_block.work_ms != block.work_ms
+            || old_anchor.wall_ms != anchor.wall_ms
+            || old_anchor.clock.epoch_id != anchor.clock.epoch_id
+            || old_anchor.clock.elapsed_ms != anchor.clock.elapsed_ms
+            || old_block
+                .run_device_id
+                .is_some_and(|device| device != local)
+            || old_block.run_event_id.is_some_and(|event| event != run)
+        {
+            return Err(CoreError::RecoveryRequired);
+        }
+    }
+    Ok(run)
+}
+pub(super) fn store_state(
     transaction: &Transaction<'_>,
     profile: ProfileId,
     state: &State,
@@ -94,22 +303,29 @@ fn refresh_deadline(
     state: &State,
     stamp: &ClockStamp,
 ) -> Result<(), CoreError> {
+    let (local_device, owner_generation, owner_active) = owner(transaction)?;
+    reconcile_deadlines(transaction, profile, state, local_device)?;
     let candidate = state
         .active
         .and_then(|id| state.blocks.get(&id.to_string()))
-        .filter(|block| block.phase == TimeblockPhase::Running && !block.deadline_reached);
-    let (_, owner_generation, owner_active) = owner(transaction)?;
+        .filter(|block| {
+            block.phase == TimeblockPhase::Running
+                && !block.deadline_reached
+                && block
+                    .run_device_id
+                    .is_some_and(|device| device == local_device)
+        });
     if let Some(block) = candidate {
         if let TimerSpec::CountDown {
             duration_ms,
             end_mode,
         } = block.spec.timer
         {
-            transaction.execute("UPDATE timeblock_deadlines SET state='cancelled' WHERE profile_id=?1 AND state='pending' AND (block_id<>?2 OR generation<>?3)",params![profile.to_string(),block.spec.block_id.to_string(),block.generation])?;
+            let run = block.run_event_id.ok_or(CoreError::RecoveryRequired)?;
             if !owner_active {
                 return Ok(());
             }
-            let exists:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM timeblock_deadlines WHERE profile_id=?1 AND block_id=?2 AND generation=?3)",params![profile.to_string(),block.spec.block_id.to_string(),block.generation],|row|row.get(0))?;
+            let exists:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM timeblock_deadlines WHERE profile_id=?1 AND block_id=?2 AND run_event_id=?3)",params![profile.to_string(),block.spec.block_id.to_string(),run.to_string()],|row|row.get(0))?;
             if !exists {
                 let remaining = duration_ms.saturating_sub(block.work_at(&point(stamp)));
                 let due_wall = stamp
@@ -122,7 +338,7 @@ fn refresh_deadline(
                     .checked_add(remaining)
                     .filter(|value| *value <= i64::MAX as u64)
                     .ok_or(CoreError::InvalidTimeblock("deadline overflow"))?;
-                transaction.execute("INSERT INTO timeblock_deadlines VALUES(?1,?2,?3,?4,?5,?6,?7,'pending',?8,?9,?10,?11)",params![Uuid::new_v4().to_string(),profile.to_string(),block.spec.block_id.to_string(),block.generation,owner_generation,CommandId::new().to_string(),EventId::new().to_string(),due_wall,due_elapsed,stamp.clock.epoch_id.to_string(),mode_name(end_mode)])?;
+                transaction.execute("INSERT INTO timeblock_deadlines VALUES(?1,?2,?3,?4,?5,?6,?7,'pending',?8,?9,?10,?11,?12)",params![Uuid::new_v4().to_string(),profile.to_string(),block.spec.block_id.to_string(),block.generation,owner_generation,CommandId::new().to_string(),EventId::new().to_string(),due_wall,due_elapsed,stamp.clock.epoch_id.to_string(),mode_name(end_mode),run.to_string()])?;
             }
             return Ok(());
         }
@@ -633,12 +849,18 @@ fn deadline_snapshot(
     block: &Block,
     stamp: &ClockStamp,
 ) -> Result<Option<DeadlineSnapshot>, CoreError> {
-    let row:Option<(String,u64,i64,String)>=connection.query_row("SELECT deadline_id,owner_generation,due_wall_ms,end_mode FROM timeblock_deadlines WHERE profile_id=?1 AND block_id=?2 AND generation=?3 AND state='pending'",params![profile.to_string(),block.spec.block_id.to_string(),block.generation],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).optional()?;
-    row.map(|(id, generation, due, mode)| {
+    let Some(run) = block.run_event_id else {
+        return Err(CoreError::RecoveryRequired);
+    };
+    let row:Option<(String,u64,i64,String,String,u64)>=connection.query_row("SELECT deadline_id,owner_generation,due_wall_ms,end_mode,clock_epoch,due_elapsed_ms FROM timeblock_deadlines WHERE profile_id=?1 AND block_id=?2 AND run_event_id=?3 AND state='pending'",params![profile.to_string(),block.spec.block_id.to_string(),run.to_string()],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))).optional()?;
+    row.map(|(id, generation, due, mode, epoch, elapsed)| {
         let (device, current, active) = owner(connection)?;
-        let duration = match block.spec.timer {
-            TimerSpec::CountDown { duration_ms, .. } => duration_ms,
-            _ => 0,
+        // The accepted deadline is operational intent. Reordered historical
+        // pauses may change projected work, but never its accepted due time.
+        let remaining_ms = if epoch == stamp.clock.epoch_id.to_string() {
+            elapsed.saturating_sub(stamp.clock.elapsed_ms)
+        } else {
+            due.saturating_sub(stamp.wall_ms).max(0) as u64
         };
         Ok(DeadlineSnapshot {
             deadline_id: Uuid::parse_str(&id)?,
@@ -646,9 +868,9 @@ fn deadline_snapshot(
             owner_device_id: device,
             owner_generation: generation,
             due_at_ms: due,
-            remaining_ms: duration.saturating_sub(block.work_at(&point(stamp))),
+            remaining_ms,
             end_mode: parse_mode(&mode)?,
-            eligible: active && current == generation,
+            eligible: active && current == generation && block.run_device_id == Some(device),
         })
     })
     .transpose()
@@ -666,9 +888,10 @@ struct DeadlineRow {
     elapsed: u64,
     epoch: Uuid,
     mode: CountdownEndMode,
+    run: Option<EventId>,
 }
 fn deadline(connection: &Connection, id: Uuid) -> Result<Option<DeadlineRow>, CoreError> {
-    let row:Option<(String,String,u64,u64,String,String,String,i64,u64,String,String)>=connection.query_row("SELECT profile_id,block_id,generation,owner_generation,command_id,event_id,state,due_wall_ms,due_elapsed_ms,clock_epoch,end_mode FROM timeblock_deadlines WHERE deadline_id=?1",[id.to_string()],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?,row.get(9)?,row.get(10)?))).optional()?;
+    let row:Option<(String,String,u64,u64,String,String,String,i64,u64,String,String,Option<String>)>=connection.query_row("SELECT profile_id,block_id,generation,owner_generation,command_id,event_id,state,due_wall_ms,due_elapsed_ms,clock_epoch,end_mode,run_event_id FROM timeblock_deadlines WHERE deadline_id=?1",[id.to_string()],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?,row.get(9)?,row.get(10)?,row.get(11)?))).optional()?;
     row.map(|r| {
         Ok(DeadlineRow {
             profile: r.0.parse()?,
@@ -682,6 +905,7 @@ fn deadline(connection: &Connection, id: Uuid) -> Result<Option<DeadlineRow>, Co
             elapsed: r.8,
             epoch: Uuid::parse_str(&r.9)?,
             mode: parse_mode(&r.10)?,
+            run: r.11.map(|value| value.parse()).transpose()?,
         })
     })
     .transpose()
@@ -720,7 +944,7 @@ impl Core {
         if !active || device != self.device_id() {
             return Ok(vec![]);
         }
-        let mut statement=connection.prepare("SELECT deadline_id,profile_id,block_id,generation FROM timeblock_deadlines WHERE state='pending' AND owner_generation=?1 AND ((clock_epoch=?2 AND due_elapsed_ms<=?3) OR(clock_epoch<>?2 AND due_wall_ms<=?4)) AND (?6 IS NULL OR profile_id=?6) ORDER BY due_wall_ms,deadline_id LIMIT ?5")?;
+        let mut statement=connection.prepare("SELECT d.deadline_id,d.profile_id,d.block_id,d.generation FROM timeblock_deadlines d JOIN replication_projection_status p ON p.profile_id=d.profile_id AND p.status='complete' WHERE d.state='pending' AND d.owner_generation=?1 AND ((d.clock_epoch=?2 AND d.due_elapsed_ms<=?3) OR(d.clock_epoch<>?2 AND d.due_wall_ms<=?4)) AND (?6 IS NULL OR d.profile_id=?6) ORDER BY d.due_wall_ms,d.deadline_id LIMIT ?5")?;
         let rows = statement.query_map(
             params![
                 generation,
@@ -780,12 +1004,21 @@ impl Core {
         {
             return Ok(DeadlineOutcome::Stale);
         }
-        let request_hash = hash(&(
-            "timeblock-deadline/1",
-            ticket.deadline_id,
-            row.generation,
-            row.owner_generation,
-        ))?;
+        let request_hash = if let Some(run) = row.run {
+            hash(&(
+                "timeblock-run-deadline/1",
+                ticket.deadline_id,
+                run,
+                row.owner_generation,
+            ))?
+        } else {
+            hash(&(
+                "timeblock-deadline/1",
+                ticket.deadline_id,
+                row.generation,
+                row.owner_generation,
+            ))?
+        };
         if row.state == "done" {
             return Ok(receipt(&transaction, row.command, &request_hash)?
                 .map(DeadlineOutcome::Applied)
@@ -800,6 +1033,15 @@ impl Core {
         {
             return Ok(DeadlineOutcome::Stale);
         }
+        let complete: bool = transaction.query_row(
+            "SELECT status='complete' FROM replication_projection_status WHERE profile_id=?1",
+            [row.profile.to_string()],
+            |row| row.get(0),
+        )?;
+        if !complete {
+            return Ok(DeadlineOutcome::Stale);
+        }
+        let run = row.run.ok_or(CoreError::RecoveryRequired)?;
         let mut state = state(&transaction, row.profile)?;
         if state.active != Some(row.block)
             || !state
@@ -807,7 +1049,11 @@ impl Core {
                 .get(&row.block.to_string())
                 .is_some_and(|block| {
                     block.generation == row.generation
+                        && block.run_event_id == Some(run)
                         && block.phase == TimeblockPhase::Running
+                        && block
+                            .run_device_id
+                            .is_some_and(|device| device == self.device_id())
                         && !block.deadline_reached
                 })
         {
@@ -826,7 +1072,7 @@ impl Core {
             occurred_at_ms: stamp.wall_ms,
             effective_at_ms: row.wall.max(state.last_boundary),
             clock: stamp.clock.clone(),
-            payload: TimeblockPayload::DeadlineReached {
+            payload: TimeblockPayload::RunDeadlineReached {
                 block_id: row.block,
                 deadline_id: ticket.deadline_id,
                 generation: row.generation,
@@ -834,6 +1080,7 @@ impl Core {
                 due_wall_ms: row.wall,
                 due_elapsed_ms: row.elapsed,
                 clock_epoch: row.epoch,
+                run_event_id: run,
             },
             digest: String::new(),
             local_seq: 0,

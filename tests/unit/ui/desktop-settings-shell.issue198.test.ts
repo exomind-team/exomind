@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
   const sourcePath = path.resolve('src/routes.tsx');
   const source = readFileSync(sourcePath, 'utf-8');
+  const view = readFileSync(path.resolve('src/ui/app/components/AlphaAppShellView.tsx'), 'utf-8');
   const desktopNavStart = source.indexOf('const desktopNavItems = [');
   const desktopNavEnd = source.indexOf('];', desktopNavStart);
   const desktopNavBlock = source.slice(desktopNavStart, desktopNavEnd);
@@ -20,9 +21,10 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(source).not.toContain('resolveAppShellMode({');
   });
 
-  it('keeps me entry behind feature flag in desktop nav（桌面导航中的 Me 入口受功能开关控制）', () => {
+  it('keeps enabled domains and excludes disabled task/proposal navigation（保留启用域，不重新暴露任务/提案）', () => {
     expect(desktopNavBlock).toContain("title: '当下', path: '/eventlog'");
-    expect(desktopNavBlock).toContain("title: '任务', path: '/tasks'");
+    expect(desktopNavBlock).not.toContain("title: '任务'");
+    expect(desktopNavBlock).not.toContain("path: '/tasks'");
     expect(desktopNavBlock).not.toContain("title: '提案箱'");
     expect(desktopNavBlock).not.toContain("path: '/proposals'");
     expect(desktopNavBlock).toContain('...(goalsPageEnabled ? [{');
@@ -43,9 +45,11 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(desktopNavBlock).not.toContain('available');
   });
 
-  it('treats proposals as part of the task domain for active nav matching（提案箱路由应归入任务导航高亮）', () => {
-    expect(desktopNavBlock).toContain("path === '/tasks' || path.startsWith('/tasks/') || path === '/proposals' || path.startsWith('/proposals/')");
-    expect(source).toContain("(item.path === '/tasks' && (locationPath.startsWith('/tasks') || locationPath === '/proposals' || locationPath.startsWith('/proposals/')))");
+  it('retains legacy URLs without restoring disabled navigation（旧地址兼容不恢复禁用域入口）', () => {
+    expect(desktopNavBlock).not.toContain("key: 'tasks'");
+    expect(desktopNavBlock).not.toContain("path: '/proposals'");
+    expect(source).toContain("path: '/tasks'");
+    expect(source).toContain("path: '/proposals'");
   });
 
   it('uses network label and waypoints icon in mobile shell nav（移动端底栏使用网络文案与拓扑图标）', () => {
@@ -74,13 +78,15 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(source).toContain('setDesktopSidebarCollapsed');
     expect(source).toContain('getPersistedDesktopSidebarCollapsed');
     expect(source).toContain('setPersistedDesktopSidebarCollapsed');
-    expect(source).toContain('data-testid="desktop-sidebar-toggle"');
-    expect(source).toContain('收起侧边栏');
-    expect(source).toContain('展开侧边栏');
+    expect(source).toContain('<AlphaDesktopSidebarView');
+    expect(view).toContain('data-testid="desktop-sidebar-toggle"');
+    expect(view).toContain('收起侧边栏');
+    expect(view).toContain('展开侧边栏');
   });
 
   it('uses settings content area marker（设置内容区标识）', () => {
-    expect(source).toContain('data-testid="desktop-settings-content"');
+    expect(source).toContain('<AlphaDesktopShellView');
+    expect(view).toContain('data-testid="desktop-settings-content"');
     expect(source).not.toContain('data-testid="desktop-settings-nav"');
   });
 });
