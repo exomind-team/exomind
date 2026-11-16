@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use serde::{Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
-pub(crate) const AUTH_VERSION: i64 = 4;
+pub(crate) const AUTH_VERSION: i64 = 5;
 const LAYOUT: &str = "exomind-peer-membership/1";
 pub(super) const MAX_JSON: usize = 16384;
 pub(super) const MAX_MEMBERS: i64 = 256;
@@ -47,6 +47,7 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), HostError> {
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(unavailable)?;
     if (1..=3).contains(&version) {
+        super::original_auto_store::absent(connection)?;
         super::network_store::absent(connection)?;
         if version < 3 {
             super::sync_store::ensure_absent(connection)?;
@@ -82,6 +83,23 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), HostError> {
             super::sync_store::create_schema(&tx)?;
         }
         super::network_store::create(&tx)?;
+        // Complete and validate the historical chain at its own version.
+        // Never stamp 5 while skipping either the network4 or auto5 tables.
+        tx.pragma_update(None, "user_version", 4)
+            .map_err(unavailable)?;
+        validate_v4(&tx)?;
+        super::original_auto_store::create(&tx)?;
+        tx.pragma_update(None, "user_version", AUTH_VERSION)
+            .map_err(unavailable)?;
+        tx.commit().map_err(unavailable)?;
+    } else if version == 4 {
+        validate_v4(connection)?;
+        super::original_auto_store::absent(connection)?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(unavailable)?;
+        validate_v4(&tx)?;
+        super::original_auto_store::create(&tx)?;
         tx.pragma_update(None, "user_version", AUTH_VERSION)
             .map_err(unavailable)?;
         tx.commit().map_err(unavailable)?;
@@ -95,6 +113,18 @@ pub(super) fn validate(connection: &Connection) -> Result<(), HostError> {
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(unavailable)?;
     if version != AUTH_VERSION {
+        return Err(HostError::PeerMembershipRecoveryRequired);
+    }
+    validate_membership_layout(connection)?;
+    super::sync_store::validate(connection)?;
+    super::network_store::validate(connection)?;
+    super::original_auto_store::validate(connection)
+}
+fn validate_v4(connection: &Connection) -> Result<(), HostError> {
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .map_err(unavailable)?;
+    if version != 4 {
         return Err(HostError::PeerMembershipRecoveryRequired);
     }
     validate_membership_layout(connection)?;

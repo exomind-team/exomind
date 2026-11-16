@@ -314,7 +314,7 @@ fn peer_membership_auth_upgrade_preserves_owner_grants_and_missing_tables_fail_c
     host.stop().unwrap();
     let path = root.path().join("host-auth.sqlite3");
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE peer_membership_layout;DROP TABLE peer_members;DROP TABLE peer_invitations;DROP TABLE peer_claims;DROP TABLE peer_pending;DROP TABLE peer_sync_ack;DROP TABLE peer_sync_ack_layout;DROP TABLE peer_network_routes;DROP TABLE peer_network_settings;PRAGMA user_version=1").unwrap();
+    db.execute_batch("DROP TABLE peer_original_auto_backoff;DROP TABLE peer_original_auto_intents;DROP TABLE peer_original_auto_policy;DROP TABLE peer_original_auto_revisions;DROP TABLE peer_membership_layout;DROP TABLE peer_members;DROP TABLE peer_invitations;DROP TABLE peer_claims;DROP TABLE peer_pending;DROP TABLE peer_sync_ack;DROP TABLE peer_sync_ack_layout;DROP TABLE peer_network_routes;DROP TABLE peer_network_settings;PRAGMA user_version=1").unwrap();
     drop(db);
     let reopened = BetaHost::open(root.path()).unwrap();
     assert_eq!(reopened.device_id, device);

@@ -26,15 +26,17 @@ mod originals;
 mod originals_http;
 mod peers;
 pub use peers::{
-    ApprovePeerInvitationReplacement, CreatePeerInvitation, DeviceIdentityInfo,
-    IssuedPeerInvitation, OriginalTransferOptions, OriginalTransferResult, PEER_CORE_SCHEMA,
-    PEER_PROTOCOL, PeerCancellation, PeerCapabilities, PeerChannel, PeerClaimReceipt,
-    PeerConnectionView, PeerInvitation, PeerInvitationOffer, PeerInvitationState,
-    PeerInvitationStatus, PeerJoinClaim, PeerJoinConfirmation, PeerJoinState, PeerJoinStatus,
-    PeerMember, PeerMembershipEvidence, PeerNetwork, PeerNetworkSettings, PeerNetworkStatus,
-    PeerOriginalStatus, PeerPin, PeerProbe, PeerReadyAcknowledgement, PeerReadyReceipt,
-    PeerRejoinExpectation, PeerServiceKind, PeerServiceOutcome, PeerSyncOptions, PeerSyncResult,
-    PeerTransportListener, PeerTransportOptions,
+    ApprovePeerInvitationReplacement, CreatePeerInvitation, DEFAULT_ORIGINAL_AUTO_BYTES,
+    DeviceIdentityInfo, IssuedPeerInvitation, MAX_ORIGINAL_AUTO_BYTES, MIN_ORIGINAL_AUTO_BYTES,
+    OriginalAutoBackoff, OriginalAutoPolicy, OriginalAutoPolicyCommand, OriginalAutoSuppression,
+    OriginalAutoSuppressionCommand, OriginalLocalIntent, OriginalTransferOptions,
+    OriginalTransferResult, PEER_CORE_SCHEMA, PEER_PROTOCOL, PeerCancellation, PeerCapabilities,
+    PeerChannel, PeerClaimReceipt, PeerConnectionView, PeerInvitation, PeerInvitationOffer,
+    PeerInvitationState, PeerInvitationStatus, PeerJoinClaim, PeerJoinConfirmation, PeerJoinState,
+    PeerJoinStatus, PeerMember, PeerMembershipEvidence, PeerNetwork, PeerNetworkSettings,
+    PeerNetworkStatus, PeerOriginalStatus, PeerPin, PeerProbe, PeerReadyAcknowledgement,
+    PeerReadyReceipt, PeerRejoinExpectation, PeerServiceKind, PeerServiceOutcome, PeerSyncOptions,
+    PeerSyncResult, PeerTransportListener, PeerTransportOptions,
 };
 #[cfg(test)]
 mod stop_tests;
