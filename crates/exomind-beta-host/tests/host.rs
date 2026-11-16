@@ -474,9 +474,63 @@ async fn host_origin_and_explicit_frontend_cors_are_exact() {
             .status(),
         403
     );
-    let address = server.addr();
+    // Identify this instance on one owned connection BEFORE stopping. A new
+    // connect to a released ephemeral address cannot identify its listener.
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let identity = host.status().unwrap();
+    let mut owned = tokio::net::TcpStream::connect(server.addr()).await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        owned
+            .write_all(
+                format!(
+                    "GET /beta/v1/hello HTTP/1.1\r\nHost: {}\r\nConnection: keep-alive\r\n\r\n",
+                    server.addr()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut header = Vec::new();
+        while !header.ends_with(b"\r\n\r\n") {
+            assert!(header.len() < 8192);
+            header.push(owned.read_u8().await.unwrap());
+        }
+        let header = String::from_utf8(header).unwrap();
+        assert!(header.starts_with("HTTP/1.1 200"));
+        let length: usize = header
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse().unwrap())
+            })
+            .unwrap();
+        assert!(length <= 4096);
+        let mut body = vec![0; length];
+        owned.read_exact(&mut body).await.unwrap();
+        let value: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["runtime_id"], identity.runtime_id.to_string());
+        assert_eq!(value["device_id"], identity.device_id.to_string());
+    })
+    .await
+    .expect("owned HTTP identity response deadline");
     server.stop().await.unwrap();
-    assert!(tokio::net::TcpStream::connect(address).await.is_err());
+    assert!(!host.status().unwrap().running);
+    let mut byte = [0];
+    let closed = tokio::time::timeout(std::time::Duration::from_secs(2), owned.read(&mut byte))
+        .await
+        .expect("owned HTTP socket shutdown deadline");
+    assert!(
+        matches!(closed, Ok(0))
+            || closed.is_err_and(|error| matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+            ))
+    );
+    let reopened = BetaHost::open(&directory.path().join("beta")).unwrap();
+    assert_eq!(reopened.status().unwrap().device_id, identity.device_id);
+    assert_ne!(reopened.status().unwrap().runtime_id, identity.runtime_id);
+    reopened.stop().unwrap();
 }
 
 #[tokio::test]
