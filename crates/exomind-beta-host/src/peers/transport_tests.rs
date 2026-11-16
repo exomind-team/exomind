@@ -38,6 +38,200 @@ fn key_path(root: &Path) -> std::path::PathBuf {
     root.join(identity::DIRECTORY).join("identity.sqlite3")
 }
 
+#[test]
+fn client_handshake_error_keeps_authentication_evidence_ahead_of_io_categories() {
+    use std::io::{Error as IoError, ErrorKind};
+    for kind in [
+        ErrorKind::UnexpectedEof,
+        ErrorKind::ConnectionReset,
+        ErrorKind::ConnectionAborted,
+        ErrorKind::ConnectionRefused,
+        ErrorKind::NotConnected,
+        ErrorKind::BrokenPipe,
+    ] {
+        let error = IoError::from(kind);
+        assert!(matches!(
+            client_handshake_error(&error, false),
+            HostError::PeerTransportUnavailable
+        ));
+        assert!(matches!(
+            client_handshake_error(&error, true),
+            HostError::PeerPinMismatch
+        ));
+    }
+    assert!(matches!(
+        client_handshake_error(&IoError::from(ErrorKind::TimedOut), false),
+        HostError::PeerTimeout
+    ));
+    assert!(matches!(
+        client_handshake_error(&IoError::from(ErrorKind::InvalidData), false),
+        HostError::PeerTls
+    ));
+    let tls = IoError::new(
+        ErrorKind::UnexpectedEof,
+        rustls::Error::General("synthetic protocol rejection".into()),
+    );
+    assert!(matches!(
+        client_handshake_error(&tls, false),
+        HostError::PeerTls
+    ));
+    assert!(matches!(
+        client_handshake_error(&tls, true),
+        HostError::PeerPinMismatch
+    ));
+    assert!(
+        matches!(
+            client_handshake_error(&IoError::from(ErrorKind::Other), false),
+            HostError::PeerTls
+        ),
+        "unknown errors remain conservative rejection"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn peer_client_handshake_eof_is_transport_unavailable_without_claiming_identity_failure() {
+    let (_root, client, owner) = host();
+    let expected = pin(&client, &owner);
+    let raw = TcpListener::bind(address()).await.unwrap();
+    let endpoint = raw.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = tokio::time::timeout(Duration::from_secs(2), raw.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        // Consume a genuine ClientHello record; no synthetic Rust io::Error is
+        // injected. Keep the read side/socket owned after sending real EOF.
+        let mut header = [0u8; 5];
+        tokio::time::timeout(Duration::from_secs(2), stream.read_exact(&mut header))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(header[0], 22);
+        let count = u16::from_be_bytes([header[3], header[4]]) as usize;
+        assert!((1..=16384).contains(&count));
+        let mut payload = vec![0; count];
+        tokio::time::timeout(Duration::from_secs(2), stream.read_exact(&mut payload))
+            .await
+            .unwrap()
+            .unwrap();
+        stream.shutdown().await.unwrap();
+        stream
+    });
+    let result = client
+        .connect_peer_transport(
+            &owner,
+            endpoint,
+            expected,
+            options(),
+            PeerCancellation::new(),
+        )
+        .await;
+    let stream = tokio::time::timeout(Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
+    drop(stream);
+    assert!(client.profiles(&owner).unwrap().is_empty());
+    stop(client).await;
+    assert!(
+        matches!(result, Err(HostError::PeerTransportUnavailable)),
+        "actual TLS-handshake EOF must remain transport unavailable, not PeerTls/identity"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn peer_client_completed_real_tls_without_expected_alpn_is_still_rejected() {
+    let (_source_root, source, source_owner) = host();
+    let (_client_root, client, owner) = host();
+    let identity = source.transport_identity(&source_owner).unwrap();
+    let expected = pin(&source, &source_owner);
+    // Client key creation (including private persistence) precedes the real
+    // transport handshake deadline. Do that setup before arming the fixture's
+    // two-second accept deadline, as the EOF/malformed fixtures already do.
+    client.transport_identity(&owner).unwrap();
+    let mut config = server_config(&identity).unwrap();
+    Arc::get_mut(&mut config).unwrap().alpn_protocols.clear();
+    let raw = TcpListener::bind(address()).await.unwrap();
+    let endpoint = raw.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = tokio::time::timeout(Duration::from_secs(2), raw.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            tokio_rustls::TlsAcceptor::from(config).accept(stream),
+        )
+        .await
+        .unwrap()
+    });
+    let result = client
+        .connect_peer_transport(
+            &owner,
+            endpoint,
+            expected,
+            options(),
+            PeerCancellation::new(),
+        )
+        .await;
+    let tls = tokio::time::timeout(Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        tls.get_ref().1.protocol_version(),
+        Some(ProtocolVersion::TLSv1_3)
+    );
+    assert!(tls.get_ref().1.alpn_protocol().is_none());
+    drop(tls);
+    assert!(
+        matches!(result, Err(HostError::PeerTls)),
+        "a completed authenticated TLS stream without required ALPN cannot yield a channel"
+    );
+    assert!(client.profiles(&owner).unwrap().is_empty());
+    stop(client).await;
+    stop(source).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn peer_client_malformed_tls_record_remains_protocol_rejected() {
+    let (_root, client, owner) = host();
+    let expected = pin(&client, &owner);
+    let raw = TcpListener::bind(address()).await.unwrap();
+    let endpoint = raw.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = tokio::time::timeout(Duration::from_secs(2), raw.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        stream
+            .write_all(&[0xff, 0x03, 0x03, 0x00, 0x01, 0xff])
+            .await
+            .unwrap();
+        stream
+    });
+    let result = client
+        .connect_peer_transport(
+            &owner,
+            endpoint,
+            expected,
+            options(),
+            PeerCancellation::new(),
+        )
+        .await;
+    let stream = tokio::time::timeout(Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
+    drop(stream);
+    assert!(
+        matches!(result, Err(HostError::PeerTls)),
+        "malformed TLS protocol data must not be relabeled as ordinary offline EOF"
+    );
+    stop(client).await;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct OwnedTransportState {
     jobs: usize,

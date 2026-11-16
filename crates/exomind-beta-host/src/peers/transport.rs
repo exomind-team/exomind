@@ -282,6 +282,46 @@ fn verified(
         pin: PeerPin::of(keys[0].as_ref()),
     })
 }
+fn client_handshake_error(error: &std::io::Error, pin_mismatch: bool) -> HostError {
+    // Authentication evidence wins even if the final socket operation also
+    // failed. No TLS verifier, signature, ALPN or protocol check is relaxed.
+    if pin_mismatch {
+        return HostError::PeerPinMismatch;
+    }
+    if error.kind() == std::io::ErrorKind::InvalidData
+        || error
+            .get_ref()
+            .is_some_and(|inner| inner.downcast_ref::<rustls::Error>().is_some())
+    {
+        return HostError::PeerTls;
+    }
+    match error.kind() {
+        std::io::ErrorKind::TimedOut => HostError::PeerTimeout,
+        std::io::ErrorKind::UnexpectedEof
+        | std::io::ErrorKind::ConnectionReset
+        | std::io::ErrorKind::ConnectionAborted
+        | std::io::ErrorKind::ConnectionRefused
+        | std::io::ErrorKind::NotConnected
+        | std::io::ErrorKind::BrokenPipe => HostError::PeerTransportUnavailable,
+        _ => HostError::PeerTls,
+    }
+}
+#[cfg(test)]
+fn handshake_diagnostic(error: &std::io::Error) -> (&'static str, bool) {
+    let tls = error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<rustls::Error>());
+    let class = match tls {
+        Some(rustls::Error::InvalidCertificate(_)) => "tls_certificate",
+        Some(rustls::Error::PeerMisbehaved(_)) => "tls_protocol",
+        Some(rustls::Error::AlertReceived(_)) => "tls_alert",
+        Some(rustls::Error::DecryptError) => "tls_signature_or_decryption",
+        Some(rustls::Error::General(_)) => "tls_general",
+        Some(_) => "tls_other",
+        None => "io_only",
+    };
+    (class, tls.is_some())
+}
 async fn bounded<T>(
     global: &PeerCancellation,
     scope: &PeerCancellation,
@@ -417,7 +457,23 @@ fn channel(
         .and_then(|()| verified(&stream))
     {
         Ok(peer) => peer,
-        Err(error) => return Err(ChannelAdmissionFailure { error, ownership }),
+        Err(error) => {
+            #[cfg(test)]
+            eprintln!(
+                "peer_transport_diag runtime={} phase=post_tls tls13={} alpn_match={} peer_key_count={} rejected_tls={}",
+                host.runtime_id,
+                stream.get_ref().1.protocol_version() == Some(ProtocolVersion::TLSv1_3),
+                stream.get_ref().1.alpn_protocol() == Some(ALPN),
+                stream
+                    .get_ref()
+                    .1
+                    .peer_certificates()
+                    .map(|keys| keys.len())
+                    .unwrap_or(0),
+                matches!(&error, HostError::PeerTls)
+            );
+            return Err(ChannelAdmissionFailure { error, ownership });
+        }
     };
     let remote_address = match stream.get_ref().0.peer_addr() {
         Ok(address) => address,
@@ -728,12 +784,10 @@ impl BetaHost {
                         socket,
                     )
                     .await
-                    .map_err(|_| {
-                        if mismatch.load(Ordering::Acquire) {
-                            HostError::PeerPinMismatch
-                        } else {
-                            HostError::PeerTls
-                        }
+                    .map_err(|error| {
+                        #[cfg(test)]
+                        {let(class,tls_inner)=handshake_diagnostic(&error);eprintln!("peer_transport_diag runtime={} phase=client_handshake io_kind={:?} class={} rustls_inner={} pin_mismatch={}",self.runtime_id,error.kind(),class,tls_inner,mismatch.load(Ordering::Acquire));}
+                        client_handshake_error(&error,mismatch.load(Ordering::Acquire))
                     })
             },
         )
