@@ -31,7 +31,7 @@ fn capture(profile: ProfileId, text: &str, originals: Vec<OriginalRef>) -> Captu
 fn remote_manifest_is_metadata_without_a_stage_fact_receipt_or_read_credential() {
     let root = tempfile::tempdir().unwrap();
     let core = Core::open(root.path()).unwrap();
-    assert_eq!(CORE_SCHEMA_VERSION, 6);
+    assert_eq!(CORE_SCHEMA_VERSION, 7);
     let profile = core.create_profile("metadata-only original").unwrap();
     let human = core.local_human(profile).unwrap();
     let remote = core

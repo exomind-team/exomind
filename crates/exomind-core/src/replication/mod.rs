@@ -8,6 +8,7 @@ use crate::{Core, CoreError, DeviceId, ProfileId};
 pub use facts::ReplicatedFact;
 pub(crate) use origin::{provision_local_origin, record_local_fact};
 pub(crate) use schema::{migrate, validate_objects, validate_schema};
+pub(crate) use schema::{migrate_agent_summary_facts, validate_agent_summary_schema};
 pub(crate) use schema::{migrate_summary_facts, validate_summary_schema};
 use serde::{Deserialize, Serialize};
 pub use transfer::{ImportAck, OriginEntry, OriginPage, OriginPageQuery};

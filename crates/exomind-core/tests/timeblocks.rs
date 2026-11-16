@@ -636,6 +636,7 @@ fn mixed_typed_timeline_uses_one_global_highwater_and_never_omits_a_kind_between
                     sequences.push(event.local_seq);
                 }
                 TimelineItem::Summary(_) => panic!("no summary in this fixture"),
+                TimelineItem::AgentSummary(_) => panic!("no external summary in this fixture"),
                 TimelineItem::Timeblock(node) => {
                     kinds.push("timeblock");
                     sequences.push(node.local_seq);

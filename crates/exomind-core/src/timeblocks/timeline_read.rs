@@ -25,6 +25,7 @@ pub(super) fn decode(profile: ProfileId, row: TimelineRow) -> Result<TimelineIte
         "capture" => ReplicatedFact::Capture(serde_json::from_str(&body)?),
         "timeblock/1" => ReplicatedFact::Timeblock(serde_json::from_str(&body)?),
         "summary/1" => ReplicatedFact::Summary(serde_json::from_str(&body)?),
+        "agent_summary/1" => ReplicatedFact::AgentSummary(serde_json::from_str(&body)?),
         _ => return Err(CoreError::RecoveryRequired),
     };
     if fact.event_id() != id || fact.profile_id() != profile || fact.digest() != digest {
@@ -44,6 +45,10 @@ pub(super) fn decode(profile: ProfileId, row: TimelineRow) -> Result<TimelineIte
             value.local_seq = seq;
             TimelineItem::Summary(value)
         }
+        ReplicatedFact::AgentSummary(mut value) => {
+            value.local_seq = seq;
+            TimelineItem::AgentSummary(value)
+        }
         ReplicatedFact::SummaryJob(_) => return Err(CoreError::RecoveryRequired),
     })
 }
@@ -60,7 +65,7 @@ impl Core {
     ) -> Result<Option<TimelineItem>, CoreError> {
         self.check_scope(context, profile)?;
         let connection = self.connection()?;
-        let value=connection.query_row("SELECT local_seq,CASE WHEN typeof(event_id)='text' AND length(event_id)=36 THEN event_id END,kind,CASE WHEN typeof(digest)='text' AND length(digest)=64 THEN digest END,CASE WHEN typeof(body)='text' AND length(CAST(body AS BLOB))<=?3 THEN body END FROM events WHERE profile_id=?1 AND event_id=?2 AND kind IN ('capture','timeblock/1','summary/1') LIMIT 1",params![profile.to_string(),event_id.to_string(),crate::MAX_FACT_BYTES],row).optional()?;
+        let value=connection.query_row("SELECT local_seq,CASE WHEN typeof(event_id)='text' AND length(event_id)=36 THEN event_id END,kind,CASE WHEN typeof(digest)='text' AND length(digest)=64 THEN digest END,CASE WHEN typeof(body)='text' AND length(CAST(body AS BLOB))<=?3 THEN body END FROM events WHERE profile_id=?1 AND event_id=?2 AND kind IN ('capture','timeblock/1','summary/1','agent_summary/1') LIMIT 1",params![profile.to_string(),event_id.to_string(),crate::MAX_FACT_BYTES],row).optional()?;
         value.map(|row| decode(profile, row)).transpose()
     }
 }

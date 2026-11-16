@@ -15,6 +15,8 @@ pub enum ReplicatedFact {
     SummaryJob(crate::SummaryJobRecord),
     #[serde(rename = "summary/1")]
     Summary(crate::SummaryArtifactRecord),
+    #[serde(rename = "agent_summary/1")]
+    AgentSummary(crate::ExternalSummaryRecord),
 }
 impl ReplicatedFact {
     pub fn event_id(&self) -> EventId {
@@ -23,6 +25,7 @@ impl ReplicatedFact {
             Self::Timeblock(v) => v.event_id,
             Self::SummaryJob(v) => v.event_id,
             Self::Summary(v) => v.event_id,
+            Self::AgentSummary(v) => v.event_id,
         }
     }
     pub fn profile_id(&self) -> ProfileId {
@@ -31,6 +34,7 @@ impl ReplicatedFact {
             Self::Timeblock(v) => v.profile_id,
             Self::SummaryJob(v) => v.profile_id,
             Self::Summary(v) => v.profile_id,
+            Self::AgentSummary(v) => v.profile_id,
         }
     }
     pub fn device_id(&self) -> DeviceId {
@@ -39,6 +43,7 @@ impl ReplicatedFact {
             Self::Timeblock(v) => v.device_id,
             Self::SummaryJob(v) => v.device_id,
             Self::Summary(v) => v.device_id,
+            Self::AgentSummary(v) => v.device_id,
         }
     }
     pub fn digest(&self) -> &str {
@@ -47,6 +52,7 @@ impl ReplicatedFact {
             Self::Timeblock(v) => &v.digest,
             Self::SummaryJob(v) => &v.digest,
             Self::Summary(v) => &v.digest,
+            Self::AgentSummary(v) => &v.digest,
         }
     }
     pub fn fact_type(&self) -> &'static str {
@@ -56,6 +62,7 @@ impl ReplicatedFact {
             Self::Timeblock(_) => "timeblock/1",
             Self::SummaryJob(_) => "summary_job/1",
             Self::Summary(_) => "summary/1",
+            Self::AgentSummary(_) => "agent_summary/1",
         }
     }
     pub fn canonical_fact_bytes(&self) -> Result<Vec<u8>, CoreError> {
@@ -64,12 +71,15 @@ impl ReplicatedFact {
             Self::Timeblock(v) => v.canonical_fact_bytes(),
             Self::SummaryJob(v) => v.canonical_fact_bytes(),
             Self::Summary(v) => v.canonical_fact_bytes(),
+            Self::AgentSummary(v) => v.canonical_fact_bytes(),
         }
     }
     pub(super) fn originals(&self) -> &[OriginalRef] {
         match self {
             Self::Capture(v) => &v.originals,
-            Self::Timeblock(_) | Self::SummaryJob(_) | Self::Summary(_) => &[],
+            Self::Timeblock(_) | Self::SummaryJob(_) | Self::Summary(_) | Self::AgentSummary(_) => {
+                &[]
+            }
         }
     }
     pub(super) fn portable(&self) -> Self {
@@ -79,6 +89,7 @@ impl ReplicatedFact {
             Self::Timeblock(v) => v.local_seq = 0,
             Self::SummaryJob(v) => v.local_seq = 0,
             Self::Summary(v) => v.local_seq = 0,
+            Self::AgentSummary(v) => v.local_seq = 0,
         };
         value
     }
@@ -88,6 +99,7 @@ impl ReplicatedFact {
             Self::Timeblock(v) => crate::fact_encoding::encode_fact(v),
             Self::SummaryJob(v) => crate::fact_encoding::encode_fact(v),
             Self::Summary(v) => crate::fact_encoding::encode_fact(v),
+            Self::AgentSummary(v) => crate::fact_encoding::encode_fact(v),
         }
     }
     pub(crate) fn validate(&self) -> Result<(), CoreError> {
@@ -124,6 +136,7 @@ impl ReplicatedFact {
             }
             Self::SummaryJob(v) => v.validate()?,
             Self::Summary(v) => v.validate()?,
+            Self::AgentSummary(v) => v.validate()?,
         }
         self.body()?;
         Ok(())
@@ -142,6 +155,7 @@ pub(super) fn load_fact(
             "timeblock/1" => ReplicatedFact::Timeblock(serde_json::from_str(&body)?),
             "summary_job/1" => ReplicatedFact::SummaryJob(serde_json::from_str(&body)?),
             "summary/1" => ReplicatedFact::Summary(serde_json::from_str(&body)?),
+            "agent_summary/1" => ReplicatedFact::AgentSummary(serde_json::from_str(&body)?),
             _ => return Err(CoreError::RecoveryRequired),
         };
         if fact.event_id() != event

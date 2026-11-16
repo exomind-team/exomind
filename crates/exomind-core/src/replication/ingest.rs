@@ -227,6 +227,9 @@ fn apply_page(
     let mut typed_changed = false;
     for entry in &page.entries {
         let received = entry.fact.portable();
+        if let ReplicatedFact::AgentSummary(record) = &received {
+            crate::external_summaries::validate_available_sources(transaction, record)?;
+        }
         if entry.origin_seq <= before {
             let (event, kind, digest, chain) = existing_origin(transaction, id, entry.origin_seq)?
                 .ok_or(CoreError::RecoveryRequired)?;
@@ -274,6 +277,7 @@ fn apply_page(
                 ReplicatedFact::Timeblock(_) => "timeblock/1",
                 ReplicatedFact::SummaryJob(_) => "summary_job/1",
                 ReplicatedFact::Summary(_) => "summary/1",
+                ReplicatedFact::AgentSummary(_) => "agent_summary/1",
             };
             transaction.execute(
                 "INSERT INTO events(event_id,profile_id,digest,body,kind) VALUES(?1,?2,?3,?4,?5)",
@@ -313,6 +317,9 @@ fn apply_page(
                     v.task_id,
                     "summary/1",
                 )?,
+                // Derived external attestations do not create model work,
+                // internal task qualification, or attachment read authority.
+                ReplicatedFact::AgentSummary(_) => {}
             }
             inserted += 1;
         }

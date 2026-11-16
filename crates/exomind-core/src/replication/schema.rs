@@ -210,6 +210,49 @@ pub(crate) fn validate_summary_schema(tx: &Transaction<'_>) -> Result<(), CoreEr
     }
     Ok(())
 }
+fn agent_summary_objects() -> Vec<(&'static str, &'static str, String)> {
+    summary_objects()
+        .into_iter()
+        .map(|(kind, name, sql)| {
+            let sql = if name == "origin_entries" {
+                sql.replace(
+                    "'summary_job/1','summary/1'",
+                    "'summary_job/1','summary/1','agent_summary/1'",
+                )
+            } else {
+                sql
+            };
+            (kind, name, sql)
+        })
+        .collect()
+}
+pub(crate) fn migrate_agent_summary_facts(tx: &Transaction<'_>) -> Result<(), CoreError> {
+    validate_summary_schema(tx)?;
+    tx.execute_batch("ALTER TABLE origin_entries RENAME TO origin_entries_schema6;")?;
+    let objects = agent_summary_objects();
+    tx.execute_batch(
+        &objects
+            .iter()
+            .find(|(_, name, _)| *name == "origin_entries")
+            .ok_or(CoreError::RecoveryRequired)?
+            .2,
+    )?;
+    tx.execute_batch("INSERT INTO origin_entries(rowid,profile_id,origin_device,restoration_epoch,origin_seq,event_id,fact_type,digest,chain_hash) SELECT rowid,profile_id,origin_device,restoration_epoch,origin_seq,event_id,fact_type,digest,chain_hash FROM origin_entries_schema6; DROP TABLE origin_entries_schema6;")?;
+    validate_agent_summary_schema(tx)
+}
+pub(crate) fn validate_agent_summary_schema(tx: &Transaction<'_>) -> Result<(), CoreError> {
+    let objects = agent_summary_objects();
+    let refs = objects
+        .iter()
+        .map(|(kind, name, sql)| (*kind, *name, sql.as_str()))
+        .collect::<Vec<_>>();
+    validate_objects(tx, &refs)?;
+    let valid:bool=tx.query_row("SELECT count(*)=1 AND COALESCE(sum(singleton=1 AND layout_revision=1),0)=1 FROM replication_layout",[],|row|row.get(0))?;
+    if !valid {
+        return Err(CoreError::RecoveryRequired);
+    }
+    Ok(())
+}
 pub(crate) fn validate_objects(
     connection: &Connection,
     objects: &[(&str, &str, &str)],

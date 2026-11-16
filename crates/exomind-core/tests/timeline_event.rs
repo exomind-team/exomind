@@ -75,6 +75,7 @@ fn id(value: &TimelineItem) -> EventId {
         TimelineItem::Capture(v) => v.event_id,
         TimelineItem::Timeblock(v) => v.event_id,
         TimelineItem::Summary(v) => v.event_id,
+        TimelineItem::AgentSummary(v) => v.event_id,
     }
 }
 

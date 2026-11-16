@@ -283,6 +283,8 @@ pub enum TimelineItem {
     Timeblock(TimeblockNodeRecord),
     #[serde(rename = "summary/1")]
     Summary(crate::SummaryArtifactRecord),
+    #[serde(rename = "agent_summary/1")]
+    AgentSummary(crate::ExternalSummaryRecord),
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct TimelinePage {

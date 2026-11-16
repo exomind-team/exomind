@@ -5,6 +5,7 @@
 //! must be completed by an adapter before calling this API.
 
 mod capture_fact;
+mod external_summaries;
 mod fact_encoding;
 mod identity;
 mod manifests;
@@ -16,6 +17,7 @@ mod store;
 mod summaries;
 mod timeblocks;
 
+pub use external_summaries::*;
 pub use identity::{
     AgentId, CommandId, DeviceId, EventId, InvalidIdentifier, OriginalId, ProfileId, StageId,
     TimeblockId,
@@ -32,7 +34,7 @@ pub use replication::{
 };
 use serde::{Deserialize, Serialize};
 pub use store::Core;
-pub const CORE_SCHEMA_VERSION: i64 = 6;
+pub const CORE_SCHEMA_VERSION: i64 = 7;
 /// Durable UTF-8 JSON fact encoding, independent of the smaller wire-page
 /// budget. Includes worst-case escaping of all existing capture input limits.
 pub const MAX_FACT_BYTES: usize = 2 * 1024 * 1024;
@@ -41,6 +43,8 @@ pub use timeblocks::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
+    #[error("invalid external summary: {0}")]
+    InvalidExternalSummary(&'static str),
     #[error("invalid summary: {0}")]
     InvalidSummary(&'static str),
     #[error("summary task does not exist")]

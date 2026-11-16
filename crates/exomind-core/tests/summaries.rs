@@ -292,6 +292,7 @@ fn frozen_cross_page_inputs_late_update_new_artifact_and_timeline_skips_jobs() {
                 TimelineItem::Capture(v) => v.event_id,
                 TimelineItem::Timeblock(v) => v.event_id,
                 TimelineItem::Summary(v) => v.event_id,
+                TimelineItem::AgentSummary(v) => v.event_id,
             });
         }
         if page.next_before.is_none() {
