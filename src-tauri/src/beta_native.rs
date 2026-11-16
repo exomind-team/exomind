@@ -43,6 +43,10 @@ struct Failure {
 impl From<HostError> for Failure {
     fn from(error: HostError) -> Self {
         let (code, message) = match error {
+            HostError::PeerNetworkDisabled => (
+                "peer_network_disabled",
+                "设备同步已暂停，请先启用同步再取回其他设备的原件",
+            ),
             HostError::Core(CoreError::InvalidSummary(_)) => {
                 ("invalid_summary_request", "回顾范围或操作内容无效")
             }

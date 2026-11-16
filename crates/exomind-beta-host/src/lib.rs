@@ -125,6 +125,8 @@ pub enum HostError {
     PeerIdentityUnavailable,
     #[error("peer transport is unavailable")]
     PeerTransportUnavailable,
+    #[error("device synchronization is disabled")]
+    PeerNetworkDisabled,
     #[error("peer TLS authentication failed")]
     PeerTls,
     #[error("peer public key does not match the expected pin")]

@@ -350,6 +350,12 @@ impl PeerChannel {
             .await
             .map_err(|_| HostError::PeerTimeout)
     }
+    /// Read-only completion witness. Captures only the private done watch,
+    /// never this channel/Host and never exposes a sender capable of faking it.
+    pub(super) fn closed_notification(&self) -> impl Future<Output = ()> + Send + 'static + use<> {
+        let done = self.done.clone();
+        async move { done.cancelled().await }
+    }
     // Only the future Host membership layer may use frames. No public admin,
     // raw-source or business API is attached to a possession-only channel.
     pub(crate) async fn send_frame(&self, bytes: Vec<u8>) -> Result<(), HostError> {

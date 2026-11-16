@@ -40,6 +40,11 @@ struct FailureDetail {
 impl IntoResponse for HostError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::PeerNetworkDisabled => (
+                StatusCode::CONFLICT,
+                "peer_network_disabled",
+                "Device synchronization is paused; enable it before retrieving peer originals",
+            ),
             Self::Core(CoreError::InvalidSummary(_)) => (
                 StatusCode::BAD_REQUEST,
                 "invalid_summary_request",

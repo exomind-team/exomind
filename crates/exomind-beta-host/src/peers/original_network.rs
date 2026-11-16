@@ -1,6 +1,7 @@
 //! Explicit Native download jobs. Runtime progress is bounded and disposable;
 //! the Core stage offset/hash is the durable source of byte availability.
 use super::*;
+use crate::peers::original_transfer::TransferCompletion;
 use crate::peers::{OriginalTransferOptions, OriginalTransferResult};
 use exomind_core::{OriginalAvailability, OriginalId, OriginalRef, StageState};
 use tokio::sync::Notify;
@@ -50,27 +51,14 @@ impl Default for OriginalJobs {
     }
 }
 struct Job {
-    jobs: Arc<OriginalJobs>,
-    key: (ProfileId, OriginalId),
-    id: Uuid,
+    _jobs: Arc<OriginalJobs>,
     cancel: PeerCancellation,
+    completion: Arc<TransferCompletion>,
 }
 impl Drop for Job {
     fn drop(&mut self) {
         self.cancel.cancel();
-        if let Ok(mut entries) = self.jobs.entries.lock() {
-            if let Some(p) = entries.get_mut(&self.key) {
-                if p.active.as_ref().is_some_and(|a| a.id == self.id) {
-                    p.active = None;
-                    if matches!(p.state, "receiving" | "verifying" | "confirming") {
-                        p.state = "cancelled";
-                        p.error = Some("cancelled");
-                    }
-                    p.touched = Instant::now();
-                }
-            }
-        }
-        self.jobs.changed.notify_one();
+        self.completion.close();
     }
 }
 impl OriginalJobs {
@@ -103,6 +91,12 @@ impl OriginalJobs {
             entries.remove(&stale);
         }
         let cancel = PeerCancellation::new();
+        let jobs = Arc::downgrade(self);
+        let completion = TransferCompletion::new(move || {
+            if let Some(jobs) = jobs.upgrade() {
+                jobs.drained(key, id);
+            }
+        });
         entries.insert(
             key,
             Progress {
@@ -117,11 +111,25 @@ impl OriginalJobs {
             },
         );
         Ok(Job {
-            jobs: self.clone(),
-            key,
-            id,
+            _jobs: self.clone(),
             cancel,
+            completion,
         })
+    }
+    fn drained(&self, key: (ProfileId, OriginalId), id: Uuid) {
+        if let Ok(mut entries) = self.entries.lock() {
+            if let Some(p) = entries.get_mut(&key) {
+                if p.active.as_ref().is_some_and(|a| a.id == id) {
+                    p.active = None;
+                    if matches!(p.state, "receiving" | "verifying" | "confirming") {
+                        p.state = "cancelled";
+                        p.error = Some("cancelled");
+                    }
+                    p.touched = Instant::now();
+                }
+            }
+        }
+        self.changed.notify_waiters();
     }
     pub(super) fn cancel_all(&self) {
         if let Ok(entries) = self.entries.lock() {
@@ -131,18 +139,40 @@ impl OriginalJobs {
         }
     }
     pub(super) async fn wait_empty(&self) -> Result<(), HostError> {
+        self.wait_for(None).await
+    }
+    async fn wait_request(
+        &self,
+        key: (ProfileId, OriginalId),
+        request: Uuid,
+    ) -> Result<(), HostError> {
+        self.wait_for(Some((key, request))).await
+    }
+    async fn wait_for(
+        &self,
+        request: Option<((ProfileId, OriginalId), Uuid)>,
+    ) -> Result<(), HostError> {
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
-                if !self
-                    .entries
-                    .lock()
-                    .map_err(|_| HostError::StatePoisoned)?
-                    .values()
-                    .any(|p| p.active.is_some())
-                {
+                // Register BEFORE checking state. Both the RPC and network
+                // stop can wait for this scope; notify_waiters must wake both.
+                let changed = self.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                let pending = {
+                    let entries = self.entries.lock().map_err(|_| HostError::StatePoisoned)?;
+                    match request {
+                        Some((key, id)) => entries
+                            .get(&key)
+                            .and_then(|p| p.active.as_ref())
+                            .is_some_and(|a| a.id == id),
+                        None => entries.values().any(|p| p.active.is_some()),
+                    }
+                };
+                if !pending {
                     return Ok(());
                 }
-                self.changed.notified().await;
+                changed.await;
             }
         })
         .await
@@ -282,14 +312,35 @@ impl PeerNetwork {
         original: OriginalId,
         request: Uuid,
     ) -> Result<OriginalTransferResult, HostError> {
-        self.host.qualify_transport(&self.owner)?;
         if peer == self.host.device_id {
             return Err(HostError::InvalidRequest);
         }
-        // Register before asynchronous listener/key setup so an immediate
-        // cancellation by the exact request UUID is not lost during startup.
-        let job = self.originals.start((profile, original), peer, request)?;
-        let _lease = self.host.peers.register(false)?;
+        // Admission and startup serialize with disable. No old fetch queued
+        // behind a pause may implicitly turn the persisted preference on.
+        let (job, _lease, network_cancel, generation) = {
+            let _control = self.control.lock().await;
+            self.host.qualify_transport(&self.owner)?;
+            if !self.host.peer_network_settings(&self.owner)?.enabled {
+                return Err(HostError::PeerNetworkDisabled);
+            }
+            // Register before async key/listener setup, preserving exact-ID
+            // cancellation while that setup is in progress.
+            let job = self.originals.start((profile, original), peer, request)?;
+            let lease = self.host.peers.register(false)?;
+            tokio::select! {biased;_=job.cancel.cancelled()=>return Err(HostError::PeerCancelled),_=self.host.peers.cancel.cancelled()=>return Err(HostError::Stopped),result=self.start()=>{result?;}}
+            let run = self.lifecycle.lock().await;
+            let cancel = run
+                .as_ref()
+                .ok_or(HostError::PeerTransportUnavailable)?
+                .cancel
+                .clone();
+            let generation = self
+                .shared
+                .lock()
+                .map_err(|_| HostError::StatePoisoned)?
+                .generation;
+            (job, lease, cancel, generation)
+        };
         let result = tokio::select! {biased;
             _=job.cancel.cancelled()=>Err(HostError::PeerCancelled),
             _=self.host.peers.cancel.cancelled()=>Err(HostError::Stopped),
@@ -297,16 +348,19 @@ impl PeerNetwork {
                 // This check has no staging side effect and precedes all
                 // remote I/O, so private/unreferenced IDs never leave here.
                 let before=self.original_status(profile,original)?;
-                self.ensure_started().await?;
-                let (network_cancel,generation)={let run=self.lifecycle.lock().await;let cancel=run.as_ref().ok_or(HostError::PeerTransportUnavailable)?.cancel.clone();let generation=self.shared.lock().map_err(|_|HostError::StatePoisoned)?.generation;(cancel,generation)};
                 let result=tokio::select!{biased;
                     _=network_cancel.cancelled()=>Err(HostError::PeerCancelled),
-                    result=self.fetch_sessions(profile,peer,original,&job.cancel,before.original)=>result,
+                    result=self.fetch_sessions(profile,peer,original,&job.cancel,before.original,&job.completion)=>result,
                 };
                 if self.shared.lock().map_err(|_|HostError::StatePoisoned)?.generation!=generation{Err(HostError::PeerCancelled)}else{result}
             }=>result,
         };
         self.originals.finish((profile, original), request, &result);
+        job.cancel.cancel();
+        job.completion.close();
+        self.originals
+            .wait_request((profile, original), request)
+            .await?;
         result
     }
     async fn fetch_sessions(
@@ -316,6 +370,7 @@ impl PeerNetwork {
         original: OriginalId,
         cancel: &PeerCancellation,
         expected: OriginalRef,
+        completion: &Arc<TransferCompletion>,
     ) -> Result<OriginalTransferResult, HostError> {
         let end = Instant::now() + Duration::from_secs(30 * 60);
         let mut first = None;
@@ -365,6 +420,7 @@ impl PeerNetwork {
                         continue;
                     }
                 };
+                completion.track_channel(&channel)?;
                 self.host
                     .select_peer_service(
                         &self.owner,
@@ -381,13 +437,14 @@ impl PeerNetwork {
                 };
                 match self
                     .host
-                    .download_peer_original_over_transport(
+                    .download_peer_original_owned(
                         &self.owner,
                         profile,
                         peer,
                         original,
                         channel,
                         options,
+                        Some(completion.clone()),
                     )
                     .await
                 {
@@ -426,6 +483,277 @@ impl PeerNetwork {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn has_active(network: &PeerNetwork) -> bool {
+        network
+            .originals
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .any(|p| p.active.is_some())
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn original_cancel_and_network_stop_wait_for_owned_blocking_completion_only() {
+        let root = tempfile::tempdir().unwrap();
+        let host = Arc::new(BetaHost::open(root.path()).unwrap());
+        let owner = host.owner_session().unwrap();
+        let network = PeerNetwork::new(host.clone(), owner).unwrap();
+        let key = (ProfileId::new(), OriginalId::new());
+        let peer = DeviceId::new();
+        let request = Uuid::new_v4();
+        let job = network.originals.start(key, peer, request).unwrap();
+        let completion = job.completion.clone();
+        let guard = completion.register().unwrap();
+        let owned = host.peers.register(false).unwrap();
+        let unrelated = host.peers.register(false).unwrap();
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::sync_channel(1);
+        let blocking = tokio::task::spawn_blocking(move || {
+            let _done = guard;
+            let _owned = owned;
+            entered.send(()).unwrap();
+            wait.recv_timeout(Duration::from_secs(5))
+                .expect("owned blocking fixture release");
+        });
+        tokio::time::timeout(Duration::from_secs(2), ready)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(network.cancel_original(key.0, key.1, request).unwrap());
+        drop(job);
+        assert!(
+            has_active(&network),
+            "dropping caller must not hide its running blocking worker"
+        );
+        assert!(
+            matches!(
+                network.originals.start(key, peer, Uuid::new_v4()),
+                Err(HostError::PeerBusy)
+            ),
+            "replacement cannot overlap old blocking work"
+        );
+        assert!(
+            matches!(completion.register(), Err(HostError::PeerCancelled)),
+            "closed old scope cannot admit late work"
+        );
+        let mut stopping = Box::pin(network.stop());
+        std::future::poll_fn(|cx| {
+            assert!(
+                std::future::Future::poll(stopping.as_mut(), cx).is_pending(),
+                "stop falsely drained a live blocking worker"
+            );
+            std::task::Poll::Ready(())
+        })
+        .await;
+        let mut waiting_request = Box::pin(network.originals.wait_request(key, request));
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(waiting_request.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        release.send(()).unwrap();
+        let (stopped, request_drained) = tokio::join!(
+            tokio::time::timeout(Duration::from_secs(2), &mut stopping),
+            tokio::time::timeout(Duration::from_secs(2), &mut waiting_request)
+        );
+        stopped.unwrap().unwrap();
+        request_drained.unwrap().unwrap();
+        drop(waiting_request);
+        drop(stopping);
+        tokio::time::timeout(Duration::from_secs(2), blocking)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!has_active(&network));
+        assert_eq!(
+            host.peers.counts.lock().unwrap().jobs,
+            1,
+            "network stop must not wait for an unrelated peer lease"
+        );
+        drop(unrelated);
+        tokio::task::spawn_blocking(move || host.stop())
+            .await
+            .unwrap()
+            .unwrap();
+        let reopened = BetaHost::open(root.path()).unwrap();
+        reopened.stop().unwrap();
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn fetch_queued_after_disable_started_cannot_reenable_or_deadlock_drain() {
+        let _discovery = crate::peers::test_discovery::lease().await;
+        let root = tempfile::tempdir().unwrap();
+        let host = Arc::new(BetaHost::open(root.path()).unwrap());
+        let owner = host.owner_session().unwrap();
+        host.save_peer_network_settings(
+            &owner,
+            PeerNetworkSettings {
+                enabled: false,
+                preferred_port: 0,
+            },
+        )
+        .unwrap();
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+        network.set_enabled(true).await.unwrap();
+        // Hold one old owned request so disable is observably past cancel_all
+        // and still draining while a NEW fetch is first polled.
+        let blocker = network
+            .originals
+            .start(
+                (ProfileId::new(), OriginalId::new()),
+                DeviceId::new(),
+                Uuid::new_v4(),
+            )
+            .unwrap();
+        let mut disabling = Box::pin(network.set_enabled(false));
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(disabling.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        assert!(blocker.cancel.is_cancelled());
+        let mut late = Box::pin(network.fetch_original(
+            ProfileId::new(),
+            DeviceId::new(),
+            OriginalId::new(),
+            Uuid::new_v4(),
+        ));
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(late.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        let admitted = network
+            .originals
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|p| p.active.is_some())
+            .count();
+        drop(blocker);
+        let disabled = tokio::time::timeout(Duration::from_secs(2), &mut disabling).await;
+        drop(disabling);
+        let result = tokio::time::timeout(Duration::from_secs(2), &mut late).await;
+        drop(late);
+        let enabled = host.peer_network_settings(&owner).unwrap().enabled;
+        let addresses = network.local_addresses().unwrap();
+        network.stop().await.unwrap();
+        tokio::task::spawn_blocking(move || host.stop())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            admitted, 1,
+            "late fetch registered behind disable's cancellation sweep"
+        );
+        disabled.expect("disable drain deadline").unwrap();
+        assert!(matches!(
+            result.expect("late fetch deadline"),
+            Err(HostError::PeerNetworkDisabled)
+        ));
+        assert!(!enabled);
+        assert!(addresses.is_empty());
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn disabled_original_fetch_never_enables_or_starts_network() {
+        let _discovery = crate::peers::test_discovery::lease().await;
+        let root = tempfile::tempdir().unwrap();
+        let host = Arc::new(BetaHost::open(root.path()).unwrap());
+        let owner = host.owner_session().unwrap();
+        host.save_peer_network_settings(
+            &owner,
+            PeerNetworkSettings {
+                enabled: false,
+                preferred_port: 0,
+            },
+        )
+        .unwrap();
+        let profile = ProfileId::new();
+        host.provision_profile(&owner, profile, "synthetic paused network")
+            .unwrap();
+        // A real committed reference lets the existing availability preflight
+        // succeed. No private/unknown original is used to short-circuit it.
+        let stage = exomind_core::StageId::new();
+        let original = OriginalId::new();
+        let ticket = {
+            let state = host.active_state().unwrap();
+            let core = &crate::resources(&state).unwrap().core;
+            let human = core.local_human(profile).unwrap();
+            core.begin_stage(
+                &human,
+                &exomind_core::BeginStageCommand {
+                    stage_id: stage,
+                    original_id: original,
+                    profile_id: profile,
+                    expected_sha256:
+                        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+                    byte_length: 0,
+                    file_name: "synthetic-empty.bin".into(),
+                    media_type: "application/octet-stream".into(),
+                },
+            )
+            .unwrap();
+            core.freeze_stage(&human, stage).unwrap()
+        };
+        let proof = ticket.verify(|| false).unwrap();
+        {
+            let state = host.active_state().unwrap();
+            let core = &crate::resources(&state).unwrap().core;
+            let human = core.local_human(profile).unwrap();
+            let original = core.finish_stage(&human, &proof).unwrap().original;
+            core.submit(
+                &human,
+                &exomind_core::CaptureCommand {
+                    command_id: exomind_core::CommandId::new(),
+                    event_id: exomind_core::EventId::new(),
+                    profile_id: profile,
+                    occurred_at_ms: 1000,
+                    text: "synthetic committed original".into(),
+                    tags: vec![],
+                    originals: vec![original],
+                },
+            )
+            .unwrap();
+        }
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+        assert!(!host.peer_network_settings(&owner).unwrap().enabled);
+        assert!(network.local_addresses().unwrap().is_empty());
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            network.fetch_original(profile, DeviceId::new(), original, Uuid::new_v4()),
+        )
+        .await
+        .expect("finite disabled-fetch regression");
+        let enabled = host.peer_network_settings(&owner).unwrap().enabled;
+        let addresses = network.local_addresses().unwrap();
+        let active = network
+            .originals
+            .entries
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|p| p.active.is_some())
+            .count();
+        // Always clean our own actor/leases before making the red assertion.
+        network.stop().await.unwrap();
+        tokio::task::spawn_blocking(move || host.stop())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(&result, Err(HostError::PeerNetworkDisabled)),
+            "paused network fetch must return the typed disabled error: {result:?}"
+        );
+        assert!(
+            !enabled,
+            "fetch silently persisted enabled=true after user paused network"
+        );
+        assert!(
+            addresses.is_empty(),
+            "fetch started a listener while network was paused: {addresses:?}"
+        );
+        assert_eq!(active, 0, "disabled fetch retained an original job");
+    }
     #[tokio::test]
     async fn exact_request_cancellation_does_not_cancel_replacement_or_another_original() {
         let root = tempfile::tempdir().unwrap();

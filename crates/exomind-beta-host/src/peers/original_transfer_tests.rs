@@ -245,6 +245,9 @@ async fn native_controller_explicit_original_fetch_is_verified_then_idle_and_off
     let source = crate::PeerNetwork::new(r.a.clone(), r.oa.clone()).unwrap();
     let target = crate::PeerNetwork::new(r.b.clone(), r.ob.clone()).unwrap();
     source.set_enabled(true).await.unwrap();
+    // Fetching an original respects the user's network preference; this
+    // fixture explicitly enables BOTH controllers instead of implicit enable.
+    target.set_enabled(true).await.unwrap();
     let address = source
         .local_addresses()
         .unwrap()

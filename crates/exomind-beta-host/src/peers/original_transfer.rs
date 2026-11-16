@@ -12,7 +12,7 @@ use exomind_core::{
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::{
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use uuid::Uuid;
@@ -156,6 +156,87 @@ impl Rejection {
         }
     }
 }
+/// Tracks only blocking work belonging to one admitted fetch. Dropping its
+/// async caller closes admission, but does not pretend running blocking jobs
+/// have finished. The callback must not capture Host/Core or a strong owner.
+pub(super) struct TransferCompletion {
+    state: Mutex<CompletionState>,
+    drained: Box<dyn Fn() + Send + Sync>,
+}
+#[derive(Default)]
+struct CompletionState {
+    jobs: usize,
+    closed: bool,
+    notified: bool,
+}
+pub(super) struct TransferCompletionLease {
+    completion: Arc<TransferCompletion>,
+}
+impl TransferCompletion {
+    pub(super) fn track_channel(self: &Arc<Self>, channel: &PeerChannel) -> Result<(), HostError> {
+        let guard = self.register()?;
+        let closed = channel.closed_notification();
+        tokio::spawn(async move {
+            let _guard = guard;
+            closed.await;
+        });
+        Ok(())
+    }
+    pub(super) fn new(drained: impl Fn() + Send + Sync + 'static) -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(CompletionState::default()),
+            drained: Box::new(drained),
+        })
+    }
+    pub(super) fn register(self: &Arc<Self>) -> Result<TransferCompletionLease, HostError> {
+        let mut state = self.state.lock().map_err(|_| HostError::StatePoisoned)?;
+        if state.closed {
+            return Err(HostError::PeerCancelled);
+        }
+        state.jobs = state.jobs.checked_add(1).ok_or(HostError::PeerBusy)?;
+        Ok(TransferCompletionLease {
+            completion: self.clone(),
+        })
+    }
+    pub(super) fn close(&self) {
+        let notify = {
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            state.closed = true;
+            Self::notify(&mut state)
+        };
+        if notify {
+            (self.drained)();
+        }
+    }
+    fn notify(state: &mut CompletionState) -> bool {
+        if state.closed && state.jobs == 0 && !state.notified {
+            state.notified = true;
+            true
+        } else {
+            false
+        }
+    }
+}
+impl Drop for TransferCompletionLease {
+    fn drop(&mut self) {
+        let notify = {
+            let mut state = self
+                .completion
+                .state
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            state.jobs = state
+                .jobs
+                .checked_sub(1)
+                .expect("owned original completion lease");
+            TransferCompletion::notify(&mut state)
+        };
+        if notify {
+            (self.completion.drained)();
+        }
+    }
+}
+
 struct Io {
     channel: PeerChannel,
     cancel: PeerCancellation,
@@ -402,6 +483,19 @@ impl BetaHost {
         channel: PeerChannel,
         options: OriginalTransferOptions,
     ) -> Result<OriginalTransferResult, HostError> {
+        self.download_peer_original_owned(owner, profile, peer, original, channel, options, None)
+            .await
+    }
+    pub(super) async fn download_peer_original_owned(
+        self: &Arc<Self>,
+        owner: &Session,
+        profile: ProfileId,
+        peer: DeviceId,
+        original: OriginalId,
+        channel: PeerChannel,
+        options: OriginalTransferOptions,
+        completion: Option<Arc<TransferCompletion>>,
+    ) -> Result<OriginalTransferResult, HostError> {
         options.validate()?;
         self.qualify_transport(owner)?;
         channel.binding_pin(self)?;
@@ -410,7 +504,12 @@ impl BetaHost {
         let runtime = tokio::runtime::Handle::current();
         let cancel = PeerCancellation::new();
         let _cancel = CancelOnDrop(cancel.clone());
+        let completion_lease = completion
+            .as_ref()
+            .map(|work| work.register())
+            .transpose()?;
         tokio::task::spawn_blocking(move || {
+            let _completion_lease = completion_lease;
             let _lease = lease;
             runtime.block_on(async move {
                 let mut io = Io {
@@ -420,7 +519,20 @@ impl BetaHost {
                     options,
                 };
                 let scope = host.peer_profile_scope(&io.channel, profile, peer)?;
-                download(&host, &mut io, &scope, profile, original).await
+                match completion {
+                    Some(completion) => {
+                        download_with_completion(
+                            &host,
+                            &mut io,
+                            &scope,
+                            profile,
+                            original,
+                            Some(&completion),
+                        )
+                        .await
+                    }
+                    None => download(&host, &mut io, &scope, profile, original).await,
+                }
             })
         })
         .await
@@ -467,11 +579,14 @@ async fn verify(
     host: &Arc<BetaHost>,
     io: &mut Io,
     ticket: VerificationTicket,
+    completion: Option<&Arc<TransferCompletion>>,
 ) -> Result<VerificationProof, HostError> {
     let lease = host.peers.register(false)?;
     let global = host.peers.cancel.clone();
     let cancel = io.cancel.clone();
+    let completion_lease = completion.map(|work| work.register()).transpose()?;
     let mut job = tokio::task::spawn_blocking(move || {
+        let _completion_lease = completion_lease;
         let _lease = lease;
         ticket.verify(|| global.is_cancelled() || cancel.is_cancelled())
     });
@@ -494,6 +609,16 @@ async fn download(
     scope: &PeerProfileScope,
     profile: ProfileId,
     original: OriginalId,
+) -> Result<OriginalTransferResult, HostError> {
+    download_with_completion(host, io, scope, profile, original, None).await
+}
+async fn download_with_completion(
+    host: &Arc<BetaHost>,
+    io: &mut Io,
+    scope: &PeerProfileScope,
+    profile: ProfileId,
+    original: OriginalId,
+    completion: Option<&Arc<TransferCompletion>>,
 ) -> Result<OriginalTransferResult, HostError> {
     let prepared = host.prepare_original(&io.channel, scope, original)?;
     io.send(&Control::Start {
@@ -560,7 +685,7 @@ async fn download(
         chunks += 1;
     }
     let ticket = host.freeze_original(&io.channel, scope, &prepared)?;
-    let proof = verify(host, io, ticket).await?;
+    let proof = verify(host, io, ticket, completion).await?;
     host.seal_original(&io.channel, scope, &prepared, &proof)?;
     io.send(&Control::Verified {
         original_id: original,
