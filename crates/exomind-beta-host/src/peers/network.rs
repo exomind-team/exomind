@@ -21,7 +21,8 @@ use tokio::{
 use uuid::Uuid;
 #[path = "original_network.rs"]
 mod original_network;
-pub use original_network::PeerOriginalStatus;
+use original_network::auto_queue::{AutoCompletion, AutoQueue};
+pub use original_network::{OriginalAutoQueueStatus, PeerOriginalStatus};
 
 const DISCOVERY_PORT: u16 = 43343;
 const DISCOVERY_GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 77, 68);
@@ -74,6 +75,10 @@ struct Shared {
     forced: HashSet<(ProfileId, DeviceId)>,
     candidates: HashMap<DeviceId, Vec<Candidate>>,
     route_cursor: usize,
+    auto_deferred: bool,
+    auto_error: Option<&'static str>,
+    #[cfg(test)]
+    auto_yields: usize,
 }
 struct Running {
     cancel: PeerCancellation,
@@ -133,6 +138,7 @@ struct Worker {
     host: Arc<BetaHost>,
     owner: Session,
     shared: Arc<Mutex<Shared>>,
+    originals: Arc<original_network::OriginalJobs>,
 }
 struct Busy {
     shared: Arc<Mutex<Shared>>,
@@ -269,6 +275,10 @@ impl PeerNetwork {
                 forced: HashSet::new(),
                 candidates: HashMap::new(),
                 route_cursor: 0,
+                auto_deferred: false,
+                auto_error: None,
+                #[cfg(test)]
+                auto_yields: 0,
             })),
             originals: Arc::new(original_network::OriginalJobs::default()),
         }))
@@ -278,6 +288,7 @@ impl PeerNetwork {
             host: self.host.clone(),
             owner: self.owner.clone(),
             shared: self.shared.clone(),
+            originals: self.originals.clone(),
         }
     }
     pub async fn restore(self: &Arc<Self>) -> Result<(), HostError> {
@@ -354,6 +365,12 @@ impl PeerNetwork {
             state.addresses = endpoints(listener.addr());
             state.progress.clear();
             state.candidates.clear();
+            state.auto_deferred = false;
+            state.auto_error = None;
+            #[cfg(test)]
+            {
+                state.auto_yields = 0;
+            }
             state.generation
         };
         let cancel = PeerCancellation::new();
@@ -1158,6 +1175,9 @@ impl Worker {
         let udp = discovery_socket().ok();
         let mut packet = [0u8; 1025];
         let mut jobs = JoinSet::new();
+        let mut incoming_jobs = JoinSet::new();
+        let mut auto_jobs = JoinSet::<AutoCompletion>::new();
+        let mut auto = AutoQueue::new();
         loop {
             if cancel.is_cancelled() || self.host.peers.cancel.is_cancelled() {
                 break;
@@ -1167,7 +1187,7 @@ impl Worker {
             tokio::select! {
                 _=cancel.cancelled()=>break,
                 _=self.host.peers.cancel.cancelled()=>break,
-                result=listener.accept(cancel.clone())=>{match result {Ok(channel)=>{if incoming.track_channel(&channel).is_err(){drop(channel);break;}if jobs.len()>=8{drop(channel);continue;}let network=self.clone();let completion=incoming.clone();let lease=match self.host.peers.register(false){Ok(l)=>l,Err(_)=>break};jobs.spawn(async move{let _lease=lease;if let Ok(outcome)=network.host.accept_peer_service_owned(&network.owner,channel,Some(completion)).await{network.incoming(generation,outcome);}});},Err(HostError::PeerTimeout|HostError::PeerTls)=>{},Err(_)=>break}},
+                result=listener.accept(cancel.clone())=>{match result {Ok(channel)=>{if incoming.track_channel(&channel).is_err(){drop(channel);break;}if incoming_jobs.len()>=8{drop(channel);continue;}let network=self.clone();let completion=incoming.clone();let lease=match self.host.peers.register(false){Ok(l)=>l,Err(_)=>break};incoming_jobs.spawn(async move{let _lease=lease;if let Ok(outcome)=network.host.accept_peer_service_owned(&network.owner,channel,Some(completion)).await{network.incoming(generation,outcome);}});},Err(HostError::PeerTimeout|HostError::PeerTls)=>{},Err(_)=>break}},
                 received=async{match &udp {Some(socket)=>socket.recv_from(&mut packet).await,None=>std::future::pending().await}}=>{
                     if let Ok((n,source))=received{if n<=1024{if let Ok(value)=serde_json::from_slice::<Announcement>(&packet[..n]){let _=self.remember_announcement(value,source,generation);}}}
                 },
@@ -1177,7 +1197,10 @@ impl Worker {
                     if jobs.len()>=2{continue;}if let Ok(mut routes)=self.routes(){if !routes.is_empty(){let mut state=match self.shared.lock(){Ok(s)=>s,Err(_)=>return};let count=routes.len();routes.rotate_left(state.route_cursor%count);state.route_cursor=state.route_cursor.wrapping_add(1);routes.sort_by_key(|r|!state.forced.contains(&(r.profile,r.device)));}for route in routes {if jobs.len()>=2{break;}let key=(route.profile,route.device);let force;{let mut state=match self.shared.lock(){Ok(s)=>s,Err(_)=>return};force=state.forced.remove(&key);if state.progress.get(&key).is_some_and(|p|p.busy||(!force&&p.retry.is_some_and(|at|at>Instant::now()))){continue;}}
                         let network=self.clone();let cancel=cancel.clone();jobs.spawn(async move{let _=network.attempt(route,cancel,generation,force).await;});
                     }}
+                    if let Err(error)=auto.tick(&self,&cancel,generation,&mut auto_jobs){if let Ok(mut state)=self.shared.lock(){state.auto_deferred=true;state.auto_error=Some(error_code(&error));}}
                 },
+                result=auto_jobs.join_next(),if !auto_jobs.is_empty()=>{if let Some(result)=result{auto.completed(result,&self);}},
+                _=incoming_jobs.join_next(),if !incoming_jobs.is_empty()=>{},
                 _=jobs.join_next(),if !jobs.is_empty()=>{},
             }
         }
@@ -1185,13 +1208,21 @@ impl Worker {
         drop(listener);
         #[cfg(test)]
         incoming.before_worker_exit().await;
-        let drain = async { while jobs.join_next().await.is_some() {} };
+        let drain = async {
+            while !jobs.is_empty() || !auto_jobs.is_empty() || !incoming_jobs.is_empty() {
+                tokio::select! {_=incoming_jobs.join_next(),if !incoming_jobs.is_empty()=>{},_=jobs.join_next(),if !jobs.is_empty()=>{},result=auto_jobs.join_next(),if !auto_jobs.is_empty()=>{if let Some(result)=result{auto.completed(result,&self);}}}
+            }
+        };
         if tokio::time::timeout(Duration::from_secs(6), drain)
             .await
             .is_err()
         {
             jobs.abort_all();
+            auto_jobs.abort_all();
+            incoming_jobs.abort_all();
             while jobs.join_next().await.is_some() {}
+            while auto_jobs.join_next().await.is_some() {}
+            while incoming_jobs.join_next().await.is_some() {}
         }
         if let Ok(mut shared) = self.shared.lock() {
             if shared.generation == generation {

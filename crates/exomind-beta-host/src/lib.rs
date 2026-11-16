@@ -30,15 +30,16 @@ mod peers;
 pub use peers::{
     ApprovePeerInvitationReplacement, CreatePeerInvitation, DEFAULT_ORIGINAL_AUTO_BYTES,
     DeviceIdentityInfo, IssuedPeerInvitation, MAX_ORIGINAL_AUTO_BYTES, MIN_ORIGINAL_AUTO_BYTES,
-    OriginalAutoBackoff, OriginalAutoPolicy, OriginalAutoPolicyCommand, OriginalAutoSuppression,
-    OriginalAutoSuppressionCommand, OriginalLocalIntent, OriginalTransferOptions,
-    OriginalTransferResult, PEER_CORE_SCHEMA, PEER_PROTOCOL, PeerCancellation, PeerCapabilities,
-    PeerChannel, PeerClaimReceipt, PeerConnectionView, PeerInvitation, PeerInvitationOffer,
-    PeerInvitationState, PeerInvitationStatus, PeerJoinClaim, PeerJoinConfirmation, PeerJoinState,
-    PeerJoinStatus, PeerMember, PeerMembershipEvidence, PeerNetwork, PeerNetworkSettings,
-    PeerNetworkStatus, PeerOriginalStatus, PeerPin, PeerProbe, PeerReadyAcknowledgement,
-    PeerReadyReceipt, PeerRejoinExpectation, PeerServiceKind, PeerServiceOutcome, PeerSyncOptions,
-    PeerSyncResult, PeerTransportListener, PeerTransportOptions,
+    OriginalAutoBackoff, OriginalAutoPolicy, OriginalAutoPolicyCommand, OriginalAutoQueueStatus,
+    OriginalAutoSuppression, OriginalAutoSuppressionCommand, OriginalLocalIntent,
+    OriginalTransferOptions, OriginalTransferResult, PEER_CORE_SCHEMA, PEER_PROTOCOL,
+    PeerCancellation, PeerCapabilities, PeerChannel, PeerClaimReceipt, PeerConnectionView,
+    PeerInvitation, PeerInvitationOffer, PeerInvitationState, PeerInvitationStatus, PeerJoinClaim,
+    PeerJoinConfirmation, PeerJoinState, PeerJoinStatus, PeerMember, PeerMembershipEvidence,
+    PeerNetwork, PeerNetworkSettings, PeerNetworkStatus, PeerOriginalStatus, PeerPin, PeerProbe,
+    PeerReadyAcknowledgement, PeerReadyReceipt, PeerRejoinExpectation, PeerServiceKind,
+    PeerServiceOutcome, PeerSyncOptions, PeerSyncResult, PeerTransportListener,
+    PeerTransportOptions,
 };
 #[cfg(test)]
 mod stop_tests;
@@ -513,8 +514,10 @@ impl BetaHost {
         let resources = resources(&state)?;
         self.owner(session)?;
         resources.core.local_human(request.profile_id)?;
-        if matches!(request.kind, GrantKind::AgentNote | GrantKind::SummaryProducer)
-            != request.agent_id.is_some()
+        if matches!(
+            request.kind,
+            GrantKind::AgentNote | GrantKind::SummaryProducer
+        ) != request.agent_id.is_some()
         {
             return Err(HostError::InvalidRequest);
         }

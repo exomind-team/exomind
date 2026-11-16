@@ -9,6 +9,9 @@ use crate::peers::original_transfer::TransferCompletion;
 use crate::peers::{OriginalTransferOptions, OriginalTransferResult};
 use exomind_core::{OriginalAvailability, OriginalId, OriginalRef, StageState};
 use tokio::sync::Notify;
+#[path = "original_auto_queue.rs"]
+pub(super) mod auto_queue;
+pub use auto_queue::OriginalAutoQueueStatus;
 
 const MAX_ACTIVE: usize = 2;
 const MAX_TRACKED: usize = 256;
@@ -475,6 +478,7 @@ impl PeerNetwork {
                     .is_some_and(|a| a.id == request && !a.cancel.is_cancelled()))
             },
         );
+        let worker = self.worker();
         let result = tokio::select! {biased;
             _=job.cancel.cancelled()=>Err(HostError::PeerCancelled),
             _=self.host.peers.cancel.cancelled()=>Err(HostError::Stopped),
@@ -483,7 +487,7 @@ impl PeerNetwork {
                 // remote I/O, so private/unreferenced IDs never leave here.
                 let result=tokio::select!{biased;
                     _=network_cancel.cancelled()=>Err(HostError::PeerCancelled),
-                    result=self.fetch_sessions(profile,peer,original,&job.cancel,before,&job.completion,&admission)=>result,
+                    result=worker.fetch_sessions(profile,peer,original,&job.cancel,before,&job.completion,&admission,false)=>result,
                 };
                 if self.shared.lock().map_err(|_|HostError::StatePoisoned)?.generation!=generation{Err(HostError::PeerCancelled)}else{result}
             }=>result,
@@ -512,6 +516,9 @@ impl PeerNetwork {
             .await?;
         result
     }
+}
+
+impl Worker {
     async fn fetch_sessions(
         &self,
         profile: ProfileId,
@@ -521,11 +528,12 @@ impl PeerNetwork {
         expected: OriginalRef,
         completion: &Arc<TransferCompletion>,
         admission: &Arc<OriginalAdmission>,
+        automatic: bool,
     ) -> Result<OriginalTransferResult, HostError> {
-        let end = Instant::now() + Duration::from_secs(30 * 60);
+        let end = Instant::now() + Duration::from_secs(if automatic { 10 } else { 30 * 60 });
         let mut first = None;
         let mut last = HostError::PeerTransportUnavailable;
-        for _ in 0..32 {
+        for _ in 0..if automatic { 1 } else { 32 } {
             if cancel.is_cancelled() {
                 return Err(HostError::PeerCancelled);
             }
@@ -536,7 +544,6 @@ impl PeerNetwork {
                 .find(|m| m.device_id == peer && !m.revoked && m.state == PeerJoinState::Ready)
                 .ok_or(HostError::PeerMembershipDenied)?;
             let route = self
-                .worker()
                 .routes()?
                 .into_iter()
                 .find(|r| r.profile == profile && r.device == peer)
@@ -548,22 +555,30 @@ impl PeerNetwork {
                 .port();
             let pin = PeerPin::from_sha256(&member.pin)?;
             let mut partial = None;
-            for endpoint in route.endpoints {
+            for endpoint in route
+                .endpoints
+                .into_iter()
+                .take(if automatic { 2 } else { 8 })
+            {
                 let left = end.saturating_duration_since(Instant::now());
                 if left.is_zero() {
                     return Err(HostError::PeerTimeout);
                 }
-                let channel = match self
-                    .host
-                    .connect_peer_transport(
-                        &self.owner,
-                        endpoint,
-                        pin,
-                        transport_options(),
-                        cancel.clone(),
-                    )
-                    .await
-                {
+                let dial = self.host.connect_peer_transport(
+                    &self.owner,
+                    endpoint,
+                    pin,
+                    transport_options(),
+                    cancel.clone(),
+                );
+                let connected = if automatic {
+                    tokio::time::timeout(left.min(Duration::from_secs(3)), dial)
+                        .await
+                        .unwrap_or(Err(HostError::PeerTimeout))
+                } else {
+                    dial.await
+                };
+                let channel = match connected {
                     Ok(channel) => channel,
                     Err(error) => {
                         last = error;
@@ -571,39 +586,60 @@ impl PeerNetwork {
                     }
                 };
                 completion.track_channel(&channel)?;
-                self.host
-                    .select_peer_service(
-                        &self.owner,
-                        &channel,
-                        PeerServiceKind::Originals,
-                        Some(profile),
-                        Some(peer),
-                        port,
-                    )
-                    .await?;
-                let options = OriginalTransferOptions {
-                    session_timeout: left.min(Duration::from_secs(120)),
-                    ..Default::default()
+                let selection = self.host.select_peer_service(
+                    &self.owner,
+                    &channel,
+                    PeerServiceKind::Originals,
+                    Some(profile),
+                    Some(peer),
+                    port,
+                );
+                if automatic {
+                    tokio::time::timeout(end.saturating_duration_since(Instant::now()), selection)
+                        .await
+                        .map_err(|_| HostError::PeerTimeout)??;
+                } else {
+                    selection.await?;
+                }
+                let left = end.saturating_duration_since(Instant::now());
+                if left < Duration::from_millis(50) {
+                    return Err(HostError::PeerTimeout);
+                }
+                let options = if automatic {
+                    OriginalTransferOptions {
+                        session_timeout: left.min(Duration::from_secs(10)),
+                        message_timeout: Duration::from_secs(3),
+                        max_chunks: 4,
+                    }
+                } else {
+                    OriginalTransferOptions {
+                        session_timeout: left.min(Duration::from_secs(120)),
+                        ..Default::default()
+                    }
                 };
-                match self
-                    .host
-                    .download_peer_original_owned(
-                        &self.owner,
-                        profile,
-                        peer,
-                        original,
-                        channel,
-                        options,
-                        Some(completion.clone()),
-                        Some(admission.clone()),
-                    )
-                    .await
-                {
+                let transfer = self.host.download_peer_original_owned(
+                    &self.owner,
+                    profile,
+                    peer,
+                    original,
+                    channel,
+                    options,
+                    Some(completion.clone()),
+                    Some(admission.clone()),
+                );
+                let result = if automatic {
+                    tokio::time::timeout(left, transfer)
+                        .await
+                        .unwrap_or(Err(HostError::PeerTimeout))
+                } else {
+                    transfer.await
+                };
+                match result {
                     Ok(value) => {
                         if value.original != expected {
                             return Err(HostError::Core(exomind_core::CoreError::OriginalConflict));
                         }
-                        self.worker().promote(profile, peer, endpoint)?;
+                        self.promote(profile, peer, endpoint)?;
                         partial = Some(value);
                         break;
                     }
@@ -621,6 +657,9 @@ impl PeerNetwork {
             if value.verified {
                 value.resumed_from = start;
                 value.transferred_bytes = value.original.byte_length.saturating_sub(start);
+                return Ok(value);
+            }
+            if automatic {
                 return Ok(value);
             }
             if value.transferred_bytes == 0 {

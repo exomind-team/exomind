@@ -483,6 +483,346 @@ async fn stop(host: Arc<BetaHost>) {
         .unwrap()
         .unwrap();
 }
+async fn auto_controllers(
+    r: &Rig,
+    max_bytes: u64,
+    source_hook: Option<Box<dyn FnOnce() + Send>>,
+) -> (Arc<crate::PeerNetwork>, Arc<crate::PeerNetwork>) {
+    for (host, owner) in [(&r.a, &r.oa), (&r.b, &r.ob)] {
+        host.save_peer_network_settings(
+            owner,
+            crate::PeerNetworkSettings {
+                enabled: false,
+                preferred_port: 0,
+            },
+        )
+        .unwrap();
+    }
+    let source = crate::PeerNetwork::new(r.a.clone(), r.oa.clone()).unwrap();
+    let target = crate::PeerNetwork::new(r.b.clone(), r.ob.clone()).unwrap();
+    let prior = r.b.original_auto_policy(&r.ob).unwrap();
+    r.b.configure_original_auto_policy(
+        &r.ob,
+        &crate::OriginalAutoPolicyCommand {
+            command_id: Uuid::new_v4(),
+            expected_revision: prior.revision,
+            enabled: true,
+            max_bytes,
+        },
+    )
+    .unwrap();
+    source.set_enabled(true).await.unwrap();
+    if let Some(hook) = source_hook {
+        source.source_hook_for_test(hook).await;
+    }
+    let endpoint = source
+        .local_addresses()
+        .unwrap()
+        .into_iter()
+        .find(|a| a.ip().is_loopback())
+        .unwrap();
+    r.b.save_peer_routes(&r.ob, r.p, r.a.device_id, vec![endpoint])
+        .unwrap();
+    target.set_enabled(true).await.unwrap();
+    (source, target)
+}
+async fn wait_auto(stage: &str, mut ready: impl FnMut() -> bool) {
+    let end = Instant::now() + Duration::from_secs(18);
+    while !ready() {
+        assert!(
+            Instant::now() < end,
+            "automatic original stage deadline: {stage}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+fn original_bytes(host: &BetaHost, p: ProfileId, id: OriginalId) -> Vec<u8> {
+    let state = host.active_state().unwrap();
+    let core = &crate::resources(&state).unwrap().core;
+    let writer = core.local_human(p).unwrap();
+    let mut out = vec![];
+    loop {
+        let chunk = core
+            .read_original_range(&writer, p, id, out.len() as u64, MAX_ORIGINAL_CHUNK_BYTES)
+            .unwrap();
+        if chunk.bytes.is_empty() {
+            break;
+        }
+        out.extend(chunk.bytes);
+        if out.len() as u64 == chunk.original.byte_length {
+            break;
+        }
+    }
+    out
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automatic_small_originals_sync_both_directions_without_ui_and_keep_large_and_other_profile()
+ {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let bytes: Vec<u8> = (0..4097).map(|n| ((n * 131 + 255) % 256) as u8).collect();
+    let r = rig(&bytes).await;
+    let q = ProfileId::new();
+    r.b.provision_profile(&r.ob, q, "untouched Q").unwrap();
+    let q_original = seed(&r.b, q, b"Q must stay local", true);
+    let (source, target) = auto_controllers(&r, 1024 * 1024, None).await;
+    wait_auto("initial automatic verified", || {
+        target
+            .original_status(r.p, r.original.original_id)
+            .is_ok_and(|s| s.availability == "complete")
+    })
+    .await;
+    assert_eq!(original_bytes(&r.b, r.p, r.original.original_id), bytes);
+    let large = seed(&r.a, r.p, &vec![0xff; 1024 * 1024 + 1], true);
+    let late = seed(&r.a, r.p, b"late automatic P bytes\0\xff", true);
+    wait_auto("late metadata and automatic bytes", || {
+        target
+            .original_status(r.p, late.original_id)
+            .is_ok_and(|s| s.availability == "complete")
+    })
+    .await;
+    wait_auto("large metadata available", || {
+        target.original_status(r.p, large.original_id).is_ok()
+    })
+    .await;
+    assert_eq!(
+        target
+            .original_status(r.p, large.original_id)
+            .unwrap()
+            .availability,
+        "missing"
+    );
+    assert_eq!(
+        original_bytes(&r.b, r.p, late.original_id),
+        b"late automatic P bytes\0\xff"
+    );
+    let reverse = seed(&r.b, r.p, b"reverse own-origin bytes", true);
+    wait_auto("reverse automatic verified", || {
+        source
+            .original_status(r.p, reverse.original_id)
+            .is_ok_and(|s| s.availability == "complete")
+    })
+    .await;
+    assert_eq!(
+        original_bytes(&r.a, r.p, reverse.original_id),
+        b"reverse own-origin bytes"
+    );
+    assert_eq!(
+        original_bytes(&r.b, q, q_original.original_id),
+        b"Q must stay local"
+    );
+    assert!(
+        !r.a.profiles(&r.oa)
+            .unwrap()
+            .iter()
+            .any(|p| p.profile_id == q)
+    );
+    assert!(target.original_auto_queue_status().unwrap().active_outbound <= 2);
+    source.stop().await.unwrap();
+    target.stop().await.unwrap();
+    stop(r.a).await;
+    stop(r.b).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automatic_original_yields_after_four_chunks_then_resumes_same_durable_stage() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let bytes: Vec<u8> = (0..1024 * 1024 + 17)
+        .map(|i| ((i as u64 * 131 + 255) % 256) as u8)
+        .collect();
+    let r = rig(&bytes).await;
+    let (source, target) = auto_controllers(&r, 2 * 1024 * 1024, None).await;
+    wait_auto("short sessions complete", || {
+        target
+            .original_status(r.p, r.original.original_id)
+            .is_ok_and(|s| s.availability == "complete")
+    })
+    .await;
+    wait_auto("partial completion was consumed", || {
+        target.auto_yields_for_test() > 0
+    })
+    .await;
+    assert!(target.auto_yields_for_test() > 0);
+    assert_eq!(original_bytes(&r.b, r.p, r.original.original_id), bytes);
+    let stage = stage_status(&r);
+    assert_eq!(stage.next_offset, bytes.len() as u64);
+    {
+        let state = r.b.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        let db = rusqlite::Connection::open(core.database_path()).unwrap();
+        assert_eq!(
+            db.query_row::<u64, _, _>(
+                "SELECT count(*) FROM original_stages WHERE original_id=?1",
+                [r.original.original_id.to_string()],
+                |row| row.get(0)
+            )
+            .unwrap(),
+            1
+        );
+    }
+    assert_no_fake_capture(&r);
+    source.stop().await.unwrap();
+    target.stop().await.unwrap();
+    stop(r.a).await;
+    stop(r.b).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automatic_cancel_is_durable_across_restart_and_manual_oneoff_does_not_clear_it() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let r = rig(b"cancelled auto file\0\xff").await;
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::sync_channel(1);
+    let (source, target) = auto_controllers(
+        &r,
+        1024 * 1024,
+        Some(Box::new(move || {
+            entered.send(()).unwrap();
+            wait.recv_timeout(Duration::from_secs(10))
+                .expect("release automatic source fixture");
+        })),
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(18), ready)
+        .await
+        .expect("automatic source reached real worker")
+        .unwrap();
+    let active = target.original_status(r.p, r.original.original_id).unwrap();
+    let request = active.request_id.expect("automatic job owns request UUID");
+    assert!(
+        target
+            .cancel_original_and_wait(r.p, r.original.original_id, request)
+            .await
+            .unwrap()
+    );
+    release.send(()).unwrap();
+    let intent =
+        r.b.original_local_intent(&r.ob, r.p, r.original.original_id)
+            .unwrap();
+    assert_eq!(
+        intent.suppression,
+        Some(crate::OriginalAutoSuppression::UserCancelled)
+    );
+    let before = target
+        .original_status(r.p, r.original.original_id)
+        .unwrap()
+        .next_offset;
+    target.stop().await.unwrap();
+    drop(target);
+    stop(r.b.clone()).await;
+    let reopened = Arc::new(BetaHost::open(r.rb.path()).unwrap());
+    let owner = reopened.owner_session().unwrap();
+    let target = crate::PeerNetwork::new(reopened.clone(), owner.clone()).unwrap();
+    target.restore().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(4300)).await;
+    assert_eq!(
+        target
+            .original_status(r.p, r.original.original_id)
+            .unwrap()
+            .next_offset,
+        before
+    );
+    assert!(
+        target
+            .original_status(r.p, r.original.original_id)
+            .unwrap()
+            .request_id
+            .is_none()
+    );
+    assert_eq!(
+        reopened
+            .original_local_intent(&owner, r.p, r.original.original_id)
+            .unwrap(),
+        intent
+    );
+    let result = target
+        .fetch_original(r.p, r.a.device_id, r.original.original_id, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert!(result.verified);
+    assert_eq!(
+        reopened
+            .original_local_intent(&owner, r.p, r.original.original_id)
+            .unwrap(),
+        intent,
+        "manual success cannot clear permanent auto pause"
+    );
+    target.stop().await.unwrap();
+    source.stop().await.unwrap();
+    stop(reopened).await;
+    stop(r.a).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automatic_runtime_rearms_saved_backoff_before_any_byte_session() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let r = rig(b"saved retry wait").await;
+    let policy = r.b.original_auto_policy(&r.ob).unwrap();
+    let mut settings = r.b.peer_network_settings(&r.ob).unwrap();
+    settings.enabled = true;
+    r.b.save_peer_network_settings(&r.ob, settings).unwrap();
+    {
+        let mut state = r.b.active_state().unwrap();
+        let resources = state.resources.as_mut().unwrap();
+        let tx =
+            crate::peers::membership_store::transaction(&mut resources.persistence.auth).unwrap();
+        for _ in 0..3 {
+            crate::peers::original_auto_store::note_failure(
+                &tx,
+                r.p,
+                r.original.original_id,
+                "unreachable",
+                r.original.byte_length,
+                policy.revision,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        }
+        tx.commit().unwrap();
+    }
+    assert_eq!(
+        r.b.original_auto_backoff(&r.ob, r.p, r.original.original_id)
+            .unwrap()
+            .delay_ms,
+        8000
+    );
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (source, target) = auto_controllers(
+        &r,
+        1024 * 1024,
+        Some(Box::new(move || {
+            entered.send(Instant::now()).unwrap();
+        })),
+    )
+    .await;
+    let returned = Instant::now();
+    let first = tokio::time::timeout(Duration::from_secs(18), ready)
+        .await
+        .expect("delayed automatic session eventually starts")
+        .unwrap();
+    assert!(
+        first.saturating_duration_since(returned) >= Duration::from_millis(7500),
+        "restoration skipped/rearmed from an overdue wall timestamp"
+    );
+    wait_auto("backoff-delayed verified bytes", || {
+        target
+            .original_status(r.p, r.original.original_id)
+            .is_ok_and(|s| s.availability == "complete")
+    })
+    .await;
+    assert_eq!(
+        r.b.original_auto_backoff(&r.ob, r.p, r.original.original_id)
+            .unwrap()
+            .delay_ms,
+        0
+    );
+    assert_no_fake_capture(&r);
+    target.stop().await.unwrap();
+    source.stop().await.unwrap();
+    stop(r.a).await;
+    stop(r.b).await;
+}
 async fn exchange(
     r: &Rig,
     options: OriginalTransferOptions,
@@ -538,6 +878,19 @@ async fn native_controller_explicit_original_fetch_is_verified_then_idle_and_off
     let r = rig(&bytes).await;
     let source = crate::PeerNetwork::new(r.a.clone(), r.oa.clone()).unwrap();
     let target = crate::PeerNetwork::new(r.b.clone(), r.ob.clone()).unwrap();
+    // This case verifies explicit acquisition; background-policy behavior has
+    // its own real controller tests and must not race the manual preconditions.
+    let policy = r.b.original_auto_policy(&r.ob).unwrap();
+    r.b.configure_original_auto_policy(
+        &r.ob,
+        &crate::OriginalAutoPolicyCommand {
+            command_id: Uuid::new_v4(),
+            expected_revision: policy.revision,
+            enabled: false,
+            max_bytes: policy.max_bytes,
+        },
+    )
+    .unwrap();
     source.set_enabled(true).await.unwrap();
     // Fetching an original respects the user's network preference; this
     // fixture explicitly enables BOTH controllers instead of implicit enable.

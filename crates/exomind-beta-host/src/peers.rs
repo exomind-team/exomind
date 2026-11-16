@@ -18,7 +18,9 @@ pub use original_auto_store::{
     OriginalAutoSuppressionCommand, OriginalLocalIntent,
 };
 pub(crate) mod sync_store;
-pub use network::{PeerConnectionView, PeerNetwork, PeerNetworkStatus, PeerOriginalStatus};
+pub use network::{
+    OriginalAutoQueueStatus, PeerConnectionView, PeerNetwork, PeerNetworkStatus, PeerOriginalStatus,
+};
 mod service;
 pub use network_store::PeerNetworkSettings;
 pub use service::{PeerProbe, PeerServiceKind, PeerServiceOutcome};
