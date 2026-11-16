@@ -82,6 +82,7 @@ impl BetaHost {
                 SummariesControl,
             ]),
             GrantKind::AgentNote => allowed.extend([CaptureAppendAgentNote, OriginalsStage]),
+            GrantKind::SummaryProducer => allowed.push(ExternalSummaryAppend),
         }
         if request
             .required
@@ -98,7 +99,7 @@ impl BetaHost {
             grant_kind: authority.kind,
             agent_id: authority.agent_id,
             allowed,
-            unsupported: vec![Wait, ExportBundle, ExternalSummaryAppend],
+            unsupported: vec![Wait, ExportBundle],
             max_page_items: 100,
             max_original_chunk_bytes: exomind_core::MAX_ORIGINAL_CHUNK_BYTES,
         })

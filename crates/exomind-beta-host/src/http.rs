@@ -40,6 +40,11 @@ struct FailureDetail {
 impl IntoResponse for HostError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::Core(CoreError::InvalidExternalSummary(_)) => (
+                StatusCode::BAD_REQUEST,
+                "invalid_external_summary",
+                "External summary sources, evidence or narrative are invalid",
+            ),
             Self::PeerNetworkDisabled => (
                 StatusCode::CONFLICT,
                 "peer_network_disabled",
@@ -488,6 +493,7 @@ fn router(host: Arc<BetaHost>, address: SocketAddr, frontend_origins: Vec<String
         .route("/beta/v1/profiles/:profile/events", get(events))
         .route("/beta/v1/profiles/:profile/receipts/:command", get(receipt))
         .merge(crate::agent_access_http::router())
+        .merge(crate::external_summaries_http::router())
         .merge(crate::originals_http::router())
         .merge(crate::timeblocks_http::router())
         .merge(crate::model_config_http::router())

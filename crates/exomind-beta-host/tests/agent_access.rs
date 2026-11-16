@@ -168,10 +168,16 @@ async fn real_http_access_check_rejects_unknown_fields_capabilities_and_wrong_au
             .contains(&json!("capture_append_human"))
     );
     assert!(
-        value["unsupported"]
+        !value["unsupported"]
             .as_array()
             .unwrap()
             .contains(&json!("external_summary_append"))
+    );
+    assert!(
+        value["unsupported"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("export_bundle"))
     );
     assert!(!value.to_string().contains(&agent.token));
     for (token, body, status) in [

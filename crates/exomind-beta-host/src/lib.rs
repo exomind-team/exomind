@@ -3,6 +3,8 @@
 mod agent_access;
 mod agent_access_http;
 pub use agent_access::{AgentAccess, AgentAccessCheck, AgentCapability};
+mod external_summaries;
+mod external_summaries_http;
 mod http;
 mod local_intents;
 mod local_sources;
@@ -180,6 +182,7 @@ pub enum GrantKind {
     Observer,
     Human,
     AgentNote,
+    SummaryProducer,
 }
 
 impl GrantKind {
@@ -188,6 +191,7 @@ impl GrantKind {
             Self::Observer => "observer",
             Self::Human => "human",
             Self::AgentNote => "agent_note",
+            Self::SummaryProducer => "summary_producer",
         }
     }
     fn parse(value: &str) -> Result<Self, HostError> {
@@ -195,6 +199,7 @@ impl GrantKind {
             "observer" => Ok(Self::Observer),
             "human" => Ok(Self::Human),
             "agent_note" => Ok(Self::AgentNote),
+            "summary_producer" => Ok(Self::SummaryProducer),
             _ => Err(HostError::CredentialsUnavailable),
         }
     }
@@ -472,7 +477,9 @@ impl BetaHost {
                 .transpose()
                 .map_err(|_| HostError::CredentialsUnavailable)?,
         };
-        if authority.profile_id != profile || (write && authority.kind == GrantKind::Observer) {
+        if authority.profile_id != profile
+            || (write && !matches!(authority.kind, GrantKind::Human | GrantKind::AgentNote))
+        {
             return Err(HostError::Forbidden);
         }
         Ok(authority)
@@ -506,7 +513,9 @@ impl BetaHost {
         let resources = resources(&state)?;
         self.owner(session)?;
         resources.core.local_human(request.profile_id)?;
-        if (request.kind == GrantKind::AgentNote) != request.agent_id.is_some() {
+        if matches!(request.kind, GrantKind::AgentNote | GrantKind::SummaryProducer)
+            != request.agent_id.is_some()
+        {
             return Err(HostError::InvalidRequest);
         }
         let raw_token = token();
@@ -661,7 +670,7 @@ fn resources(state: &State) -> Result<&Resources, HostError> {
 }
 fn context(core: &Core, authority: &ProfileAuthority) -> Result<WriterContext, HostError> {
     match authority.kind {
-        GrantKind::AgentNote => Ok(core.local_agent(
+        GrantKind::AgentNote | GrantKind::SummaryProducer => Ok(core.local_agent(
             authority.profile_id,
             authority
                 .agent_id
