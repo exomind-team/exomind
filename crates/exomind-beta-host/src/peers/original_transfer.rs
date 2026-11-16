@@ -1,5 +1,6 @@
 //! Referenced original bytes over one owned, pinned channel. Metadata delivery
 //! is not byte delivery; only a locally sealed hash may produce Verified.
+use super::original_admission::OriginalAdmission;
 use super::{
     PeerCancellation, PeerChannel,
     authorization::{PeerOperation, PeerProfileScope},
@@ -364,6 +365,8 @@ struct Prepared {
     stage: StageId,
     offset: u64,
     existing: bool,
+    admission: Arc<OriginalAdmission>,
+    cancelled: PeerCancellation,
 }
 fn stage_id(device: DeviceId, profile: ProfileId, original: OriginalId) -> StageId {
     let digest = Sha256::digest(
@@ -384,15 +387,32 @@ impl BetaHost {
         channel: &PeerChannel,
         scope: &PeerProfileScope,
         original: OriginalId,
+        admission: Arc<OriginalAdmission>,
+        cancelled: PeerCancellation,
     ) -> Result<Prepared, HostError> {
-        self.with_peer_scope(
+        self.with_peer_resources(
             channel,
             scope,
             PeerOperation::MaterializeOriginals,
-            |core, member| {
+            |resources, member| {
+                admission.validate(
+                    self,
+                    resources,
+                    member.profile_id,
+                    original,
+                    Some(&cancelled),
+                )?;
+                let core = &resources.core;
                 let human = core.local_human(member.profile_id)?;
                 let availability =
                     core.original_availability(&human, member.profile_id, original)?;
+                let description = match &availability {
+                    OriginalAvailability::Missing { original } => original,
+                    OriginalAvailability::Local { stage } => &stage.original,
+                };
+                if description != admission.original() {
+                    return Err(HostError::Core(CoreError::OriginalConflict));
+                }
                 let status = match availability {
                     OriginalAvailability::Local { stage } => stage,
                     OriginalAvailability::Missing { original } => core.begin_stage(
@@ -416,6 +436,9 @@ impl BetaHost {
                     return Err(HostError::Core(CoreError::OriginalHashMismatch));
                 }
                 let existing = status.state == StageState::Verified;
+                if status.original != *admission.original() {
+                    return Err(HostError::Core(CoreError::OriginalConflict));
+                }
                 if status.next_offset > status.original.byte_length
                     || (existing && status.next_offset != status.original.byte_length)
                 {
@@ -429,6 +452,8 @@ impl BetaHost {
                     stage: status.stage_id,
                     offset: status.next_offset,
                     existing,
+                    admission,
+                    cancelled,
                 })
             },
         )
@@ -441,11 +466,19 @@ impl BetaHost {
         offset: u64,
         bytes: &[u8],
     ) -> Result<u64, HostError> {
-        self.with_peer_scope(
+        self.with_peer_resources(
             channel,
             scope,
             PeerOperation::MaterializeOriginals,
-            |core, member| {
+            |resources, member| {
+                prepared.admission.validate(
+                    self,
+                    resources,
+                    member.profile_id,
+                    prepared.original.original_id,
+                    Some(&prepared.cancelled),
+                )?;
+                let core = &resources.core;
                 let human = core.local_human(member.profile_id)?;
                 let availability = core.original_availability(
                     &human,
@@ -470,11 +503,19 @@ impl BetaHost {
         scope: &PeerProfileScope,
         prepared: &Prepared,
     ) -> Result<VerificationTicket, HostError> {
-        self.with_peer_scope(
+        self.with_peer_resources(
             channel,
             scope,
             PeerOperation::MaterializeOriginals,
-            |core, member| {
+            |resources, member| {
+                prepared.admission.validate(
+                    self,
+                    resources,
+                    member.profile_id,
+                    prepared.original.original_id,
+                    Some(&prepared.cancelled),
+                )?;
+                let core = &resources.core;
                 let human = core.local_human(member.profile_id)?;
                 if prepared.existing {
                     Ok(core.verified_original_ticket(
@@ -495,11 +536,19 @@ impl BetaHost {
         prepared: &Prepared,
         proof: &VerificationProof,
     ) -> Result<(), HostError> {
-        self.with_peer_scope(
+        self.with_peer_resources(
             channel,
             scope,
             PeerOperation::MaterializeOriginals,
-            |core, member| {
+            |resources, member| {
+                prepared.admission.validate(
+                    self,
+                    resources,
+                    member.profile_id,
+                    prepared.original.original_id,
+                    Some(&prepared.cancelled),
+                )?;
+                let core = &resources.core;
                 let human = core.local_human(member.profile_id)?;
                 if prepared.existing {
                     let actual =
@@ -547,8 +596,10 @@ impl BetaHost {
         channel: PeerChannel,
         options: OriginalTransferOptions,
     ) -> Result<OriginalTransferResult, HostError> {
-        self.download_peer_original_owned(owner, profile, peer, original, channel, options, None)
-            .await
+        self.download_peer_original_owned(
+            owner, profile, peer, original, channel, options, None, None,
+        )
+        .await
     }
     pub(super) async fn download_peer_original_owned(
         self: &Arc<Self>,
@@ -559,6 +610,7 @@ impl BetaHost {
         channel: PeerChannel,
         options: OriginalTransferOptions,
         completion: Option<Arc<TransferCompletion>>,
+        admission: Option<Arc<OriginalAdmission>>,
     ) -> Result<OriginalTransferResult, HostError> {
         options.validate()?;
         self.qualify_transport(owner)?;
@@ -568,6 +620,10 @@ impl BetaHost {
         let runtime = tokio::runtime::Handle::current();
         let cancel = PeerCancellation::new();
         let _cancel = CancelOnDrop(cancel.clone());
+        let admission = match admission {
+            Some(ticket) => ticket,
+            None => OriginalAdmission::direct(self, owner, profile, original, cancel.clone())?,
+        };
         let completion_lease = completion
             .as_ref()
             .map(|work| work.register())
@@ -583,20 +639,20 @@ impl BetaHost {
                     options,
                 };
                 let scope = host.peer_profile_scope(&io.channel, profile, peer)?;
-                match completion {
-                    Some(completion) => {
-                        download_with_completion(
-                            &host,
-                            &mut io,
-                            &scope,
-                            profile,
-                            original,
-                            Some(&completion),
-                        )
-                        .await
-                    }
-                    None => download(&host, &mut io, &scope, profile, original).await,
-                }
+                let result = download_with_completion(
+                    &host,
+                    &mut io,
+                    &scope,
+                    profile,
+                    original,
+                    completion.as_ref(),
+                    &admission,
+                )
+                .await;
+                let state = host.active_state()?;
+                let resources = crate::resources(&state)?;
+                admission.validate_result(&host, resources, &result, Some(&io.cancel))?;
+                result
             })
         })
         .await
@@ -686,15 +742,6 @@ async fn verify(
         }
     }
 }
-async fn download(
-    host: &Arc<BetaHost>,
-    io: &mut Io,
-    scope: &PeerProfileScope,
-    profile: ProfileId,
-    original: OriginalId,
-) -> Result<OriginalTransferResult, HostError> {
-    download_with_completion(host, io, scope, profile, original, None).await
-}
 async fn download_with_completion(
     host: &Arc<BetaHost>,
     io: &mut Io,
@@ -702,8 +749,15 @@ async fn download_with_completion(
     profile: ProfileId,
     original: OriginalId,
     completion: Option<&Arc<TransferCompletion>>,
+    admission: &Arc<OriginalAdmission>,
 ) -> Result<OriginalTransferResult, HostError> {
-    let prepared = host.prepare_original(&io.channel, scope, original)?;
+    let prepared = host.prepare_original(
+        &io.channel,
+        scope,
+        original,
+        admission.clone(),
+        io.cancel.clone(),
+    )?;
     io.send(&Control::Start {
         protocol: PROTOCOL.into(),
         schema: exomind_core::CORE_SCHEMA_VERSION,

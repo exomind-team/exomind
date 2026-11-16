@@ -1,6 +1,10 @@
 //! Explicit Native download jobs. Runtime progress is bounded and disposable;
 //! the Core stage offset/hash is the durable source of byte availability.
 use super::*;
+use crate::peers::original_admission::{OriginalAdmission, OriginalFetchMode};
+use crate::peers::original_auto_store::{
+    self, OriginalAutoSuppression, OriginalAutoSuppressionCommand,
+};
 use crate::peers::original_transfer::TransferCompletion;
 use crate::peers::{OriginalTransferOptions, OriginalTransferResult};
 use exomind_core::{OriginalAvailability, OriginalId, OriginalRef, StageState};
@@ -31,6 +35,7 @@ struct Active {
     id: Uuid,
     peer: DeviceId,
     cancel: PeerCancellation,
+    cancel_intent_revision: Option<Uuid>,
 }
 struct Progress {
     active: Option<Active>,
@@ -104,6 +109,7 @@ impl OriginalJobs {
                     id,
                     peer,
                     cancel: cancel.clone(),
+                    cancel_intent_revision: None,
                 }),
                 state: "receiving",
                 error: None,
@@ -286,17 +292,47 @@ impl PeerNetwork {
         original: OriginalId,
         request: Uuid,
     ) -> Result<bool, HostError> {
-        self.host.qualify_transport(&self.owner)?;
         if request.is_nil() {
             return Err(HostError::InvalidRequest);
         }
+        // Global order is Host gate -> entries. The request cannot be replaced
+        // between its identity check, durable suppression commit and signal.
+        let mut state = self.host.active_state()?;
+        self.host.owner(&self.owner)?;
+        let resources = state.resources.as_mut().ok_or(HostError::Stopped)?;
         let mut entries = self
             .originals
             .entries
             .lock()
             .map_err(|_| HostError::StatePoisoned)?;
         if let Some(progress) = entries.get_mut(&(profile, original)) {
-            if let Some(active) = progress.active.as_ref().filter(|a| a.id == request) {
+            if let Some(active) = progress.active.as_mut().filter(|a| a.id == request) {
+                resources.core.original_availability(
+                    &resources.core.local_human(profile)?,
+                    profile,
+                    original,
+                )?;
+                let prior =
+                    original_auto_store::intent(&resources.persistence.auth, profile, original)?;
+                if active.cancel_intent_revision != prior.intent_revision
+                    || prior.suppression != Some(OriginalAutoSuppression::UserCancelled)
+                {
+                    let tx = super::super::membership_store::transaction(
+                        &mut resources.persistence.auth,
+                    )?;
+                    let intent = original_auto_store::save_intent(
+                        &tx,
+                        profile,
+                        original,
+                        &OriginalAutoSuppressionCommand {
+                            command_id: Uuid::new_v4(),
+                            expected_intent_revision: prior.intent_revision,
+                            suppression: Some(OriginalAutoSuppression::UserCancelled),
+                        },
+                    )?;
+                    tx.commit().map_err(|_| HostError::PeerSyncUnavailable)?;
+                    active.cancel_intent_revision = intent.intent_revision;
+                }
                 active.cancel.cancel();
                 progress.state = "cancelled";
                 progress.error = Some("cancelled");
@@ -305,6 +341,31 @@ impl PeerNetwork {
         }
         Ok(false)
     }
+    /// A true result includes durable suppression and this exact request's
+    /// physical completion, not merely acceptance of its cancellation signal.
+    pub async fn cancel_original_and_wait(
+        self: &Arc<Self>,
+        profile: ProfileId,
+        original: OriginalId,
+        request: Uuid,
+    ) -> Result<bool, HostError> {
+        // Preserve the Native adapter's gate/disk work off its async executor.
+        // This short owned operation also participates in Host shutdown.
+        let host_lease = self.host.peers.register(false)?;
+        let network = self.clone();
+        let accepted = tokio::task::spawn_blocking(move || {
+            let _lease = host_lease;
+            network.cancel_original(profile, original, request)
+        })
+        .await
+        .map_err(|_| HostError::StatePoisoned)??;
+        if accepted {
+            self.originals
+                .wait_request((profile, original), request)
+                .await?;
+        }
+        Ok(accepted)
+    }
     pub async fn fetch_original(
         self: &Arc<Self>,
         profile: ProfileId,
@@ -312,21 +373,62 @@ impl PeerNetwork {
         original: OriginalId,
         request: Uuid,
     ) -> Result<OriginalTransferResult, HostError> {
+        self.fetch_original_mode(profile, peer, original, request, OriginalFetchMode::Manual)
+            .await
+    }
+    async fn fetch_original_mode(
+        self: &Arc<Self>,
+        profile: ProfileId,
+        peer: DeviceId,
+        original: OriginalId,
+        request: Uuid,
+        mode: OriginalFetchMode,
+    ) -> Result<OriginalTransferResult, HostError> {
         if peer == self.host.device_id {
             return Err(HostError::InvalidRequest);
         }
         // Admission and startup serialize with disable. No old fetch queued
         // behind a pause may implicitly turn the persisted preference on.
-        let (job, _lease, network_cancel, generation) = {
+        let (job, _lease, network_cancel, generation, before, intent_revision) = {
             let _control = self.control.lock().await;
-            self.host.qualify_transport(&self.owner)?;
-            if !self.host.peer_network_settings(&self.owner)?.enabled {
-                return Err(HostError::PeerNetworkDisabled);
-            }
+            let (job, lease, before, intent_revision) = {
+                let state = self.host.active_state()?;
+                self.host.owner(&self.owner)?;
+                let r = crate::resources(&state)?;
+                if !super::super::network_store::settings(&r.persistence.auth)?.enabled {
+                    return Err(HostError::PeerNetworkDisabled);
+                }
+                let before = match r.core.original_availability(
+                    &r.core.local_human(profile)?,
+                    profile,
+                    original,
+                )? {
+                    OriginalAvailability::Missing { original } => original,
+                    OriginalAvailability::Local { stage } => stage.original,
+                };
+                let intent = original_auto_store::intent(&r.persistence.auth, profile, original)?;
+                if let OriginalFetchMode::Automatic { policy_revision } = mode {
+                    if !original_auto_store::eligible(
+                        &r.persistence.auth,
+                        profile,
+                        original,
+                        before.byte_length,
+                        policy_revision,
+                        intent.intent_revision,
+                    )? {
+                        return Err(HostError::PeerCancelled);
+                    }
+                }
+                let job = self.originals.start((profile, original), peer, request)?;
+                (
+                    job,
+                    self.host.peers.register(false)?,
+                    before,
+                    intent.intent_revision,
+                )
+            };
             // Register before async key/listener setup, preserving exact-ID
             // cancellation while that setup is in progress.
-            let job = self.originals.start((profile, original), peer, request)?;
-            let lease = self.host.peers.register(false)?;
             tokio::select! {biased;_=job.cancel.cancelled()=>return Err(HostError::PeerCancelled),_=self.host.peers.cancel.cancelled()=>return Err(HostError::Stopped),result=self.start()=>{result?;}}
             let run = self.lifecycle.lock().await;
             let cancel = run
@@ -339,23 +441,70 @@ impl PeerNetwork {
                 .lock()
                 .map_err(|_| HostError::StatePoisoned)?
                 .generation;
-            (job, lease, cancel, generation)
+            (job, lease, cancel, generation, before, intent_revision)
         };
+        let shared = self.shared.clone();
+        let jobs = Arc::downgrade(&self.originals);
+        let network_guard = network_cancel.clone();
+        let admission = OriginalAdmission::managed(
+            self.host.runtime_id,
+            profile,
+            before.clone(),
+            intent_revision,
+            mode,
+            job.cancel.clone(),
+            move || {
+                if network_guard.is_cancelled() {
+                    return Ok(false);
+                }
+                if shared
+                    .lock()
+                    .map_err(|_| HostError::StatePoisoned)?
+                    .generation
+                    != generation
+                {
+                    return Ok(false);
+                }
+                let Some(jobs) = jobs.upgrade() else {
+                    return Ok(false);
+                };
+                let entries = jobs.entries.lock().map_err(|_| HostError::StatePoisoned)?;
+                Ok(entries
+                    .get(&(profile, original))
+                    .and_then(|p| p.active.as_ref())
+                    .is_some_and(|a| a.id == request && !a.cancel.is_cancelled()))
+            },
+        );
         let result = tokio::select! {biased;
             _=job.cancel.cancelled()=>Err(HostError::PeerCancelled),
             _=self.host.peers.cancel.cancelled()=>Err(HostError::Stopped),
             result=async {
                 // This check has no staging side effect and precedes all
                 // remote I/O, so private/unreferenced IDs never leave here.
-                let before=self.original_status(profile,original)?;
                 let result=tokio::select!{biased;
                     _=network_cancel.cancelled()=>Err(HostError::PeerCancelled),
-                    result=self.fetch_sessions(profile,peer,original,&job.cancel,before.original,&job.completion)=>result,
+                    result=self.fetch_sessions(profile,peer,original,&job.cancel,before,&job.completion,&admission)=>result,
                 };
                 if self.shared.lock().map_err(|_|HostError::StatePoisoned)?.generation!=generation{Err(HostError::PeerCancelled)}else{result}
             }=>result,
         };
-        self.originals.finish((profile, original), request, &result);
+        let mut result = result;
+        // Publication shares the same gate/order as cancellation. A committed
+        // pause cannot be overwritten by an old successful async result.
+        match self.host.active_state() {
+            Ok(state) => {
+                let validation = crate::resources(&state)
+                    .and_then(|r| admission.validate_result(&self.host, r, &result, None));
+                if let Err(error) = validation {
+                    result = Err(error);
+                }
+                self.originals.finish((profile, original), request, &result);
+            }
+            Err(error) => {
+                result = Err(error);
+                self.originals.finish((profile, original), request, &result);
+            }
+        }
         job.cancel.cancel();
         job.completion.close();
         self.originals
@@ -371,6 +520,7 @@ impl PeerNetwork {
         cancel: &PeerCancellation,
         expected: OriginalRef,
         completion: &Arc<TransferCompletion>,
+        admission: &Arc<OriginalAdmission>,
     ) -> Result<OriginalTransferResult, HostError> {
         let end = Instant::now() + Duration::from_secs(30 * 60);
         let mut first = None;
@@ -445,6 +595,7 @@ impl PeerNetwork {
                         channel,
                         options,
                         Some(completion.clone()),
+                        Some(admission.clone()),
                     )
                     .await
                 {
@@ -483,6 +634,54 @@ impl PeerNetwork {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn committed_original(host: &BetaHost, owner: &Session) -> (ProfileId, OriginalId) {
+        let p = ProfileId::new();
+        host.provision_profile(owner, p, "synthetic cancellable original")
+            .unwrap();
+        let stage = exomind_core::StageId::new();
+        let id = OriginalId::new();
+        let ticket = {
+            let state = host.active_state().unwrap();
+            let core = &crate::resources(&state).unwrap().core;
+            let human = core.local_human(p).unwrap();
+            core.begin_stage(
+                &human,
+                &exomind_core::BeginStageCommand {
+                    stage_id: stage,
+                    original_id: id,
+                    profile_id: p,
+                    expected_sha256:
+                        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+                    byte_length: 0,
+                    file_name: "synthetic-cancel.bin".into(),
+                    media_type: "application/octet-stream".into(),
+                },
+            )
+            .unwrap();
+            core.freeze_stage(&human, stage).unwrap()
+        };
+        let proof = ticket.verify(|| false).unwrap();
+        {
+            let state = host.active_state().unwrap();
+            let core = &crate::resources(&state).unwrap().core;
+            let human = core.local_human(p).unwrap();
+            let original = core.finish_stage(&human, &proof).unwrap().original;
+            core.submit(
+                &human,
+                &exomind_core::CaptureCommand {
+                    command_id: exomind_core::CommandId::new(),
+                    event_id: exomind_core::EventId::new(),
+                    profile_id: p,
+                    occurred_at_ms: 1000,
+                    text: "synthetic cancellation reference".into(),
+                    tags: vec![],
+                    originals: vec![original],
+                },
+            )
+            .unwrap();
+        }
+        (p, id)
+    }
     fn has_active(network: &PeerNetwork) -> bool {
         network
             .originals
@@ -497,8 +696,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let host = Arc::new(BetaHost::open(root.path()).unwrap());
         let owner = host.owner_session().unwrap();
+        let key = committed_original(&host, &owner);
         let network = PeerNetwork::new(host.clone(), owner).unwrap();
-        let key = (ProfileId::new(), OriginalId::new());
         let peer = DeviceId::new();
         let request = Uuid::new_v4();
         let job = network.originals.start(key, peer, request).unwrap();
@@ -759,9 +958,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let host = Arc::new(BetaHost::open(root.path()).unwrap());
         let owner = host.owner_session().unwrap();
-        let network = PeerNetwork::new(host.clone(), owner).unwrap();
-        let p = ProfileId::new();
-        let original = OriginalId::new();
+        let (p, original) = committed_original(&host, &owner);
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
         let peer = DeviceId::new();
         let first = Uuid::new_v4();
         let old = network.originals.start((p, original), peer, first).unwrap();
@@ -778,6 +976,17 @@ mod tests {
         assert!(!old.cancel.is_cancelled());
         assert!(network.cancel_original(p, original, first).unwrap());
         assert!(old.cancel.is_cancelled());
+        let persisted = host.original_local_intent(&owner, p, original).unwrap();
+        assert_eq!(
+            persisted.suppression,
+            Some(OriginalAutoSuppression::UserCancelled)
+        );
+        assert!(network.cancel_original(p, original, first).unwrap());
+        assert_eq!(
+            host.original_local_intent(&owner, p, original).unwrap(),
+            persisted,
+            "repeat cancel must not spend another revision"
+        );
         drop(old);
         let replacement = network
             .originals
@@ -785,11 +994,140 @@ mod tests {
             .unwrap();
         assert!(!network.cancel_original(p, original, first).unwrap());
         assert!(!replacement.cancel.is_cancelled());
+        assert_eq!(
+            host.original_local_intent(&owner, p, original).unwrap(),
+            persisted,
+            "old UUID cannot suppress its replacement"
+        );
         network.originals.cancel_all();
         assert!(replacement.cancel.is_cancelled());
         drop(replacement);
         network.originals.wait_empty().await.unwrap();
         drop(network);
+        tokio::task::spawn_blocking(move || host.stop())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancellation_write_failure_never_signals_or_spends_a_revision() {
+        let root = tempfile::tempdir().unwrap();
+        let host = Arc::new(BetaHost::open(root.path()).unwrap());
+        let owner = host.owner_session().unwrap();
+        let (p, id) = committed_original(&host, &owner);
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+        let request = Uuid::new_v4();
+        let job = network
+            .originals
+            .start((p, id), DeviceId::new(), request)
+            .unwrap();
+        {
+            let mut state = host.active_state().unwrap();
+            state.resources.as_mut().unwrap().persistence.auth.execute_batch("CREATE TRIGGER test_deny_cancel_intent BEFORE INSERT ON peer_original_auto_intents BEGIN SELECT RAISE(ABORT,'synthetic cancel write denial'); END;").unwrap();
+        }
+        let before = host.original_local_intent(&owner, p, id).unwrap();
+        let revisions = {
+            let state = host.active_state().unwrap();
+            crate::resources(&state)
+                .unwrap()
+                .persistence
+                .auth
+                .query_row::<u64, _, _>(
+                    "SELECT count(*) FROM peer_original_auto_revisions",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert!(matches!(
+            network.cancel_original(p, id, request),
+            Err(HostError::PeerSyncUnavailable)
+        ));
+        assert!(
+            !job.cancel.is_cancelled(),
+            "failed durable intent cannot be acknowledged as cancelled"
+        );
+        assert_eq!(host.original_local_intent(&owner, p, id).unwrap(), before);
+        {
+            let mut state = host.active_state().unwrap();
+            let c = &mut state.resources.as_mut().unwrap().persistence.auth;
+            assert_eq!(
+                c.query_row::<u64, _, _>(
+                    "SELECT count(*) FROM peer_original_auto_revisions",
+                    [],
+                    |r| r.get(0)
+                )
+                .unwrap(),
+                revisions
+            );
+            c.execute("DROP TRIGGER test_deny_cancel_intent", [])
+                .unwrap();
+        }
+        network.cancel_original(p, id, request).unwrap();
+        assert!(job.cancel.is_cancelled());
+        assert_eq!(
+            host.original_local_intent(&owner, p, id)
+                .unwrap()
+                .suppression,
+            Some(OriginalAutoSuppression::UserCancelled)
+        );
+        drop(job);
+        network.stop().await.unwrap();
+        tokio::task::spawn_blocking(move || host.stop())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancellation_signal_observes_committed_intent_and_async_cancel_waits_for_completion() {
+        let root = tempfile::tempdir().unwrap();
+        let host = Arc::new(BetaHost::open(root.path()).unwrap());
+        let owner = host.owner_session().unwrap();
+        let (p, id) = committed_original(&host, &owner);
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+        let request = Uuid::new_v4();
+        let job = network
+            .originals
+            .start((p, id), DeviceId::new(), request)
+            .unwrap();
+        let cancel = job.cancel.clone();
+        let guard = job.completion.register().unwrap();
+        let mut cancelling = Box::pin(network.cancel_original_and_wait(p, id, request));
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(cancelling.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        tokio::time::timeout(Duration::from_secs(2), cancel.cancelled())
+            .await
+            .unwrap();
+        assert!(cancel.is_cancelled());
+        assert_eq!(
+            host.original_local_intent(&owner, p, id)
+                .unwrap()
+                .suppression,
+            Some(OriginalAutoSuppression::UserCancelled)
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut cancelling)
+                .await
+                .is_err(),
+            "durable cancellation must still await its held completion guard"
+        );
+        drop(job);
+        assert!(has_active(&network));
+        drop(guard);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), &mut cancelling)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        drop(cancelling);
+        assert!(!has_active(&network));
+        network.stop().await.unwrap();
         tokio::task::spawn_blocking(move || host.stop())
             .await
             .unwrap()

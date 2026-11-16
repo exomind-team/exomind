@@ -307,7 +307,7 @@ fn save_policy(
     c.execute("UPDATE peer_original_auto_policy SET revision=?1,enabled=?2,max_bytes=?3,input_digest=?4 WHERE singleton=1",params![command.command_id.to_string(),command.enabled,command.max_bytes,input]).map_err(unavailable)?;
     policy(c)
 }
-fn save_intent(
+pub(super) fn save_intent(
     c: &Connection,
     p: ProfileId,
     id: OriginalId,

@@ -183,6 +183,300 @@ fn availability(host: &BetaHost, p: ProfileId, original: OriginalId) -> Original
     core.original_availability(&core.local_human(p).unwrap(), p, original)
         .unwrap()
 }
+fn change_intent(
+    r: &Rig,
+    suppression: Option<crate::OriginalAutoSuppression>,
+) -> crate::OriginalLocalIntent {
+    let prior =
+        r.b.original_local_intent(&r.ob, r.p, r.original.original_id)
+            .unwrap();
+    r.b.configure_original_auto_suppression(
+        &r.ob,
+        r.p,
+        r.original.original_id,
+        &crate::OriginalAutoSuppressionCommand {
+            command_id: Uuid::new_v4(),
+            expected_intent_revision: prior.intent_revision,
+            suppression,
+        },
+    )
+    .unwrap()
+}
+fn stage_status(r: &Rig) -> exomind_core::StageStatus {
+    match availability(&r.b, r.p, r.original.original_id) {
+        OriginalAvailability::Local { stage } => stage,
+        _ => panic!("expected a staged but not fabricated original"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn local_intent_is_rechecked_at_prepare_write_freeze_and_seal_without_erasing_suppression() {
+    let bytes = b"synthetic frozen bytes\0\xff";
+    let r = rig(bytes).await;
+    let (listener, client, server) = channels(&r.a, &r.oa, &r.b, &r.ob).await;
+    let scope = r.b.peer_profile_scope(&client, r.p, r.a.device_id).unwrap();
+    let cancel = PeerCancellation::new();
+    let old = OriginalAdmission::direct(&r.b, &r.ob, r.p, r.original.original_id, cancel.clone())
+        .unwrap();
+    change_intent(&r, Some(crate::OriginalAutoSuppression::UserCancelled));
+    assert!(matches!(
+        r.b.prepare_original(&client, &scope, r.original.original_id, old, cancel.clone()),
+        Err(HostError::PeerCancelled)
+    ));
+    assert!(
+        matches!(
+            availability(&r.b, r.p, r.original.original_id),
+            OriginalAvailability::Missing { .. }
+        ),
+        "stale prepare created a stage"
+    );
+    let allowed =
+        OriginalAdmission::direct(&r.b, &r.ob, r.p, r.original.original_id, cancel.clone())
+            .unwrap();
+    let prepared =
+        r.b.prepare_original(
+            &client,
+            &scope,
+            r.original.original_id,
+            allowed,
+            cancel.clone(),
+        )
+        .unwrap();
+    change_intent(&r, Some(crate::OriginalAutoSuppression::LocalReleased));
+    assert!(matches!(
+        r.b.materialize_write(&client, &scope, &prepared, 0, bytes),
+        Err(HostError::PeerCancelled)
+    ));
+    assert_eq!(stage_status(&r).next_offset, 0);
+    let oneoff =
+        OriginalAdmission::direct(&r.b, &r.ob, r.p, r.original.original_id, cancel.clone())
+            .unwrap();
+    let prepared =
+        r.b.prepare_original(
+            &client,
+            &scope,
+            r.original.original_id,
+            oneoff,
+            cancel.clone(),
+        )
+        .unwrap();
+    r.b.materialize_write(&client, &scope, &prepared, 0, bytes)
+        .unwrap();
+    change_intent(&r, None);
+    assert!(matches!(
+        r.b.freeze_original(&client, &scope, &prepared),
+        Err(HostError::PeerCancelled)
+    ));
+    assert_eq!(stage_status(&r).state, StageState::Uploading);
+    let new = OriginalAdmission::direct(&r.b, &r.ob, r.p, r.original.original_id, cancel.clone())
+        .unwrap();
+    let prepared =
+        r.b.prepare_original(&client, &scope, r.original.original_id, new, cancel.clone())
+            .unwrap();
+    let proof =
+        r.b.freeze_original(&client, &scope, &prepared)
+            .unwrap()
+            .verify(|| false)
+            .unwrap();
+    let released = change_intent(&r, Some(crate::OriginalAutoSuppression::LocalReleased));
+    assert!(matches!(
+        r.b.seal_original(&client, &scope, &prepared, &proof),
+        Err(HostError::PeerCancelled)
+    ));
+    assert_eq!(stage_status(&r).state, StageState::Frozen);
+    // A NEW explicit manual action may use retained bytes, but cannot clear
+    // the permanent auto suppression as an accidental success side effect.
+    let oneoff =
+        OriginalAdmission::direct(&r.b, &r.ob, r.p, r.original.original_id, cancel.clone())
+            .unwrap();
+    let prepared =
+        r.b.prepare_original(&client, &scope, r.original.original_id, oneoff, cancel)
+            .unwrap();
+    r.b.seal_original(&client, &scope, &prepared, &proof)
+        .unwrap();
+    assert_eq!(stage_status(&r).state, StageState::Verified);
+    assert_eq!(
+        r.b.original_local_intent(&r.ob, r.p, r.original.original_id)
+            .unwrap(),
+        released
+    );
+    assert_no_fake_capture(&r);
+    client.close().await.unwrap();
+    server.close().await.unwrap();
+    drop(listener);
+    stop(r.a).await;
+    stop(r.b).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_cancel_and_managed_epoch_are_final_gate_checks_not_only_outer_future_checks() {
+    use crate::peers::original_admission::OriginalFetchMode;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let bytes = b"synthetic session fence";
+    let r = rig(bytes).await;
+    let mut settings = r.b.peer_network_settings(&r.ob).unwrap();
+    settings.enabled = true;
+    r.b.save_peer_network_settings(&r.ob, settings).unwrap();
+    let (listener, client, server) = channels(&r.a, &r.oa, &r.b, &r.ob).await;
+    let scope = r.b.peer_profile_scope(&client, r.p, r.a.device_id).unwrap();
+    let live = Arc::new(AtomicU64::new(1));
+    let epoch = live.clone();
+    let job_cancel = PeerCancellation::new();
+    let admission = OriginalAdmission::managed(
+        r.b.runtime_id,
+        r.p,
+        r.original.clone(),
+        None,
+        OriginalFetchMode::Manual,
+        job_cancel,
+        move || Ok(epoch.load(Ordering::SeqCst) == 1),
+    );
+    let session = PeerCancellation::new();
+    let prepared =
+        r.b.prepare_original(
+            &client,
+            &scope,
+            r.original.original_id,
+            admission.clone(),
+            session.clone(),
+        )
+        .unwrap();
+    session.cancel();
+    assert!(matches!(
+        r.b.materialize_write(&client, &scope, &prepared, 0, bytes),
+        Err(HostError::PeerCancelled)
+    ));
+    assert!(matches!(
+        r.b.freeze_original(&client, &scope, &prepared),
+        Err(HostError::PeerCancelled)
+    ));
+    assert_eq!(stage_status(&r).next_offset, 0);
+    let session = PeerCancellation::new();
+    let prepared =
+        r.b.prepare_original(
+            &client,
+            &scope,
+            r.original.original_id,
+            admission.clone(),
+            session.clone(),
+        )
+        .unwrap();
+    live.store(2, Ordering::SeqCst);
+    assert!(matches!(
+        r.b.materialize_write(&client, &scope, &prepared, 0, bytes),
+        Err(HostError::PeerCancelled)
+    ));
+    assert_eq!(stage_status(&r).next_offset, 0);
+    let epoch = live.clone();
+    let admission = OriginalAdmission::managed(
+        r.b.runtime_id,
+        r.p,
+        r.original.clone(),
+        None,
+        OriginalFetchMode::Manual,
+        PeerCancellation::new(),
+        move || Ok(epoch.load(Ordering::SeqCst) == 2),
+    );
+    let prepared =
+        r.b.prepare_original(
+            &client,
+            &scope,
+            r.original.original_id,
+            admission,
+            session.clone(),
+        )
+        .unwrap();
+    r.b.materialize_write(&client, &scope, &prepared, 0, bytes)
+        .unwrap();
+    let proof =
+        r.b.freeze_original(&client, &scope, &prepared)
+            .unwrap()
+            .verify(|| false)
+            .unwrap();
+    session.cancel();
+    assert!(matches!(
+        r.b.seal_original(&client, &scope, &prepared, &proof),
+        Err(HostError::PeerCancelled)
+    ));
+    assert_eq!(stage_status(&r).state, StageState::Frozen);
+    assert_no_fake_capture(&r);
+    client.close().await.unwrap();
+    server.close().await.unwrap();
+    drop(listener);
+    stop(r.a).await;
+    stop(r.b).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automatic_policy_revision_blocks_late_write_while_explicit_manual_remains_allowed() {
+    use crate::peers::original_admission::OriginalFetchMode;
+    let bytes = b"synthetic policy revision";
+    let r = rig(bytes).await;
+    let mut settings = r.b.peer_network_settings(&r.ob).unwrap();
+    settings.enabled = true;
+    r.b.save_peer_network_settings(&r.ob, settings).unwrap();
+    let policy = r.b.original_auto_policy(&r.ob).unwrap();
+    let (listener, client, server) = channels(&r.a, &r.oa, &r.b, &r.ob).await;
+    let scope = r.b.peer_profile_scope(&client, r.p, r.a.device_id).unwrap();
+    let cancel = PeerCancellation::new();
+    let auto = OriginalAdmission::managed(
+        r.b.runtime_id,
+        r.p,
+        r.original.clone(),
+        None,
+        OriginalFetchMode::Automatic {
+            policy_revision: policy.revision,
+        },
+        cancel.clone(),
+        || Ok(true),
+    );
+    let prepared =
+        r.b.prepare_original(
+            &client,
+            &scope,
+            r.original.original_id,
+            auto,
+            cancel.clone(),
+        )
+        .unwrap();
+    r.b.configure_original_auto_policy(
+        &r.ob,
+        &crate::OriginalAutoPolicyCommand {
+            command_id: Uuid::new_v4(),
+            expected_revision: policy.revision,
+            enabled: false,
+            max_bytes: policy.max_bytes,
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        r.b.materialize_write(&client, &scope, &prepared, 0, bytes),
+        Err(HostError::PeerCancelled)
+    ));
+    assert_eq!(stage_status(&r).next_offset, 0);
+    let manual =
+        OriginalAdmission::direct(&r.b, &r.ob, r.p, r.original.original_id, cancel.clone())
+            .unwrap();
+    let prepared =
+        r.b.prepare_original(&client, &scope, r.original.original_id, manual, cancel)
+            .unwrap();
+    r.b.materialize_write(&client, &scope, &prepared, 0, bytes)
+        .unwrap();
+    let proof =
+        r.b.freeze_original(&client, &scope, &prepared)
+            .unwrap()
+            .verify(|| false)
+            .unwrap();
+    r.b.seal_original(&client, &scope, &prepared, &proof)
+        .unwrap();
+    assert_eq!(stage_status(&r).state, StageState::Verified);
+    assert_no_fake_capture(&r);
+    client.close().await.unwrap();
+    server.close().await.unwrap();
+    drop(listener);
+    stop(r.a).await;
+    stop(r.b).await;
+}
 async fn stop(host: Arc<BetaHost>) {
     tokio::task::spawn_blocking(move || host.stop())
         .await
@@ -310,11 +604,21 @@ async fn native_controller_explicit_original_fetch_is_verified_then_idle_and_off
         .fetch_original(r.p, r.a.device_id, missing.original_id, Uuid::new_v4())
         .await
         .unwrap_err();
-    assert!(matches!(
-        error,
-        HostError::PeerTransportUnavailable | HostError::PeerTimeout
-    ));
     let status = target.original_status(r.p, missing.original_id).unwrap();
+    assert!(
+        matches!(
+            &error,
+            HostError::PeerTransportUnavailable | HostError::PeerTimeout
+        ),
+        "offline fetch error={error:?}; local availability={} offset={} transfer={} status_error={:?}; source_addresses={} target_addresses={}; target_network_enabled={}",
+        status.availability,
+        status.next_offset,
+        status.transfer_state,
+        status.last_error_code,
+        source.local_addresses().unwrap().len(),
+        target.local_addresses().unwrap().len(),
+        r.b.peer_network_settings(&r.ob).unwrap().enabled
+    );
     assert_eq!(
         (
             status.availability,
@@ -571,9 +875,19 @@ async fn manual(
     let (listener, c, s) = channels(&r.a, &r.oa, &r.b, &r.ob).await;
     let scope_source = r.a.peer_profile_scope(&s, r.p, r.b.device_id).unwrap();
     let target_scope = r.b.peer_profile_scope(&c, r.p, r.a.device_id).unwrap();
-    let prepared =
-        r.b.prepare_original(&c, &target_scope, r.original.original_id)
+    let cancelled = PeerCancellation::new();
+    let admission =
+        OriginalAdmission::direct(&r.b, &r.ob, r.p, r.original.original_id, cancelled.clone())
             .unwrap();
+    let prepared =
+        r.b.prepare_original(
+            &c,
+            &target_scope,
+            r.original.original_id,
+            admission,
+            cancelled.clone(),
+        )
+        .unwrap();
     let source = r.a.clone();
     let serving = tokio::spawn(async move {
         source
@@ -583,7 +897,7 @@ async fn manual(
     let options = OriginalTransferOptions::default();
     let mut io = Io {
         channel: c,
-        cancel: PeerCancellation::new(),
+        cancel: cancelled,
         end: Instant::now() + options.session_timeout,
         options,
     };

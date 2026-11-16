@@ -381,9 +381,12 @@ impl PeerNetwork {
         self.stop_work().await
     }
     async fn stop_work(&self) -> Result<(), HostError> {
-        self.originals.cancel_all();
         let mut running = self.lifecycle.lock().await;
         {
+            // Local generation invalidation serializes with the final
+            // materialization gate, just like durable intent cancellation.
+            let _gate = self.host.state()?;
+            self.originals.cancel_all();
             let mut state = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
             state.generation = state.generation.saturating_add(1);
             state.addresses.clear();
@@ -392,6 +395,9 @@ impl PeerNetwork {
                 value.busy = false;
                 value.busy_id = None;
                 value.connection = "idle";
+            }
+            if let Some(run) = running.as_ref() {
+                run.cancel.cancel();
             }
         }
         // Retain the old scope in lifecycle while awaiting it: cancellation of

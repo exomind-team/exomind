@@ -10,6 +10,7 @@ pub(crate) mod identity;
 mod network;
 mod network_management;
 mod network_store;
+mod original_admission;
 mod original_auto_store;
 pub use original_auto_store::{
     DEFAULT_ORIGINAL_AUTO_BYTES, MAX_ORIGINAL_AUTO_BYTES, MIN_ORIGINAL_AUTO_BYTES,

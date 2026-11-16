@@ -287,12 +287,14 @@ pub(super) async fn beta_peer_original_cancel(
     request_id: Uuid,
 ) -> Result<bool, Failure> {
     trusted_window(&window, state.inner())?;
-    work(state.inner(), move |state| {
-        state
-            .peers
-            .cancel_original(profile_id, original_id, request_id)
-    })
-    .await
+    if state.closing.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(HostError::Stopped.into());
+    }
+    state
+        .peers
+        .cancel_original_and_wait(profile_id, original_id, request_id)
+        .await
+        .map_err(Failure::from)
 }
 
 #[cfg(test)]
