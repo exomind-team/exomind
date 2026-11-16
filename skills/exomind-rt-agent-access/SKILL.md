@@ -1,16 +1,24 @@
 ---
 name: exomind-rt-agent-access
-description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Prefer `/act/*` feature APIs first, and fall back to raw resource routes only when `/act` has no matching action or when low-level truth/debugging is required. Use when the user mentions ExoMind, `/act`, await, event log, RT access, curl, profiles, tasks, or timeblocks in ExoMind.
+description: Connect an external Agent to ExoMind through its actual HTTP protocol. Route exomind-beta/1 to scoped Beta grants and API guidance; keep /act-first and raw fallback guidance for the legacy Runtime. Use for ExoMind Agent access, scoped reads or appends, receipts, pagination, originals, and Runtime HTTP diagnostics.
 ---
 
-# ExoMind Runtime Agent / curl 接入指南
+# ExoMind Agent / HTTP 接入指南
+
+## 先区分 Beta 与旧 Runtime
+
+- **0.6 Beta / `exomind-beta/1`**：先读 [Beta Agent 接入](references/beta-agent-access.md)。使用 broker 提供的精确地址、UUID 档案 P 和低权 grant；核对 `GET /beta/v1/hello` 的协议及设备身份。Beta 不走 `/act/*`，不能用 owner-only `/beta/v1/profiles` 发现档案，也不能把旧 RT 配置、slug、鉴权或 API 当作回退。
+- **明确指定的旧 Runtime**：继续使用下文的 `/act/*` 优先、raw fallback 路线及原有 references。
+- 目标不明时先根据用户提供的实例信息识别；Beta 探测失败、功能未实现或返回拒绝时，停止该操作并报告事实，不能自动改打另一个旧实例。
+
+**本节之后的 `/health`、`/version`、`/act/*`、`profile-<slug>`、旧 RT 配置和 token query 说明仅适用于旧 Runtime。Beta 的 method/path/body/权限以独立 reference 为准。**
 
 > **核心约束**：Agent 接入外心的目标是**辅助人类、引导人类成长**，不是替代人类做决策。
 >
 > **定位**：
 >
-> - 本 skill 是 ExoMind Runtime HTTP/curl 接入的唯一真源。
-> - Agent 默认优先使用 `/act/*` feature API；只有 `/act/*` 暂无对应动作，才回退 raw RT 资源路由。
+> - 本 skill 是 ExoMind Agent HTTP/curl 接入的协议分流入口。
+> - 旧 Runtime 默认优先使用 `/act/*` feature API；只有 `/act/*` 暂无对应动作，才回退 raw RT 资源路由。Beta 使用上方独立路线。
 > - raw RT 资源路由主要用于真相回读、低层排障、联调和兼容期补能力。
 > - 历史上的独立 curl 手册内容已收口到本 skill，不再保留第二份真源。
 > - 具体端点细节按渐进披露拆到 `references/`，主 `SKILL.md` 只保留入口层规则、核心流程与风险边界。
@@ -31,15 +39,17 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
 
 ## 版本与时效性
 
-- 最后更新日期：`2026-05-18`
-- 更新者：`Claude Code`
-- 更新内容概要：`去硬编码：将所有`<http://127.0.0.1:9124`> 和 `profile-argon` 替换为 `<RT>` 和 `<PROFILE>` 占位符；新增"设备配置优先"规则，指向 `exomind-monitor` skill 的 `config.json`；禁止凭名字猜测档案`
-- 核验依据：
+- 最后更新日期：`2026-11-16`
+- 更新者：`Codex`
+- 更新内容概要：`新增 Beta 与旧 Runtime 的准确分流；Beta 精确 scope/grant、已实现分页/追加/原件 API、HTTP 回执 404 与未实现能力独立披露；保留旧 RT 路线。`
+- 旧 Runtime 的历史核验依据（不是本轮 Beta live 结果）：
   - `GET /version` 等 live 版本信息
   - 当前工作区代码与相关路由实现
   - GitHub 对应 issue / PR / 文档信息
-- 基线提交：`da88bc11`
-- 真相源：
+- 核验范围：本轮 Beta 为源码与计划只读核对，未运行 HTTP/Agent 实测，不能据此宣称 V16 通过；旧 Runtime 下列基线保持独立。
+- Beta 源码基线：`2d8c827b7f813ef55f79a26ddb0e444cc9848cd0`，`crates/exomind-beta-host/src/{lib,http,originals_http,timeblocks_http,summary_jobs_http}.rs` 与 `crates/exomind-core/src/{lib,store,originals}.rs`
+- 旧 Runtime 基线提交：`da88bc11`
+- 旧 Runtime 真相源：
   - `../../crates/exomind-runtime/src/lib.rs`
   - `../../crates/exomind-runtime/src/agent_await.rs`
   - `../../crates/exomind-runtime/src/routes/eventlog.rs`
@@ -50,6 +60,7 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
   - `../../crates/exomind-runtime/src/routes/signals.rs`
   - `../../crates/exomind-runtime/src/routes/topology.rs`
 - 当前覆盖范围：
+  - Beta：精确实例/档案/低权 grant 分流；实际 HTTP 读写、分页、回执及原件边界；未实现能力见独立 reference。
   - 已覆盖：当前 ExoMind Runtime HTTP/curl 接入分层、`/act/*` 优先规则、raw RT 直读/排障、`profile-<slug>` scope 规则、当前鉴权现状、tasks/timeblocks/eventlog 的排障要点、常见 `/act/await` 自然语言意图映射
   - 不覆盖：`/agents/*` SSE 会话细节、`/act/today-planner/*` 的完整 feature 语义、`/act/await` 全量 condition / fulfilled payload 细节、mesh peer token / grant 的完整运维流程
 
@@ -85,6 +96,7 @@ description: Teach an AI Agent to connect to ExoMind Runtime via HTTP/curl. Pref
 
 | 场景 | 读取文件 |
 |------|----------|
+| 0.6 Beta、`exomind-beta/1`、UUID P、observer/agent_note grant | [references/beta-agent-access.md](references/beta-agent-access.md)；不加载旧 RT API 作为回退 |
 | 先确认 references 目录地图、关键词和跨域组合方式 | `references/index.md` |
 | 健康检查、版本、拓扑、profiles、signals、PowerShell curl 约定、鉴权边界 | `references/discovery-and-diagnostics.md` |
 | eventlog 读写、raw watch、备份、导入、清空 | `references/eventlog.md` |

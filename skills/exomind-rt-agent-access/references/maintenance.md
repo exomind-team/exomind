@@ -1,4 +1,4 @@
-> 最后更新：`2026-04-20` | 更新者：`Codex` | 更新内容概要：`记录 await 自然语言到参数映射的补充维护，覆盖当前时间块完成、任务完成、匿名域与 1 小时超时。`
+> 最后更新：`2026-11-16` | 更新者：`Codex` | 更新内容概要：`记录正式 Beta 协议分流及源码核验范围；保留旧 RT 维护记录与接口路线。`
 
 # Maintenance
 
@@ -25,6 +25,8 @@
 
 | 差异类型 | 应更新的文件 |
 |----------|-------------|
+| Beta 与旧 RT 分流、禁止跨协议回退 | `../SKILL.md` / `index.md` |
+| 正式 Beta HTTP 权限、类型、分页、回执、原件及未实现能力 | `beta-agent-access.md` |
 | 主流程、风险边界、真相源优先级、什么时候触发 skill | `../SKILL.md` |
 | 健康检查、版本、拓扑、profiles、signals、鉴权、PowerShell curl 约定 | `discovery-and-diagnostics.md` |
 | eventlog 读写、raw watch、backup/import、清空、header 语义 | `eventlog.md` |
@@ -63,6 +65,12 @@
 
 ## 最小复核清单
 
+- 先确认协议：Beta reference 不继承旧 `/act/*`、slug、匿名域、旧 monitor 配置、token query 或 owner profiles 发现路线
+- Beta 业务接口以 `crates/exomind-beta-host` 当前路由/权限和 Core 类型核对；区分源码检查、HTTP 实测与真实 Agent 验收，不把文档完成当 V16 通过
+- Beta HTTP 未知回执为 404 `not_found`，Native Option 则可为 `null`，不得混用
+- Beta 未实现的能力仍明确未实现；不得将计划的 access/check、等待、manifest export 或 external summary 写成可调用接口
+- 下列旧 RT 复核项只对明确指定的旧 Runtime 生效；Beta 不因它们存在便自动转向旧实例
+
 - `GET /health` 与 `GET /version` 是否仍然分离
 - `DELETE /eventlog` 是否仍为清空端点
 - `eventlog` 是否仍以 `user_id` 为主作用域参数
@@ -82,6 +90,8 @@
 - 核验依据：`live 版本信息 + 代码文件/提交 + GitHub issue/PR/文档`
 
 ## 最近维护记录
+
+- `2026-11-16` | 更新者：`Codex` | 更新内容概要：`修改主入口与 index 先分流 Beta/旧 RT，新增 beta-agent-access.md；记录精确 P/低权 grant、作者绑定、真实 method/path/body/cursor/error、agent_note stage 能力、HTTP receipt 404，以及 summary 追加/等待/manifest export/access-check 未实现边界。` | 核验依据：`Beta 源码基线 2d8c827b7f813ef55f79a26ddb0e444cc9848cd0 的 exomind-beta-host lib/http/originals_http/timeblocks_http/summary_jobs_http、Core lib/store/originals/summaries + docs/plans/2026-11-13-v0.6-beta-feature-plan.md V16；本轮只读源码与文档核对，无 live/Agent/构建执行。旧 RT 路线保持可用，并非认定旧 RT 接口失效。`
 
 - `2026-04-20` | 更新者：`Codex` | 更新内容概要：`补充 await 自然语言意图到参数映射，覆盖“当前时间块完成”“任务完成”“匿名域监听”“超时 1 小时”，并把这些口径下沉到 tasks/timeblocks references。` | 核验依据：`crates/exomind-runtime/src/agent_await.rs + docs/testing/2026-04-19-await-timeblock-experiment-summary.md + docs/development/runtime-external-access-contract.md`
 - `2026-04-19` | 更新者：`Codex` | 更新内容概要：`在主 SKILL 与 timeblocks reference 中明确 timeblock_stopped=专注结束、raw block_end=stop 痕迹、timeblock_ended=反馈完成后的时间块完成，避免 Agent 将“时间块结束”与“时间块完成”混淆。` | 核验依据：`await 联测 live 结果 + crates/exomind-runtime/src/agent_await.rs + crates/exomind-runtime/src/routes/timeblocks.rs + docs/plans/2026-04-19-external-agent-await-api-plan.md`
