@@ -1,4 +1,4 @@
-//! Negative-only regression slice: reseal every changed fact so rejection
+//! Boundary regressions: reseal every changed fact so rejection
 //! cannot accidentally be attributed to its digest rather than the boundary.
 use super::{facts, model::*};
 use crate::{
@@ -273,4 +273,345 @@ fn coverage_read_failures_and_missing_parents_are_sets() {
         accepted.is_empty(),
         "accepted repeated gap identifiers (missing_parent): {accepted:?}"
     );
+}
+
+// Build the entire source/block/request/run/attempt/publication with the real
+// local APIs first. Only the exported portable fact under test is changed;
+// neither source database nor a historical artifact body is rewritten.
+fn portable_kind_fixture() -> (ProfileId, crate::OriginPage, SummaryArtifactRecord) {
+    use crate::{
+        CaptureCommand, CommandId, Core, FeedbackInput, TimeblockAction, TimeblockCommand,
+        TimerSpec,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let core = Core::open(directory.path()).unwrap();
+    let p = core
+        .create_profile("portable artifact kind binding")
+        .unwrap();
+    let human = core.local_human(p).unwrap();
+    let block = TimeblockId::new();
+    let actions = [
+        (
+            1000,
+            TimeblockAction::Start {
+                block_id: block,
+                name: "actual source block".into(),
+                note: String::new(),
+                timer: TimerSpec::CountUp,
+            },
+        ),
+        (2000, TimeblockAction::EndAction { block_id: block }),
+        (
+            3000,
+            TimeblockAction::SubmitFeedback {
+                block_id: block,
+                feedback: FeedbackInput::Skipped,
+            },
+        ),
+    ];
+    for (ms, action) in actions {
+        let at = core
+            .trusted_clock_stamp(Uuid::from_u128(7), ms, ms as u64)
+            .unwrap();
+        let command = TimeblockCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: p,
+            expected_revision: core.timeblock_snapshot(&human, p, &at).unwrap().revision,
+            action,
+        };
+        core.apply_timeblock(&human, &command, &at).unwrap();
+    }
+    let capture = CaptureCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: p,
+        occurred_at_ms: 1500,
+        text: "Real portable evidence for kind binding".into(),
+        tags: vec![],
+        originals: vec![],
+    };
+    core.submit(&human, &capture).unwrap();
+    let selection = core.summary_block_selection(&human, p, block).unwrap();
+    core.request_summary(
+        &human,
+        &SummaryRequestCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: p,
+            purpose: SummaryPurpose::ManualCompressV1,
+            artifact_kind: SummaryArtifactKind::CompressedBlock,
+            selection,
+        },
+    )
+    .unwrap();
+    let task = core
+        .summary_tasks_page(&human, p, None, 25)
+        .unwrap()
+        .items
+        .pop()
+        .unwrap();
+    let executor = core.local_summary_executor();
+    let work = core
+        .begin_summary_attempt(
+            &executor,
+            &SummaryBeginCommand {
+                command_id: CommandId::new(),
+                event_id: EventId::new(),
+                profile_id: p,
+                task_id: task.task_id,
+                expected_owner_generation: task.owner_generation,
+                expected_owner_control_event_id: task.owner_control_event_id,
+                expected_run_id: task.current_run.as_ref().unwrap().run_id,
+                attempt_id: Uuid::new_v4(),
+                role_config_digest: "a".repeat(64),
+                max_attempts: 2,
+                now_ms: 4000,
+            },
+        )
+        .unwrap();
+    assert!(
+        work.snapshot
+            .sources
+            .iter()
+            .any(|source| source.event_id == capture.event_id)
+    );
+    let output = artifact(p, work.snapshot.clone()).output;
+    core.finish_summary_attempt(&executor, &work.ticket, &output)
+        .unwrap();
+    let completed = core.read_summary_task(&human, p, task.task_id).unwrap();
+    assert_eq!(completed.state, SummaryState::Succeeded);
+    let page = core
+        .export_origin_page(
+            &human,
+            p,
+            &crate::OriginPageQuery {
+                max_bytes: crate::MAX_ORIGIN_PAGE_BYTES,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(!page.has_more);
+    assert_eq!(page.to, page.through);
+    let result = page
+        .entries
+        .iter()
+        .find_map(|entry| match &entry.fact {
+            crate::ReplicatedFact::Summary(value) => Some(value.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(result.local_seq, 0);
+    assert_eq!(result.artifact_kind, SummaryArtifactKind::CompressedBlock);
+    result.validate().unwrap();
+    (p, page, result)
+}
+
+fn reseal_portable_kind_page(page: &mut crate::OriginPage) {
+    // Exactly the published origin-entry encoding, including its valid prefix.
+    // Recomputing every following chain hash prevents a transport/hash failure
+    // from substituting for the artifact/task semantic qualification assertion.
+    let mut previous = page.from.hash.clone();
+    for entry in &mut page.entries {
+        entry.fact.validate().unwrap();
+        entry.chain_hash = facts::hash(&(
+            "exomind-origin-entry/1",
+            page.origin.profile_id,
+            page.origin.device_id,
+            page.origin.restoration_epoch,
+            entry.origin_seq,
+            entry.fact.fact_type(),
+            entry.fact.event_id(),
+            entry.fact.digest(),
+            &previous,
+        ))
+        .unwrap();
+        previous = entry.chain_hash.clone();
+    }
+    page.to.hash = previous;
+    page.through = page.to.clone();
+}
+
+fn import_portable_kind_page(
+    p: ProfileId,
+    page: &crate::OriginPage,
+) -> (tempfile::TempDir, crate::Core) {
+    let directory = tempfile::tempdir().unwrap();
+    let receiver = crate::Core::open(directory.path()).unwrap();
+    receiver
+        .provision_profile(p, "portable artifact kind binding")
+        .unwrap();
+    let authority = receiver
+        .trusted_replica_context(p, page.origin.device_id, page.origin.restoration_epoch, 1)
+        .unwrap();
+    let ack = receiver.import_origin_page(&authority, page).unwrap();
+    assert_eq!(ack.inserted, page.entries.len() as u64);
+    assert_eq!(ack.cursor, page.to);
+    (directory, receiver)
+}
+
+fn assert_portable_kind_is_not_current(
+    p: ProfileId,
+    page: &crate::OriginPage,
+    original: &SummaryArtifactRecord,
+) {
+    let (_directory, receiver) = import_portable_kind_page(p, page);
+    let human = receiver.local_human(p).unwrap();
+    let before: (String, String) = receiver
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT body,digest FROM events WHERE event_id=?1",
+            [original.event_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    let task = receiver
+        .read_summary_task(&human, p, original.task_id)
+        .unwrap();
+    let artifacts = receiver
+        .summary_artifacts_page(&human, p, original.task_id, None, 25)
+        .unwrap();
+    assert_eq!(artifacts.items.len(), 1);
+    let retained = &artifacts.items[0];
+    assert_eq!(retained.event_id, original.event_id);
+    assert_eq!(retained.snapshot.digest, original.snapshot.digest);
+    assert_eq!(retained.output.narrative, original.output.narrative);
+    assert_ne!(retained.artifact_kind, task.artifact_kind);
+    let after: (String, String) = receiver
+        .connection()
+        .unwrap()
+        .query_row(
+            "SELECT body,digest FROM events WHERE event_id=?1",
+            [original.event_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        before, after,
+        "qualification reads must not rewrite historical bytes/digests"
+    );
+    assert!(
+        task.latest_artifact_id != Some(original.event_id)
+            && task.state != SummaryState::Succeeded
+            && !retained.current,
+        "valid portable result with kind {:?} must not qualify as current for task kind {:?}; task state {:?}, latest {:?}, artifact current {}",
+        retained.artifact_kind,
+        task.artifact_kind,
+        task.state,
+        task.latest_artifact_id,
+        retained.current
+    );
+}
+
+#[test]
+fn portable_artifact_kind_mismatch_cannot_become_internal_current() {
+    let (p, mut page, original) = portable_kind_fixture();
+    for entry in &mut page.entries {
+        if let crate::ReplicatedFact::Summary(value) = &mut entry.fact {
+            value.artifact_kind = SummaryArtifactKind::CompressedMessage;
+            value.digest = value.computed_digest().unwrap();
+            value.validate().unwrap();
+            assert_eq!(value.snapshot.digest, original.snapshot.digest);
+            assert_eq!(
+                value.owner_control_event_id,
+                original.owner_control_event_id
+            );
+            assert_eq!(
+                (
+                    value.task_id,
+                    value.run_id,
+                    value.attempt_id,
+                    value.owner_generation
+                ),
+                (
+                    original.task_id,
+                    original.run_id,
+                    original.attempt_id,
+                    original.owner_generation
+                )
+            );
+        }
+    }
+    reseal_portable_kind_page(&mut page);
+    assert_portable_kind_is_not_current(p, &page, &original);
+}
+
+#[test]
+fn portable_artifact_kind_external_reserved_cannot_become_internal_current() {
+    let (p, mut page, original) = portable_kind_fixture();
+    for entry in &mut page.entries {
+        if let crate::ReplicatedFact::Summary(value) = &mut entry.fact {
+            value.artifact_kind = SummaryArtifactKind::ExternalSummary;
+            value.digest = value.computed_digest().unwrap();
+            value.validate().unwrap();
+            assert_eq!(value.snapshot.digest, original.snapshot.digest);
+            assert_eq!(
+                value.owner_control_event_id,
+                original.owner_control_event_id
+            );
+            assert_eq!(
+                (
+                    value.task_id,
+                    value.run_id,
+                    value.attempt_id,
+                    value.owner_generation
+                ),
+                (
+                    original.task_id,
+                    original.run_id,
+                    original.attempt_id,
+                    original.owner_generation
+                )
+            );
+        }
+    }
+    reseal_portable_kind_page(&mut page);
+    assert_portable_kind_is_not_current(p, &page, &original);
+}
+
+#[test]
+fn portable_artifact_kind_old_record_cannot_satisfy_different_task_kind() {
+    let (p, mut page, original) = portable_kind_fixture();
+    let original_bytes = original.canonical_fact_bytes().unwrap();
+    for entry in &mut page.entries {
+        if let crate::ReplicatedFact::SummaryJob(value) = &mut entry.fact {
+            if let SummaryJobPayload::Requested { artifact_kind, .. } = &mut value.payload {
+                *artifact_kind = SummaryArtifactKind::CompressedMessage;
+                value.digest = value.computed_digest().unwrap();
+                value.validate().unwrap();
+            }
+        }
+    }
+    let retained = page
+        .entries
+        .iter()
+        .find_map(|entry| match &entry.fact {
+            crate::ReplicatedFact::Summary(value) => Some(value),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(retained.canonical_fact_bytes().unwrap(), original_bytes);
+    assert_eq!(retained.digest, original.digest);
+    reseal_portable_kind_page(&mut page);
+    assert_portable_kind_is_not_current(p, &page, &original);
+}
+
+#[test]
+fn portable_artifact_kind_matching_result_remains_internal_current() {
+    let (p, page, original) = portable_kind_fixture();
+    let (_directory, receiver) = import_portable_kind_page(p, &page);
+    let human = receiver.local_human(p).unwrap();
+    let task = receiver
+        .read_summary_task(&human, p, original.task_id)
+        .unwrap();
+    let artifacts = receiver
+        .summary_artifacts_page(&human, p, original.task_id, None, 25)
+        .unwrap();
+    assert_eq!(task.state, SummaryState::Succeeded);
+    assert_eq!(task.latest_artifact_id, Some(original.event_id));
+    assert_eq!(task.artifact_kind, original.artifact_kind);
+    assert_eq!(artifacts.items.len(), 1);
+    assert!(artifacts.items[0].current);
+    assert_eq!(artifacts.items[0].event_id, original.event_id);
 }

@@ -419,6 +419,7 @@ pub(super) fn load(c: &Connection, p: ProfileId, id: SummaryTaskId) -> Result<Ta
                     continue;
                 };
                 if artifact.task_id != id
+                    || artifact.artifact_kind != *artifact_kind
                     || artifact.run_id != *run_id
                     || artifact.attempt_id != *attempt_id
                     || artifact.owner_generation != *owner_generation
