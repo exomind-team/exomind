@@ -204,7 +204,10 @@ export class BetaDraftController {
     const source = await this.sources.get(file.source_key);
     this.active();
     const current = this.state.drafts[profileId]?.files?.find(item => item.id === id);
-    if (current !== file || source?.size !== file.byte_length) return null;
+    // Upload progress replaces metadata objects without changing the image.
+    // Fence by its immutable source identity, not the transient object/state.
+    if (!current || current.source_key !== file.source_key || current.byte_length !== file.byte_length
+      || current.original?.sha256 !== file.original?.sha256 || source?.size !== file.byte_length) return null;
     return source;
   }
 
