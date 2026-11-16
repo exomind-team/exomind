@@ -1,15 +1,19 @@
+import type { ReactNode } from 'react';
 import { Sparkles } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { ChatMessageRowView } from '@/ui/app/components/ChatMessageRowView';
 import { EventTimestamp } from '@/ui/app/components/EventTimestamp';
 import type { EventDateDisplayMode } from '@/lib/eventlog/format-event-timestamp';
-import type { SummaryArtifactKind, SummaryArtifactView, SummaryMaterialState, SummarySourceRef, SummarySourceSnapshot, SummaryState, SummaryTaskView } from './summary-types';
+import { summaryReason } from './summary-ui';
+import type { SummaryOutput, SummaryArtifactKind, SummaryArtifactView, SummaryMaterialState, SummarySourceRef, SummarySourceSnapshot, SummaryState, SummaryTaskView } from './summary-types';
 
 const statusLabels: Record<SummaryState, string> = {
   waiting_configuration: '等待配置回顾模型', queued: '已排队', running: '正在生成回顾', retry_wait: '等待重试', succeeded: '回顾已生成', failed: '回顾生成失败', cancelled: '回顾已取消',
 };
 const artifactLabels: Record<SummaryArtifactKind, string> = { review: '回顾', compressed_block: '时间块压缩', compressed_message: '记录压缩', external_summary: '外部总结' };
+export function summaryStateLabel(state:SummaryState):string{return statusLabels[state];}
+export function summaryArtifactLabel(kind:SummaryArtifactKind):string{return artifactLabels[kind];}
 const materialLabels: Record<SummaryMaterialState, string> = { not_selected: '未选择给模型', missing: '本机缺少原件', verified_available: '原件已校验可用', metadata_only: '仅有原件信息', read_failed: '原件读取失败' };
 export interface BetaReviewActions {
   /** The Host adapter supplies only currently available actions. A click carries
@@ -31,6 +35,8 @@ export interface BetaReviewViewProps {
   localDeviceId?: string;
   now: number;
   dateMode: EventDateDisplayMode;
+  qualificationPending?: boolean;
+  extraActions?: ReactNode;
 }
 function count(value: number | null): string { return value !== null && Number.isSafeInteger(value) && value >= 0 ? String(value) : '供应商未提供'; }
 function coverageLabels(snapshot: SummarySourceSnapshot): string[] {
@@ -50,17 +56,46 @@ function coverageLabels(snapshot: SummarySourceSnapshot): string[] {
 
 /** Pure Alpha message-row composition. No RPC, model/config imports, storage,
  * polling, automatic source reads, original selection or optimistic success. */
-export function BetaReviewView({ task, artifact = null, actions = {}, pendingAction = null, localDeviceId, now, dateMode }: BetaReviewViewProps) {
+export function BetaReviewView({ task, artifact = null, actions = {}, pendingAction = null, localDeviceId, now, dateMode, qualificationPending = false, extraActions }: BetaReviewViewProps) {
   if (artifact && (artifact.profile_id !== task.profile_id || artifact.task_id !== task.task_id)) return <p role="alert" className="text-sm text-destructive">回顾版本与当前档案不一致，请刷新后重试</p>;
   const snapshot = artifact?.snapshot ?? task.current_run?.snapshot ?? null;
   const sources = new Map(snapshot?.sources.map(source => [source.event_id, source]));
-  const gaps = snapshot ? coverageLabels(snapshot) : [];
   const busy = pendingAction !== null;
   const latest = !!artifact && task.latest_artifact_id === artifact.event_id;
   const newer = !!artifact && !!task.latest_artifact_id && !latest;
-  const readOriginals = new Set(artifact?.output.read_original_ids ?? []);
   const evidence = artifact?.output.evidence ?? [];
   const retryAt = task.current_run?.attempt?.retry_at_ms;
+
+  return <ChatMessageRowView eventId={artifact?.event_id ?? task.task_id} tone="system"
+    avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className="bg-surface text-brand-accent"><Sparkles size={16}/></AvatarFallback></Avatar>}
+    metadata={<><span className="text-xs font-semibold text-strong">{artifactLabels[artifact?.artifact_kind??task.artifact_kind]}</span><span role="status">{statusLabels[task.state]}</span>{artifact&&<EventTimestamp timestamp={artifact.occurred_at_ms} now={now} mode={dateMode}/>}</>}
+    content={<div className="space-y-2">
+      {artifact ? <p className="whitespace-pre-wrap break-words">{artifact.output.narrative}</p> : task.latest_artifact_id||task.state==='succeeded'?<p>结果正文尚未读取，请刷新或继续读取版本；原始记录保留。</p>:<p>尚未生成{artifactLabels[task.artifact_kind]}，原始记录保留。</p>}
+      {qualificationPending && <p role="status" className="text-xs text-muted">当前版本资格正在核对；保留原文，不按有效结果声明。</p>}
+      {artifact && !artifact.current && <p className="text-xs text-muted">正在查看保留版本；此版本不是当前有效结果。</p>}
+      {newer && <p className="text-xs text-muted">有新版本可查看，当前阅读内容保持不变。</p>}
+      {task.coverage_changed && <p role="status" className="text-xs text-muted">有新材料，可更新另存；当前结果不会被覆盖。</p>}
+      {!!task.conflicts.length && <p role="alert" className="text-xs text-destructive">生成归属存在冲突，需要确认后继续。</p>}
+      {(task.reason || task.current_run?.attempt?.reason) && <p className="text-xs text-muted">{summaryReason(task.reason||task.current_run?.attempt?.reason||null)}</p>}
+      {artifact?.reason && <p className="text-xs text-muted">此结果的当前资格需要核对，来源和原文仍保留。</p>}
+      {localDeviceId && <p className="text-xs text-muted">{task.owner_device_id === localDeviceId ? '由本机负责生成' : '由另一设备负责生成，不会自动争抢执行'}</p>}
+      {task.state === 'retry_wait' && retryAt !== null && retryAt !== undefined && <p className="text-xs text-muted">可重试时间：<EventTimestamp timestamp={retryAt} now={now} mode={dateMode}/></p>}
+      {!!evidence.length && <div className="flex flex-wrap gap-1 text-xs">依据：{evidence.map(id => { const source = sources.get(id); return source ? <Button key={id} variant="ghost" size="sm" disabled={!actions.openSource || busy} onClick={() => actions.openSource?.(source, task.profile_id)}>来源 {id.slice(0,8)}</Button> : <span key={id} role="alert" className="text-destructive">引用来源不在此快照中</span>; })}</div>}
+    </div>}
+    afterBubble={<SummaryEvidenceDetails snapshot={snapshot} output={artifact?.output??null} conflicts={task.conflicts} now={now} dateMode={dateMode}/>}
+    actions={<div className="mt-2 flex flex-wrap gap-1">
+      {extraActions}
+      {actions.configure && <Button variant="outline" size="sm" disabled={busy} onClick={() => actions.configure?.(task)}>配置回顾模型</Button>}
+      {actions.cancel && <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.cancel?.(task)}>{pendingAction === 'cancel' ? '正在取消…' : '取消生成'}</Button>}
+      {actions.retry && <Button variant="outline" size="sm" disabled={busy} onClick={() => actions.retry?.(task)}>重试生成</Button>}
+      {actions.update && <Button variant="outline" size="sm" disabled={busy} onClick={() => actions.update?.(task)}>更新另存</Button>}
+      {newer && actions.openLatest && <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.openLatest?.(task.latest_artifact_id!, task.profile_id)}>查看新版本</Button>}
+    </div>}/>;
+}
+
+export function SummaryEvidenceDetails({snapshot,output,conflicts=[],now,dateMode}:{snapshot:SummarySourceSnapshot|null;output:SummaryOutput|null;conflicts?:readonly string[];now:number;dateMode:EventDateDisplayMode}){
+  const gaps=snapshot?coverageLabels(snapshot):[];
+  const readOriginals=new Set(output?.read_original_ids??[]);
   const materialDetails = snapshot && <>
     <p>只披露本机此快照实际纳入的材料，不代表现实活动或所有设备资料完整。</p>
     <ul className="space-y-1">{gaps.map(label => <li key={label}>{label}</li>)}</ul>
@@ -79,31 +114,9 @@ export function BetaReviewView({ task, artifact = null, actions = {}, pendingAct
       {snapshot.origin_heads.map(head => <p key={`${head.origin.device_id}:${head.origin.restoration_epoch}`}>来源设备 {head.origin.device_id} · 位置 {head.cursor.seq} · {head.cursor.hash}</p>)}
     </div></details>
   </>;
-  return <ChatMessageRowView eventId={artifact?.event_id ?? task.task_id} tone="system"
-    avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className="bg-surface text-brand-accent"><Sparkles size={16}/></AvatarFallback></Avatar>}
-    metadata={<><span className="text-xs font-semibold text-strong">{artifact ? artifactLabels[artifact.artifact_kind] : '回顾'}</span><span role="status">{statusLabels[task.state]}</span></>}
-    content={<div className="space-y-2">
-      {artifact ? <p className="whitespace-pre-wrap break-words">{artifact.output.narrative}</p> : <p>尚未生成回顾，原始记录保留。</p>}
-      {artifact && !artifact.current && <p className="text-xs text-muted">正在查看保留版本；此版本不是当前有效结果。</p>}
-      {newer && <p className="text-xs text-muted">有新版本可查看，当前阅读内容保持不变。</p>}
-      {task.coverage_changed && <p role="status" className="text-xs text-muted">有新材料，可更新另存；当前结果不会被覆盖。</p>}
-      {!!task.conflicts.length && <p role="alert" className="text-xs text-destructive">生成归属存在冲突，需要确认后继续。</p>}
-      {(task.reason || task.current_run?.attempt?.reason) && <p className="text-xs text-muted">当前生成需要处理，请检查配置、归属或稍后刷新。</p>}
-      {artifact?.reason && <p className="text-xs text-muted">此结果的当前资格需要核对，来源和原文仍保留。</p>}
-      {localDeviceId && <p className="text-xs text-muted">{task.owner_device_id === localDeviceId ? '由本机负责生成' : '由另一设备负责生成，不会自动争抢执行'}</p>}
-      {task.state === 'retry_wait' && retryAt !== null && retryAt !== undefined && <p className="text-xs text-muted">可重试时间：<EventTimestamp timestamp={retryAt} now={now} mode={dateMode}/></p>}
-      {!!evidence.length && <div className="flex flex-wrap gap-1 text-xs">依据：{evidence.map(id => { const source = sources.get(id); return source ? <Button key={id} variant="ghost" size="sm" disabled={!actions.openSource || busy} onClick={() => actions.openSource?.(source, task.profile_id)}>来源 {id.slice(0,8)}</Button> : <span key={id} role="alert" className="text-destructive">引用来源不在此快照中</span>; })}</div>}
-    </div>}
-    afterBubble={<details className="mt-2 space-y-2 text-xs text-muted"><summary className="cursor-pointer py-1">生成依据与覆盖</summary><div className="space-y-2">
-      {materialDetails ?? <p>材料尚未冻结，不能声明已读取任何记录或原件。</p>}
-      {artifact && <><p className="break-all">模型：{artifact.output.model.provider} / {artifact.output.model.model}</p><p>输入用量：{count(artifact.output.usage.input_tokens)} · 输出用量：{count(artifact.output.usage.output_tokens)}</p></>}
-      {!!task.conflicts.length && <p className="break-all">冲突来源：{task.conflicts.join('、')}</p>}
-    </div></details>}
-    actions={<div className="mt-2 flex flex-wrap gap-1">
-      {actions.configure && <Button variant="outline" size="sm" disabled={busy} onClick={() => actions.configure?.(task)}>配置回顾模型</Button>}
-      {actions.cancel && <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.cancel?.(task)}>{pendingAction === 'cancel' ? '正在取消…' : '取消生成'}</Button>}
-      {actions.retry && <Button variant="outline" size="sm" disabled={busy} onClick={() => actions.retry?.(task)}>重试生成</Button>}
-      {actions.update && <Button variant="outline" size="sm" disabled={busy} onClick={() => actions.update?.(task)}>更新另存</Button>}
-      {newer && actions.openLatest && <Button variant="ghost" size="sm" disabled={busy} onClick={() => actions.openLatest?.(task.latest_artifact_id!, task.profile_id)}>查看新版本</Button>}
-    </div>}/>;
+  return <details className="mt-2 space-y-2 text-xs text-muted"><summary className="cursor-pointer py-1">生成依据与覆盖</summary><div className="space-y-2">
+    {materialDetails??<p>材料尚未冻结，不能声明已读取任何记录或原件。</p>}
+    {output&&<><p className="break-all">模型：{output.model.provider} / {output.model.model}</p><p>输入用量：{count(output.usage.input_tokens)} · 输出用量：{count(output.usage.output_tokens)}</p></>}
+    {!!conflicts.length&&<p className="break-all">冲突来源：{conflicts.slice(0,8).join("、")}{conflicts.length>8&&("；还有 "+(conflicts.length-8)+" 项，未在此展开")}</p>}
+  </div></details>;
 }

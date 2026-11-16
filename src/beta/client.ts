@@ -6,9 +6,14 @@ import { nativeTimeblockFeatures, webTimeblockFeatures } from './timeblocks-clie
 import type { BetaTimeblockClient, BetaTimelinePage } from './timeblocks-types';
 import { nativeOriginalExports, type BetaOriginalExportsClient } from './original-export';
 import { nativeOriginalAcquisition, type BetaOriginalAcquisitionClient } from './original-acquisition';
+import {nativeSummaryModelConfigurationService,webSummaryModelConfigurationService} from './summary-model-client';
+import type {SummaryModelConfigurationService} from './summary-model-config';
+import {nativeSummaryClient,webSummaryClient} from './summary-client';
+import type {SummaryClient} from './summary-types';
+import {nativeTimelineEventReader,webTimelineEventReader} from './timeline-event-client';
 export { BetaApiError } from './api-error';
 
-export interface BetaStatus { protocol: string; device_id: string; runtime_id?: string; running: boolean; capabilities?: { originals?: boolean; max_original_chunk_bytes?: number; timeblocks?: boolean; typed_timeline?: boolean } }
+export interface BetaStatus { protocol: string; device_id: string; runtime_id?: string; running: boolean; capabilities?: { originals?: boolean; max_original_chunk_bytes?: number; timeblocks?: boolean; typed_timeline?: boolean; summary_jobs?:boolean } }
 export interface BetaProfile { profile_id: string; display_name: string }
 export interface BetaCommand {
   command_id: string; event_id: string; profile_id: string;
@@ -28,6 +33,9 @@ export interface BetaEvent {
 export interface BetaQuery { before?: number; through?: number; limit?: number; search?: string }
 export interface BetaPage { items: BetaEvent[]; next_before: number | null; highwater: number }
 export interface BetaClient {
+  summaryModel?:SummaryModelConfigurationService;
+  summaries?:SummaryClient;
+  timelineEvent?(profileId:string,eventId:string):Promise<import('./timeblocks-types').BetaTimelineItem|null>;
   originalAcquisition?: BetaOriginalAcquisitionClient;
   originalExports?: BetaOriginalExportsClient;
   originals?: BetaOriginalClient;
@@ -116,6 +124,13 @@ export function nativeBetaClient(call: NativeInvoke = invoke): BetaClient {
     return call<T>(name, args);
   }
   return {
+    summaries:nativeSummaryClient(call,async()=>check(await call('beta_status'))),
+    timelineEvent:nativeTimelineEventReader(call,async()=>check(await call('beta_status'))),
+    summaryModel:nativeSummaryModelConfigurationService(call,async()=>{
+      const current=check(await call('beta_status'));
+      if(current.capabilities?.summary_jobs!==true)throw new BetaApiError('unsupported_summaries','当前服务尚不支持回顾设置，请使用同版 Beta');
+      return current;
+    }),
     originalAcquisition: nativeOriginalAcquisition(async <T>(name:string,args?:Record<string,unknown>) => {
       const current=check(await call('beta_status'));
       if(current.capabilities?.originals!==true)throw new BetaApiError('unsupported_originals','本机服务尚不支持原件获取，请更新后重试');
@@ -195,6 +210,12 @@ export function webBetaClient(endpoint: string, ownerToken: string, fetcher: typ
     return grant;
   }
   return {
+    summaries:webSummaryClient({identity:hello,async json(profileId,path,method,body){return request(path,await humanToken(profileId),method,body);},async ownerJson(path,method){await hello();return request(path,ownerToken,method);}}),
+    timelineEvent:webTimelineEventReader({identity:hello,async json(profileId,path){return request(path,await humanToken(profileId));}}),
+    summaryModel:webSummaryModelConfigurationService({identity:hello,async ownerJson(_profileId,path,method,body){
+      const current=await hello();if(current.capabilities?.summary_jobs!==true)throw new BetaApiError('unsupported_summaries','当前服务尚不支持回顾设置，请使用同版 Beta');
+      return request(path,ownerToken,method,body);
+    }}),
     ...webTimeblockFeatures({ identity: hello, async json(profileId,path,method,body) { return request(path,await humanToken(profileId),method,body); } }),
     originals: webOriginalClient({
       async json(profileId,path,method,body) { return request(path,await humanToken(profileId,true),method,body); },

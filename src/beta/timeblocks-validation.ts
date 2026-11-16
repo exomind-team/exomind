@@ -1,10 +1,11 @@
 import { BetaApiError } from './api-error';
 import { validateOriginal } from './original-client';
+import { validateSummaryArtifactRecord } from './summary-validation';
 import type { BetaEvent, BetaQuery, BetaStatus } from './client';
 import type {
   BetaActiveBlock, BetaBlockSpec, BetaDeadline, BetaDeadlineEnvelope, BetaIntervalPage, BetaIntervalQuery,
   BetaTimeblockAction, BetaTimeblockCommand, BetaTimeblockNode, BetaTimeblockNodePage, BetaTimeblockSnapshot,
-  BetaTimelinePage, BetaTimer,
+  BetaTimelineItem, BetaTimelinePage, BetaTimer,
 } from './timeblocks-types';
 
 const invalid = (message = '时间块响应无效', code = 'invalid_timeblock_response'): never => { throw new BetaApiError(code, message); };
@@ -118,15 +119,24 @@ export function validateEventQuery(query:BetaQuery):void{
 function page<T>(value:unknown,query:BetaQuery,parse:(raw:unknown)=>T,sequence:(item:T)=>number):{items:T[];highwater:number;next_before:number|null}{
   validateEventQuery(query);const raw=object(value,['items','highwater','next_before']);const highwater=integer(raw.highwater);
   if(!Array.isArray(raw.items)||raw.items.length>(query.limit??100)||(query.through!==undefined&&query.through!==highwater))return invalid();
-  let previous=query.before??Number.MAX_SAFE_INTEGER;const items:T[]=[];
+  let previous=query.before??Number.POSITIVE_INFINITY;const items:T[]=[];
   for(const value of raw.items){const item=parse(value);const seq=sequence(item);if(seq>=previous||seq>highwater)return invalid();previous=seq;items.push(item);}
   const next=raw.next_before===null?null:integer(raw.next_before,1);
   if(next!==null&&(!items.length||next!==previous))return invalid();return {items,highwater,next_before:next};
 }
 export function validateNodePage(value:unknown,profileId:string,query:BetaQuery):BetaTimeblockNodePage{return page(value,query,raw=>validateTimeblockNode(raw,profileId),item=>item.local_seq);}
 export function validateTimelinePage(value:unknown,profileId:string,query:BetaQuery):BetaTimelinePage{
-  try{return page(value,query,raw=>{const item=object(raw,['kind','record']);if(item.kind==='capture')return {kind:'capture' as const,record:validateCaptureRecord(item.record,profileId)};if(item.kind==='timeblock')return {kind:'timeblock' as const,record:validateTimeblockNode(item.record,profileId)};return invalid();},item=>item.record.local_seq);}
+  try{return page(value,query,raw=>validateTimelineItem(raw,profileId),item=>item.record.local_seq);}
   catch{return invalid('混合时间线响应或分页不一致','invalid_timeline');}
+}
+export function validateTimelineItem(value:unknown,profileId:string):BetaTimelineItem{
+  try{
+    const item=object(value,['kind','record']);
+    if(item.kind==='capture')return{kind:'capture',record:validateCaptureRecord(item.record,profileId)};
+    if(item.kind==='timeblock')return{kind:'timeblock',record:validateTimeblockNode(item.record,profileId)};
+    if(item.kind==='summary/1')return{kind:'summary/1',record:validateSummaryArtifactRecord(item.record,profileId)};
+    return invalid();
+  }catch{return invalid('时间线记录与档案范围尚未确认','invalid_timeline');}
 }
 export function validateIntervalQuery(query:BetaIntervalQuery):void{
   integer(query.from_ms);integer(query.to_ms);if(query.to_ms<=query.from_ms)return invalid('时间区间无效');

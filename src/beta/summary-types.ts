@@ -1,4 +1,5 @@
 import type { BetaOriginal } from './original-types';
+import type { BetaReceipt } from './client';
 
 /** Public wire DTOs mirror exomind-core/src/summaries/model.rs. Transport
  * adapters must validate UUIDs, digests, scopes, lengths and safe integers;
@@ -8,6 +9,10 @@ export const MAX_SUMMARY_SOURCES = 1000;
 export const MAX_SUMMARY_PAGE_SIZE = 100;
 export const MAX_SUMMARY_ATTEMPTS = 8;
 export const MAX_SUMMARY_SAFE_COUNTER = Number.MAX_SAFE_INTEGER;
+export const MAX_SUMMARY_CONTROL_HEADS = 512;
+// Incomplete graphs can include missing external parents in diagnostics.
+// Root/Core's current public projection bound is larger than the job count.
+export const MAX_SUMMARY_CONFLICTS = 66560;
 // Core's frozen input bundle. Host reserves the remaining request budget for
 // system instructions and provider wrapping; those are separate byte limits.
 export const MAX_SUMMARY_INPUT_ENCODED_BYTES = 192 * 1024;
@@ -16,6 +21,7 @@ export type SummaryPurpose = 'first_review_v1' | 'manual_compress_v1';
 export type SummaryArtifactKind = 'review' | 'compressed_block' | 'compressed_message' | 'external_summary';
 export type SummaryMaterialState = 'not_selected' | 'missing' | 'verified_available' | 'metadata_only' | 'read_failed';
 export type SummaryRemoteVisibility = 'unknown' | 'known_gap' | 'frozen_known_heads';
+export type SummaryFailureKind = 'timeout' | 'rate_limited' | 'provider_unavailable' | 'provider_rejected' | 'invalid_output' | 'external_outcome_unknown' | 'input_too_large' | 'material_unavailable' | 'unsupported_material' | 'configuration_changed';
 
 export interface SummarySelection { block_ids: string[]; from_ms: number; to_ms: number; selected_original_ids: string[] }
 export interface SummarySourceRef { event_id: string; kind: string; digest: string }
@@ -56,6 +62,10 @@ export interface SummaryRunView {
 export interface SummaryTaskView {
   task_id: string;
   profile_id: string;
+  purpose: SummaryPurpose;
+  artifact_kind: SummaryArtifactKind;
+  selection: SummarySelection;
+  created_at_ms: number;
   trigger_key: string;
   creator_event_id: string;
   owner_device_id: string;
@@ -70,12 +80,15 @@ export interface SummaryTaskView {
   coverage_changed: boolean;
 }
 export interface SummaryTaskPage { items: SummaryTaskView[]; next_after: string | null }
-export interface SummaryModelMetadata { provider: string; model: string; role_config_digest: string; request_input_digest: string }
+export interface SummaryModelMetadata { provider: string; model: string; role_config_digest: string; request_input_digest: string; prompt_template: string; include_suggestions: boolean; max_output_tokens: number; requested_model: string }
 export interface SummaryUsage { input_tokens: number | null; output_tokens: number | null; provider_request_id: string | null }
 export interface SummaryOutput { narrative: string; evidence: string[]; read_original_ids: string[]; model: SummaryModelMetadata; usage: SummaryUsage }
 export interface SummaryArtifactView {
   event_id: string;
   profile_id: string;
+  occurred_at_ms: number;
+  device_id: string;
+  author_id: string;
   task_id: string;
   run_id: string;
   attempt_id: string;
@@ -87,6 +100,26 @@ export interface SummaryArtifactView {
   reason: string | null;
 }
 export interface SummaryArtifactPage { items: SummaryArtifactView[]; next_before: number | null; highwater: number }
+/** Immutable timeline fact. Current qualification must be read from the task
+ * and ArtifactView; a replicated record alone is not a succeeded task. */
+export interface SummaryArtifactRecord {
+  event_id: string;
+  profile_id: string;
+  device_id: string;
+  author_id: string;
+  task_id: string;
+  run_id: string;
+  attempt_id: string;
+  owner_generation: number;
+  owner_control_event_id: string;
+  artifact_kind: SummaryArtifactKind;
+  snapshot: SummarySourceSnapshot;
+  output: SummaryOutput;
+  supersedes_artifact_id: string | null;
+  occurred_at_ms: number;
+  digest: string;
+  local_seq: number;
+}
 export interface SummaryRequestCommand { command_id: string; event_id: string; profile_id: string; purpose: SummaryPurpose; artifact_kind: SummaryArtifactKind; selection: SummarySelection }
 export type SummaryControlAction =
   | { kind: 'cancel' }
@@ -102,4 +135,15 @@ export interface SummaryControlCommand {
   expected_owner_control_event_id: string;
   expected_control_heads: string[];
   action: SummaryControlAction;
+}
+export interface SummaryServiceStatus { running:boolean; active_profile_id:string|null; active_task_id:string|null; last_error_code:string|null }
+export interface SummaryClient {
+  tasks(profileId:string,after?:string|null,limit?:number):Promise<SummaryTaskPage>;
+  task(profileId:string,taskId:string):Promise<SummaryTaskView>;
+  artifacts(profileId:string,taskId:string,before?:number|null,limit?:number):Promise<SummaryArtifactPage>;
+  blockSelection(profileId:string,blockId:string):Promise<SummarySelection>;
+  request(command:SummaryRequestCommand):Promise<BetaReceipt>;
+  control(command:SummaryControlCommand):Promise<BetaReceipt>;
+  /** This read requires owner authority. It is absent for scoped-only HTTP IO. */
+  serviceStatus?():Promise<SummaryServiceStatus>;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Bell, CalendarDays, Expand, Monitor, Moon, Sun } from 'lucide-react';
 import { PageShell } from '@/ui/app/components/PageShell';
@@ -13,8 +13,10 @@ import { setBetaDateDisplayMode, setBetaTheme, useBetaDateDisplayMode, useBetaTh
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import { version } from '../../package.json';
 import { deadlineAlertFailure, deadlineNotificationPermission, nativeBetaDeadlineAlertsClient, type BetaDeadlineAlertsClient, type BetaDeadlineAlertStatus } from './deadline-alert-client';
+import { SummaryModelConfigurationController, type SummaryModelConfigurationService } from './summary-model-config';
+import { BetaSummaryModelSettingsView } from './BetaSummaryModelSettingsView';
 
-export function BetaSettingsPage({ profileName, onDisconnect, deadlineAlerts }: { profileName: string; onDisconnect?: () => void; deadlineAlerts?: BetaDeadlineAlertsClient | null }) {
+export function BetaSettingsPage({ profileName, profileId='', deviceId='', summaryModel, onDisconnect, deadlineAlerts }: { profileName: string; profileId?:string; deviceId?:string; summaryModel?:SummaryModelConfigurationService|null; onDisconnect?: () => void; deadlineAlerts?: BetaDeadlineAlertsClient | null }) {
   const theme = useBetaTheme();
   const dateMode = useBetaDateDisplayMode();
   const [error, setError] = useState('');
@@ -58,6 +60,7 @@ export function BetaSettingsPage({ profileName, onDisconnect, deadlineAlerts }: 
         <SettingRow label="档案" right={<span className="max-w-[60%] truncate text-sm text-secondary">{profileName || '尚未选择'}</span>}/>
         <Divider/><SettingRow label="资料保存" right={<span className="text-sm text-secondary">先保存到本机</span>}/>
       </SettingsSection>
+      <SummaryModelSettings service={summaryModel??null} deviceId={deviceId} profileId={profileId} profileName={profileName}/>
       <SettingsSection title="关于">
         <SettingRow label="外心 · Beta" right={<span className="text-xs text-muted">{build.appVersion} · {build.buildHash}</span>}/>
         <p className="px-4 pb-4 text-xs leading-relaxed text-muted">记录、原件与时间块使用本机独立资料目录。设备同步的记录与原件状态分别显示。</p>
@@ -65,6 +68,33 @@ export function BetaSettingsPage({ profileName, onDisconnect, deadlineAlerts }: 
       {onDisconnect && <Button variant="outline" onClick={onDisconnect}>断开当前服务</Button>}
     </div>
   </PageShell>;
+}
+
+interface ModelEditorSlot {service:SummaryModelConfigurationService;deviceId:string;profileId:string;owner:SummaryModelConfigurationController;active:boolean}
+function SummaryModelSettings({service,deviceId,profileId,profileName}:{service:SummaryModelConfigurationService|null;deviceId:string;profileId:string;profileName:string}){
+  const [slot,setSlot]=useState<ModelEditorSlot|null>(null);
+  const startup=useRef<{service:SummaryModelConfigurationService;deviceId:string;profileId:string;promise:Promise<void>}|null>(null);
+  useEffect(()=>{
+    if(!service||!deviceId||!profileId){setSlot(null);return;}
+    const owner=new SummaryModelConfigurationController(service,deviceId,profileId);
+    const current:ModelEditorSlot={service,deviceId,profileId,owner,active:true};setSlot(current);
+    const prior=startup.current;const previous=prior&&prior.service===service&&prior.deviceId===deviceId&&prior.profileId===profileId?prior.promise:null;
+    const promise=(async()=>{if(previous)await previous.catch(()=>{});if(current.active)await owner.load();})();
+    startup.current={service,deviceId,profileId,promise};
+    // Configuration drafts/entered keys are owned by this editor only. Their
+    // lifetime never replaces or flushes the Record/Timeblock draft journal.
+    return()=>{current.active=false;owner.dispose();};
+  },[service,deviceId,profileId]);
+  if(!service)return<SettingsSection title="回顾模型"><p className="px-4 py-4 text-xs text-secondary">当前连接尚未提供回顾模型配置。</p></SettingsSection>;
+  if(!deviceId||!profileId)return<SettingsSection title="回顾模型"><p className="px-4 py-4 text-xs text-secondary">请先选择并加载本机档案，再配置回顾模型。</p></SettingsSection>;
+  if(!slot?.active||slot.service!==service||slot.deviceId!==deviceId||slot.profileId!==profileId)return<SettingsSection title="回顾模型"><p role="status" className="px-4 py-4 text-xs text-secondary">正在读取当前档案的回顾配置…</p></SettingsSection>;
+  return<ModelEditor owner={slot.owner} profileId={profileId} profileName={profileName}/>;
+}
+function ModelEditor({owner,profileId,profileName}:{owner:SummaryModelConfigurationController;profileId:string;profileName:string}){
+  const state=useSyncExternalStore(owner.subscribe,owner.snapshot);
+  return<BetaSummaryModelSettingsView profileId={profileId} profileName={profileName} state={state}
+    onDraftChange={update=>{owner.edit(update);}} onSave={()=>{void owner.save();}} onReset={()=>owner.reset()}
+    onReload={()=>{void owner.load();}} onRetry={()=>{void owner.retry();}}/>;
 }
 
 type AlertLifetime = { active: boolean };
