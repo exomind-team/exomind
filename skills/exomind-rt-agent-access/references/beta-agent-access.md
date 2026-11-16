@@ -121,6 +121,35 @@ Body 为 `{"required":[]}`，或已知能力列表，如 `{"required":["events_r
 
 stage 状态为 `uploading/frozen/verified/hash_mismatch`；只有真实 `verified` 后才可把其完整 `OriginalRef` 放进 capture 的 `originals`（最多 256 件），以固定整组命令提交。原件单独验证不等于记录已提交，observer 不得用 stage 预览旁路读取私有草稿。
 
+## Core7 独立外部回顾（已验证源码，Beta04 包不含）
+
+Core 保存点 `d33a4276`、Host 保存点 `eecb2871` 起支持独立 `agent_summary/1` 事实。此节不能用于前述已构建 Beta04；由 broker 明确告知实例源码／能力后才使用。Core7 与 Core6 的设备协议不能混用；升级不等于拥有新角色。
+
+需要单独的 `summary_producer` grant，并绑定真实 Agent UUID。普通 `agent_note`、human、observer 或管理 owner 均不能冒用；producer 只有当前 P 公共读取及外部回顾追加，不具备 capture、stage、计时、内部模型任务控制或配置权限。先用同 P 的 `access/check` 要求 `external_summary_append`；其他角色返回 403，不升级自己的 token。
+
+`POST /beta/v1/profiles/P/external-summaries` 严格接收：
+
+```json
+{
+  "command_id": "FIXED_COMMAND_UUID",
+  "event_id": "FIXED_EVENT_UUID",
+  "profile_id": "BROKER_PROFILE_UUID",
+  "occurred_at_ms": 0,
+  "observed_through": 1,
+  "sources": [{"event_id":"ACTUAL_SOURCE_UUID","kind":"capture","digest":"ACTUAL_SOURCE_SHA256"}],
+  "narrative": "仅依据显式来源的外部回顾。",
+  "evidence": ["ACTUAL_SOURCE_UUID"]
+}
+```
+
+用真实时间、producer 所读固定页的 highwater、实际来源 ID/kind/digest 替换模板。source kind 只能 `capture` 或 `timeblock/1`，不能递归引用派生回顾。sources/evidence 均非空且唯一，evidence 必须属于 sources；最多1000来源、192KiB实际输入、128KiB叙述与256原件元数据，超限整次拒绝，不能静默删减已用于推理的材料。
+
+不得提交作者／设备、模型 job、`current`、coverage 或原件已读声明。服务在提交事务核验同 P 来源与 digest、序号不超过指定观察位置，再冻结**显式引用集**：这不是完整时间区间、不是推理前交付材料的证明。原件仅元数据、全部未读；不存在内部 succeeded/current 资格。`observed_through` 属于提交设备的本机读取位置，不能拿来解释另一设备的游标。
+
+返回普通本机持久回执；沿前文同 ID／原内容查证与重放规则。用 typed timeline／精确 event 读取 `kind=agent_summary/1`，核对 `producer_agent_id/device_id`、正文、来源与 `snapshot.coverage`，不要调用内部模型 task 接口伪造资格。改内容或跨角色重用原命令为409；错误来源／证据为400 `invalid_external_summary`；错 P／角色403，撤销401。来源尚未同步到接收端时保持缺口 unknown，不冒称读全。
+
+当前已有 Core 单元／复制、真实旧库升级、Host真实HTTP和界面组件证据。固定源码 `169f3c3` 的真实低权producer Agent流程另已通过：250来源跨3页、随机原件2块、typed append/replay、10项拒绝、撤销及独立broker对账；这是Host流程，未计新安装包GUI呈现，也不是服务端wait/bundle已实现。
+
 ## 错误与当前不支持的能力
 
 HTTP 业务错误返回 `{"error":{"code":"…","message":"…"}}`；判断 status/code，不把任意错误正文写回用户资料。当前主要边界如下：
@@ -143,7 +172,7 @@ HTTP 业务错误返回 `{"error":{"code":"…","message":"…"}}`；判断 stat
 
 - 已构建 Beta04 尚无 per-grant `access/check`；后续源码的有条件接入见上节，hello 全局 features 不能代替。
 - Beta await/SSE/长轮询或旧 `/act/await` 的任务条件语义。有界客户端只读轮询现有接口只能称轮询；不得写成服务端等待已实现。
-- 正式外部 `summary` 分类追加。`external_summary` 枚举预留且生产 Core 明确拒绝，需要独立 producer authority/事实合同；既有模型 request/control 不作替代。
+- Beta04 的内部 `external_summary` 枚举仍是预留且不能作为追加方式；后续Core7的独立 producer／`agent_summary/1` 路线见上节，不借内部模型 request/control。
 - 选事件/块的 Markdown+manifest 导出 HTTP API。可以明确受限范围后自行导出已实际读到的资料，并核对 ID/字节/hash、列出缺页/缺件；这不是已实现的服务端完整导出。Native 单原件保存框也不供外部 HTTP Agent 调用。
 - 通过 Agent API 清理、回收、释放副本或兼容旧 0.5 协议。本 skill 不授权这些操作。
 
