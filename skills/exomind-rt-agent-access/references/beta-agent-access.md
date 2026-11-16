@@ -61,6 +61,16 @@ hello 当前只描述 `originals`、`max_original_chunk_bytes`、`timeblocks`、
 
 新写入不会加入正在读的固定快照。需要刷新时从新 highwater 开始，分别对账，不能把跨快照的半页拼成完整覆盖。摘要 raw `summary/1` 是不可变事实，不自带当前成功资格；如需判断当前有效，另读同 P 的 task 和 artifact view，旧正文仍绑定自身 ID/snapshot。
 
+## 新源码的有效能力发现（Beta04 安装包不含）
+
+源码保存点 `1a797b96615ac643163e643d8a66ce5038277780` 起新增 `POST /beta/v1/profiles/P/access/check`。仅在 broker 明确提供的该版或更新实例使用；本文前述已构建 Beta04 仍不含此端点，404 不得触发旧 RT 回退。
+
+Body 为 `{"required":[]}`，或已知能力列表，如 `{"required":["events_read","capture_append_agent_note"]}`。返回当前 `runtime_id/device_id/profile_id/grant_kind/agent_id`、`allowed/unsupported` 及分页／原件分块上限，不返回 token、其他档案或模型配置。未知字段、未知能力、重复项或超过 32 项为 400；已知但此 grant 不具备的能力为 403；错 P 为 403、失效或撤销为 401。空列表只描述当前授权，不创建任务或凭据。
+
+能力名为 `events_read/timeline_read/receipts_read/originals_read/timeblocks_read/summaries_read`，写入依角色另外包含 `capture_append_human`、`capture_append_agent_note`、`originals_stage`、`timeblocks_control/summaries_control`。`wait/export_bundle/external_summary_append` 明确未实现，请求为 403。能力快照不保证某一条业务命令符合归属、状态或内容条件；后续每次操作仍重新校验当前授权。
+
+该端点有真实 HTTP 与生命周期／撤销回归，尚不能代替外部 Agent 整体 V16 验收。以 broker 的精确源码和实际响应为准，不用全局 hello flags 推导私有权限。
+
 ## 追加分类说明与查证回执
 
 `POST /beta/v1/capture` 使用固定 command/event UUID；P 来自授权，作者来自认证上下文。最小文字请求模板如下，所有占位符均须换为实际值：
@@ -131,7 +141,7 @@ HTTP 业务错误返回 `{"error":{"code":"…","message":"…"}}`；判断 stat
 
 以下目前没有可用 Beta 接口，不能调用计划中的路径或回退 0.5：
 
-- per-grant `access/check` 能力发现；hello 全局 features 不能代替。
+- 已构建 Beta04 尚无 per-grant `access/check`；后续源码的有条件接入见上节，hello 全局 features 不能代替。
 - Beta await/SSE/长轮询或旧 `/act/await` 的任务条件语义。有界客户端只读轮询现有接口只能称轮询；不得写成服务端等待已实现。
 - 正式外部 `summary` 分类追加。`external_summary` 枚举预留且生产 Core 明确拒绝，需要独立 producer authority/事实合同；既有模型 request/control 不作替代。
 - 选事件/块的 Markdown+manifest 导出 HTTP API。可以明确受限范围后自行导出已实际读到的资料，并核对 ID/字节/hash、列出缺页/缺件；这不是已实现的服务端完整导出。Native 单原件保存框也不供外部 HTTP Agent 调用。
