@@ -46,14 +46,14 @@ export function createBetaSettingsRegistry(bindings: BetaSettingsBindings): Sett
     {
       ...PORTABLE_SETTINGS.theme, type: 'enum', options: THEME_SETTING_OPTIONS,
       optionTestId: value => `new-settings-theme-${value}`,
-      get: getBetaTheme, set: value => {
+      get: getBetaTheme, set: (value: string) => {
         if (value !== 'system' && value !== 'light' && value !== 'dark') throw new Error('请选择有效的主题');
         setBetaTheme(value);
       }, subscribe: subscribeTheme,
     },
     {
       ...PORTABLE_SETTINGS.date, type: 'enum', options: DATE_DISPLAY_SETTING_OPTIONS,
-      get: getBetaDateDisplayMode, set: value => {
+      get: getBetaDateDisplayMode, set: (value: string) => {
         if (value !== 'compact' && value !== 'full' && value !== 'weekday') throw new Error('请选择有效的日期显示方式');
         setBetaDateDisplayMode(value);
       }, subscribe: subscribeDate,
