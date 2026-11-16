@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { isTauri } from '@tauri-apps/api/core';
-import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Copy, MapPin, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -46,7 +45,7 @@ export function BetaRuntimeLocation({ endpoint }: { endpoint?: string }) {
   async function copy(value: string, name: string) {
     setNotice(''); setCopyError('');
     try {
-      if (native) await writeText(value);
+      if (native) await invoke('plugin:clipboard-manager|write_text', { text: value });
       else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(value);
       else throw new Error('当前环境无法自动复制，请选择下方文本后复制');
       setNotice(`${name}已复制`);
