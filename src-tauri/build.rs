@@ -2,6 +2,7 @@
 mod beta_windows_version;
 
 fn main() -> Result<(), String> {
+    println!("cargo:rustc-check-cfg=cfg(exomind_beta_gui)");
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os == "android" {
         // A shared library can otherwise link successfully with unresolved Rust
@@ -18,6 +19,9 @@ fn main() -> Result<(), String> {
         tauri_build::build();
         return Ok(());
     };
+    // The selector above only returns Some for the exact Windows Beta overlay.
+    // This affects the executable subsystem, not logging or runtime storage.
+    println!("cargo:rustc-cfg=exomind_beta_gui");
 
     // tauri-build 2.5.6 sets numeric versions from config, but tauri-winres
     // 0.3.5 still initializes the two version strings from this process env.
