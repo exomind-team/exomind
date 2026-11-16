@@ -78,10 +78,40 @@ struct Shared {
 struct Running {
     cancel: PeerCancellation,
     task: JoinHandle<()>,
+    incoming: Arc<super::original_transfer::TransferCompletion>,
+    joined: bool,
 }
 impl Drop for Running {
     fn drop(&mut self) {
         self.cancel.cancel();
+        self.incoming.close();
+    }
+}
+impl Running {
+    async fn drain(&mut self) -> Result<(), HostError> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        self.cancel.cancel();
+        let mut failed = false;
+        if !self.joined {
+            match tokio::time::timeout_at(deadline, &mut self.task).await {
+                Ok(result) => failed = result.is_err(),
+                Err(_) => {
+                    self.task.abort();
+                    let _ = (&mut self.task).await;
+                    failed = true;
+                }
+            }
+            self.joined = true;
+        }
+        self.incoming.close();
+        self.incoming
+            .wait_closed(deadline.saturating_duration_since(tokio::time::Instant::now()))
+            .await?;
+        if failed {
+            Err(HostError::Shutdown)
+        } else {
+            Ok(())
+        }
     }
 }
 pub struct PeerNetwork {
@@ -276,13 +306,16 @@ impl PeerNetwork {
     }
     async fn start(self: &Arc<Self>) -> Result<(), HostError> {
         let mut running = self.lifecycle.lock().await;
-        if running.as_ref().is_some_and(|r| !r.task.is_finished()) {
+        if running
+            .as_ref()
+            .is_some_and(|r| !r.joined && !r.task.is_finished() && !r.cancel.is_cancelled())
+        {
             return Ok(());
         }
-        if let Some(mut old) = running.take() {
-            old.cancel.cancel();
-            let _ = (&mut old.task).await;
+        if let Some(old) = running.as_mut() {
+            old.drain().await?;
         }
+        *running = None;
         let settings = self.host.peer_network_settings(&self.owner)?;
         let options = PeerTransportOptions {
             handshake_timeout: Duration::from_secs(3),
@@ -326,12 +359,21 @@ impl PeerNetwork {
         let cancel = PeerCancellation::new();
         let worker_cancel = cancel.clone();
         let network = self.worker();
+        let incoming = super::original_transfer::TransferCompletion::new(|| {});
+        let worker_incoming = incoming.clone();
         let lease = self.host.peers.register(false)?;
         let task = tokio::spawn(async move {
             let _lease = lease;
-            network.run(listener, worker_cancel, generation).await;
+            network
+                .run(listener, worker_cancel, generation, worker_incoming)
+                .await;
         });
-        *running = Some(Running { cancel, task });
+        *running = Some(Running {
+            cancel,
+            task,
+            incoming,
+            joined: false,
+        });
         Ok(())
     }
     pub async fn stop(&self) -> Result<(), HostError> {
@@ -352,17 +394,12 @@ impl PeerNetwork {
                 value.connection = "idle";
             }
         }
-        if let Some(mut run) = running.take() {
-            run.cancel.cancel();
-            match tokio::time::timeout(Duration::from_secs(10), &mut run.task).await {
-                Ok(result) => result.map_err(|_| HostError::Shutdown)?,
-                Err(_) => {
-                    run.task.abort();
-                    let _ = (&mut run.task).await;
-                    return Err(HostError::Shutdown);
-                }
-            }
+        // Retain the old scope in lifecycle while awaiting it: cancellation of
+        // this caller or a timeout must not forget live blocking source work.
+        if let Some(run) = running.as_mut() {
+            run.drain().await?;
         }
+        *running = None;
         self.originals.wait_empty().await
     }
     pub fn status(&self, profile: ProfileId) -> Result<PeerNetworkStatus, HostError> {
@@ -1108,6 +1145,7 @@ impl Worker {
         mut listener: super::PeerTransportListener,
         cancel: PeerCancellation,
         generation: u64,
+        incoming: Arc<super::original_transfer::TransferCompletion>,
     ) {
         let mut interval = tokio::time::interval(Duration::from_secs(2));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -1123,7 +1161,7 @@ impl Worker {
             tokio::select! {
                 _=cancel.cancelled()=>break,
                 _=self.host.peers.cancel.cancelled()=>break,
-                result=listener.accept(cancel.clone())=>{match result {Ok(channel)=>{if jobs.len()>=8{drop(channel);continue;}let network=self.clone();let lease=match self.host.peers.register(false){Ok(l)=>l,Err(_)=>break};jobs.spawn(async move{let _lease=lease;if let Ok(outcome)=network.host.accept_peer_service(&network.owner,channel).await{network.incoming(generation,outcome);}});},Err(HostError::PeerTimeout|HostError::PeerTls)=>{},Err(_)=>break}},
+                result=listener.accept(cancel.clone())=>{match result {Ok(channel)=>{if incoming.track_channel(&channel).is_err(){drop(channel);break;}if jobs.len()>=8{drop(channel);continue;}let network=self.clone();let completion=incoming.clone();let lease=match self.host.peers.register(false){Ok(l)=>l,Err(_)=>break};jobs.spawn(async move{let _lease=lease;if let Ok(outcome)=network.host.accept_peer_service_owned(&network.owner,channel,Some(completion)).await{network.incoming(generation,outcome);}});},Err(HostError::PeerTimeout|HostError::PeerTls)=>{},Err(_)=>break}},
                 received=async{match &udp {Some(socket)=>socket.recv_from(&mut packet).await,None=>std::future::pending().await}}=>{
                     if let Ok((n,source))=received{if n<=1024{if let Ok(value)=serde_json::from_slice::<Announcement>(&packet[..n]){let _=self.remember_announcement(value,source,generation);}}}
                 },
@@ -1139,6 +1177,8 @@ impl Worker {
         }
         cancel.cancel();
         drop(listener);
+        #[cfg(test)]
+        incoming.before_worker_exit().await;
         let drain = async { while jobs.join_next().await.is_some() {} };
         if tokio::time::timeout(Duration::from_secs(6), drain)
             .await

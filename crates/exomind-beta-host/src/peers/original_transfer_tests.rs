@@ -336,6 +336,91 @@ async fn native_controller_explicit_original_fetch_is_verified_then_idle_and_off
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn incoming_source_scope_waits_for_real_blocking_worker_after_handler_abort() {
+    let r = rig(b"synthetic source worker bytes\0\xff").await;
+    let identity = r.a.device_identity(&r.oa).unwrap();
+    let (listener, client, server) = channels(&r.a, &r.oa, &r.b, &r.ob).await;
+    r.b.select_peer_service(
+        &r.ob,
+        &client,
+        crate::PeerServiceKind::Originals,
+        Some(r.p),
+        Some(r.a.device_id),
+        0,
+    )
+    .await
+    .unwrap();
+    let completion = TransferCompletion::new(|| {});
+    completion.track_channel(&server).unwrap();
+    let unrelated = r.a.peers.register(false).unwrap();
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::sync_channel(1);
+    // This per-scope hook parks the ACTUAL source spawn_blocking closure,
+    // after its owned completion and peer leases were installed. No gate or
+    // another test's source worker is held by the hook.
+    completion.set_source_hook(move || {
+        entered.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(5))
+            .expect("owned source fixture release");
+    });
+    let source = r.a.clone();
+    let owner = r.oa.clone();
+    let scope = completion.clone();
+    let handler = tokio::spawn(async move {
+        source
+            .accept_peer_service_owned(&owner, server, Some(scope))
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), ready)
+        .await
+        .unwrap()
+        .unwrap();
+    handler.abort();
+    assert!(matches!(handler.await,Err(error) if error.is_cancelled()));
+    completion.close();
+    let mut drain = Box::pin(completion.wait_closed(Duration::from_secs(2)));
+    std::future::poll_fn(|cx| {
+        assert!(
+            std::future::Future::poll(drain.as_mut(), cx).is_pending(),
+            "aborted handler falsely drained the blocked source worker"
+        );
+        std::task::Poll::Ready(())
+    })
+    .await;
+    assert!(completion.state_for_test().1 > 0);
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(2), &mut drain)
+        .await
+        .unwrap()
+        .unwrap();
+    drop(drain);
+    assert_eq!(completion.state_for_test(), (true, 0));
+    assert!(
+        matches!(
+            availability(&r.b, r.p, r.original.original_id),
+            OriginalAvailability::Missing { .. }
+        ),
+        "no source bytes/ACK were supplied; metadata must stay missing"
+    );
+    assert_no_fake_capture(&r);
+    // The scope drained with a deliberately unrelated global peer lease held.
+    assert!(r.a.peers.counts.lock().unwrap().jobs >= 1);
+    drop(unrelated);
+    client.close().await.unwrap();
+    drop(listener);
+    stop(r.a.clone()).await;
+    stop(r.b.clone()).await;
+    let reopened = BetaHost::open(r.ra.path()).unwrap();
+    assert_eq!(
+        reopened
+            .device_identity(&reopened.owner_session().unwrap())
+            .unwrap(),
+        identity
+    );
+    reopened.stop().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn physical_original_service_rejects_second_profile_after_sealing_header_scope() {
     let r = rig(b"sealed profile original").await;
     let (listener, client, server) = channels(&r.a, &r.oa, &r.b, &r.ob).await;

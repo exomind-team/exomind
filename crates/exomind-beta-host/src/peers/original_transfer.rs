@@ -162,6 +162,11 @@ impl Rejection {
 pub(super) struct TransferCompletion {
     state: Mutex<CompletionState>,
     drained: Box<dyn Fn() + Send + Sync>,
+    changed: tokio::sync::Notify,
+    #[cfg(test)]
+    source_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    #[cfg(test)]
+    worker_exit_hook: Mutex<Option<(PeerCancellation, PeerCancellation)>>,
 }
 #[derive(Default)]
 struct CompletionState {
@@ -186,6 +191,11 @@ impl TransferCompletion {
         Arc::new(Self {
             state: Mutex::new(CompletionState::default()),
             drained: Box::new(drained),
+            changed: tokio::sync::Notify::new(),
+            #[cfg(test)]
+            source_hook: Mutex::new(None),
+            #[cfg(test)]
+            worker_exit_hook: Mutex::new(None),
         })
     }
     pub(super) fn register(self: &Arc<Self>) -> Result<TransferCompletionLease, HostError> {
@@ -206,6 +216,59 @@ impl TransferCompletion {
         };
         if notify {
             (self.drained)();
+            self.changed.notify_waiters();
+        }
+    }
+    pub(super) async fn wait_closed(&self, timeout: Duration) -> Result<(), HostError> {
+        tokio::time::timeout(timeout, async {
+            loop {
+                let changed = self.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                if {
+                    let state = self.state.lock().map_err(|_| HostError::StatePoisoned)?;
+                    state.closed && state.jobs == 0
+                } {
+                    return Ok(());
+                }
+                changed.await;
+            }
+        })
+        .await
+        .map_err(|_| HostError::Shutdown)?
+    }
+    #[cfg(test)]
+    pub(super) fn set_source_hook(&self, hook: impl FnOnce() + Send + 'static) {
+        *self.source_hook.lock().unwrap() = Some(Box::new(hook));
+    }
+    #[cfg(test)]
+    pub(super) fn state_for_test(&self) -> (bool, usize) {
+        let state = self.state.lock().unwrap();
+        (state.closed, state.jobs)
+    }
+    #[cfg(test)]
+    pub(super) fn set_worker_exit_hook(
+        &self,
+        entered: PeerCancellation,
+        release: PeerCancellation,
+    ) {
+        *self.worker_exit_hook.lock().unwrap() = Some((entered, release));
+    }
+    #[cfg(test)]
+    pub(super) async fn before_worker_exit(&self) {
+        let hook = { self.worker_exit_hook.lock().unwrap().take() };
+        if let Some((entered, release)) = hook {
+            entered.cancel();
+            tokio::time::timeout(Duration::from_secs(5), release.cancelled())
+                .await
+                .expect("owned pre-join barrier release");
+        }
+    }
+    #[cfg(test)]
+    fn before_source(&self) {
+        let hook = { self.source_hook.lock().unwrap().take() };
+        if let Some(hook) = hook {
+            hook();
         }
     }
     fn notify(state: &mut CompletionState) -> bool {
@@ -233,6 +296,7 @@ impl Drop for TransferCompletionLease {
         };
         if notify {
             (self.completion.drained)();
+            self.completion.changed.notify_waiters();
         }
     }
 }
@@ -544,6 +608,16 @@ impl BetaHost {
         scope: PeerProfileScope,
         options: OriginalTransferOptions,
     ) -> Result<OriginalTransferResult, HostError> {
+        self.serve_peer_original_owned(channel, scope, options, None)
+            .await
+    }
+    pub(super) async fn serve_peer_original_owned(
+        self: &Arc<Self>,
+        channel: PeerChannel,
+        scope: PeerProfileScope,
+        options: OriginalTransferOptions,
+        completion: Option<Arc<TransferCompletion>>,
+    ) -> Result<OriginalTransferResult, HostError> {
         options.validate()?;
         channel.binding_pin(self)?;
         let lease = self.peers.register(false)?;
@@ -551,8 +625,17 @@ impl BetaHost {
         let runtime = tokio::runtime::Handle::current();
         let cancel = PeerCancellation::new();
         let _cancel = CancelOnDrop(cancel.clone());
+        let completion_lease = completion
+            .as_ref()
+            .map(|work| work.register())
+            .transpose()?;
         tokio::task::spawn_blocking(move || {
+            let _completion_lease = completion_lease;
             let _lease = lease;
+            #[cfg(test)]
+            if let Some(completion) = &completion {
+                completion.before_source();
+            }
             runtime.block_on(async move {
                 let mut io = Io {
                     channel,

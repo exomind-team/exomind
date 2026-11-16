@@ -152,6 +152,16 @@ impl BetaHost {
         owner: &Session,
         channel: PeerChannel,
     ) -> Result<PeerServiceOutcome, HostError> {
+        self.accept_peer_service_owned(owner, channel, None).await
+    }
+    /// The network controller supplies only its own generation's completion
+    /// scope. Public/manual serving retains the original untracked behavior.
+    pub(super) async fn accept_peer_service_owned(
+        self: &Arc<Self>,
+        owner: &Session,
+        channel: PeerChannel,
+        completion: Option<Arc<super::original_transfer::TransferCompletion>>,
+    ) -> Result<PeerServiceOutcome, HostError> {
         self.qualify_transport(owner)?;
         channel.binding_pin(self)?;
         let observed = canonical_ip(channel.remote_address().ip());
@@ -191,13 +201,25 @@ impl BetaHost {
                 let profile = header.profile_id.ok_or(HostError::InvalidRequest)?;
                 let scope = self.peer_profile_scope(&channel, profile, header.device_id)?;
                 if matches!(header.service, PeerServiceKind::Originals) {
-                    let result = self
-                        .serve_peer_original_over_transport(
-                            channel,
-                            scope,
-                            OriginalTransferOptions::default(),
-                        )
-                        .await?;
+                    let result = match completion {
+                        Some(completion) => {
+                            self.serve_peer_original_owned(
+                                channel,
+                                scope,
+                                OriginalTransferOptions::default(),
+                                Some(completion),
+                            )
+                            .await?
+                        }
+                        None => {
+                            self.serve_peer_original_over_transport(
+                                channel,
+                                scope,
+                                OriginalTransferOptions::default(),
+                            )
+                            .await?
+                        }
+                    };
                     self.save_observed_peer_route(
                         owner,
                         profile,

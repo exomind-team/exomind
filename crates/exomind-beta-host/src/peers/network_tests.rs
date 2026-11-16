@@ -11,6 +11,227 @@ fn transport_options() -> PeerTransportOptions {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stop_and_restart_retain_incoming_scope_until_its_blocking_work_drains() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (root, host, owner) = host();
+    let identity = host.device_identity(&owner).unwrap();
+    let network = PeerNetwork::new(host.clone(), owner).unwrap();
+    network.set_enabled(true).await.unwrap();
+    let completion = {
+        let running = network.lifecycle.lock().await;
+        running.as_ref().unwrap().incoming.clone()
+    };
+    let guard = completion.register().unwrap();
+    let owned = host.peers.register(false).unwrap();
+    let unrelated = host.peers.register(false).unwrap();
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::sync_channel(1);
+    let work = tokio::task::spawn_blocking(move || {
+        let _guard = guard;
+        let _owned = owned;
+        entered.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(5))
+            .expect("incoming generation worker release");
+    });
+    tokio::time::timeout(Duration::from_secs(2), ready)
+        .await
+        .unwrap()
+        .unwrap();
+    let controller = network.clone();
+    let stopping = tokio::spawn(async move { controller.stop().await });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !completion.state_for_test().0 {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("incoming generation reached its drain phase");
+    assert!(
+        !stopping.is_finished(),
+        "stop returned while this generation's blocking worker still ran"
+    );
+    // Dropping the awaiter must leave the old scope reachable in lifecycle.
+    stopping.abort();
+    assert!(stopping.await.unwrap_err().is_cancelled());
+    {
+        let running = network.lifecycle.lock().await;
+        assert!(Arc::ptr_eq(
+            &running.as_ref().unwrap().incoming,
+            &completion
+        ));
+    }
+    let mut restarting = Box::pin(network.ensure_started());
+    std::future::poll_fn(|cx| {
+        assert!(
+            std::future::Future::poll(restarting.as_mut(), cx).is_pending(),
+            "new generation overlapped undrained incoming work"
+        );
+        std::task::Poll::Ready(())
+    })
+    .await;
+    assert!(network.local_addresses().unwrap().is_empty());
+    drop(restarting);
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(2), work)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), network.stop())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(completion.state_for_test(), (true, 0));
+    assert!(
+        host.peers.counts.lock().unwrap().jobs >= 1,
+        "the unrelated global peer lease is still held; scoped stop must not wait for it"
+    );
+    network.set_enabled(true).await.unwrap();
+    {
+        let running = network.lifecycle.lock().await;
+        assert!(!Arc::ptr_eq(
+            &running.as_ref().unwrap().incoming,
+            &completion
+        ));
+    }
+    network.stop().await.unwrap();
+    drop(unrelated);
+    stopped(host).await;
+    let reopened = BetaHost::open(root.path()).unwrap();
+    assert_eq!(
+        reopened
+            .device_identity(&reopened.owner_session().unwrap())
+            .unwrap(),
+        identity
+    );
+    reopened.stop().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_stop_before_join_cannot_reuse_the_stopping_generation() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (root, host, owner) = host();
+    let identity = host.device_identity(&owner).unwrap();
+    let network = PeerNetwork::new(host.clone(), owner).unwrap();
+    network.set_enabled(true).await.unwrap();
+    let completion = {
+        let running = network.lifecycle.lock().await;
+        running.as_ref().unwrap().incoming.clone()
+    };
+    let entered = PeerCancellation::new();
+    let release = PeerCancellation::new();
+    completion.set_worker_exit_hook(entered.clone(), release.clone());
+    let controller = network.clone();
+    let stopping = tokio::spawn(async move { controller.stop().await });
+    tokio::time::timeout(Duration::from_secs(2), entered.cancelled())
+        .await
+        .expect("worker reached early pre-join exit barrier");
+    stopping.abort();
+    assert!(stopping.await.unwrap_err().is_cancelled());
+    // Unlike the later incoming.closed test, this explicitly freezes the
+    // window BEFORE the old JoinHandle completed or its scope was closed.
+    {
+        let running = network.lifecycle.lock().await;
+        let run = running.as_ref().unwrap();
+        assert!(run.cancel.is_cancelled());
+        assert!(!run.joined);
+        assert!(!run.task.is_finished());
+        assert!(Arc::ptr_eq(&run.incoming, &completion));
+    }
+    assert!(!completion.state_for_test().0);
+    let mut restarting = Box::pin(network.ensure_started());
+    let early = std::future::poll_fn(|cx| {
+        std::task::Poll::Ready(std::future::Future::poll(restarting.as_mut(), cx))
+    })
+    .await;
+    let returned_early = early.is_ready();
+    let addresses_before_release = network.local_addresses().unwrap();
+    // Always release our own barrier before the behavioral assertion so a
+    // failing regression cannot strand the synthetic worker.
+    release.cancel();
+    if !returned_early {
+        tokio::time::timeout(Duration::from_secs(3), &mut restarting)
+            .await
+            .expect("restart after releasing old worker")
+            .unwrap();
+    }
+    drop(restarting);
+    let new_scope = {
+        let running = network.lifecycle.lock().await;
+        running.as_ref().unwrap().incoming.clone()
+    };
+    let addresses_after = network.local_addresses().unwrap();
+    network.stop().await.unwrap();
+    stopped(host).await;
+    assert!(
+        !returned_early,
+        "start returned before the cancelled generation joined: {early:?}"
+    );
+    assert!(addresses_before_release.is_empty());
+    assert!(!addresses_after.is_empty());
+    assert!(!Arc::ptr_eq(&new_scope, &completion));
+    assert_eq!(completion.state_for_test(), (true, 0));
+    let reopened = BetaHost::open(root.path()).unwrap();
+    assert_eq!(
+        reopened
+            .device_identity(&reopened.owner_session().unwrap())
+            .unwrap(),
+        identity
+    );
+    reopened.stop().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_join_failure_is_reported_before_a_drained_generation_can_restart() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_root, host, owner) = host();
+    let network = PeerNetwork::new(host.clone(), owner).unwrap();
+    network.set_enabled(true).await.unwrap();
+    let completion = {
+        let running = network.lifecycle.lock().await;
+        let run = running.as_ref().unwrap();
+        run.task.abort();
+        run.incoming.clone()
+    };
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if network
+                .lifecycle
+                .lock()
+                .await
+                .as_ref()
+                .unwrap()
+                .task
+                .is_finished()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("owned worker abort completed");
+    let first = network.stop().await;
+    assert!(
+        matches!(first, Err(HostError::Shutdown)),
+        "this drain must report its JoinError"
+    );
+    assert_eq!(completion.state_for_test(), (true, 0));
+    // Only a subsequent explicit retry may use the proven-drained scope and
+    // replace it. It cannot erase the preceding call's honest failure.
+    network.ensure_started().await.unwrap();
+    {
+        let running = network.lifecycle.lock().await;
+        assert!(!Arc::ptr_eq(
+            &running.as_ref().unwrap().incoming,
+            &completion
+        ));
+    }
+    assert!(!network.local_addresses().unwrap().is_empty());
+    network.stop().await.unwrap();
+    stopped(host).await;
+}
+
 fn host() -> (TempDir, Arc<BetaHost>, Session) {
     let root = tempdir().unwrap();
     let host = Arc::new(BetaHost::open(root.path()).unwrap());
