@@ -1,6 +1,7 @@
 import { BetaApiError,type BetaClient,type BetaReceipt } from '../client';
 import type { BetaDraftController } from '../drafts';
 import type { BetaTimeblockController } from '../timeblocks-controller';
+import type { InputSendMode } from '@/lib/input-send-shortcut';
 import { canonicalOverlayRequest,overlayScopeKey,type MainOverlayPort,type OverlayBinding,type OverlayResponse,type OverlayScope,type OverlayTicket,type OverlayView } from './protocol';
 
 const failure=(code:string,message:string):never=>{throw new BetaApiError(code,message);};
@@ -14,12 +15,12 @@ function freeze<T>(value:T):T{if(value&&typeof value==='object'){for(const item 
 export class MainOverlayOwner {
   private active=true;
   private readonly requests=new Map<string,{body:string;result:Promise<OverlayResponse>}>();
-  constructor(private readonly options:{scope:OverlayScope;client:BetaClient;capture:BetaDraftController;focus:BetaTimeblockController;validateTicket:(ticket:OverlayTicket)=>Promise<void>;onCommitted?:()=>void;dark?:()=>boolean}){}
+  constructor(private readonly options:{scope:OverlayScope;client:BetaClient;capture:BetaDraftController;focus:BetaTimeblockController;validateTicket:(ticket:OverlayTicket)=>Promise<void>;onCommitted?:()=>void;dark?:()=>boolean;inputSendMode?:()=>InputSendMode}){}
   dispose(){this.active=false;}
   snapshot():OverlayView {
     const {scope,capture,focus}=this.options,c=capture.snapshot(),f=focus.snapshot(),draft=c.drafts[scope.profile_id];
     const feedback=Object.fromEntries(Object.entries(f.feedback).filter(([id,value])=>value.text.trim()||id===f.remote?.active?.block_id||f.remote?.pending_feedback.includes(id)));
-    return{scope,theme:this.options.dark?.()?'dark':'light',remote:f.remote,clock:focus.displayClock(),capture:{text:draft?.text??'',revision:draft?.revision??0,file_count:draft?.files?.length??0,state:c.persistenceState,error:c.persistenceError},
+    return{scope,theme:this.options.dark?.()?'dark':'light',input_send_mode:this.options.inputSendMode?.()??'ctrl-enter-send',remote:f.remote,clock:focus.displayClock(),capture:{text:draft?.text??'',revision:draft?.revision??0,file_count:draft?.files?.length??0,state:c.persistenceState,error:c.persistenceError},
       feedback,focus_state:f.persistenceState,focus_error:f.cacheError??f.error,focus_busy:f.loading||f.pending.some(item=>item.state!=='rejected'),
       focus_pending:f.pending.map(item=>({command_id:item.command.command_id,state:item.state,message:item.message})),
       capture_pending:c.pending.filter(item=>item.command.profile_id===scope.profile_id&&item.state!=='committed').map(item=>({command_id:item.command.command_id,state:item.state,message:item.message}))};
@@ -77,7 +78,7 @@ export class MainOverlayOwner {
 
 /** One bounded Native polling loop. Pending Core calls are not awaited here,
  * so the single Main writer can still accept later draft edits. */
-export async function connectMainOverlay(options:{port:MainOverlayPort;binding:OverlayBinding;client:BetaClient;capture:BetaDraftController;focus:BetaTimeblockController;onCommitted?:()=>void;dark?:()=>boolean;onReady?:()=>void;onError?:(error:unknown)=>void}){
+export async function connectMainOverlay(options:{port:MainOverlayPort;binding:OverlayBinding;client:BetaClient;capture:BetaDraftController;focus:BetaTimeblockController;onCommitted?:()=>void;dark?:()=>boolean;inputSendMode?:()=>InputSendMode;onReady?:()=>void;onError?:(error:unknown)=>void}){
   const scope=await options.port.register(options.binding),owner=new MainOverlayOwner({...options,scope,validateTicket:ticket=>options.port.validate(scope,ticket.ticket_id)});
   let stopped=false,timer:ReturnType<typeof setTimeout>|undefined;
   const replies=new Map<string,OverlayResponse>();const busy=new Set<string>();

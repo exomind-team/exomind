@@ -11,6 +11,7 @@ import { OverlayDraftBuffer } from './draft-buffer';
 import { nativeOverlayWindow } from './native-port';
 import { overlayScopeKey,type OverlayAction,type OverlayResponse,type OverlayScope,type OverlayView } from './protocol';
 import { useOverlayWindowLayout } from './window-layout';
+import { inputSendShortcutLabel, shouldSubmitOnEnter } from '../input-preferences';
 
 const message=(error:unknown)=>error instanceof Error?error.message:'浮窗操作尚未确认，请保留输入并重试';
 interface RetainedInput {kind:'capture'|'feedback';blockId?:string;text:string}
@@ -84,7 +85,7 @@ function ConnectedSurface({session,view,onRetire,hasRetained}:{session:OverlaySe
     onPauseOrResume={()=>{if(active&&!disabled)void run({kind:active.phase==='paused'?'resume':'pause',block_id:active.block_id});}} onEndBlock={end} onSurfaceMount={surface.onSurfaceMount} onSurfaceMouseDownCapture={surface.onSurfaceMouseDownCapture}
     slots={{running:chrome=><FocusTimerView surface="overlay" overlayChrome={chrome} actionsDisabled={disabled} model={active&&view.clock?{phase:'running',name:{text:active.name,draft:'',editing:false,saving:false,readOnly:true},clock:view.clock,paused:active.phase!=='running',feedback:{inProgress:active.phase==='feedback_pending',dialogOpen:feedback?.id===active.block_id}}:{phase:'idle'}}
       actions={{expand:()=>{},collapse:chrome.onCollapse,selectTiming:()=>{},editCustom:()=>{},start:()=>{},beginRename:()=>{},pauseResume:()=>{if(active&&!disabled)void run({kind:active.phase==='paused'?'resume':'pause',block_id:active.block_id});},end}}/>,
-      record:<NowInputRowView value={draft.text} placeholder="记录当下的事实..." textareaLabel="记录当下" sendLabel="发送" onValueChange={text=>capture.edit(text)} onKeyDown={event=>{if(!event.nativeEvent.isComposing&&(event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();void sendCapture();}}} onSend={sendCapture}
+      record:<NowInputRowView value={draft.text} placeholder="记录当下的事实..." textareaLabel="记录当下" sendLabel="发送" onValueChange={text=>capture.edit(text)} onKeyDown={event=>{if(!event.nativeEvent.isComposing&&shouldSubmitOnEnter(view.input_send_mode??'ctrl-enter-send',event)){event.preventDefault();void sendCapture();}}} onSend={sendCapture}
         sendDisabled={captureDisabled}
         beforeControls={<>{view.capture.file_count>0&&<p className="mb-2 text-xs text-muted">含主窗整组 {view.capture.file_count} 个原件；回主窗管理</p>}{draft.error&&<div className="mb-2 flex gap-2"><Button size="sm" variant="outline" onClick={()=>{void capture.retry().catch(failure=>setError(message(failure)));}}>重试本机暂存</Button><Button size="sm" variant="outline" onClick={()=>capture.useMainDraft()}>使用主窗草稿</Button></div>}</>}
         afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{draft.saving||draft.dirty?'正在暂存，请保留窗口…':view.capture.state==='failed'?'暂存失败，请保留窗口并重试':'草稿已暂存 · 尚未提交'}</p>}/>,dialogs}}/></div>;
@@ -108,14 +109,14 @@ function FeedbackSurface({target,view,buffer,disabled,statusError,onSurfaceMount
   const draft=useSyncExternalStore(buffer.subscribe,buffer.snapshot);
   const [error,setError]=useState('');const submit=(skipped=false)=>{if(disabled||draft.dirty||draft.saving||draft.error||!skipped&&!draft.text.trim())return;void onSubmit(skipped).catch(failure=>setError(message(failure)));};
   return<TimeBlockFeedbackDialog open onOpenChange={open=>{if(!open)onClose();}} title={target.kind==='append'?'追加反馈':'结束反馈'} description={view.remote?.active?.block_id===target.id?view.remote.active.name:target.id.slice(0,8)} compact dialogRef={onSurfaceMount} overlayClassName="bg-transparent" dialogClassName="w-[380px] max-w-[calc(100vw-2rem)]"
-    feedback={draft.text} onFeedbackChange={text=>buffer.edit(text)} onFeedbackKeyDown={event=>{if(!event.nativeEvent.isComposing&&(event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();submit();}}}
+    feedback={draft.text} onFeedbackChange={text=>buffer.edit(text)} onFeedbackKeyDown={event=>{if(!event.nativeEvent.isComposing&&shouldSubmitOnEnter(view.input_send_mode??'ctrl-enter-send',event)){event.preventDefault();submit();}}}
     feedbackPlaceholder="记录本次专注的反馈..." onSubmit={()=>submit()} submitLabel={target.kind==='append'?'确认追加':'提交反馈'} submitDisabled={disabled||draft.dirty||draft.saving||!!draft.error||!draft.text.trim()} tasks={[]} autoFocusFeedback
     dialogTestId="now-overlay-feedback-surface" feedbackTestId="now-overlay-feedback-textarea" submitTestId="now-overlay-feedback-confirm"
     textareaClassName="min-h-[88px] resize-none text-[13px] dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
     submitButtonClassName="h-9 rounded-[10px] bg-[#C75B3A] px-4 text-sm font-semibold text-white hover:bg-[#B24D2F] disabled:cursor-not-allowed disabled:opacity-60"
     footerContent={target.kind==='submit'&&<Button variant="ghost" className="h-9 rounded-[10px]" disabled={disabled||draft.dirty||draft.saving||!!draft.error} onClick={()=>submit(true)}>跳过</Button>}
     extraContent={<>
-      <p className="hidden text-[11px] text-muted [@media(pointer:fine)]:block">Ctrl / ⌘ + Enter 提交</p>
+      <p className="hidden text-[11px] text-muted [@media(pointer:fine)]:block">{inputSendShortcutLabel(view.input_send_mode??'ctrl-enter-send').replace('发送','提交')}</p>
       {(error||draft.error||statusError)&&<p role="alert" className="text-xs text-destructive">{error||draft.error||statusError}</p>}
       {draft.error&&<Button variant="outline" size="sm" onClick={()=>{void buffer.retry().catch(failure=>setError(message(failure)));}}>重试反馈暂存</Button>}
       {target.kind==='submit'&&!view.remote?.pending_feedback.includes(target.id)&&view.remote?.active?.block_id!==target.id&&<Button variant="outline" size="sm" disabled={disabled} onClick={onAppend}>改为追加反馈</Button>}

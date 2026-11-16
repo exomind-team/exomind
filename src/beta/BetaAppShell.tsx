@@ -4,6 +4,7 @@ import { Settings, Target, Waypoints } from 'lucide-react';
 import { AlphaDesktopShellView, AlphaDesktopSidebarView, AlphaMobileShellView } from '@/ui/app/components/AlphaAppShellView';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { observeBetaCompactEditing } from './compact-editing';
+import { useBetaDesktopAdaptiveEnabled } from './preferences';
 
 export type BetaSection = 'now' | 'sync' | 'settings';
 const NAVIGATION = [
@@ -21,7 +22,8 @@ export function BetaAppShell({ section, onSectionChange, profileName, onProfileC
   sync: ReactNode;
   settings: ReactNode;
 }) {
-  const desktop = useIsDesktop();
+  const wide = useIsDesktop();
+  const desktop = useBetaDesktopAdaptiveEnabled() && wide;
   const [compactEditing, setCompactEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(SIDEBAR_KEY) === 'true'; } catch { return false; } });
   const [preferenceError, setPreferenceError] = useState('');

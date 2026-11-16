@@ -5,7 +5,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { getClipboardService } from '@/lib/services';
 import { Divider, SettingRow, buildSettingsToneStyle, useSettingsToneColor } from '@/ui/app/components/settings-shared';
 import type {
   ActionSettingsItem,
@@ -988,7 +987,7 @@ function StringRenderer({ item }: { item: StringSettingsItem }) {
   );
 }
 
-function ActionRenderer({ item }: { item: ActionSettingsItem }) {
+function ActionRenderer({ item, ctx }: { item: ActionSettingsItem; ctx: SettingsContext }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1040,12 +1039,18 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
     setError(null);
     setLoading(true);
     try {
-      const result = await getClipboardService().writeText(resolvedCopyValue);
-      if (!result.ok) {
-        setError(result.title);
-        return;
+      if (ctx.copyText) {
+        await ctx.copyText(resolvedCopyValue);
+      } else {
+        // Alpha retains its public service seam. Import only when that host
+        // actually copies; mounting the shared engine must not start it.
+        const { getClipboardService } = await import('@/lib/services');
+        const result = await getClipboardService().writeText(resolvedCopyValue);
+        if (!result.ok) { setError(result.title); return; }
       }
       setNotice(resolveMessage(item.copySuccessMessage, resolvedCopyValue) ?? '已复制');
+    } catch (nextError) {
+      setError(formatErrorMessage(item.errorMessagePrefix, nextError));
     } finally {
       setLoading(false);
     }
@@ -1290,7 +1295,7 @@ export function SettingsItemRenderer({
     case 'string':
       return <StringRenderer item={item} />;
     case 'action':
-      return <ActionRenderer item={item} />;
+      return <ActionRenderer item={item} ctx={ctx} />;
     case 'group':
       return <GroupRenderer item={item} ctx={ctx} />;
     case 'custom':

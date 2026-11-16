@@ -43,6 +43,8 @@ export interface SettingsContext {
   voiceShortcutAsrProvider?: string;
   embeddedRuntimeNetworkMode?: 'local' | 'lan';
   runtimeTargetMode?: 'embedded' | 'external';
+  /** Host-owned clipboard capability; isolated variants need no legacy services. */
+  copyText?: (value: string) => Promise<void>;
 }
 
 export interface SettingsItemBase {

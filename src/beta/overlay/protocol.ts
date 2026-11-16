@@ -1,5 +1,6 @@
 import type { BetaReceipt } from '../client';
 import type { BetaTimeblockSnapshot } from '../timeblocks-types';
+import type { InputSendMode } from '@/lib/input-send-shortcut';
 
 export interface OverlayBinding { device_id:string; runtime_id:string; profile_id:string }
 export interface OverlayScope extends OverlayBinding { ui_owner_generation:string }
@@ -20,6 +21,7 @@ export interface OverlayTicket { ticket_id:string;request:OverlayRequest }
 export interface OverlayView {
   scope:OverlayScope;
   theme:'light'|'dark';
+  input_send_mode?: InputSendMode;
   remote:BetaTimeblockSnapshot|null;
   clock:{text:string;warning:boolean;endTimeText?:string;stale:boolean}|null;
   capture:{text:string;revision:number;file_count:number;state:'idle'|'pending'|'failed';error:string|null};

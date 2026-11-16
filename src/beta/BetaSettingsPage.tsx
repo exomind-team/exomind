@@ -1,71 +1,92 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { Bell, CalendarDays, Expand, Monitor, Moon, Sun } from 'lucide-react';
+import { Bell } from 'lucide-react';
 import { PageShell } from '@/ui/app/components/PageShell';
 import { SettingsSection } from '@/ui/app/components/settings/settings-section';
 import { Divider, SettingRow } from '@/ui/app/components/settings-shared';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import type { EventDateDisplayMode } from '@/lib/eventlog/format-event-timestamp';
 import { errorMessage } from './drafts';
-import { setBetaDateDisplayMode, setBetaTheme, useBetaDateDisplayMode, useBetaTheme, type BetaTheme } from './preferences';
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
+import type { SettingsContext } from '@/ui/app/config/settings/settings-types';
+import { DesktopSettingsLayout } from '@/ui/app/layouts/DesktopSettingsLayout';
+import { MobileSettingsLayout } from '@/ui/app/layouts/MobileSettingsLayout';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { version } from '../../package.json';
 import { deadlineAlertFailure, deadlineNotificationPermission, nativeBetaDeadlineAlertsClient, type BetaDeadlineAlertsClient, type BetaDeadlineAlertStatus } from './deadline-alert-client';
 import { SummaryModelConfigurationController, type SummaryModelConfigurationService } from './summary-model-config';
 import { BetaSummaryModelSettingsView } from './BetaSummaryModelSettingsView';
+import { BetaRuntimeLocation } from './BetaRuntimeLocation';
+import { betaDesktopPreferences } from './desktop-preferences';
+import { BetaSettingsPanels, createBetaSettingsRegistry } from './settings-registry';
+import { useBetaDesktopAdaptiveEnabled } from './preferences';
 
-export function BetaSettingsPage({ profileName, profileId='', deviceId='', summaryModel, onDisconnect, deadlineAlerts }: { profileName: string; profileId?:string; deviceId?:string; summaryModel?:SummaryModelConfigurationService|null; onDisconnect?: () => void; deadlineAlerts?: BetaDeadlineAlertsClient | null }) {
-  const theme = useBetaTheme();
-  const dateMode = useBetaDateDisplayMode();
-  const [error, setError] = useState('');
+export function BetaSettingsPage({ profileName, profileId='', deviceId='', summaryModel, onDisconnect, onManageProfile, endpoint, deadlineAlerts }: { profileName: string; profileId?:string; deviceId?:string; summaryModel?:SummaryModelConfigurationService|null; onDisconnect?: () => void; onManageProfile?: () => void; endpoint?: string; deadlineAlerts?: BetaDeadlineAlertsClient | null }) {
+  const wide = useIsDesktop();
+  const desktopLayout = useBetaDesktopAdaptiveEnabled() && wide;
+  const native = isTauri();
+  const android = native && /android/i.test(navigator.userAgent);
+  const nativeDesktop = native && !/Android|iPhone|iPad/i.test(navigator.userAgent);
+  const desktop = useSyncExternalStore(betaDesktopPreferences.subscribe, betaDesktopPreferences.get);
+  const [desktopLoading, setDesktopLoading] = useState(nativeDesktop && !desktop);
+  const [desktopError, setDesktopError] = useState('');
+  const desktopFlight = useRef<Promise<void> | null>(null);
+  const alive = useRef(true);
   const [fullscreen, setFullscreen] = useState(() => { try { return localStorage.getItem('exomind:mobileFullscreenEnabled') === 'true'; } catch { return false; } });
-  const [displayBusy, setDisplayBusy] = useState(false);
+  const fullscreenValue = useRef(fullscreen); fullscreenValue.current = fullscreen;
+  const fullscreenQueue = useRef<Promise<unknown>>(Promise.resolve());
   const [nativeAlerts] = useState(() => isTauri() ? nativeBetaDeadlineAlertsClient() : null);
+  const [modelHost] = useState(() => document.createElement('div'));
   const alerts = deadlineAlerts === undefined ? nativeAlerts : deadlineAlerts;
-  const android = isTauri() && /android/i.test(navigator.userAgent);
-  const choose = (change: () => void) => { try { change(); setError(''); } catch (failure) { setError(`显示设置未能保存：${errorMessage(failure)}`); } };
-  async function setMobileFullscreen(enabled: boolean) {
-    if (displayBusy) return;
-    setDisplayBusy(true); setError('');
-    try {
-      await invoke('mobile_fullscreen_set', { enabled });
-      setFullscreen(enabled);
-      try { localStorage.setItem('exomind:mobileFullscreenEnabled', String(enabled)); }
-      catch { setError('本次全屏显示已应用，下次启动设置未能保存，请稍后重试'); }
-    } catch (failure) { setError(`全屏显示未能应用：${errorMessage(failure)}`); }
-    finally { setDisplayBusy(false); }
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  function refreshDesktop(): Promise<void> {
+    if (desktopFlight.current) return desktopFlight.current;
+    setDesktopLoading(true); setDesktopError('');
+    const flight = betaDesktopPreferences.refresh().then(() => { if (alive.current) setDesktopError(''); })
+      .catch(failure => { if (alive.current) setDesktopError(errorMessage(failure)); })
+      .finally(() => { if (desktopFlight.current === flight) { desktopFlight.current = null; if (alive.current) setDesktopLoading(false); } });
+    desktopFlight.current = flight; return flight;
   }
-  const ThemeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor;
+  useEffect(() => { if (nativeDesktop) void refreshDesktop(); }, [nativeDesktop]);
+  const fullscreenBinding = useMemo(() => ({
+    get: () => fullscreenValue.current,
+    set: (enabled: boolean) => {
+      const operation = fullscreenQueue.current.then(async () => {
+        await invoke('mobile_fullscreen_set', { enabled });
+        // Native has already applied this state. Keep it visible even if the
+        // separate startup preference write fails; do not claim persistence.
+        fullscreenValue.current = enabled; if (alive.current) setFullscreen(enabled);
+        try { localStorage.setItem('exomind:mobileFullscreenEnabled', String(enabled)); }
+        catch { throw new Error('本次全屏已应用，但下次启动偏好未能保存，请重试'); }
+        return enabled;
+      });
+      fullscreenQueue.current = operation.catch(() => {}); return operation;
+    },
+  }), []);
   const build = resolveVersionBuildInfo(import.meta.env, version);
+  const ctx = useMemo<SettingsContext>(() => ({
+    isDesktop: desktopLayout, isLandscape: desktopLayout, isTauriWindow: native,
+    copyText: async value => {
+      if (native) await invoke('plugin:clipboard-manager|write_text', { text: value });
+      else if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(value);
+      else throw new Error('当前环境无法自动复制，请手动选择文本');
+    },
+  }), [desktopLayout, native]);
+  const items = useMemo(() => createBetaSettingsRegistry({
+    nativeDesktop, android, desktopLoading, desktopError, profileName, profileId,
+    appVersion: build.appVersion, buildHash: build.buildHash, fullscreen: fullscreenBinding,
+    refreshDesktop, onManageProfile, onDisconnect,
+  }).filter(item => !item.visible || item.visible(ctx)), [nativeDesktop, android, desktop, desktopLoading, desktopError, profileName, profileId, build.appVersion, build.buildHash, fullscreenBinding, onManageProfile, onDisconnect, ctx]);
   return <PageShell title="设置" contentClassName="overflow-y-auto">
     <div className="mx-auto max-w-3xl space-y-5 px-5 pb-8 pt-5 md:px-8 md:py-8">
-      <SettingsSection title="外观与显示">
-        <SettingRow icon={<ThemeIcon className="size-4 text-muted"/>} label="外观主题" right={<Select value={theme} onValueChange={value => choose(() => setBetaTheme(value as BetaTheme))}>
-          <SelectTrigger aria-label="外观主题" className="h-8 w-32"><SelectValue/></SelectTrigger>
-          <SelectContent><SelectItem value="system">跟随系统</SelectItem><SelectItem value="light">浅色</SelectItem><SelectItem value="dark">深色</SelectItem></SelectContent>
-        </Select>}/>
-        <Divider/>
-        <SettingRow icon={<CalendarDays className="size-4 text-muted"/>} label="记录日期" right={<Select value={dateMode} onValueChange={value => choose(() => setBetaDateDisplayMode(value as EventDateDisplayMode))}>
-          <SelectTrigger aria-label="记录日期" className="h-8 w-32"><SelectValue/></SelectTrigger>
-          <SelectContent><SelectItem value="compact">简略日期</SelectItem><SelectItem value="full">完整日期</SelectItem><SelectItem value="weekday">星期日期</SelectItem></SelectContent>
-        </Select>}/>
-        <p className="px-4 pb-3 text-xs text-muted">跨日、跨月和跨年会披露日期。点击记录旁的时间可切换完整与简略显示。</p>
-        {android && <><Divider/><SettingRow icon={<Expand className="size-4 text-muted"/>} label="安卓全屏" right={<Switch aria-label="安卓全屏" checked={fullscreen} disabled={displayBusy} onCheckedChange={enabled => { void setMobileFullscreen(enabled); }}/>} /></>}
-      </SettingsSection>
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      <DeadlineAlertSettings client={alerts}/>
-      <SettingsSection title="当前档案">
-        <SettingRow label="档案" right={<span className="max-w-[60%] truncate text-sm text-secondary">{profileName || '尚未选择'}</span>}/>
-        <Divider/><SettingRow label="资料保存" right={<span className="text-sm text-secondary">先保存到本机</span>}/>
-      </SettingsSection>
-      <SummaryModelSettings service={summaryModel??null} deviceId={deviceId} profileId={profileId} profileName={profileName}/>
-      <SettingsSection title="关于">
-        <SettingRow label="外心 · Beta" right={<span className="text-xs text-muted">{build.appVersion} · {build.buildHash}</span>}/>
-        <p className="px-4 pb-4 text-xs leading-relaxed text-muted">记录、原件与时间块使用本机独立资料目录。设备同步的记录与原件状态分别显示。</p>
-      </SettingsSection>
-      {onDisconnect && <Button variant="outline" onClick={onDisconnect}>断开当前服务</Button>}
+      <BetaSettingsPanels.Provider value={{
+        model: modelHost,
+        alerts: <DeadlineAlertSettings client={alerts}/>,
+        location: <BetaRuntimeLocation endpoint={endpoint}/>,
+      }}>
+        {desktopLayout ? <DesktopSettingsLayout items={items} ctx={ctx}/> : <MobileSettingsLayout items={items} ctx={ctx}/>}
+      </BetaSettingsPanels.Provider>
+      {createPortal(<SummaryModelSettings service={summaryModel??null} deviceId={deviceId} profileId={profileId} profileName={profileName}/>, modelHost, 'beta-settings-model')}
     </div>
   </PageShell>;
 }

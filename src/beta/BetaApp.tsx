@@ -42,6 +42,10 @@ import { describeDeadlineHandoff, useBetaDeadlineHandoff } from './deadline-hand
 import { clipboardImageFiles, readBetaClipboard } from './clipboard-images';
 import { BetaImagePreview } from './BetaImagePreview';
 import { BetaRuntimeLocation } from './BetaRuntimeLocation';
+import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
+import { betaDesktopPreferences } from './desktop-preferences';
+import { inputSendShortcutLabel, shouldSubmitOnEnter, useBetaInputSendMode } from './input-preferences';
 
 const SESSION_KEY = 'exomind:beta:connection';
 const selectClass = 'h-9 max-w-full rounded-md border border-input bg-page px-2 text-sm dark:bg-page-dark';
@@ -100,7 +104,36 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   const [persistenceBusy,setPersistenceBusy]=useState(false);
   const [switching,setSwitching]=useState(false);
   const [section,setSection]=useState<BetaSection>('now');
+  const [inputFocusRequest, setInputFocusRequest] = useState(0);
+  useEffect(() => {
+    if (!isTauri() || /Android|iPhone|iPad/i.test(navigator.userAgent)) return;
+    let active = true; let unlisten: (() => void) | undefined;
+    const request = () => { if (active) { setSection('now'); setInputFocusRequest(value => value + 1); } };
+    void listen<{quick_focus:boolean}>('beta-main-window-shortcut', event => {
+      void invoke('beta_take_desktop_activation').catch(() => {});
+      if (event.payload?.quick_focus === true) request();
+    }).then(async cleanup => {
+      if (!active) { cleanup(); return; } unlisten = cleanup;
+      const pending = await invoke<boolean>('beta_take_desktop_activation');
+      if (!active || !pending) return;
+      const preferences = await betaDesktopPreferences.refresh();
+      if (active && preferences.quick_focus) request();
+    }).catch(failure => { if (active) setError(`快捷唤起状态暂未确认：${errorMessage(failure)}`); });
+    return () => { active = false; unlisten?.(); };
+  }, []);
   const sectionRef=useRef(section);sectionRef.current=section;
+  useEffect(() => {
+    if (!inputFocusRequest || section !== 'now') return;
+    const focus = () => {
+      const element = document.querySelector<HTMLTextAreaElement>('[data-beta-view="now"] textarea[data-testid="new-now-input-textarea"]');
+      if (!element) return;
+      // Preserve an active feedback/settings dialog and its unfinished input.
+      if (!document.querySelector('[role="dialog"][data-state="open"]')) element.focus({ preventScroll: true });
+      setInputFocusRequest(0);
+    };
+    window.addEventListener('beta:capture-input-ready', focus); focus();
+    return () => window.removeEventListener('beta:capture-input-ready', focus);
+  }, [inputFocusRequest, section]);
   const [eventRevision,setEventRevision]=useState(0);
   const [profileDialog,setProfileDialog]=useState(false);
   const prepareSwitch=useRef<(()=>Promise<void>)|null>(null);
@@ -208,7 +241,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   useEffect(()=>{if(handoff.pending||handoff.failed)setSection('now');},[handoff.pending?.handoff_id,handoff.failed]);
   return <><BetaAppShell section={section} onSectionChange={setSection} profileName={profileName} onProfileClick={()=>setProfileDialog(true)}
     sync={<BetaPeersPage peers={peers} profileId={profileId} profileName={profileName} runtimeId={status?.runtime_id??''} deviceId={status?.device_id??''} onJoined={joined} onEventsChanged={changed=>{if(changed===profileId)setEventRevision(value=>value+1);}}/>}
-    settings={<BetaSettingsPage profileName={profileName} profileId={profileId} deviceId={status?.device_id??''} summaryModel={client.summaryModel} onDisconnect={persistenceBusy?undefined:onDisconnect}/>}
+    settings={<BetaSettingsPage profileName={profileName} profileId={profileId} deviceId={status?.device_id??''} endpoint={endpoint} onManageProfile={()=>setProfileDialog(true)} summaryModel={client.summaryModel} onDisconnect={persistenceBusy?undefined:onDisconnect}/>}
     now={<PageShell title="当下" headerTop={<BetaRuntimeLocation endpoint={endpoint}/>} className="min-h-0 overflow-y-auto" headerClassName="shrink-0" contentClassName="flex flex-col"
     headerAction={<div className="flex max-w-[15rem] items-center gap-1">{status&&profileId&&<>
       <label className="sr-only" htmlFor="beta-profile">当前档案</label>
@@ -312,6 +345,7 @@ async function readTimeline(client:BetaClient,profileId:string,query:BetaQuery):
 }
 function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visible, externalRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,intentJournal,summaryOwner }: { client: BetaClient; controller: BetaDraftController; focus:BetaTimeblockController|null; deviceId:string;profileId: string; visible:boolean;externalRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;intentJournal?:LocalIntentJournal;summaryOwner:MutableRefObject<SummaryTasksController|null> }) {
   const drafts = useSyncExternalStore(controller.subscribe, controller.snapshot);
+  const inputSendMode = useBetaInputSendMode();
   const [page, setPage] = useState<BetaTimelinePage | null>(null);
   const pageRef=useRef(page);pageRef.current=page;
   const pageOwner=useRef({client,profileId,query:''});
@@ -375,6 +409,7 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
   }
   const draft = drafts.drafts[profileId];
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => { if (visible && textareaRef.current) window.dispatchEvent(new Event('beta:capture-input-ready')); }, [visible]);
   const fileInput = useRef<HTMLInputElement>(null);
   const reselectTarget = useRef<string | null>(null);
   const [clipboardBusy, setClipboardBusy] = useState(false);
@@ -477,7 +512,7 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
       textareaLabel="记录当下"
       sendLabel="发送"
       onValueChange={(next, element) => { try { controller.setDraft(profileId, next); resizeNowInputTextarea(element); } catch (failure) { setError(errorMessage(failure)); } }}
-      onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }}
+      onKeyDown={event => { if (!event.nativeEvent.isComposing && shouldSubmitOnEnter(inputSendMode, event)) { event.preventDefault(); void submit(); } }}
       onPaste={event => {
         const files = clipboardImageFiles(event.clipboardData);
         if (!files.length) return;
@@ -524,7 +559,7 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
         {item.state !== 'pending' && <Button variant="outline" size="sm" onClick={() => void submit(item.command.command_id)}>查证并重试</Button>}
       </div>)}
       </>}
-      afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{clipboardBusy?'正在粘贴…':drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':pending.length ? '待确认的提交会保留原文与原命令' : draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision) ? '本机已保存' : draft?.text.trim()||draft?.files?.length?'记录草稿已暂存 · 尚未提交':'Ctrl / ⌘ + Enter 发送 · 支持粘贴图片'}</p>}
+      afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{clipboardBusy?'正在粘贴…':drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':pending.length ? '待确认的提交会保留原文与原命令' : draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision) ? '本机已保存' : draft?.text.trim()||draft?.files?.length?'记录草稿已暂存 · 尚未提交':`${inputSendShortcutLabel(inputSendMode)} · 支持粘贴图片`}</p>}
     />
   </>;
 }

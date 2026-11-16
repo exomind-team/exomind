@@ -2,6 +2,8 @@
 
 #[path = "beta_native_deadlines.rs"]
 mod deadlines;
+#[path = "beta_native_settings.rs"]
+mod desktop_settings;
 #[path = "beta_native_export.rs"]
 mod export;
 #[path = "beta_native_sources.rs"]
@@ -28,8 +30,8 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::{
-        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
     },
 };
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
@@ -241,7 +243,7 @@ struct NativeState {
     closing: AtomicBool,
     exit_ready: AtomicBool,
     desktop_tray_ready: AtomicBool,
-    desktop_shortcut: Mutex<Option<String>>,
+    desktop_preferences: desktop_settings::DesktopPreferences,
     overlay: Mutex<overlay::Broker>,
 }
 
@@ -265,7 +267,7 @@ impl NativeState {
             closing: AtomicBool::new(false),
             exit_ready: AtomicBool::new(false),
             desktop_tray_ready: AtomicBool::new(false),
-            desktop_shortcut: Mutex::new(None),
+            desktop_preferences: desktop_settings::DesktopPreferences::open(root),
             overlay: Mutex::new(overlay::Broker::default()),
         })
     }
@@ -285,7 +287,8 @@ impl NativeState {
             self.host.clone(),
             SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
         )
-        .await {
+        .await
+        {
             Ok(server) => server,
             Err(error) => {
                 self.listener_failed.store(true, Ordering::Release);
@@ -418,7 +421,9 @@ async fn beta_runtime_location(
     let http_address = if stopped {
         None
     } else {
-        server.as_ref().map(|server| format!("http://{}", server.addr()))
+        server
+            .as_ref()
+            .map(|server| format!("http://{}", server.addr()))
     };
     let listener_state = if stopped {
         "stopped"
@@ -817,19 +822,23 @@ struct DesktopInfo {
     shortcut: Option<String>,
 }
 #[tauri::command]
-fn beta_desktop_status(
+async fn beta_desktop_status(
     window: WebviewWindow,
     state: State<'_, Arc<NativeState>>,
 ) -> Result<DesktopInfo, Failure> {
     trusted_window(&window, state.inner())?;
-    Ok(DesktopInfo {
-        close_to_tray: state.desktop_tray_ready.load(Ordering::Acquire),
-        shortcut: state
-            .desktop_shortcut
-            .lock()
-            .map_err(|_| Failure::from(HostError::StatePoisoned))?
-            .clone(),
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(DesktopInfo {
+            close_to_tray: state.desktop_tray_ready.load(Ordering::Acquire),
+            shortcut: state.desktop_preferences.snapshot()?.registered_shortcut,
+        })
     })
+    .await
+    .map_err(|_| Failure {
+        code: "desktop_preferences_unavailable",
+        message: "桌面设置暂未确认，请重试",
+    })?
 }
 
 fn data_root(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -935,21 +944,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                 {
                     state.desktop_tray_ready.store(true, Ordering::Release);
                 }
-                for shortcut in ["Control+Shift+Space", "Control+Alt+Space"] {
-                    if crate::commands::shortcut_commands::register_main_window_shortcut_listener(
-                        app.handle(),
-                        shortcut,
-                    )
-                    .is_ok()
-                    {
-                        *state
-                            .desktop_shortcut
-                            .lock()
-                            .map_err(|_| "Beta shortcut state unavailable")? =
-                            Some(shortcut.into());
-                        break;
-                    }
-                }
+                state.desktop_preferences.start(app.handle(), &state);
             }
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let Some((config, directory)) = isolated_window.as_ref() {
@@ -1046,6 +1041,10 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             beta_receipt,
             beta_request_exit,
             beta_desktop_status,
+            desktop_settings::beta_desktop_preferences,
+            desktop_settings::beta_set_desktop_shortcut,
+            desktop_settings::beta_set_desktop_quick_focus,
+            desktop_settings::beta_take_desktop_activation,
             beta_begin_stage,
             beta_stage_status,
             beta_write_stage_chunk,
@@ -1273,12 +1272,10 @@ mod tests {
             Some("{\"draft\":\"retained local text\"}")
         );
         let human = reopened.native_human_session(&owner, profile).unwrap();
-        assert!(
-            reopened
-                .events_page(&human, profile, &EventQuery::default())
-                .unwrap()
-                .items
-                .is_empty()
-        );
+        assert!(reopened
+            .events_page(&human, profile, &EventQuery::default())
+            .unwrap()
+            .items
+            .is_empty());
     }
 }

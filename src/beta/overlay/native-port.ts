@@ -19,8 +19,9 @@ export function validateOverlayScope(value:unknown):OverlayScope {
   const raw=object(value,['device_id','runtime_id','profile_id','ui_owner_generation']);return{device_id:id(raw.device_id),runtime_id:id(raw.runtime_id),profile_id:id(raw.profile_id),ui_owner_generation:id(raw.ui_owner_generation)};
 }
 export function validateOverlayView(value:unknown):OverlayView{
-  const raw=object(value,['scope','theme','remote','clock','capture','feedback','focus_state','focus_error','focus_busy','focus_pending','capture_pending']),scope=validateOverlayScope(raw.scope);
+  const raw=object(value,['scope','theme','remote','clock','capture','feedback','focus_state','focus_error','focus_busy','focus_pending','capture_pending'],['input_send_mode']),scope=validateOverlayScope(raw.scope);
   if(raw.theme!=='light'&&raw.theme!=='dark')return invalid();
+  if(raw.input_send_mode!==undefined&&raw.input_send_mode!=='enter-send'&&raw.input_send_mode!=='ctrl-enter-send')return invalid();
   const capture=object(raw.capture,['text','revision','file_count','state','error']);
   let clock:OverlayView['clock']=null;
   if(raw.clock!==null){const c=object(raw.clock,['text','warning','stale'],['endTimeText']);clock={text:text(c.text),warning:flag(c.warning),stale:flag(c.stale),...(c.endTimeText===undefined?{}:{endTimeText:text(c.endTimeText)})};}
@@ -28,7 +29,7 @@ export function validateOverlayView(value:unknown):OverlayView{
   if(!raw.feedback||typeof raw.feedback!=='object'||Array.isArray(raw.feedback))return invalid();
   const feedback:OverlayView['feedback']={};for(const [key,value]of Object.entries(raw.feedback)){id(key);const draft=object(value,['text','revision']);feedback[key]={text:text(draft.text),revision:integer(draft.revision)};}
   function pending(value:unknown,kinds:string[]){if(!Array.isArray(value)||value.length>64)return invalid();return value.map(item=>{const p=object(item,['command_id','state'],['message']);if(!kinds.includes(text(p.state)))return invalid();return{command_id:id(p.command_id),state:text(p.state),...(p.message===undefined?{}:{message:text(p.message)})};});}
-  return{scope,theme:raw.theme,remote,clock,capture:{text:text(capture.text),revision:integer(capture.revision),file_count:integer(capture.file_count),state:state(capture.state),error:nullableText(capture.error)},feedback,
+  return{scope,theme:raw.theme,input_send_mode:raw.input_send_mode??'ctrl-enter-send',remote,clock,capture:{text:text(capture.text),revision:integer(capture.revision),file_count:integer(capture.file_count),state:state(capture.state),error:nullableText(capture.error)},feedback,
     focus_state:state(raw.focus_state),focus_error:nullableText(raw.focus_error),focus_busy:flag(raw.focus_busy),focus_pending:pending(raw.focus_pending,['pending','unknown','rejected']),capture_pending:pending(raw.capture_pending,['pending','unknown','failed'])};
 }
 export function validateOverlayResponse(value:unknown):OverlayResponse{
