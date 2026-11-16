@@ -39,6 +39,9 @@ import { rememberLastBetaProfile, restoreLastBetaProfile } from './last-profile'
 import { BetaApiError } from './api-error';
 import { nativeBetaDeadlineHandoffsClient, type BetaDeadlineHandoff, type BetaDeadlineHandoffsClient } from './deadline-handoff-client';
 import { describeDeadlineHandoff, useBetaDeadlineHandoff } from './deadline-handoff';
+import { clipboardImageFiles, readBetaClipboard } from './clipboard-images';
+import { BetaImagePreview } from './BetaImagePreview';
+import { BetaRuntimeLocation } from './BetaRuntimeLocation';
 
 const SESSION_KEY = 'exomind:beta:connection';
 const selectClass = 'h-9 max-w-full rounded-md border border-input bg-page px-2 text-sm dark:bg-page-dark';
@@ -71,7 +74,7 @@ export function BetaApp({ client: injected, sourceStore, intentJournal, intentPr
       setError(''); setClient(next);
     } catch (failure) { setError(errorMessage(failure)); }
   }
-  if (client) return <ConnectedBeta key={native ? 'native' : undefined} client={client} peers={peers} handoffs={handoffs} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor}
+  if (client) return <ConnectedBeta key={native ? 'native' : undefined} endpoint={!native && !injected ? endpoint : undefined} client={client} peers={peers} handoffs={handoffs} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor}
     onDisconnect={!native && !injected ? () => { setClient(null); setToken(''); sessionStorage.removeItem(SESSION_KEY); } : undefined} />;
   return <PageShell title="外心" subtitle="Beta · 连接本机服务" contentClassName="overflow-y-auto">
     <form onSubmit={connect} className="mx-auto flex max-w-lg flex-col gap-4 px-5 py-8">
@@ -85,7 +88,7 @@ export function BetaApp({ client: injected, sourceStore, intentJournal, intentPr
 }
 
 type DeadlineLocation={handoffId:string;profileId:string;blockId:string;attempt:number};
-function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, intentJournal, intentPredecessor }: { client: BetaClient; peers:BetaPeersClient|null; handoffs:BetaDeadlineHandoffsClient|null; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor }) {
+function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, intentJournal, intentPredecessor, endpoint }: { client: BetaClient; peers:BetaPeersClient|null; handoffs:BetaDeadlineHandoffsClient|null; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; endpoint?: string }) {
   const [status, setStatus] = useState<BetaStatus | null>(null);
   const [profiles, setProfiles] = useState<BetaProfile[]>([]);
   const [profileId, setProfileId] = useState('');
@@ -206,7 +209,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   return <><BetaAppShell section={section} onSectionChange={setSection} profileName={profileName} onProfileClick={()=>setProfileDialog(true)}
     sync={<BetaPeersPage peers={peers} profileId={profileId} profileName={profileName} runtimeId={status?.runtime_id??''} deviceId={status?.device_id??''} onJoined={joined} onEventsChanged={changed=>{if(changed===profileId)setEventRevision(value=>value+1);}}/>}
     settings={<BetaSettingsPage profileName={profileName} profileId={profileId} deviceId={status?.device_id??''} summaryModel={client.summaryModel} onDisconnect={persistenceBusy?undefined:onDisconnect}/>}
-    now={<PageShell title="当下" className="min-h-0 overflow-y-auto" headerClassName="shrink-0" contentClassName="flex flex-col"
+    now={<PageShell title="当下" headerTop={<BetaRuntimeLocation endpoint={endpoint}/>} className="min-h-0 overflow-y-auto" headerClassName="shrink-0" contentClassName="flex flex-col"
     headerAction={<div className="flex max-w-[15rem] items-center gap-1">{status&&profileId&&<>
       <label className="sr-only" htmlFor="beta-profile">当前档案</label>
       <select id="beta-profile" className={`${selectClass} min-w-0 max-w-36`} value={profileId} disabled={!prepareSwitch.current||switching||creating} onChange={event => {void changeProfile(event.target.value);}}>
@@ -363,6 +366,7 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
     finally { if (current === generation.current) setLoading(false); }
   }
   async function submit(commandId?: string) {
+    if (!commandId && clipboardFlight.current) return;
     setError('');
     try {
       const receipt = commandId ? await controller.retry(commandId) : await controller.submit(profileId);
@@ -373,6 +377,49 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const reselectTarget = useRef<string | null>(null);
+  const [clipboardBusy, setClipboardBusy] = useState(false);
+  const clipboardFlight = useRef<object | null>(null);
+  const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
+  const pasteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => { clipboardFlight.current = null; clearTimeout(pasteTimer.current); }, []);
+  function reportPaste(result: 'success' | 'error') {
+    setPasteFeedback(result); clearTimeout(pasteTimer.current);
+    pasteTimer.current = setTimeout(() => { if (alive.current) setPasteFeedback('idle'); }, 1500);
+  }
+  function insertClipboardText(text: string) {
+    if (!text) return;
+    const element = textareaRef.current;
+    const current = controller.snapshot().drafts[profileId]?.text ?? '';
+    const start = element?.selectionStart ?? current.length;
+    const end = element?.selectionEnd ?? current.length;
+    controller.setDraft(profileId, current.slice(0, start) + text + current.slice(end));
+    requestAnimationFrame(() => {
+      if (!alive.current || !textareaRef.current) return;
+      textareaRef.current.focus(); textareaRef.current.setSelectionRange(start + text.length, start + text.length);
+      resizeNowInputTextarea(textareaRef.current);
+    });
+  }
+  async function pasteClipboard(read: () => Promise<{ files: File[]; text: string }>) {
+    if (clipboardFlight.current) return;
+    const flight = {}; clipboardFlight.current = flight; setClipboardBusy(true); setError('');
+    const revision = controller.snapshot().drafts[profileId]?.revision ?? 0;
+    try {
+      const result = await read();
+      if (!alive.current || clipboardFlight.current !== flight) return;
+      if (!result.files.length && !result.text) throw new Error('剪贴板没有可粘贴的图片或文字');
+      // A system permission dialog can outlive edits or a profile switch. Never
+      // replace newer input with text captured for the earlier draft.
+      if (result.text && revision !== (controller.snapshot().drafts[profileId]?.revision ?? 0)) throw new Error('草稿已变化，请再次粘贴；现有输入已保留');
+      if (result.files.length && !client.originals) throw new Error('当前服务尚不支持图片原件');
+      insertClipboardText(result.text);
+      if (result.files.length) await controller.addFiles(profileId, result.files);
+      if (alive.current && clipboardFlight.current === flight) reportPaste('success');
+    } catch (failure) {
+      if (alive.current && clipboardFlight.current === flight) { setError(errorMessage(failure)); reportPaste('error'); }
+    } finally {
+      if (clipboardFlight.current === flight) { clipboardFlight.current = null; if (alive.current) setClipboardBusy(false); }
+    }
+  }
   useEffect(() => { void controller.resumeFiles(profileId); }, [controller, profileId]);
   useLayoutEffect(() => resizeNowInputTextarea(textareaRef.current), [draft?.text]);
   const pending = drafts.pending.filter(item => item.command.profile_id === profileId && item.state !== 'committed');
@@ -431,9 +478,20 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
       sendLabel="发送"
       onValueChange={(next, element) => { try { controller.setDraft(profileId, next); resizeNowInputTextarea(element); } catch (failure) { setError(errorMessage(failure)); } }}
       onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }}
+      onPaste={event => {
+        const files = clipboardImageFiles(event.clipboardData);
+        if (!files.length) return;
+        event.preventDefault();
+        if (clipboardFlight.current) { setError('正在粘贴图片，请稍候再试'); return; }
+        const text = event.clipboardData.getData('text/plain');
+        void pasteClipboard(async () => ({ files, text }));
+      }}
+      onPasteClick={() => pasteClipboard(readBetaClipboard)}
+      pasteFeedback={pasteFeedback}
+      pasteFailureLabel="未粘贴"
       onSend={() => submit()}
       onAttachmentClick={client.originals ? () => { reselectTarget.current = null; if (fileInput.current) { fileInput.current.multiple = true; fileInput.current.click(); } } : undefined}
-      sendDisabled={(!draft?.text.trim() && !draft?.files?.length) || preparing || busy || !!drafts.persistenceError}
+      sendDisabled={(!draft?.text.trim() && !draft?.files?.length) || preparing || busy || clipboardBusy || !!drafts.persistenceError}
       beforeControls={<>
       <input ref={fileInput} type="file" multiple hidden aria-label="选择原件" onChange={event => {
         const selected = Array.from(event.target.files ?? []); event.target.value = '';
@@ -444,7 +502,8 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
       }} />
       {!!draft?.files?.length && <div className="mb-2 flex flex-col gap-2" aria-label="原件队列">
         {draft.files.map(file => <div key={file.id} className="flex items-center gap-2 rounded-2xl border border-[#E7E5E4] bg-white/90 px-3 py-2 shadow-sm dark:border-[#292524] dark:bg-[#1C1917]">
-          <FileText size={16} className="shrink-0 text-[#C75B3A] dark:text-[#FDBA74]" />
+          {file.original && <BetaImagePreview identity={`${deviceId}:${profileId}:${file.id}:${file.original.sha256}`} fileName={file.file_name} mediaType={file.media_type} byteLength={file.byte_length} load={() => controller.previewSource(profileId, file.id)} thumbnail />}
+          {(!file.original || !file.media_type.startsWith('image/')) && <FileText size={16} className="shrink-0 text-[#C75B3A] dark:text-[#FDBA74]" />}
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-medium text-stone-700 dark:text-stone-100">{file.file_name}</p>
             <p className="text-[10px] text-stone-500 dark:text-[#A8A29E]">{formatBytes(file.byte_length)} · {file.state === 'verified' ? '原件已暂存，尚未提交记录' : file.state === 'preparing' ? '正在复制并校验本机源…' : file.state === 'uploading' ? `正在暂存 ${formatBytes(file.next_offset)}` : file.state === 'source_missing' ? '本机源缺失，请重选' : '暂存未完成'}</p>
@@ -465,7 +524,7 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
         {item.state !== 'pending' && <Button variant="outline" size="sm" onClick={() => void submit(item.command.command_id)}>查证并重试</Button>}
       </div>)}
       </>}
-      afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':pending.length ? '待确认的提交会保留原文与原命令' : draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision) ? '本机已保存' : draft?.text.trim()||draft?.files?.length?'记录草稿已暂存 · 尚未提交':'Ctrl / ⌘ + Enter 发送'}</p>}
+      afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{clipboardBusy?'正在粘贴…':drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':pending.length ? '待确认的提交会保留原文与原命令' : draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision) ? '本机已保存' : draft?.text.trim()||draft?.files?.length?'记录草稿已暂存 · 尚未提交':'Ctrl / ⌘ + Enter 发送 · 支持粘贴图片'}</p>}
     />
   </>;
 }

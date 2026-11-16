@@ -8,6 +8,8 @@ import { betaUuid } from './initialization';
 import { exportOriginalDownload, MAX_BASIC_DOWNLOAD_BYTES } from './original-download';
 import type { BetaOriginal } from './original-types';
 import { originalAcquisitionError, originalTransferActive, sameOriginal, type BetaOriginalSources, type BetaOriginalTransferStatus } from './original-acquisition';
+import { collectOriginalDownload } from './original-download';
+import { BetaImagePreview } from './BetaImagePreview';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -117,6 +119,7 @@ function OriginalAttachment({client,profileId,original,exporting,onDownload}:{cl
   const transferLabel=status?.transfer_state==='verifying'?'正在校验原件…':status?.transfer_state==='confirming'?'本机已校验，正在确认传输…':'正在获取原件…';
   const statusFailure=status?.last_error_code?originalAcquisitionError(status.last_error_code):'';
   return <div className="rounded-2xl border border-[#E7E5E4] bg-white/90 px-3 py-2 dark:border-[#292524] dark:bg-[#1C1917]">
+    {readable && <BetaImagePreview identity={`${profileId}:${original.original_id}:${original.sha256}`} fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={() => collectOriginalDownload(client, profileId, original)} />}
     <div className="flex items-center gap-2"><FileText size={16} className="shrink-0 text-[#C75B3A] dark:text-[#FDBA74]" />
       <div className="min-w-0 flex-1"><p className="break-all text-xs font-medium">{original.file_name}</p><p className="text-[10px] text-muted">{formatBytes(original.byte_length)}</p></div>
       <Button variant="ghost" size="icon" aria-label={`下载 ${original.file_name}`} disabled={exporting||!readable||!client.originalExports&&original.byte_length>MAX_BASIC_DOWNLOAD_BYTES} onClick={onDownload}><Download size={14}/></Button>

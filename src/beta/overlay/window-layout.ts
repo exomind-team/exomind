@@ -4,8 +4,9 @@ import { nativeOverlayWindow } from './native-port';
 
 /** Native-only adapter for the same measured surfaces and fallback sizes as
  * Alpha. It does not start dragging: data-tauri-drag-region owns native drag. */
-export function useOverlayWindowLayout({mode,mini,peek,expanded,feedback,onError}:{mode:'running'|'idle';mini:boolean;peek:boolean;expanded:boolean;feedback:boolean;onError:(error:unknown)=>void}){
+export function useOverlayWindowLayout({mode,mini,peek,expanded,feedback,feedbackSurface,onError}:{mode:'running'|'idle';mini:boolean;peek:boolean;expanded:boolean;feedback:boolean;feedbackSurface?:HTMLElement|null;onError:(error:unknown)=>void}){
   const [surface,setSurface]=useState<HTMLElement|null>(null),[measurement,setMeasurement]=useState<{key:string;width:number;height:number}|null>(null);
+  const [feedbackHeight,setFeedbackHeight]=useState<number|null>(null);
   const [pressed,setPressed]=useState(false),[dragging,setDragging]=useState(false);const draggingPending=useRef(false),glow=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),notify=useRef(onError);notify.current=onError;
   const key=feedback?'feedback':mode==='running'?mini?peek?'running-mini-peek':'running-mini':'running-single-card':expanded?'idle-expanded':'idle-collapsed';
   const onSurfaceMount=useCallback((element:HTMLElement|null)=>setSurface(element),[]);
@@ -23,9 +24,23 @@ export function useOverlayWindowLayout({mode,mini,peek,expanded,feedback,onError
     return()=>{disposed=true;unlisten?.();clearTimeout(remember);clearTimeout(glow.current);};
   },[clear]);
   useEffect(()=>{
+    if(!feedback||!feedbackSurface){setFeedbackHeight(null);return;}
+    let frame:number|undefined;
+    const measure=()=>{
+      // Width remains fixed at 412 CSS pixels. Measuring a viewport-relative
+      // width and feeding it back to the native window would shrink forever.
+      const height=Math.min(900,Math.max(240,Math.ceil(Math.max(feedbackSurface.offsetHeight,feedbackSurface.scrollHeight))+32));
+      setFeedbackHeight(previous=>previous===height?previous:height);
+    };
+    const schedule=()=>{if(frame!==undefined)cancelAnimationFrame(frame);frame=requestAnimationFrame(measure);};
+    schedule();const observer=new ResizeObserver(schedule);observer.observe(feedbackSurface);
+    const mutations=new MutationObserver(schedule);mutations.observe(feedbackSurface,{subtree:true,childList:true,characterData:true});
+    return()=>{observer.disconnect();mutations.disconnect();if(frame!==undefined)cancelAnimationFrame(frame);};
+  },[feedback,feedbackSurface]);
+  useEffect(()=>{
     const fallback=key==='feedback'?{width:412,height:490}:key==='running-mini-peek'?{width:352,height:200}:key==='running-mini'?{width:248,height:120}:key==='running-single-card'?{width:390,height:192}:key==='idle-expanded'?{width:428,height:360}:{width:276,height:156};
-    const size=key!=='feedback'&&measurement?.key===key?measurement:fallback;
+    const size=key==='feedback'&&feedbackHeight!==null?{width:412,height:feedbackHeight}:key!=='feedback'&&measurement?.key===key?measurement:fallback;
     void nativeOverlayWindow({kind:'resize',width:size.width,height:size.height}).catch(error=>notify.current(error));
-  },[key,measurement]);
+  },[key,measurement,feedbackHeight]);
   return{onSurfaceMount,onSurfaceMouseDownCapture,surfaceActive:pressed||dragging};
 }

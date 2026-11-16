@@ -39,6 +39,7 @@ function ConnectedSurface({session,view,onRetire,hasRetained}:{session:OverlaySe
   const state=useSyncExternalStore(session.subscribe,session.snapshot);
   const [mini,setMini]=useState(false),[hover,setHover]=useState(false),[idleHover,setIdleHover]=useState(false),[idleFocus,setIdleFocus]=useState(false);
   const [error,setError]=useState(''),[acting,setActing]=useState(false),[feedback,setFeedback]=useState<{id:string;kind:'submit'|'append'}|null>(null);
+  const [feedbackSurface,setFeedbackSurface]=useState<HTMLDivElement|null>(null);
   const captureRef=useRef<OverlayDraftBuffer|null>(null);captureRef.current??=new OverlayDraftBuffer(session,view,{kind:'capture'});const capture=captureRef.current;
   const feedbackBuffers=useRef(new Map<string,OverlayDraftBuffer>());const alive=useRef(true),mountGeneration=useRef(0),operationLock=useRef(false);
   const latestView=useRef(view);latestView.current=view;
@@ -55,7 +56,7 @@ function ConnectedSurface({session,view,onRetire,hasRetained}:{session:OverlaySe
   const active=view.remote?.active,mode=active?'running':'idle',expanded=idleHover||idleFocus;
   useEffect(()=>{if(!active){setMini(false);setHover(false);}else{setIdleHover(false);setIdleFocus(false);}},[active?.block_id]);
   const statusError=error||state.error||draft.error||view.capture.error||view.focus_error||(view.clock?.stale?'显示等待主窗口刷新；界面不会自行结束时间块':'');
-  const surface=useOverlayWindowLayout({mode,mini,peek:mini&&hover,expanded,feedback:!!feedback||!!statusError||hasRetained,onError:failure=>{if(alive.current)setError(message(failure));}});
+  const surface=useOverlayWindowLayout({mode,mini,peek:mini&&hover,expanded,feedback:!!feedback||!!statusError||hasRetained,feedbackSurface:feedback?feedbackSurface:null,onError:failure=>{if(alive.current)setError(message(failure));}});
   const disabled=!state.ready||acting||active?.phase==='completed'||view.focus_busy||view.focus_state==='failed'||!!view.focus_error||!!view.clock?.stale||state.pending.some(item=>overlayScopeKey(item.scope)===overlayScopeKey(view.scope));
   async function run(action:OverlayAction,done?:(response:OverlayResponse)=>void){
     const current=session.snapshot().view;
@@ -75,9 +76,9 @@ function ConnectedSurface({session,view,onRetire,hasRetained}:{session:OverlaySe
     {state.pending.filter(item=>overlayScopeKey(item.scope)===overlayScopeKey(view.scope)&&!['capture_edit','feedback_edit'].includes(item.action.kind)).map(item=><Button key={item.request_id} variant="outline" onClick={()=>{void session.retry(item.request_id).then(response=>{if(alive.current&&!response.ok)setError(response.message);}).catch(failure=>{if(alive.current)setError(message(failure));});}}>查证浮窗请求</Button>)}
     {view.focus_pending.filter(item=>item.state!=='rejected').map(item=><Button key={item.command_id} variant="outline" disabled={!state.ready||item.state==='pending'||acting} onClick={()=>void run({kind:'retry_timeblock',command_id:item.command_id})}>查证时间块操作</Button>)}
     {view.capture_pending.map(item=><Button key={item.command_id} variant="outline" disabled={!state.ready||item.state==='pending'||acting} onClick={()=>void run({kind:'retry_capture',command_id:item.command_id})}>查证记录提交</Button>)}
-    {feedback&&<FeedbackSurface key={feedback.id} target={feedback} view={view} buffer={feedbackBuffer(feedback.id)} disabled={disabled} onClose={()=>setFeedback(null)} onAppend={()=>setFeedback({...feedback,kind:'append'})} onSubmit={async skipped=>{const target=feedback,buffer=feedbackBuffer(target.id);await buffer.flush();const sent=buffer.submission(),text=buffer.snapshot().text;await run(target.kind==='append'?{kind:'append_feedback',block_id:target.id,draft_revision:sent.revision}:{kind:'submit_feedback',block_id:target.id,draft_revision:sent.revision,skipped},()=>{if(buffer.snapshot().text===''||buffer.submission().revision===sent.revision&&buffer.snapshot().text===text)setFeedback(current=>current?.id===target.id&&current.kind===target.kind?null:current);});}}/>}
+    {feedback&&<FeedbackSurface key={feedback.id} target={feedback} view={view} buffer={feedbackBuffer(feedback.id)} disabled={disabled} statusError={statusError} onSurfaceMount={setFeedbackSurface} onClose={()=>setFeedback(null)} onAppend={()=>setFeedback({...feedback,kind:'append'})} onSubmit={async skipped=>{const target=feedback,buffer=feedbackBuffer(target.id);await buffer.flush();const sent=buffer.submission(),text=buffer.snapshot().text;await run(target.kind==='append'?{kind:'append_feedback',block_id:target.id,draft_revision:sent.revision}:{kind:'submit_feedback',block_id:target.id,draft_revision:sent.revision,skipped},()=>{if(buffer.snapshot().text===''||buffer.submission().revision===sent.revision&&buffer.snapshot().text===text)setFeedback(current=>current?.id===target.id&&current.kind===target.kind?null:current);});}}/>}
   </>;
-  return<NowWorkbenchOverlayView model={{mode,title:active?.name??'当下工作台',statusLabel:active?.phase==='feedback_pending'?'待反馈':active?.phase==='completed'?'已完成':active?.phase==='paused'?'已暂停':active?'进行中':'随时记录',clockText:view.clock?.text??'--:--',paused:active?.phase!=='running',miniCollapsed:mini,miniHovered:hover,idleExpanded:expanded,surfaceActive:surface.surfaceActive}}
+  return<div className={feedback?'invisible':undefined}><NowWorkbenchOverlayView model={{mode,title:active?.name??'当下工作台',statusLabel:active?.phase==='feedback_pending'?'待反馈':active?.phase==='completed'?'已完成':active?.phase==='paused'?'已暂停':active?'进行中':'随时记录',clockText:view.clock?.text??'--:--',paused:active?.phase!=='running',miniCollapsed:mini,miniHovered:hover,idleExpanded:expanded,surfaceActive:surface.surfaceActive}}
     actionsDisabled={disabled} pauseDisabled={active?.phase==='feedback_pending'} onMiniHover={setHover} onIdleHover={setIdleHover} onIdleFocusCapture={()=>setIdleFocus(true)} onIdleBlurCapture={event=>{if(!event.relatedTarget||!event.currentTarget.contains(event.relatedTarget as Node))setIdleFocus(false);}}
     onIdleCollapse={()=>{setIdleHover(false);setIdleFocus(false);}} onExpand={()=>setMini(false)} onCollapse={()=>setMini(true)} onReturnToMain={()=>{void nativeOverlayWindow({kind:'return_main'}).catch(failure=>setError(message(failure)));}}
     onPauseOrResume={()=>{if(active&&!disabled)void run({kind:active.phase==='paused'?'resume':'pause',block_id:active.block_id});}} onEndBlock={end} onSurfaceMount={surface.onSurfaceMount} onSurfaceMouseDownCapture={surface.onSurfaceMouseDownCapture}
@@ -86,7 +87,7 @@ function ConnectedSurface({session,view,onRetire,hasRetained}:{session:OverlaySe
       record:<NowInputRowView value={draft.text} placeholder="记录当下的事实..." textareaLabel="记录当下" sendLabel="发送" onValueChange={text=>capture.edit(text)} onKeyDown={event=>{if(!event.nativeEvent.isComposing&&(event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();void sendCapture();}}} onSend={sendCapture}
         sendDisabled={captureDisabled}
         beforeControls={<>{view.capture.file_count>0&&<p className="mb-2 text-xs text-muted">含主窗整组 {view.capture.file_count} 个原件；回主窗管理</p>}{draft.error&&<div className="mb-2 flex gap-2"><Button size="sm" variant="outline" onClick={()=>{void capture.retry().catch(failure=>setError(message(failure)));}}>重试本机暂存</Button><Button size="sm" variant="outline" onClick={()=>capture.useMainDraft()}>使用主窗草稿</Button></div>}</>}
-        afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{draft.saving||draft.dirty?'正在暂存，请保留窗口…':view.capture.state==='failed'?'暂存失败，请保留窗口并重试':'草稿已暂存 · 尚未提交'}</p>}/>,dialogs}}/>;
+        afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{draft.saving||draft.dirty?'正在暂存，请保留窗口…':view.capture.state==='failed'?'暂存失败，请保留窗口并重试':'草稿已暂存 · 尚未提交'}</p>}/>,dialogs}}/></div>;
 }
 function RetainedInputs({values,onResolved}:{values:RetainedScope[];onResolved:(key:string)=>void}){
   const [open,setOpen]=useState(false),[error,setError]=useState('');
@@ -103,14 +104,20 @@ function RetainedInputs({values,onResolved}:{values:RetainedScope[];onResolved:(
     </DialogContent></Dialog>
   </>;
 }
-function FeedbackSurface({target,view,buffer,disabled,onClose,onAppend,onSubmit}:{target:{id:string;kind:'submit'|'append'};view:OverlayView;buffer:OverlayDraftBuffer;disabled:boolean;onClose:()=>void;onAppend:()=>void;onSubmit:(skipped:boolean)=>Promise<void>}){
+function FeedbackSurface({target,view,buffer,disabled,statusError,onSurfaceMount,onClose,onAppend,onSubmit}:{target:{id:string;kind:'submit'|'append'};view:OverlayView;buffer:OverlayDraftBuffer;disabled:boolean;statusError:string;onSurfaceMount:(element:HTMLDivElement|null)=>void;onClose:()=>void;onAppend:()=>void;onSubmit:(skipped:boolean)=>Promise<void>}){
   const draft=useSyncExternalStore(buffer.subscribe,buffer.snapshot);
   const [error,setError]=useState('');const submit=(skipped=false)=>{if(disabled||draft.dirty||draft.saving||draft.error||!skipped&&!draft.text.trim())return;void onSubmit(skipped).catch(failure=>setError(message(failure)));};
-  return<TimeBlockFeedbackDialog open onOpenChange={open=>{if(!open)onClose();}} title={target.kind==='append'?'追加时间块反馈':'结束专注并记录反馈'} description={`反馈对象：${view.remote?.active?.block_id===target.id?view.remote.active.name:target.id.slice(0,8)}；关闭窗口不会自动提交`}
+  return<TimeBlockFeedbackDialog open onOpenChange={open=>{if(!open)onClose();}} title={target.kind==='append'?'追加反馈':'结束反馈'} description={view.remote?.active?.block_id===target.id?view.remote.active.name:target.id.slice(0,8)} compact dialogRef={onSurfaceMount} overlayClassName="bg-transparent" dialogClassName="w-[380px] max-w-[calc(100vw-2rem)]"
     feedback={draft.text} onFeedbackChange={text=>buffer.edit(text)} onFeedbackKeyDown={event=>{if(!event.nativeEvent.isComposing&&(event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();submit();}}}
     feedbackPlaceholder="记录本次专注的反馈..." onSubmit={()=>submit()} submitLabel={target.kind==='append'?'确认追加':'提交反馈'} submitDisabled={disabled||draft.dirty||draft.saving||!!draft.error||!draft.text.trim()} tasks={[]} autoFocusFeedback
     dialogTestId="now-overlay-feedback-surface" feedbackTestId="now-overlay-feedback-textarea" submitTestId="now-overlay-feedback-confirm"
     textareaClassName="min-h-[88px] resize-none text-[13px] dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
-    submitButtonClassName="h-10 w-full rounded-[12px] bg-[#C75B3A] text-white hover:bg-[#B24D2F] disabled:cursor-not-allowed disabled:opacity-60"
-    extraContent={<div className="space-y-2"><p className="text-[11px] text-[#78716C] dark:text-[#A8A29E]">Ctrl+Enter 提交 · Enter / Shift+Enter 换行</p>{(error||draft.error)&&<p role="alert" className="text-xs text-destructive">{error||draft.error}</p>}{draft.error&&<Button variant="outline" onClick={()=>{void buffer.retry().catch(failure=>setError(message(failure)));}}>重试反馈暂存</Button>}{target.kind==='submit'&&!view.remote?.pending_feedback.includes(target.id)&&view.remote?.active?.block_id!==target.id&&<Button variant="outline" disabled={disabled} onClick={onAppend}>改为追加反馈</Button>}{target.kind==='submit'&&<Button variant="outline" disabled={disabled||draft.dirty||draft.saving} onClick={()=>submit(true)}>明确跳过反馈</Button>}</div>}/>;
+    submitButtonClassName="h-9 rounded-[10px] bg-[#C75B3A] px-4 text-sm font-semibold text-white hover:bg-[#B24D2F] disabled:cursor-not-allowed disabled:opacity-60"
+    footerContent={target.kind==='submit'&&<Button variant="ghost" className="h-9 rounded-[10px]" disabled={disabled||draft.dirty||draft.saving||!!draft.error} onClick={()=>submit(true)}>跳过</Button>}
+    extraContent={<>
+      <p className="hidden text-[11px] text-muted [@media(pointer:fine)]:block">Ctrl / ⌘ + Enter 提交</p>
+      {(error||draft.error||statusError)&&<p role="alert" className="text-xs text-destructive">{error||draft.error||statusError}</p>}
+      {draft.error&&<Button variant="outline" size="sm" onClick={()=>{void buffer.retry().catch(failure=>setError(message(failure)));}}>重试反馈暂存</Button>}
+      {target.kind==='submit'&&!view.remote?.pending_feedback.includes(target.id)&&view.remote?.active?.block_id!==target.id&&<Button variant="outline" size="sm" disabled={disabled} onClick={onAppend}>改为追加反馈</Button>}
+    </>}/>;
 }

@@ -229,6 +229,7 @@ impl From<HostError> for Failure {
 
 struct NativeState {
     host: Arc<BetaHost>,
+    data_directory: PathBuf,
     owner: Session,
     peers: Arc<exomind_beta_host::PeerNetwork>,
     exports: Arc<export::ExportManager>,
@@ -236,6 +237,7 @@ struct NativeState {
     dev_origin: Option<url::Origin>,
     sessions: Mutex<HashMap<ProfileId, Session>>,
     server: tokio::sync::Mutex<Option<RunningServer>>,
+    listener_failed: AtomicBool,
     closing: AtomicBool,
     exit_ready: AtomicBool,
     desktop_tray_ready: AtomicBool,
@@ -251,6 +253,7 @@ impl NativeState {
         let peers = exomind_beta_host::PeerNetwork::new(host.clone(), owner.clone())?;
         Ok(Self {
             host,
+            data_directory: root.to_path_buf(),
             owner,
             peers,
             exports: Arc::new(export::ExportManager::default()),
@@ -258,6 +261,7 @@ impl NativeState {
             dev_origin,
             sessions: Mutex::new(HashMap::new()),
             server: tokio::sync::Mutex::new(None),
+            listener_failed: AtomicBool::new(false),
             closing: AtomicBool::new(false),
             exit_ready: AtomicBool::new(false),
             desktop_tray_ready: AtomicBool::new(false),
@@ -277,11 +281,17 @@ impl NativeState {
     }
 
     async fn start_listener(&self, port: u16) -> Result<(), HostError> {
-        let server = exomind_beta_host::serve(
+        let server = match exomind_beta_host::serve(
             self.host.clone(),
             SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
         )
-        .await?;
+        .await {
+            Ok(server) => server,
+            Err(error) => {
+                self.listener_failed.store(true, Ordering::Release);
+                return Err(error);
+            }
+        };
         let mut owned = self.server.lock().await;
         if self.closing.load(Ordering::Acquire) {
             drop(owned);
@@ -383,6 +393,49 @@ async fn beta_status(
 ) -> Result<HostStatus, Failure> {
     trusted_window(&window, state.inner())?;
     work(state.inner(), |state| state.host.status()).await
+}
+
+/// Safe native-only location disclosure. Never serialize the connection
+/// descriptor: it also contains the owner credential.
+#[derive(Serialize)]
+struct RuntimeLocation {
+    http_address: Option<String>,
+    listener_state: &'static str,
+    data_directory: String,
+    device_id: String,
+    runtime_id: String,
+}
+
+#[tauri::command]
+async fn beta_runtime_location(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+) -> Result<RuntimeLocation, Failure> {
+    trusted_window(&window, state.inner())?;
+    let status = work(state.inner(), |state| state.host.status()).await?;
+    let server = state.server.lock().await;
+    let stopped = !status.running || state.closing.load(Ordering::Acquire);
+    let http_address = if stopped {
+        None
+    } else {
+        server.as_ref().map(|server| format!("http://{}", server.addr()))
+    };
+    let listener_state = if stopped {
+        "stopped"
+    } else if http_address.is_some() {
+        "listening"
+    } else if state.listener_failed.load(Ordering::Acquire) {
+        "unavailable"
+    } else {
+        "starting"
+    };
+    Ok(RuntimeLocation {
+        http_address,
+        listener_state,
+        data_directory: state.data_directory.to_string_lossy().into_owned(),
+        device_id: status.device_id.to_string(),
+        runtime_id: status.runtime_id.to_string(),
+    })
 }
 
 #[tauri::command]
@@ -856,6 +909,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(exomind_android_clipboard::init())
         .plugin(exomind_android_timeblock_end_alert::init())
         .plugin(exomind_android_keepalive::init())
         .setup(move |app| {
@@ -956,6 +1010,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             overlay::beta_overlay_request,
             overlay::beta_overlay_window,
             beta_status,
+            beta_runtime_location,
             beta_profiles,
             beta_summary_model_configuration,
             beta_configure_summary_model,

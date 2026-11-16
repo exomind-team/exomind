@@ -1,4 +1,4 @@
-import type { KeyboardEventHandler, ReactNode, Ref } from 'react';
+import type { ClipboardEventHandler, KeyboardEventHandler, ReactNode, Ref } from 'react';
 import { Clipboard, Image, Mic, SendHorizontal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -10,6 +10,7 @@ export interface NowInputRowViewProps {
   textareaLabel?: string;
   onValueChange: (value: string, element: HTMLTextAreaElement) => void;
   onKeyDown?: KeyboardEventHandler<HTMLTextAreaElement>;
+  onPaste?: ClipboardEventHandler<HTMLTextAreaElement>;
   onSend: () => void | Promise<unknown>;
   sendDisabled: boolean;
   sendLabel?: string;
@@ -36,7 +37,7 @@ export function resizeNowInputTextarea(element: HTMLTextAreaElement | null | und
 /** Alpha's input presentation. Controllers own drafts, voice and persistence;
  * this component has no runtime, profile or storage bootstrap side effects. */
 export function NowInputRowView({
-  value, placeholder, inputRef, textareaLabel, onValueChange, onKeyDown,
+  value, placeholder, inputRef, textareaLabel, onValueChange, onKeyDown, onPaste,
   onSend, sendDisabled, sendLabel, beforeControls, afterControls, voiceControl,
   onAttachmentClick, attachmentFeedback = 'idle', onPasteClick,
   pasteFeedback = 'idle', pasteFailureLabel = '',
@@ -67,6 +68,7 @@ export function NowInputRowView({
               value={value}
               onChange={event => onValueChange(event.target.value, event.target)}
               onKeyDown={onKeyDown}
+              onPaste={onPaste}
               placeholder={placeholder}
               aria-label={textareaLabel}
               rows={1}

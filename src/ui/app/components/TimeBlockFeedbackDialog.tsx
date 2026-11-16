@@ -1,4 +1,4 @@
-import type { KeyboardEvent, ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode, Ref } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -55,6 +55,10 @@ interface TimeBlockFeedbackDialogProps {
   extraContent?: ReactNode;
   taskStatusTestIds?: TaskStatusTestIds;
   autoFocusFeedback?: boolean;
+  compact?: boolean;
+  footerContent?: ReactNode;
+  overlayClassName?: string;
+  dialogRef?: Ref<HTMLDivElement>;
 }
 
 export function TimeBlockFeedbackDialog({
@@ -81,18 +85,25 @@ export function TimeBlockFeedbackDialog({
   extraContent,
   taskStatusTestIds,
   autoFocusFeedback = false,
+  compact = false,
+  footerContent,
+  overlayClassName,
+  dialogRef,
 }: TimeBlockFeedbackDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        ref={dialogRef}
+        overlayClassName={overlayClassName}
         data-testid={dialogTestId}
         className={cn(
           'w-[calc(100vw-2rem)] max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl',
+          compact && 'gap-3 p-4',
           dialogClassName,
         )}
       >
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+        <DialogHeader className={compact ? 'pr-6 text-left' : undefined}>
+          <DialogTitle className={compact ? 'text-base' : undefined}>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
@@ -136,7 +147,8 @@ export function TimeBlockFeedbackDialog({
           </div>
         ) : null}
 
-        <DialogFooter>
+        <DialogFooter className={compact ? 'flex-row items-center justify-end gap-2 sm:space-x-0' : undefined}>
+          {footerContent}
           <button
             type="button"
             data-testid={submitTestId}

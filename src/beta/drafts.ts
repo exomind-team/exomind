@@ -196,6 +196,18 @@ export class BetaDraftController {
   }
   private active(): void { if (this.disposed) throw new BetaApiError('inactive_session', '当前记录窗口已关闭'); }
 
+  /** Read only the source still selected by this draft, never a caller's key. */
+  async previewSource(profileId: string, id: string): Promise<FileSource | null> {
+    this.active();
+    const file = this.state.drafts[profileId]?.files?.find(item => item.id === id);
+    if (!file || file.state === 'preparing') return null;
+    const source = await this.sources.get(file.source_key);
+    this.active();
+    const current = this.state.drafts[profileId]?.files?.find(item => item.id === id);
+    if (current !== file || source?.size !== file.byte_length) return null;
+    return source;
+  }
+
   async addFiles(profileId: string, selected: readonly File[]): Promise<void> {
     this.active();
     if (!this.client.originals) throw new BetaApiError('unsupported_capability', '当前服务尚未提供原件暂存');

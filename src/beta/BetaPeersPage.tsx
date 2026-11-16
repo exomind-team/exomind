@@ -113,6 +113,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
           await peers.setEnabled(enabled); if (!isCurrent(life)) return; await refresh(life);
         })}/>}/> : <p role="status" className="px-4 py-4 text-sm text-secondary">{profileId ? '正在读取设备状态…' : '粘贴另一设备的邀请，加入已有档案；也可以先创建本机档案。'}</p>}
         {status && <p className="px-4 pb-4 text-xs leading-relaxed text-muted">{status.network_enabled ? '已授权设备会自动连接与补齐。记录和原件分别确认。' : '同步已关闭，本机记录仍可继续保存。'}</p>}
+        {status && <details className="px-4 pb-4 text-xs text-muted"><summary className="cursor-pointer">本机设备与同步地址</summary><dl className="mt-3 space-y-3 select-text"><div><dt>设备身份</dt><dd className="break-all">{status.device_id}</dd></div><div><dt>当前同步地址</dt><dd data-testid="beta-local-sync-addresses" className="mt-1 space-y-1 break-all">{status.local_addresses.length ? status.local_addresses.map(address => <p key={address}>{address}</p>) : status.network_enabled ? '尚未确认可用的同步地址' : '设备同步已关闭'}</dd></div></dl><p className="mt-3">这些地址供已授权设备连接；本机 HTTP 服务地址可在「当下」标题上方查看。</p></details>}
       </SettingsSection>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {statusError && <p role="alert" className="text-sm text-destructive">状态暂未更新：{statusError}{status ? '。以下保留上次确认结果。' : ''}</p>}
