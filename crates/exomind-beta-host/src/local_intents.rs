@@ -20,6 +20,7 @@ const SCHEMA: i64 = 1;
 const LAYOUT: &str = "exomind-native-local-intent/1";
 const CAPTURE_PREFIX: &str = "exomind:beta:drafts:";
 const TIMEBLOCK_PREFIX: &str = "exomind:beta:timeblocks:";
+const SUMMARY_PREFIX: &str = "exomind:beta:summaries:";
 const MAX_RAW_BYTES: usize = 8 * 1024 * 1024;
 const MAX_KEY_BYTES: usize = 256;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(250);
@@ -63,6 +64,7 @@ fn validate_key(key: &str, device: DeviceId, core: &Core) -> Result<(), HostErro
     }
     let encoded = key
         .strip_prefix(TIMEBLOCK_PREFIX)
+        .or_else(|| key.strip_prefix(SUMMARY_PREFIX))
         .ok_or(HostError::InvalidRequest)?;
     let pair: [String; 2] = serde_json::from_str(encoded).map_err(|_| HostError::InvalidRequest)?;
     if serde_json::to_string(&pair).map_err(|_| HostError::InvalidRequest)? != encoded {
@@ -87,6 +89,60 @@ fn validate_key(key: &str, device: DeviceId, core: &Core) -> Result<(), HostErro
 mod tests {
     use super::*;
     use std::sync::{Arc, mpsc};
+
+    #[test]
+    fn summary_intent_namespace_is_private_device_profile_bound_and_survives_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("host");
+        let host = BetaHost::open(&root).unwrap();
+        let owner = host.owner_session().unwrap();
+        let profile = ProfileId::new();
+        host.provision_profile(&owner, profile, "Synthetic summary intent")
+            .unwrap();
+        let device = host.device_id;
+        let key = format!(
+            "{SUMMARY_PREFIX}{}",
+            serde_json::to_string(&[device.to_string(), profile.to_string()]).unwrap()
+        );
+        let raw = r#"{"version":1,"pending":[{"kind":"synthetic-only"}]}"#;
+        host.write_local_intent(&owner, &key, raw).unwrap();
+        assert_eq!(
+            host.read_local_intent(&owner, &key).unwrap().as_deref(),
+            Some(raw)
+        );
+        let wrong_device = format!(
+            "{SUMMARY_PREFIX}{}",
+            serde_json::to_string(&[DeviceId::new().to_string(), profile.to_string()]).unwrap()
+        );
+        let wrong_profile = format!(
+            "{SUMMARY_PREFIX}{}",
+            serde_json::to_string(&[device.to_string(), ProfileId::new().to_string()]).unwrap()
+        );
+        assert!(matches!(
+            host.read_local_intent(&owner, &wrong_device),
+            Err(HostError::Forbidden)
+        ));
+        assert!(matches!(
+            host.write_local_intent(&owner, &wrong_profile, raw),
+            Err(HostError::Forbidden)
+        ));
+        let human = host.native_human_session(&owner, profile).unwrap();
+        assert!(matches!(
+            host.read_local_intent(&human, &key),
+            Err(HostError::Forbidden)
+        ));
+        host.stop().unwrap();
+        drop(host);
+        let reopened = BetaHost::open(&root).unwrap();
+        assert_eq!(
+            reopened
+                .read_local_intent(&reopened.owner_session().unwrap(), &key)
+                .unwrap()
+                .as_deref(),
+            Some(raw)
+        );
+        reopened.stop().unwrap();
+    }
 
     #[test]
     fn a_local_intent_waiting_for_the_host_gate_loses_admission_after_request_stop() {

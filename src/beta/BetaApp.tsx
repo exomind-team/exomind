@@ -20,6 +20,7 @@ import { BetaSummaryHistoryRow } from './BetaSummaryHistoryRow';
 import { BetaSummaryTasksPanel } from './BetaSummaryTasksPanel';
 import { BetaSummarySourceDialog } from './BetaSummarySourceDialog';
 import { betaTimeblockLabel } from './timeblock-label';
+import type { SummaryTasksController } from './summary-tasks-controller';
 import { BetaTimeblockController } from './timeblocks-controller';
 import { BetaFocusTimer } from './BetaFocusTimer';
 import { MainOverlayBridge } from './overlay/MainOverlayBridge';
@@ -229,6 +230,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
 }
 
 function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary }: { client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?:LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:MutableRefObject<(()=>Promise<void>)|null>; active:boolean;eventRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void }) {
+  const summaryOwner=useRef<SummaryTasksController|null>(null);
   type Owners={capture:BetaDraftController;focus:BetaTimeblockController|null;profileId:string};
   const [owners, setOwners] = useState<Owners | null>(null);
   const [error, setError] = useState('');
@@ -260,9 +262,10 @@ function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJourn
             if(profileId&&client.timeblocks)focus=await BetaTimeblockController.open(client,deviceId,profileId,{journal:intentJournal,predecessor:intentPredecessor,allowLegacyImport});
             if(cancelled)return;
             switchGuard=async()=>{
+              summaryOwner.current?.fenceDispatch();
               for(let attempt=0;attempt<8;attempt++){
                 if(cancelled)throw new Error('当前草稿窗口已关闭');
-                await Promise.all([capture!.flush(),focus?.flush()]);
+                await Promise.all([capture!.flush(),focus?.flush(),summaryOwner.current?.flush()]);
                 if(cancelled)throw new Error('当前草稿窗口已关闭');
                 if(capture!.snapshot().persistenceState==='idle'&&(!focus||focus.snapshot().persistenceState==='idle'))return;
               }
@@ -274,10 +277,10 @@ function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJourn
             setOwners({capture,focus:focus??null,profileId});setError('');update();
             await new Promise<void>(resolve=>{release=resolve;});
           } finally {
-            for(const unsubscribe of unsubscribers)unsubscribe();capture?.dispose();focus?.dispose();
+            for(const unsubscribe of unsubscribers)unsubscribe();capture?.dispose();focus?.dispose();const summary=summaryOwner.current;summary?.dispose();
             // The Web Lock callback does not settle while an accepted local
             // transaction is still draining, including StrictMode late opens.
-            await Promise.all([capture?.close(),focus?.close()]);
+            await Promise.all([capture?.close(),focus?.close(),summary?.close()]);
           }
         });
       })();
@@ -285,7 +288,7 @@ function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJourn
       void operation.catch(failure => { if (!cancelled) {setError(errorMessage(failure));setRecoveryRequired(!!failure&&typeof failure==='object'&&'code'in failure&&failure.code==='intent_recovery_required');onPersistenceBusy(false);} });
     }
     else {setError('当前浏览器不支持安全的草稿窗口锁，请使用支持 Web Locks 的浏览器');onPersistenceBusy(false);}
-    return () => { cancelled = true;if(prepareSwitch.current===switchGuard)prepareSwitch.current=null;capture?.dispose();focus?.dispose();release?.();setOwners(null); };
+    return () => { cancelled = true;if(prepareSwitch.current===switchGuard)prepareSwitch.current=null;capture?.dispose();focus?.dispose();summaryOwner.current?.dispose();release?.();setOwners(null); };
   }, [client, deviceId, profileId, lockAttempt, sourceStore, intentJournal, intentPredecessor, allowLegacyImport, onPersistenceBusy, prepareSwitch]);
   if (error) return <div className="space-y-3 p-5">
     <p role="alert" className="text-sm text-destructive">{error}</p>
@@ -296,14 +299,14 @@ function DeviceWorkspace({ client, deviceId, profileId, sourceStore, intentJourn
   </div>;
   if(!owners||owners.profileId!==profileId)return <p role="status" className="p-5 text-xs text-muted">正在恢复本机草稿…</p>;
   if(!profileId)return null;
-  return <ProfileWorkspace key={profileId} visible={active} externalRevision={eventRevision} client={client} controller={owners.capture} focus={owners.focus} deviceId={deviceId} profileId={profileId} deadlineLocation={deadlineLocation} onDeadlineLocated={onDeadlineLocated} onConfigureSummary={onConfigureSummary}/>;
+  return <ProfileWorkspace key={profileId} visible={active} externalRevision={eventRevision} client={client} controller={owners.capture} focus={owners.focus} deviceId={deviceId} profileId={profileId} deadlineLocation={deadlineLocation} onDeadlineLocated={onDeadlineLocated} onConfigureSummary={onConfigureSummary} intentJournal={intentJournal} summaryOwner={summaryOwner}/>;
 }
 
 async function readTimeline(client:BetaClient,profileId:string,query:BetaQuery):Promise<BetaTimelinePage>{
   if(client.timelinePage)return client.timelinePage(profileId,query);
   const page=await client.eventsPage(profileId,query);return{...page,items:page.items.map(record=>({kind:'capture' as const,record}))};
 }
-function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visible, externalRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary }: { client: BetaClient; controller: BetaDraftController; focus:BetaTimeblockController|null; deviceId:string;profileId: string; visible:boolean;externalRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void }) {
+function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visible, externalRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,intentJournal,summaryOwner }: { client: BetaClient; controller: BetaDraftController; focus:BetaTimeblockController|null; deviceId:string;profileId: string; visible:boolean;externalRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;intentJournal?:LocalIntentJournal;summaryOwner:MutableRefObject<SummaryTasksController|null> }) {
   const drafts = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const [page, setPage] = useState<BetaTimelinePage | null>(null);
   const pageRef=useRef(page);pageRef.current=page;
@@ -416,7 +419,7 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
         content={event.text?<p className="whitespace-pre-wrap break-words">{event.text}</p>:null}
         afterBubble={!!event.originals?.length&&<OriginalDownloads client={client} profileId={profileId} originals={event.originals}/>}/>;})())}</div>
     </div>
-    <BetaSummaryTasksPanel open={reviewsOpen} onOpenChange={setReviewsOpen} client={client} deviceId={deviceId} profileId={profileId} target={reviewTarget} revision={page?.highwater??0} now={now} dateMode={mode} onConfigure={onConfigureSummary} onChanged={()=>{if(alive.current)setRevision(value=>value+1);}} onOpenSource={sourceReader?source=>setSummarySource(source):undefined}/>
+    <BetaSummaryTasksPanel open={reviewsOpen} onOpenChange={setReviewsOpen} client={client} deviceId={deviceId} profileId={profileId} target={reviewTarget} revision={page?.highwater??0} now={now} dateMode={mode} onConfigure={onConfigureSummary} onChanged={()=>{if(alive.current)setRevision(value=>value+1);}} onOpenSource={sourceReader?source=>setSummarySource(source):undefined} intentJournal={intentJournal} onOwner={owner=>{summaryOwner.current=owner;}}/>
     <BetaSummarySourceDialog profileId={profileId} source={summarySource} reader={sourceReader} onClose={()=>setSummarySource(null)} now={now} dateMode={mode}/>
     <NowInputRowView
       value={draft?.text ?? ''}

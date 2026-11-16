@@ -71,4 +71,31 @@ describe('Beta compact editing uses real available space', () => {
     await settle(() => { field.blur(); visual.height = 97; visual.dispatchEvent(new Event('resize')); });
     expect(screen.getByTestId('mobile-bottom-tab')).toBeInTheDocument();
   });
+  it('fits the real settings 46px URL field into a 45px scroll clip while preserving its full caret line, then restores its Alpha size', async () => {
+    const visual = viewport(97), frame = document.createElement('div'), main = document.createElement('main'), workspace = document.createElement('div'), clip = document.createElement('div'), field = document.createElement('input');
+    field.type = 'url';field.style.cssText = 'box-sizing:border-box;height:46px;line-height:20px;font-size:14px;padding:12px 16px;border:1px solid black';clip.style.overflowY = 'auto';workspace.style.overflowY = 'hidden';clip.append(field);workspace.append(clip);main.append(workspace);frame.append(main);document.body.append(frame);
+    const box = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 640, width: 640, height } as DOMRect);
+    for (const element of [frame,main,workspace]) vi.spyOn(element,'getBoundingClientRect').mockImplementation(() => box(0,visual.height));
+    vi.spyOn(clip,'getBoundingClientRect').mockImplementation(() => box(52,visual.height - 52));Object.defineProperty(clip,'clientHeight',{get:()=>visual.height - 52});
+    vi.spyOn(field,'getBoundingClientRect').mockImplementation(() => box(52.281,Math.min(46,parseFloat(field.style.maxHeight)||46)));
+    const original = field.getBoundingClientRect();expect(original.bottom).toBeGreaterThan(97);expect(original.height).toBe(46);
+    const changed = vi.fn(),detach = observeBetaCompactEditing(workspace,changed);
+    try {
+      await settle(()=>{field.focus();visual.dispatchEvent(new Event('resize'));});
+      const rect = field.getBoundingClientRect(),style = getComputedStyle(field),caretBudget = rect.height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth);
+      expect(changed).toHaveBeenLastCalledWith(true);expect(rect.top).toBeGreaterThanOrEqual(52);expect(rect.bottom).toBeLessThanOrEqual(97);expect(rect.height).toBe(44);expect(caretBudget).toBeGreaterThanOrEqual(parseFloat(style.lineHeight));expect(field.style.height).toBe('46px');expect(document.activeElement).toBe(field);
+      visual.height = 360;vi.stubGlobal('innerHeight',360);await settle(()=>visual.dispatchEvent(new Event('resize')));
+      expect(changed).toHaveBeenLastCalledWith(false);expect(field.style.maxHeight).toBe('');expect(field.style.minHeight).toBe('');expect(field.style.paddingTop).toBe('12px');expect(field.style.paddingBottom).toBe('12px');expect(field.getBoundingClientRect().height).toBe(46);expect(document.activeElement).toBe(field);
+    } finally { detach();frame.remove(); }
+  });
+  it('restores only compact input padding it still owns on blur and cleanup', async () => {
+    const visual = viewport(45),workspace = document.createElement('div'),field = document.createElement('input');field.style.cssText = 'height:46px;line-height:20px;padding-top:12px;padding-bottom:12px;border-width:1px';workspace.append(field);document.body.append(workspace);
+    vi.spyOn(field,'getBoundingClientRect').mockImplementation(()=>({top:0,bottom:Math.min(46,parseFloat(field.style.maxHeight)||46),left:0,right:640,width:640,height:Math.min(46,parseFloat(field.style.maxHeight)||46)} as DOMRect));
+    const detach = observeBetaCompactEditing(workspace,vi.fn());
+    try {
+      await settle(()=>{field.focus();visual.dispatchEvent(new Event('resize'));});expect(parseFloat(field.style.paddingTop)).toBeLessThan(12);
+      await settle(()=>field.blur());expect(field.style.paddingTop).toBe('12px');expect(field.style.paddingBottom).toBe('12px');
+      await settle(()=>field.focus());field.style.paddingTop = '9px';detach();expect(field.style.paddingTop).toBe('9px');expect(field.style.paddingBottom).toBe('12px');
+    } finally { detach();workspace.remove(); }
+  });
 });
