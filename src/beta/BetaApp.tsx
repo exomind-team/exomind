@@ -17,6 +17,7 @@ import type { LocalIntentJournal,IntentPredecessor } from './local-intent-journa
 import type { BetaTimelinePage } from './timeblocks-types';
 import type { SummaryArtifactRecord,SummarySourceRef } from './summary-types';
 import { BetaSummaryHistoryRow } from './BetaSummaryHistoryRow';
+import { BetaExternalSummaryHistoryRow } from './BetaExternalSummaryHistoryRow';
 import { BetaSummaryTasksPanel } from './BetaSummaryTasksPanel';
 import { BetaSummarySourceDialog } from './BetaSummarySourceDialog';
 import { betaTimeblockLabel } from './timeblock-label';
@@ -413,6 +414,7 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
         metadata={<><span className="text-xs font-semibold text-strong">{item.record.source.kind==='scheduler'?'计时服务':'我 · 时间块'}</span><EventTimestamp timestamp={item.record.occurred_at_ms} now={now} mode={mode}/></>}
         content={<p className="whitespace-pre-wrap break-words">{betaTimeblockLabel(item.record)}</p>}/>
       :item.kind==='summary/1'?<BetaSummaryHistoryRow key={item.record.event_id} record={item.record} api={client.summaries} revision={page.highwater} now={now} dateMode={mode} onInspect={record=>{setReviewTarget(record);setReviewsOpen(true);}} onOpenSource={sourceReader?source=>setSummarySource(source):undefined}/>
+      :item.kind==='agent_summary/1'?<BetaExternalSummaryHistoryRow key={item.record.event_id} record={item.record} now={now} dateMode={mode} onOpenSource={sourceReader?source=>setSummarySource(source):undefined}/>
       :(()=>{const event=item.record;return <ChatMessageRowView key={event.event_id} eventId={event.event_id} timelineKind="capture" tone={event.author_kind==='human'?'user':'system'}
         avatar={<Avatar className={`${event.author_kind==='human'?'':'mt-0.5 '}h-8 w-8 shrink-0`}><AvatarFallback className={event.author_kind==='human'?'rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100':'bg-surface text-brand-accent'}>{event.author_kind==='human'?'我':<Bot size={16}/>}</AvatarFallback></Avatar>}
         metadata={<><span className="text-muted">设备 {event.device_id.slice(0,8)}</span><EventTimestamp timestamp={event.occurred_at_ms} now={now} mode={mode}/><span className="text-xs font-semibold text-strong">{event.author_kind==='human'?'我':'Agent 记录'}</span></>}

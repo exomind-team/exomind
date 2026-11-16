@@ -9,6 +9,7 @@ import type { SummaryClient,SummaryTaskView } from '@/beta/summary-types';
 import { A,B,D,E,N,O,P,R,T,artifact,receipt,record,snapshot,task } from './summary-client-fixtures';
 import { asyncDraftLocks,deferred,fakeClient } from './fixtures';
 import { memoryIntentJournal } from './timeblock-ui-fixtures';
+import { externalRecord } from './external-summary-fixtures';
 
 const locks=Object.getOwnPropertyDescriptor(navigator,'locks');
 beforeEach(()=>{localStorage.clear();vi.stubGlobal('IntersectionObserver',undefined);Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});});
@@ -16,6 +17,11 @@ afterEach(()=>{cleanup();localStorage.clear();vi.restoreAllMocks();vi.unstubAllG
 function summaries(){return{tasks:vi.fn<SummaryClient['tasks']>(async()=>({items:[{...task(),state:'succeeded',latest_artifact_id:A}],next_after:null})),task:vi.fn<SummaryClient['task']>(async()=>({...task(),state:'succeeded',latest_artifact_id:A})),artifacts:vi.fn<SummaryClient['artifacts']>(async()=>({items:[artifact()],next_before:null,highwater:3})),blockSelection:vi.fn<SummaryClient['blockSelection']>(async()=>snapshot().selection),request:vi.fn<SummaryClient['request']>(async command=>receipt(command)),control:vi.fn<SummaryClient['control']>(async command=>receipt(command))}satisfies SummaryClient;}
 const now=4000,dateMode='compact' as const;
 describe('summary/1 feed and qualified history rendering',()=>{
+  it('renders an external Agent row through the real feed and opens its source without querying internal task qualification',async()=>{
+    const api=summaries(),base=fakeClient(),external={...externalRecord(),profile_id:P,device_id:D};base.status.mockResolvedValue({protocol:'exomind-beta/1',device_id:D,runtime_id:R,running:true});base.profiles.mockResolvedValue([{profile_id:P,display_name:'P'}]);
+    const source=external.snapshot.sources[0],reader=vi.fn(async()=>({kind:'capture' as const,record:{event_id:source.event_id,profile_id:P,device_id:D,author_id:D,author_kind:'human' as const,occurred_at_ms:1000,text:'external exact source',tags:[],digest:source.digest,local_seq:1}}));
+    const client={...base,summaries:api,timelinePage:async()=>({items:[{kind:'agent_summary/1' as const,record:external}],highwater:2,next_before:null}),timelineEvent:reader};render(<BetaApp client={client} intentJournal={memoryIntentJournal()}/>);await screen.findByText('外部 Agent 回顾');fireEvent.click(screen.getByRole('button',{name:/来源 /}));await screen.findByText('external exact source');expect(reader).toHaveBeenCalledWith(P,source.event_id);expect(api.task).not.toHaveBeenCalled();expect(api.request).not.toHaveBeenCalled();expect(api.control).not.toHaveBeenCalled();
+  });
   it('decodes the real summary/1 wire item directly and excludes internal job facts or forged qualification',()=>{
     expect(validateTimelineItem({kind:'summary/1',record:record()},P).kind).toBe('summary/1');expect(validateTimelinePage({items:[{kind:'summary/1',record:record()}],highwater:3,next_before:null},P,{limit:100}).items).toHaveLength(1);
     expect(()=>validateTimelineItem({kind:'summary_job/1',record:record()},P)).toThrow();expect(()=>validateTimelineItem({kind:'summary/1',record:{...record(),current:true}},P)).toThrow();expect(()=>validateTimelineItem({kind:'summary/1',record:{...record(),profile_id:N}},P)).toThrow();

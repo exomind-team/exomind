@@ -1,0 +1,3 @@
+import type { ExternalSummaryRecord } from '@/beta/external-summary';
+export const id=(n:number)=>`10000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
+export const externalRecord=():ExternalSummaryRecord=>({event_id:id(1),profile_id:id(2),device_id:id(3),producer_agent_id:id(4),occurred_at_ms:new Date(2026,10,15,19,16).getTime(),snapshot:{observed_through:1,sources:[{event_id:id(5),kind:'capture',digest:'b'.repeat(64)}],input_encoded_bytes:400,materials:[],coverage:{scope:'explicit_sources',source_delivery:'not_attested',remote_visibility:'unknown',unread_original_ids:[]},digest:'c'.repeat(64)},narrative:'外部叙述 <script>not executed</script>',evidence:[id(5)],digest:'d'.repeat(64),local_seq:2});

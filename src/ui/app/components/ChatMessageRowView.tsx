@@ -14,7 +14,7 @@ export function ChatMessageRowView({
   actions?: ReactNode;
   rowRef?: Ref<HTMLDivElement>;
   className?: string;
-  timelineKind?: 'capture' | 'timeblock';
+  timelineKind?: 'capture' | 'timeblock' | 'summary/1' | 'agent_summary/1';
 }) {
   if (tone === 'user') return <div ref={rowRef} className={`flex justify-end gap-2 ${className}`}
     data-event-id={eventId} data-testid="new-mobile-user-message-row" data-timeline-kind={timelineKind}>

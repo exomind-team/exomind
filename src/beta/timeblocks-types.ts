@@ -1,5 +1,6 @@
 import type { BetaEvent, BetaQuery, BetaReceipt, BetaStatus } from './client';
 import type { SummaryArtifactRecord } from './summary-types';
+import type { ExternalSummaryRecord } from './external-summary';
 
 export type BetaTimer = { mode: 'count_up' } | { mode: 'count_down'; duration_ms: number; end_mode: 'soft' | 'hard' };
 export interface BetaBlockSpec { block_id: string; name: string; note: string; timer: BetaTimer }
@@ -42,7 +43,7 @@ export interface BetaTimeblockNode {
   digest: string; local_seq: number;
 }
 export interface BetaTimeblockNodePage { items: BetaTimeblockNode[]; highwater: number; next_before: number | null }
-export type BetaTimelineItem = { kind: 'capture'; record: BetaEvent } | { kind: 'timeblock'; record: BetaTimeblockNode } | { kind: 'summary/1'; record: SummaryArtifactRecord };
+export type BetaTimelineItem = { kind: 'capture'; record: BetaEvent } | { kind: 'timeblock'; record: BetaTimeblockNode } | { kind: 'summary/1'; record: SummaryArtifactRecord } | {kind:'agent_summary/1';record:ExternalSummaryRecord};
 export interface BetaTimelinePage { items: BetaTimelineItem[]; highwater: number; next_before: number | null }
 export interface BetaIntervalQuery { from_ms: number; to_ms: number; through?: string; limit?: number }
 export interface BetaInterval {

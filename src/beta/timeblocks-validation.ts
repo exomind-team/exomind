@@ -1,6 +1,7 @@
 import { BetaApiError } from './api-error';
 import { validateOriginal } from './original-client';
 import { validateSummaryArtifactRecord } from './summary-validation';
+import { validateExternalSummaryRecord } from './external-summary';
 import type { BetaEvent, BetaQuery, BetaStatus } from './client';
 import type {
   BetaActiveBlock, BetaBlockSpec, BetaDeadline, BetaDeadlineEnvelope, BetaIntervalPage, BetaIntervalQuery,
@@ -135,6 +136,7 @@ export function validateTimelineItem(value:unknown,profileId:string):BetaTimelin
     if(item.kind==='capture')return{kind:'capture',record:validateCaptureRecord(item.record,profileId)};
     if(item.kind==='timeblock')return{kind:'timeblock',record:validateTimeblockNode(item.record,profileId)};
     if(item.kind==='summary/1')return{kind:'summary/1',record:validateSummaryArtifactRecord(item.record,profileId)};
+    if(item.kind==='agent_summary/1')return{kind:'agent_summary/1',record:validateExternalSummaryRecord(item.record,profileId)};
     return invalid();
   }catch{return invalid('时间线记录与档案范围尚未确认','invalid_timeline');}
 }
