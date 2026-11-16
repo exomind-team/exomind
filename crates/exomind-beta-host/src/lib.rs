@@ -1,5 +1,8 @@
 //! The authenticated Beta host. HTTP and trusted native IPC share this facade;
 //! the legacy Runtime and its stores are never instantiated here.
+mod agent_access;
+mod agent_access_http;
+pub use agent_access::{AgentAccess, AgentAccessCheck, AgentCapability};
 mod http;
 mod local_intents;
 mod local_sources;

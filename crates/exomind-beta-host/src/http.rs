@@ -487,6 +487,7 @@ fn router(host: Arc<BetaHost>, address: SocketAddr, frontend_origins: Vec<String
         .route("/beta/v1/capture", post(capture))
         .route("/beta/v1/profiles/:profile/events", get(events))
         .route("/beta/v1/profiles/:profile/receipts/:command", get(receipt))
+        .merge(crate::agent_access_http::router())
         .merge(crate::originals_http::router())
         .merge(crate::timeblocks_http::router())
         .merge(crate::model_config_http::router())
