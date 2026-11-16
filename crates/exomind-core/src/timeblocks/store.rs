@@ -12,6 +12,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 #[path = "alerts.rs"]
 mod alerts;
+#[path = "timeline_read.rs"]
+mod timeline_read;
 
 fn hash(value: &impl Serialize) -> Result<String, CoreError> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(value)?)))
@@ -820,46 +822,25 @@ impl Core {
         self.check_scope(context, profile)?;
         let connection = self.connection()?;
         let (highwater, through, before) = page_bounds(&connection, profile, query)?;
-        let mut statement=connection.prepare("SELECT local_seq,kind,body FROM events WHERE profile_id=?1 AND kind IN ('capture','timeblock/1','summary/1') AND local_seq<=?2 AND (?3 IS NULL OR local_seq<?3) AND (?4 IS NULL OR instr(body,?4)>0) ORDER BY local_seq DESC LIMIT ?5")?;
+        let mut statement=connection.prepare("SELECT local_seq,CASE WHEN typeof(event_id)='text' AND length(event_id)=36 THEN event_id END,kind,CASE WHEN typeof(digest)='text' AND length(digest)=64 THEN digest END,CASE WHEN typeof(body)='text' AND length(CAST(body AS BLOB))<=?6 THEN body END FROM events WHERE profile_id=?1 AND kind IN ('capture','timeblock/1','summary/1') AND local_seq<=?2 AND (?3 IS NULL OR local_seq<?3) AND (?4 IS NULL OR instr(body,?4)>0) ORDER BY local_seq DESC LIMIT ?5")?;
         let rows = statement.query_map(
             params![
                 profile.to_string(),
                 through,
                 i64::try_from(before).ok(),
                 query.search,
-                (query.limit + 1) as u64
+                (query.limit + 1) as u64,
+                crate::MAX_FACT_BYTES,
             ],
-            |row| {
-                Ok((
-                    row.get::<_, u64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
+            timeline_read::row,
         )?;
         let mut items = vec![];
         let mut last_seq = vec![];
         for row in rows {
-            let (seq, kind, body) = row?;
+            let row = row?;
+            let seq = row.0;
             last_seq.push(seq);
-            match kind.as_str() {
-                "capture" => {
-                    let mut event: crate::EventRecord = serde_json::from_str(&body)?;
-                    event.local_seq = seq;
-                    items.push(TimelineItem::Capture(event));
-                }
-                "timeblock/1" => {
-                    let mut node: TimeblockNodeRecord = serde_json::from_str(&body)?;
-                    node.local_seq = seq;
-                    items.push(TimelineItem::Timeblock(node));
-                }
-                "summary/1" => {
-                    let mut artifact: crate::SummaryArtifactRecord = serde_json::from_str(&body)?;
-                    artifact.local_seq = seq;
-                    items.push(TimelineItem::Summary(artifact));
-                }
-                _ => return Err(CoreError::InvalidTimeblockHistory),
-            }
+            items.push(timeline_read::decode(profile, row)?);
         }
         let more = items.len() > query.limit;
         items.truncate(query.limit);

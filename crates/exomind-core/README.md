@@ -2,6 +2,8 @@
 
 当前 schema 为 **6**；下文 schema 3/4/5 段落保留各次演进的来源说明，入口版本迁移到当前版本时，只备份入口已提交版本一次。
 
+`read_timeline_event(WriterContext, profile, event_id)` 精确读取一个当前档案的可见 capture / timeblock / summary，不扫描分页历史、不写入或重建投影。其他档案的 ID、内部 summary_job 和不存在的 ID 均返回 `None`；错误档案 context、旧生命周期 context、存储/解码/完整性故障返回错误，不伪装为空。它与 `timeline_page` 共用受 `MAX_FACT_BYTES` 限制的解码器，核对数据库头字段、所属档案、规范摘要及事实校验，返回本机真实 `local_seq`。结果里的原件引用不增加字节读取权限。
+
 ## schema 6：持久回顾任务与冻结来源
 
 `summary_job/1` 是任务的追加式控制/执行 DAG，`summary/1` 是不可变的结果记录。两者使用现有 own-origin/hash-chain 复制，不复制本机 `summary_attempts` 或回执。普通 `timeline_page` 只呈现 capture、时间块和结果，在 SQL LIMIT 前排除内部 job，因此任务状态不会挤进消息区或把旧消息分页隐藏。任务/结果分别用有 scope 的 `summary_tasks_page`、`read_summary_task`、`summary_artifacts_page` 读取。schema 6 peers 须协商新类型；旧记录的 canonical、ID、摘要、回执及 origin 游标不改写。

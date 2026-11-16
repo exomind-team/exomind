@@ -90,7 +90,7 @@ impl ReplicatedFact {
             Self::Summary(v) => crate::fact_encoding::encode_fact(v),
         }
     }
-    pub(super) fn validate(&self) -> Result<(), CoreError> {
+    pub(crate) fn validate(&self) -> Result<(), CoreError> {
         match self {
             Self::Capture(v) => {
                 if v.author_id.is_nil()
