@@ -21,6 +21,7 @@ const MAX_TAG_BYTES: usize = 128;
 /// overrides, or fallback backend. The mutex protects this connection only;
 /// independent processes/connections synchronize through SQLite transactions.
 pub struct Core {
+    pub(crate) summary_stopped: std::sync::atomic::AtomicBool,
     connection: Mutex<Connection>,
     database_path: PathBuf,
     device_id: DeviceId,
@@ -111,6 +112,7 @@ impl Core {
             return Err(CoreError::NilAuthorIdentity);
         }
         Ok(Self {
+            summary_stopped: std::sync::atomic::AtomicBool::new(false),
             connection: Mutex::new(connection),
             database_path,
             device_id: device.parse()?,
@@ -124,6 +126,9 @@ impl Core {
     }
     pub fn database_path(&self) -> &Path {
         &self.database_path
+    }
+    pub(crate) fn human_author(&self) -> Uuid {
+        self.human_author
     }
 
     pub fn create_profile(&self, name: &str) -> Result<ProfileId, CoreError> {
@@ -164,6 +169,7 @@ impl Core {
             params![profile_id.to_string(), name],
         )?;
         crate::replication::provision_local_origin(&transaction, profile_id, self.device_id)?;
+        crate::summaries::provision(&transaction, profile_id)?;
         transaction.execute(
             "INSERT INTO replication_projection_status VALUES(?1,'complete',0)",
             [profile_id.to_string()],
@@ -335,6 +341,7 @@ impl Core {
                 ],
             )?;
             let event_sequence = transaction.last_insert_rowid();
+            crate::summaries::note_capture(&transaction, &event)?;
             for (ordinal, original) in input.originals.iter().enumerate() {
                 transaction.execute(
                     "INSERT INTO event_originals(event_id,ordinal,original_id) VALUES(?1,?2,?3)",

@@ -141,7 +141,7 @@ pub(super) fn verify_endpoint(
     let expected_kind = if kind == "capture/1" || kind == "capture/2" {
         "capture"
     } else {
-        "timeblock/1"
+        kind.as_str()
     };
     let matches_kind: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM events WHERE event_id=?1 AND kind=?2)",
@@ -172,6 +172,22 @@ pub(super) fn verify_endpoint(
                 && fact.device_id == identity.device_id
                 && fact.digest == digest
                 && fact.computed_digest()? == digest
+        }
+        "summary_job/1" => {
+            let fact: crate::SummaryJobRecord = serde_json::from_str(&body)?;
+            fact.validate()?;
+            fact.event_id == event
+                && fact.profile_id == identity.profile_id
+                && fact.device_id == identity.device_id
+                && fact.digest == digest
+        }
+        "summary/1" => {
+            let fact: crate::SummaryArtifactRecord = serde_json::from_str(&body)?;
+            fact.validate()?;
+            fact.event_id == event
+                && fact.profile_id == identity.profile_id
+                && fact.device_id == identity.device_id
+                && fact.digest == digest
         }
         _ => false,
     };

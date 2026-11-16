@@ -75,6 +75,7 @@ pub(crate) fn validate_backup_directory(path: &Path) -> Result<(), CoreError> {
             .or_else(|| name.strip_prefix("schema-2-"))
             .or_else(|| name.strip_prefix("schema-3-"))
             .or_else(|| name.strip_prefix("schema-4-"))
+            .or_else(|| name.strip_prefix("schema-5-"))
             .and_then(|name| name.strip_suffix(".sqlite3"))
             .ok_or(CoreError::ForeignRoot)?;
         if Uuid::parse_str(id)
@@ -259,11 +260,33 @@ pub(crate) fn initialize(
     allow_initialization: bool,
     expected_device: Option<crate::DeviceId>,
 ) -> Result<(), CoreError> {
+    // The only writer is the unopened Core's migration transaction. Replacing
+    // events with its schema6 CHECK must not rename its existing child FKs.
+    // Restore enforcement on EVERY return path, after the transaction drops.
+    connection.pragma_update(None, "foreign_keys", false)?;
+    let result = initialize_transaction(
+        connection,
+        database_path,
+        allow_initialization,
+        expected_device,
+    );
+    let restored = connection
+        .pragma_update(None, "foreign_keys", true)
+        .map_err(CoreError::from);
+    result.and(restored)
+}
+
+fn initialize_transaction(
+    connection: &mut Connection,
+    database_path: &Path,
+    allow_initialization: bool,
+    expected_device: Option<crate::DeviceId>,
+) -> Result<(), CoreError> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
     let application: i64 =
         transaction.pragma_query_value(None, "application_id", |row| row.get(0))?;
-    if ![0, 1, 2, 3, 4, SCHEMA_VERSION].contains(&version) {
+    if ![0, 1, 2, 3, 4, 5, SCHEMA_VERSION].contains(&version) {
         return Err(CoreError::UnsupportedSchema(version));
     }
     if application != 0 && application != APPLICATION_ID {
@@ -332,6 +355,8 @@ pub(crate) fn initialize(
     else if transaction.prepare("SELECT e.kind,s.revision,n.request_digest FROM events e LEFT JOIN timeblock_state s ON s.profile_id=e.profile_id LEFT JOIN timeblock_nodes n ON n.event_id=e.event_id LIMIT 0").is_err(){return Err(CoreError::RecoveryRequired);}
     if version < 4 {
         crate::replication::migrate(&transaction)?;
+    } else if version >= 6 {
+        crate::replication::validate_summary_schema(&transaction)?;
     } else {
         crate::replication::validate_schema(&transaction)?;
     }
@@ -339,6 +364,22 @@ pub(crate) fn initialize(
         crate::timeblocks::migrate_scheduler(&transaction)?;
     } else {
         crate::timeblocks::validate_scheduler(&transaction)?;
+    }
+    if version < 6 {
+        crate::summaries::migrate_events(&transaction)?;
+        crate::replication::migrate_summary_facts(&transaction)?;
+        crate::summaries::migrate(&transaction)?;
+    } else {
+        crate::summaries::validate_events(&transaction)?;
+        crate::summaries::validate_schema(&transaction)?;
+    }
+    if transaction
+        .prepare("PRAGMA foreign_key_check")?
+        .query([])?
+        .next()?
+        .is_some()
+    {
+        return Err(CoreError::RecoveryRequired);
     }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     transaction.commit()?;

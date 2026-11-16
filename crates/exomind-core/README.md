@@ -1,5 +1,25 @@
 # Beta 本机提交核心
 
+当前 schema 为 **6**；下文 schema 3/4/5 段落保留各次演进的来源说明，入口版本迁移到当前版本时，只备份入口已提交版本一次。
+
+## schema 6：持久回顾任务与冻结来源
+
+`summary_job/1` 是任务的追加式控制/执行 DAG，`summary/1` 是不可变的结果记录。两者使用现有 own-origin/hash-chain 复制，不复制本机 `summary_attempts` 或回执。普通 `timeline_page` 只呈现 capture、时间块和结果，在 SQL LIMIT 前排除内部 job，因此任务状态不会挤进消息区或把旧消息分页隐藏。任务/结果分别用有 scope 的 `summary_tasks_page`、`read_summary_task`、`summary_artifacts_page` 读取。schema 6 peers 须协商新类型；旧记录的 canonical、ID、摘要、回执及 origin 游标不改写。
+
+首次回顾键固定为 `(profile,block,first_review/v1)`，默认执行设备是 Start/Rotate 创建块的设备。反馈完成（含明确跳过）使本机候选可执行；`reconcile_summary_triggers` 从私有有界候选游标发现远端结束/反馈，重复扫描不新增任务或 attempt，不依赖 UI。升级不自动回顾全部历史块；历史可显式请求。相同首次键的第二次独立请求返回 `trigger_already_requested`，原任务保留。手动范围请求仍保留全部原文。
+
+控制命令带 owner generation、owner control event 和所见全部 control heads，事务内作 CAS。取消、接管、新 run、更新都保留原事实。并发控制不按标量 generation 猜赢家：显示确定的来源并阻止执行，取消保守有效，显式 ResolveOwner 必须覆盖当前所有 heads；恢复已取消任务还需 `resume_cancelled`。导入事实不自动接管。网络分区期间两个显式操作者仍可能各发外部调用，稳定任务 ID 不等于模型侧恰好一次计费。
+
+`SummaryExecutorContext` / `SummaryRunTicket` 是不可反序列化的 Rust 私有资格，绑定 Core lifecycle、设备、档案、任务、run、attempt、owner token/generation 和 snapshot digest。`begin_summary_attempt` 仅允许 queued / waiting_configuration / 已到退避时间的 retry_wait；失败资格检查不写 attempt、receipt 或事实。`summary_input_records` 与 `validate_summary_run` 均重验资格。finish 在同一 SQLite 事务重验并写结果、发布事实及回执；已取消、导入失资格、Host 停止或旧进程 ticket 的迟到返回为 Stale，不产生新结果。相同已完成输出可重读原回执，不再生成结果。
+
+Host 负责配置、密钥、模型请求、HTTP 取消和最后授权 gate；Core 不访问模型。配置缺失只有一个持久 waiting 状态，不消耗 attempt。明确限流/不可用才可有限 retry，最高 8 次且不扩大原 run 的已冻结预算；配置变化、未知外部结果等不自动重试。新进程通过 `recover_summary_attempts` 有界标记旧 active 为 `external_outcome_unknown`，保留冻结来源并要求显式新 run，不能重建旧 ticket 后再次付费。`stop_summary_executor` 是本 Core 生命周期的执行停止，不是假造用户取消，重开 Core 才产生新生命周期。
+
+每次 run 第一次 begin 冻结真实来源 ID/kind/digest、反馈 ID、所见 origin heads、范围与材料状态；后续 retry 复用该快照。正文入口只返回该 ticket 冻结的 capture/typed 节点，逐条核摘要，最多 1000 条与 192 KiB（逐记录 JSON 编码长度之和），整条省略通过 `input_byte_limit` 和 `omitted_source_ids` 披露，页截断另标 `page_limit`。capture 时间索引和 block-source 映射先选最多 1001 个候选 ID，再读正文；状态轮询只核来源元数据和冻结 origin 向量，不重读模型正文。覆盖范围始终标远端可见性 unknown，不声称全网完整。已知缺 parent、metadata-only、原件未读分别披露。
+
+原件默认不选、不下载、不读取、不外发。summary 引用不是新的原件发布资格：结果导入不创建原件 stage、manifest 或事实引用权限。输出的 `read_original_ids` 只可取快照中显式选择且 verified 的材料；Host 还须有实际 Reader/授权并核其已读，不把 verified_available 当模型已读。总结结果必须有非空冻结来源及至少一个对应证据；raw Running 与结果也受此约束，origin head 逐个绑定当前档案，coverage 列表须满足去重、长度及材料归属。晚到来源令 `coverage_changed`，按需 QueueUpdate 另起 run/结果，旧结果的 snapshot/output/生成时间和作者设备不变。
+
+5→6 先执行已有 verified online backup，再同事务扩展 events 与 origin kind 检查域、创建任务及来源索引。events 重建保留完整 local_seq/事实列、sqlite_sequence 原 rowid/水位及所有 child FK 名称；开库连接仅在迁移事务外围临时关闭 FK，commit 前作 foreign_key_check，成功或错误均恢复 FK ON 后才返回。原 origin_entries 的 rowid/八列、原 bytes/deadline/receipt 均保留。相同版本缺表/索引/来源映射返回 RecoveryRequired，不静默补库。`tests/schema6_migration.rs` 的 ignored 专项通过 `EXOMIND_CORE_SCHEMA5_FIXTURE` 复制真实旧5库后迁移，对账全部旧表值/rowid/原件块、完整旧5备份和 retained fixture SHA；它不把降版本模拟库冒充旧候选。运行证据由父代理有限监督记录，Core通过不等于模型或端到端验收完成。
+
 维护源为本 crate，正式实现使用 Rust + SQLite。它不导入或修改旧 Runtime 的数据，不启动旧 `AppState`、Mesh、Signal、任务域或模型。宿主必须传入绝对且独立的目录；非空外来目录、未知 schema 和坏库会报错，不换用 JSON 或内存。
 
 当前实现：随机 UUID 档案和设备身份；文字/标签及固定整组原件 capture；不可覆盖事件；命令与持久回执同事务；同请求重试；作用域与作者绑定；读回记录和回执。`local_seq` 表达本机提交顺序，事件的 `occurred_at_ms` 保留原始时间。

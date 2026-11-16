@@ -6,6 +6,7 @@ pub use model::*;
 pub use projection::project_timeblocks;
 pub(crate) use scheduler_schema::{migrate as migrate_scheduler, validate as validate_scheduler};
 pub(crate) use store::rebuild_after_import;
+pub(crate) use store::summary_anchor;
 
 pub(crate) fn validate_import_node(node: &TimeblockNodeRecord) -> Result<(), crate::CoreError> {
     use crate::CoreError;

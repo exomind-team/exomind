@@ -281,6 +281,8 @@ pub struct DeadlineTicket {
 pub enum TimelineItem {
     Capture(crate::EventRecord),
     Timeblock(TimeblockNodeRecord),
+    #[serde(rename = "summary/1")]
+    Summary(crate::SummaryArtifactRecord),
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct TimelinePage {

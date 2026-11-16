@@ -179,13 +179,13 @@ fn actual_schema_four_pending_start_and_resume_keep_their_accepted_intents_after
     let bytes = fs::read(fixture.join("original.bin")).unwrap();
     let core = Core::open(&root).unwrap();
     let now = stamp(&core, &expected["clock"]);
-    assert_eq!(CORE_SCHEMA_VERSION, 5);
+    assert_eq!(CORE_SCHEMA_VERSION, 6);
     let database = Connection::open(core.database_path()).unwrap();
     assert_eq!(
         database
             .pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
             .unwrap(),
-        5
+        CORE_SCHEMA_VERSION
     );
     assert_eq!(deadline_rows(&database), expected["deadline_rows"]);
     for (profile, snapshot, origin, head, nodes) in [
@@ -329,7 +329,11 @@ fn actual_schema_four_pending_start_and_resume_keep_their_accepted_intents_after
     assert!(!denied.0);
     assert!(
         denied.2.contains("data root contains foreign files")
-            || denied.2.trim() == "legacy-core4-fixture: unsupported core schema version 5"
+            || denied.2.trim()
+                == format!(
+                    "legacy-core4-fixture: unsupported core schema version {}",
+                    CORE_SCHEMA_VERSION
+                )
     );
     assert_eq!(before, fs::read(root.join("beta-core.sqlite3")).unwrap());
     assert_eq!(backup_bytes, fs::read(&backup[0]).unwrap());
@@ -344,7 +348,10 @@ fn actual_schema_four_pending_start_and_resume_keep_their_accepted_intents_after
     assert!(!denied.0);
     assert_eq!(
         denied.2.trim(),
-        "legacy-core4-fixture: unsupported core schema version 5"
+        format!(
+            "legacy-core4-fixture: unsupported core schema version {}",
+            CORE_SCHEMA_VERSION
+        )
     );
     assert_eq!(
         before,

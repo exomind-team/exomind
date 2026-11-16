@@ -272,6 +272,8 @@ fn apply_page(
             let kind = match &received {
                 ReplicatedFact::Capture(_) => "capture",
                 ReplicatedFact::Timeblock(_) => "timeblock/1",
+                ReplicatedFact::SummaryJob(_) => "summary_job/1",
+                ReplicatedFact::Summary(_) => "summary/1",
             };
             transaction.execute(
                 "INSERT INTO events(event_id,profile_id,digest,body,kind) VALUES(?1,?2,?3,?4,?5)",
@@ -294,6 +296,24 @@ fn apply_page(
                 )?;
             }
             typed_changed |= matches!(&received, ReplicatedFact::Timeblock(_));
+            match &received {
+                ReplicatedFact::Capture(v) => crate::summaries::note_capture(transaction, v)?,
+                ReplicatedFact::Timeblock(v) => crate::summaries::index_timeblock(transaction, v)?,
+                ReplicatedFact::SummaryJob(v) => crate::summaries::index_import(
+                    transaction,
+                    v.event_id,
+                    v.profile_id,
+                    v.task_id,
+                    "summary_job/1",
+                )?,
+                ReplicatedFact::Summary(v) => crate::summaries::index_import(
+                    transaction,
+                    v.event_id,
+                    v.profile_id,
+                    v.task_id,
+                    "summary/1",
+                )?,
+            }
             inserted += 1;
         }
         let repeated:bool=transaction.query_row("SELECT EXISTS(SELECT 1 FROM origin_entries WHERE profile_id=?1 AND origin_device=?2 AND restoration_epoch=?3 AND event_id=?4)",params![id.profile_id.to_string(),id.device_id.to_string(),id.restoration_epoch.to_string(),received.event_id().to_string()],|row|row.get(0))?;

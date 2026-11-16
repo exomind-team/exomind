@@ -1,5 +1,4 @@
 use super::{
-    model::*,
     projection::{State, ordered},
     store::{legacy_run_binding, load_nodes, store_state},
 };

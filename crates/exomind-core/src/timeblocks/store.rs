@@ -463,7 +463,59 @@ fn append(
     state.apply(node, &mut vec![])?;
     store_state(transaction, node.profile_id, state)?;
     refresh_deadline(transaction, node.profile_id, state, stamp)?;
+    crate::summaries::note_timeblock(transaction, node)?;
     Ok(())
+}
+
+pub(crate) fn summary_anchor(
+    connection: &Connection,
+    profile: ProfileId,
+    block: TimeblockId,
+) -> Result<crate::summaries::BlockAnchor, CoreError> {
+    let projected = state(connection, profile)?;
+    let current = projected
+        .blocks
+        .get(&block.to_string())
+        .ok_or(CoreError::SummaryBlocked("unknown block"))?;
+    let nodes = {
+        let mut query=connection.prepare("SELECT CASE WHEN length(CAST(e.body AS BLOB))<=?3 THEN e.body END FROM summary_block_sources s JOIN events e ON e.event_id=s.event_id WHERE s.profile_id=?1 AND s.block_id=?2 ORDER BY e.local_seq LIMIT 1002")?;
+        let rows = query.query_map(
+            params![
+                profile.to_string(),
+                block.to_string(),
+                crate::MAX_FACT_BYTES
+            ],
+            |r| r.get::<_, Option<String>>(0),
+        )?;
+        let mut nodes = vec![];
+        for row in rows {
+            if nodes.len() > 1000 {
+                return Err(CoreError::SummaryBlocked("block_history_limit"));
+            }
+            let node: TimeblockNodeRecord =
+                serde_json::from_str(&row?.ok_or(CoreError::RecoveryRequired)?)?;
+            if node.profile_id != profile || node.computed_digest()? != node.digest {
+                return Err(CoreError::RecoveryRequired);
+            }
+            nodes.push(node);
+        }
+        nodes
+    };
+    let creators=nodes.iter().filter(|node|matches!(&node.payload,TimeblockPayload::Action{action:TimeblockAction::Start{block_id,..}}if *block_id==block)||matches!(&node.payload,TimeblockPayload::Action{action:TimeblockAction::Rotate{next,..}}if next.block_id==block)).collect::<Vec<_>>();
+    if creators.len() != 1 {
+        return Err(CoreError::SummaryBlocked("ambiguous block creator"));
+    }
+    let creator = creators[0];
+    let end=nodes.iter().filter(|node|matches!(&node.payload,TimeblockPayload::Action{action:TimeblockAction::SubmitFeedback{block_id,..}}if *block_id==block)).map(|node|node.effective_at_ms).min();
+    Ok(crate::summaries::BlockAnchor {
+        creator_event_id: creator.event_id,
+        creator_device_id: creator.device_id,
+        from_ms: creator.effective_at_ms,
+        to_ms: end
+            .unwrap_or(creator.effective_at_ms)
+            .max(creator.effective_at_ms),
+        eligible: current.phase == TimeblockPhase::Completed && end.is_some(),
+    })
 }
 
 fn command_hash(context: &WriterContext, input: &TimeblockCommand) -> Result<String, CoreError> {
@@ -768,7 +820,7 @@ impl Core {
         self.check_scope(context, profile)?;
         let connection = self.connection()?;
         let (highwater, through, before) = page_bounds(&connection, profile, query)?;
-        let mut statement=connection.prepare("SELECT local_seq,kind,body FROM events WHERE profile_id=?1 AND local_seq<=?2 AND (?3 IS NULL OR local_seq<?3) AND (?4 IS NULL OR instr(body,?4)>0) ORDER BY local_seq DESC LIMIT ?5")?;
+        let mut statement=connection.prepare("SELECT local_seq,kind,body FROM events WHERE profile_id=?1 AND kind IN ('capture','timeblock/1','summary/1') AND local_seq<=?2 AND (?3 IS NULL OR local_seq<?3) AND (?4 IS NULL OR instr(body,?4)>0) ORDER BY local_seq DESC LIMIT ?5")?;
         let rows = statement.query_map(
             params![
                 profile.to_string(),
@@ -800,6 +852,11 @@ impl Core {
                     let mut node: TimeblockNodeRecord = serde_json::from_str(&body)?;
                     node.local_seq = seq;
                     items.push(TimelineItem::Timeblock(node));
+                }
+                "summary/1" => {
+                    let mut artifact: crate::SummaryArtifactRecord = serde_json::from_str(&body)?;
+                    artifact.local_seq = seq;
+                    items.push(TimelineItem::Summary(artifact));
                 }
                 _ => return Err(CoreError::InvalidTimeblockHistory),
             }

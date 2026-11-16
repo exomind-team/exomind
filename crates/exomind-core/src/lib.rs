@@ -13,6 +13,7 @@ mod original_query;
 mod originals;
 mod replication;
 mod store;
+mod summaries;
 mod timeblocks;
 
 pub use identity::{
@@ -31,14 +32,31 @@ pub use replication::{
 };
 use serde::{Deserialize, Serialize};
 pub use store::Core;
-pub const CORE_SCHEMA_VERSION: i64 = 5;
+pub const CORE_SCHEMA_VERSION: i64 = 6;
 /// Durable UTF-8 JSON fact encoding, independent of the smaller wire-page
 /// budget. Includes worst-case escaping of all existing capture input limits.
 pub const MAX_FACT_BYTES: usize = 2 * 1024 * 1024;
+pub use summaries::*;
 pub use timeblocks::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
+    #[error("invalid summary: {0}")]
+    InvalidSummary(&'static str),
+    #[error("summary task does not exist")]
+    UnknownSummaryTask,
+    #[error("summary owner/run/control heads changed")]
+    SummaryConflict,
+    #[error("summary control requires human authority")]
+    SummaryControlDenied,
+    #[error("summary execution belongs to another device")]
+    SummaryNotOwner,
+    #[error("summary task is blocked: {0}")]
+    SummaryBlocked(&'static str),
+    #[error("summary executor is stopped")]
+    SummaryExecutorStopped,
+    #[error("summary execution ticket is stale")]
+    StaleSummaryTicket,
     #[error("an absolute, independent data root is required")]
     InvalidRoot,
     #[error("data root contains foreign files")]

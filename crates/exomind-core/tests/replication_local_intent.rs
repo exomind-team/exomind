@@ -84,6 +84,8 @@ fn rechain(page: &mut OriginPage) {
         match &mut entry.fact {
             ReplicatedFact::Capture(v) => v.digest = v.computed_digest().unwrap(),
             ReplicatedFact::Timeblock(v) => v.digest = v.computed_digest().unwrap(),
+            ReplicatedFact::SummaryJob(v) => v.digest = v.computed_digest().unwrap(),
+            ReplicatedFact::Summary(v) => v.digest = v.computed_digest().unwrap(),
         }
         entry.origin_seq = previous.seq + 1;
         entry.chain_hash = format!(

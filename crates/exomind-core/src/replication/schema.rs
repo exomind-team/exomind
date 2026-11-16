@@ -162,6 +162,54 @@ pub(crate) fn validate_schema(transaction: &Transaction<'_>) -> Result<(), CoreE
     }
     Ok(())
 }
+
+fn summary_objects() -> Vec<(&'static str, &'static str, String)> {
+    OBJECTS
+        .iter()
+        .map(|(kind, name, sql)| {
+            (
+                *kind,
+                *name,
+                if *name == "origin_entries" {
+                    sql.replace(
+                        "'capture/1','capture/2','timeblock/1'",
+                        "'capture/1','capture/2','timeblock/1','summary_job/1','summary/1'",
+                    )
+                } else {
+                    sql.to_string()
+                },
+            )
+        })
+        .collect()
+}
+/// Only widens the accepted fact-kind domain. Existing rowids, canonical
+/// bodies, origin sequence numbers and hashes are copied byte-for-byte.
+pub(crate) fn migrate_summary_facts(tx: &Transaction<'_>) -> Result<(), CoreError> {
+    tx.execute_batch("ALTER TABLE origin_entries RENAME TO origin_entries_schema5;")?;
+    let objects = summary_objects();
+    tx.execute_batch(
+        &objects
+            .iter()
+            .find(|(_, name, _)| *name == "origin_entries")
+            .ok_or(CoreError::RecoveryRequired)?
+            .2,
+    )?;
+    tx.execute_batch("INSERT INTO origin_entries(rowid,profile_id,origin_device,restoration_epoch,origin_seq,event_id,fact_type,digest,chain_hash) SELECT rowid,profile_id,origin_device,restoration_epoch,origin_seq,event_id,fact_type,digest,chain_hash FROM origin_entries_schema5; DROP TABLE origin_entries_schema5;")?;
+    validate_summary_schema(tx)
+}
+pub(crate) fn validate_summary_schema(tx: &Transaction<'_>) -> Result<(), CoreError> {
+    let objects = summary_objects();
+    let refs = objects
+        .iter()
+        .map(|(kind, name, sql)| (*kind, *name, sql.as_str()))
+        .collect::<Vec<_>>();
+    validate_objects(tx, &refs)?;
+    let valid:bool=tx.query_row("SELECT count(*)=1 AND COALESCE(sum(singleton=1 AND layout_revision=1),0)=1 FROM replication_layout",[],|r|r.get(0))?;
+    if !valid {
+        return Err(CoreError::RecoveryRequired);
+    }
+    Ok(())
+}
 pub(crate) fn validate_objects(
     connection: &Connection,
     objects: &[(&str, &str, &str)],
