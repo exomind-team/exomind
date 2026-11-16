@@ -45,6 +45,7 @@ pub struct SummaryModelConfiguration {
     pub has_api_key: bool,
     pub max_output_tokens: u32,
     pub timeout_ms: u64,
+    pub include_suggestions: bool,
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -69,6 +70,8 @@ pub struct SummaryModelConfigurationCommand {
     pub api_key: SummaryModelSecretUpdate,
     pub max_output_tokens: u32,
     pub timeout_ms: u64,
+    #[serde(default)]
+    pub include_suggestions: bool,
 }
 
 pub(crate) struct StoredConfiguration {
@@ -78,6 +81,14 @@ pub(crate) struct StoredConfiguration {
     command_digest: String,
 }
 impl StoredConfiguration {
+    pub(crate) fn for_worker(value: &Self) -> Self {
+        Self {
+            revision: value.revision,
+            enabled: value.enabled,
+            settings: value.settings.clone(),
+            command_digest: value.command_digest.clone(),
+        }
+    }
     pub fn view(&self, profile: ProfileId) -> SummaryModelConfiguration {
         SummaryModelConfiguration {
             profile_id: profile,
@@ -88,6 +99,7 @@ impl StoredConfiguration {
             has_api_key: self.settings.api_key.is_some(),
             max_output_tokens: self.settings.max_output_tokens,
             timeout_ms: self.settings.timeout_ms,
+            include_suggestions: self.settings.include_suggestions,
         }
     }
     /// Non-secret revision binding. Never publish a hash of the API key.
@@ -110,6 +122,7 @@ fn blank(profile: ProfileId) -> SummaryModelConfiguration {
         has_api_key: false,
         max_output_tokens: 2048,
         timeout_ms: 60000,
+        include_suggestions: false,
     }
 }
 fn unavailable<T>(_: T) -> HostError {
@@ -357,11 +370,12 @@ fn save(
         api_key: key,
         max_output_tokens: command.max_output_tokens,
         timeout_ms: command.timeout_ms,
+        include_suggestions: command.include_suggestions,
     };
     settings
         .endpoint()
         .map_err(|_| HostError::ModelConfigurationInvalid)?;
-    let raw=serde_json::to_string(&serde_json::json!({"base_url":settings.base_url,"model":settings.model,"api_key":settings.api_key,"max_output_tokens":settings.max_output_tokens,"timeout_ms":settings.timeout_ms})).map_err(unavailable)?;
+    let raw=serde_json::to_string(&serde_json::json!({"base_url":settings.base_url,"model":settings.model,"api_key":settings.api_key,"max_output_tokens":settings.max_output_tokens,"timeout_ms":settings.timeout_ms,"include_suggestions":settings.include_suggestions})).map_err(unavailable)?;
     if raw.len() > MAX_JSON {
         return Err(HostError::ModelConfigurationInvalid);
     }

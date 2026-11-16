@@ -35,6 +35,7 @@ fn settings(base: &str) -> SummaryProviderSettings {
         api_key: Some("synthetic-key".into()),
         max_output_tokens: 2048,
         timeout_ms: 5000,
+        include_suggestions: false,
     }
 }
 fn input() -> ModelInput {
@@ -235,6 +236,26 @@ async fn chunked_body_without_content_length_has_a_real_byte_limit() {
             .unwrap_err(),
         ModelCallError::ResponseTooLarge
     );
+}
+
+#[tokio::test]
+async fn response_lost_after_request_is_not_automatically_retryable() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = [0; 8192];
+        socket.read(&mut request).await.unwrap();
+        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 10000\r\nConnection: close\r\n\r\n{").await.unwrap();
+    });
+    let server = Server { base, task };
+    let (_keep, cancel) = watch::channel(false);
+    let error = complete(&settings(&server.base), &input(), cancel)
+        .await
+        .unwrap_err();
+    assert_eq!(error, ModelCallError::ExternalOutcomeUnknown);
+    assert!(!error.retryable());
 }
 
 #[tokio::test]

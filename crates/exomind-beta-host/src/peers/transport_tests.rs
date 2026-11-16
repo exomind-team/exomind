@@ -38,6 +38,44 @@ fn key_path(root: &Path) -> std::path::PathBuf {
     root.join(identity::DIRECTORY).join("identity.sqlite3")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OwnedTransportState {
+    jobs: usize,
+    listener: bool,
+    permits: usize,
+    cancelled: bool,
+    producer_closed: bool,
+}
+fn owned_transport_state(host: &BetaHost, listener: &PeerTransportListener) -> OwnedTransportState {
+    let counts = host.peers.counts.lock().unwrap();
+    OwnedTransportState {
+        jobs: counts.jobs,
+        listener: counts.listener,
+        permits: host.peers.connections.available_permits(),
+        cancelled: host.peers.cancel.is_cancelled(),
+        producer_closed: listener.accepted.is_closed(),
+    }
+}
+async fn wait_owned_transport_state(
+    host: &BetaHost,
+    listener: &PeerTransportListener,
+    phase: &'static str,
+    expected: OwnedTransportState,
+) {
+    let result = tokio::time::timeout(Duration::from_secs(2), async {
+        while owned_transport_state(host, listener) != expected {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await;
+    assert!(
+        result.is_ok(),
+        "{phase}: scoped transport did not reach {expected:?}; current={:?}; endpoint={}",
+        owned_transport_state(host, listener),
+        listener.addr(),
+    );
+}
+
 #[test]
 fn peer_identity_survives_restart_and_rejects_non_owner_or_old_runtime() {
     let (root, host, owner) = host();
@@ -393,13 +431,32 @@ async fn peer_handshake_timeout_cancel_and_stop_drain_owned_sockets() {
         a.listen_peer_transport(&owner, address(), quick).await,
         Err(HostError::PeerBusy)
     ));
-    let idle_tcp = TcpStream::connect(retained_address).await.unwrap();
+    let idle_tcp =
+        tokio::time::timeout(Duration::from_secs(2), TcpStream::connect(retained_address))
+            .await
+            .expect("idle client connection deadline")
+            .unwrap();
     let failure = listener.accept(PeerCancellation::new()).await;
     assert!(matches!(
         failure,
         Err(HostError::PeerTls) | Err(HostError::PeerTimeout)
     ));
     drop(idle_tcp);
+    // An accept timeout can precede the worker's failure report/drop. Retire
+    // that first connection before attributing the next lease to stalled.
+    wait_owned_transport_state(
+        &a,
+        &listener,
+        "first idle handshake lease returned",
+        OwnedTransportState {
+            jobs: 1,
+            listener: true,
+            permits: super::super::MAX_CONNECTIONS,
+            cancelled: false,
+            producer_closed: false,
+        },
+    )
+    .await;
     let cancelled = PeerCancellation::new();
     cancelled.cancel();
     assert!(matches!(
@@ -407,13 +464,70 @@ async fn peer_handshake_timeout_cancel_and_stop_drain_owned_sockets() {
         Err(HostError::PeerCancelled)
     ));
     // A live unauthenticated handshake is owned and drained by stop as well.
-    let _stalled = TcpStream::connect(retained_address).await.unwrap();
+    let mut stalled =
+        tokio::time::timeout(Duration::from_secs(2), TcpStream::connect(retained_address))
+            .await
+            .expect("stalled client connection deadline")
+            .unwrap();
+    let stalled_tuple = (stalled.local_addr().unwrap(), stalled.peer_addr().unwrap());
+    assert_eq!(stalled_tuple.1, retained_address);
+    wait_owned_transport_state(
+        &a,
+        &listener,
+        "stalled handshake accepted by this host",
+        OwnedTransportState {
+            jobs: 2,
+            listener: true,
+            permits: super::super::MAX_CONNECTIONS - 1,
+            cancelled: false,
+            producer_closed: false,
+        },
+    )
+    .await;
     stop(a.clone()).await;
     assert!(matches!(
         listener.accept(PeerCancellation::new()).await,
         Err(HostError::Stopped)
     ));
-    assert!(TcpStream::connect(retained_address).await.is_err());
+    // This receiver belongs to THIS listener actor and its handshake workers.
+    // All producers close only when those tasks exit, after the actor's
+    // explicit drop(socket) then drop(lease). Together with returned permits
+    // and EOF/reset on the original connected socket, this proves scoped
+    // closure without guessing who may now occupy the former numeric port.
+    // The earlier bare-connect failure has not established port reuse as its
+    // cause; don't contact an unowned endpoint to infer this actor's lifetime.
+    wait_owned_transport_state(
+        &a,
+        &listener,
+        "stop drained this listener and its owned sockets",
+        OwnedTransportState {
+            jobs: 0,
+            listener: false,
+            permits: super::super::MAX_CONNECTIONS,
+            cancelled: true,
+            producer_closed: true,
+        },
+    )
+    .await;
+    let mut byte = [0];
+    let closed = tokio::time::timeout(Duration::from_secs(2), stalled.read(&mut byte))
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "original stalled socket {stalled_tuple:?} stayed open after stop; state={:?}",
+                owned_transport_state(&a, &listener),
+            )
+        });
+    assert!(
+        matches!(&closed, Ok(0))
+            || matches!(&closed, Err(error) if matches!(error.kind(),
+                std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::NotConnected)),
+        "original stalled socket {stalled_tuple:?} did not close: {closed:?}; state={:?}",
+        owned_transport_state(&a, &listener),
+    );
     let reopened = BetaHost::open(root.path()).unwrap();
     assert_eq!(
         reopened

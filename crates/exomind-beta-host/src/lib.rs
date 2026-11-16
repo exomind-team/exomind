@@ -6,6 +6,9 @@ mod local_sources;
 mod model_config;
 mod model_config_http;
 mod model_provider;
+mod summary_jobs;
+mod summary_jobs_http;
+mod summary_material;
 pub use local_sources::{
     LocalSourceBegin, LocalSourceInfo, LocalSourceState, MAX_LOCAL_SOURCE_BYTES,
     MAX_LOCAL_SOURCE_CHUNK_BYTES,
@@ -13,6 +16,7 @@ pub use local_sources::{
 pub use model_config::{
     SummaryModelConfiguration, SummaryModelConfigurationCommand, SummaryModelSecretUpdate,
 };
+pub use summary_jobs::SummaryServiceStatus;
 #[cfg(test)]
 mod original_tests;
 mod originals;
@@ -234,6 +238,7 @@ pub struct HostCapabilities {
     pub max_original_chunk_bytes: usize,
     pub timeblocks: bool,
     pub typed_timeline: bool,
+    pub summary_jobs: bool,
 }
 
 struct Resources {
@@ -260,6 +265,7 @@ pub struct BetaHost {
     peers: std::sync::Arc<peers::Runtime>,
     clock: std::sync::Arc<dyn HostClock>,
     services: std::sync::Arc<timeblocks::Services>,
+    summary_jobs: std::sync::Arc<summary_jobs::Services>,
     #[cfg(test)]
     capture_admitted: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
@@ -313,6 +319,7 @@ impl BetaHost {
             peers: std::sync::Arc::new(peers::Runtime::default()),
             clock,
             services: std::sync::Arc::new(timeblocks::Services::default()),
+            summary_jobs: std::sync::Arc::new(summary_jobs::Services::default()),
             #[cfg(test)]
             capture_admitted: Mutex::new(None),
             gate: Mutex::new(State {
@@ -345,6 +352,7 @@ impl BetaHost {
     pub fn request_stop(&self) {
         self.accepting.store(false, Ordering::Release);
         self.services.request_stop();
+        self.summary_jobs.request_stop();
         self.peers.request_stop();
     }
 
@@ -365,6 +373,7 @@ impl BetaHost {
                 max_original_chunk_bytes: exomind_core::MAX_ORIGINAL_CHUNK_BYTES,
                 timeblocks: true,
                 typed_timeline: true,
+                summary_jobs: true,
             },
         })
     }
@@ -607,6 +616,8 @@ impl BetaHost {
         }
         self.verifications.cancel_all()?;
         self.source_jobs.cancel_all()?;
+        self.summary_jobs
+            .wait_stopped(deadline.saturating_duration_since(std::time::Instant::now()))?;
         self.services
             .wait_stopped(deadline.saturating_duration_since(std::time::Instant::now()))?;
         self.verifications

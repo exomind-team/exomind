@@ -25,6 +25,7 @@ fn command() -> SummaryModelConfigurationCommand {
         },
         max_output_tokens: 2048,
         timeout_ms: 60000,
+        include_suggestions: false,
     }
 }
 fn session(host: &BetaHost, owner: &Session, p: ProfileId, kind: GrantKind) -> Session {
@@ -51,12 +52,15 @@ fn owner_profile_config_persists_without_returning_or_replicating_keys() {
     let root = directory.path().join("host");
     let empty = host.summary_model_configuration(&owner, p).unwrap();
     assert!(!empty.enabled);
+    assert!(!empty.include_suggestions);
     assert!(empty.revision.is_none());
     assert!(!root.join(DATABASE).exists());
-    let input = command();
+    let mut input = command();
+    input.include_suggestions = true;
     let saved = host.configure_summary_model(&owner, p, &input).unwrap();
     assert_eq!(saved.revision, Some(input.command_id));
     assert!(saved.has_api_key);
+    assert!(saved.include_suggestions);
     let wire = serde_json::to_string(&saved).unwrap();
     assert!(!wire.contains("synthetic-private-key"));
     assert!(!wire.contains("\"api_key\""));
@@ -85,6 +89,7 @@ fn owner_profile_config_persists_without_returning_or_replicating_keys() {
     let after = restarted.summary_model_configuration(&owner, p).unwrap();
     assert_eq!(after.revision, saved.revision);
     assert!(after.has_api_key);
+    assert!(after.include_suggestions);
     let private = load(&root, device, p).unwrap().unwrap();
     assert_eq!(
         private.settings.api_key.as_deref(),

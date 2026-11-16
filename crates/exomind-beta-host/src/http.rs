@@ -40,6 +40,36 @@ struct FailureDetail {
 impl IntoResponse for HostError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::Core(CoreError::InvalidSummary(_)) => (
+                StatusCode::BAD_REQUEST,
+                "invalid_summary_request",
+                "Summary request is invalid",
+            ),
+            Self::Core(CoreError::UnknownSummaryTask) => (
+                StatusCode::NOT_FOUND,
+                "summary_not_found",
+                "Summary task or result was not found",
+            ),
+            Self::Core(CoreError::SummaryConflict) => (
+                StatusCode::CONFLICT,
+                "summary_conflict",
+                "Summary ownership or control changed; refresh before continuing",
+            ),
+            Self::Core(CoreError::SummaryControlDenied | CoreError::SummaryNotOwner) => (
+                StatusCode::FORBIDDEN,
+                "summary_forbidden",
+                "Summary control or execution is not permitted",
+            ),
+            Self::Core(CoreError::SummaryBlocked(_)) => (
+                StatusCode::CONFLICT,
+                "summary_blocked",
+                "Summary sources or control need attention before execution",
+            ),
+            Self::Core(CoreError::SummaryExecutorStopped | CoreError::StaleSummaryTicket) => (
+                StatusCode::CONFLICT,
+                "summary_stale",
+                "Summary execution is no longer current",
+            ),
             Self::ModelConfigurationInvalid => (
                 StatusCode::BAD_REQUEST,
                 "model_configuration_invalid",
@@ -455,6 +485,7 @@ fn router(host: Arc<BetaHost>, address: SocketAddr, frontend_origins: Vec<String
         .merge(crate::originals_http::router())
         .merge(crate::timeblocks_http::router())
         .merge(crate::model_config_http::router())
+        .merge(crate::summary_jobs_http::router())
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(middleware::from_fn_with_state(
             Boundary {

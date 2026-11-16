@@ -10,9 +10,12 @@ mod local_sources;
 mod overlay;
 #[path = "beta_native_peers.rs"]
 mod peer_commands;
+#[path = "beta_native_summaries.rs"]
+mod summary_commands;
 
 use exomind_beta_host::{
     BetaHost, DeadlineEnvelope, HostError, HostStatus, RunningServer, Session,
+    SummaryModelConfiguration, SummaryModelConfigurationCommand,
 };
 use exomind_core::{
     BeginStageCommand, CaptureCommand, CommandId, CoreError, EventPage, EventQuery, IntervalPage,
@@ -40,6 +43,40 @@ struct Failure {
 impl From<HostError> for Failure {
     fn from(error: HostError) -> Self {
         let (code, message) = match error {
+            HostError::Core(CoreError::InvalidSummary(_)) => {
+                ("invalid_summary_request", "回顾范围或操作内容无效")
+            }
+            HostError::Core(CoreError::UnknownSummaryTask) => {
+                ("summary_not_found", "回顾任务或结果不存在")
+            }
+            HostError::Core(CoreError::SummaryConflict) => {
+                ("summary_conflict", "回顾归属或状态已变化，请刷新后操作")
+            }
+            HostError::Core(CoreError::SummaryControlDenied | CoreError::SummaryNotOwner) => {
+                ("summary_forbidden", "当前会话无权控制或执行此回顾")
+            }
+            HostError::Core(CoreError::SummaryBlocked(_)) => {
+                ("summary_blocked", "回顾来源或归属需要处理，现有资料已保留")
+            }
+            HostError::Core(CoreError::SummaryExecutorStopped | CoreError::StaleSummaryTicket) => {
+                ("summary_stale", "此回顾执行已失效，旧结果不会发布")
+            }
+            HostError::ModelConfigurationInvalid => (
+                "model_configuration_invalid",
+                "请检查回顾模型的地址、模型名和密钥字段",
+            ),
+            HostError::ModelConfigurationConflict => (
+                "model_configuration_conflict",
+                "回顾模型设置已变化，请重新读取后保存",
+            ),
+            HostError::ModelConfigurationRecoveryRequired => (
+                "model_configuration_recovery_required",
+                "回顾模型设置需要恢复，本机记录仍可使用",
+            ),
+            HostError::ModelConfigurationUnavailable => (
+                "model_configuration_unavailable",
+                "回顾模型设置暂不能读取或保存，请稍后重试",
+            ),
             HostError::ClockUnavailable => (
                 "clock_unavailable",
                 "本机计时时钟暂不可用，未按未知时钟执行操作",
@@ -351,6 +388,37 @@ async fn beta_profiles(
 ) -> Result<Vec<ProfileInfo>, Failure> {
     trusted_window(&window, state.inner())?;
     work(state.inner(), |state| state.host.profiles(&state.owner)).await
+}
+
+#[tauri::command]
+async fn beta_summary_model_configuration(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+) -> Result<SummaryModelConfiguration, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .summary_model_configuration(&state.owner, profile_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_configure_summary_model(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    command: SummaryModelConfigurationCommand,
+) -> Result<SummaryModelConfiguration, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .configure_summary_model(&state.owner, profile_id, &command)
+    })
+    .await
 }
 
 // Private local UI storage: deliberately absent from the HTTP router and the
@@ -885,6 +953,16 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             overlay::beta_overlay_window,
             beta_status,
             beta_profiles,
+            beta_summary_model_configuration,
+            beta_configure_summary_model,
+            summary_commands::beta_summary_tasks,
+            summary_commands::beta_timeline_event,
+            summary_commands::beta_summary_task,
+            summary_commands::beta_summary_artifacts,
+            summary_commands::beta_request_summary,
+            summary_commands::beta_control_summary,
+            summary_commands::beta_summary_block_selection,
+            summary_commands::beta_summary_service_status,
             beta_read_local_intent,
             beta_write_local_intent,
             local_sources::beta_begin_local_source,

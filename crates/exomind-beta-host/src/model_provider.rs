@@ -19,6 +19,8 @@ pub(crate) struct SummaryProviderSettings {
     pub api_key: Option<String>,
     pub max_output_tokens: u32,
     pub timeout_ms: u64,
+    #[serde(default)]
+    pub include_suggestions: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -29,6 +31,7 @@ pub(crate) enum ModelCallError {
     Cancelled,
     Timeout,
     Unavailable,
+    ExternalOutcomeUnknown,
     RateLimited,
     Authentication,
     Rejected,
@@ -47,6 +50,20 @@ pub(crate) struct ModelInput {
     /// Frozen, explicitly scoped textual material only. Never paths or URLs to
     /// originals that a provider could fetch without a user's material choice.
     pub material: String,
+}
+pub(crate) fn request_body(
+    settings: &SummaryProviderSettings,
+    input: &ModelInput,
+) -> serde_json::Value {
+    serde_json::json!({
+        "model": settings.model,
+        "stream": false,
+        "max_tokens": settings.max_output_tokens,
+        "messages": [
+            {"role":"system","content":input.system},
+            {"role":"user","content":input.material}
+        ]
+    })
 }
 #[derive(Debug)]
 pub(crate) struct ModelReply {
@@ -100,8 +117,10 @@ fn network_error(error: reqwest::Error) -> ModelCallError {
     // in durable/user-facing errors; gateways may echo prompts and secrets.
     if error.is_timeout() {
         ModelCallError::Timeout
-    } else {
+    } else if error.is_connect() {
         ModelCallError::Unavailable
+    } else {
+        ModelCallError::ExternalOutcomeUnknown
     }
 }
 
@@ -164,15 +183,7 @@ pub(crate) async fn complete(
         .build()
         .map_err(|_| ModelCallError::InvalidConfiguration)?;
     let operation = async {
-        let mut request = client.post(endpoint).json(&serde_json::json!({
-            "model": settings.model,
-            "stream": false,
-            "max_tokens": settings.max_output_tokens,
-            "messages": [
-                {"role":"system","content":input.system},
-                {"role":"user","content":input.material}
-            ]
-        }));
+        let mut request = client.post(endpoint).json(&request_body(settings, input));
         if let Some(key) = &settings.api_key {
             request = request.bearer_auth(key);
         }
@@ -205,7 +216,7 @@ pub(crate) async fn complete(
         if value.choices.len() != 1
             || value.model.is_empty()
             || value.model.len() > 256
-            || value.id.as_ref().is_some_and(|id| id.len() > 1024)
+            || value.id.as_ref().is_some_and(|id| id.len() > 256)
         {
             return Err(ModelCallError::InvalidResponse);
         }

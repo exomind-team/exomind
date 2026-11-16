@@ -200,6 +200,18 @@ pub struct DeadlineEnvelope {
 }
 
 impl BetaHost {
+    pub fn timeline_event(
+        &self,
+        session: &Session,
+        profile: ProfileId,
+        event: exomind_core::EventId,
+    ) -> Result<Option<exomind_core::TimelineItem>, HostError> {
+        let state = self.active_state()?;
+        let r = resources(&state)?;
+        let authority = self.profile_authority(r, session, profile, false)?;
+        Ok(r.core
+            .read_timeline_event(&context(&r.core, &authority)?, profile, event)?)
+    }
     /// Native platform only: owner-scoped, all profiles, one Core read snapshot.
     /// This exposes reminder metadata, never a scheduler write context.
     pub fn local_deadline_alerts(
@@ -214,6 +226,9 @@ impl BetaHost {
         Ok(core.local_deadline_alerts(&core.local_scheduler(), &stamp)?)
     }
     pub fn start_services(self: &Arc<Self>) -> Result<ServiceStatus, HostError> {
+        // Do not nest Host's gate: the optional model worker admits itself
+        // before the scheduler below acquires that gate.
+        self.start_summary_services()?;
         let _gate = self.active_state()?;
         let mut state = self
             .services
