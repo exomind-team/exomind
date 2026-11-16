@@ -668,3 +668,137 @@ async fn real_http_summary_and_exact_source_routes_keep_profile_and_authority_bo
     );
     server.stop().await.unwrap();
 }
+
+/// Explicit opt-in only: no normal test run calls a real model or reads a
+/// developer's provider settings. All supplied material is generated below.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires explicit synthetic QA directory and model URL/ID"]
+async fn explicit_live_model_review_uses_only_synthetic_frozen_sources() {
+    let artifact = std::path::PathBuf::from(
+        std::env::var("EXOMIND_LIVE_MODEL_ARTIFACT_DIR")
+            .expect("explicit synthetic artifact directory required"),
+    );
+    assert!(
+        artifact.is_absolute() && !artifact.exists(),
+        "Live QA directory must be absolute and new"
+    );
+    std::fs::create_dir(&artifact).unwrap();
+    crate::storage::private_path(&artifact, true).unwrap();
+    std::fs::write(
+        artifact.join("synthetic-live-model.marker"),
+        b"Only generated synthetic material; no product response logging",
+    )
+    .unwrap();
+    let base = std::env::var("EXOMIND_LIVE_MODEL_URL").expect("explicit model base URL required");
+    let model = std::env::var("EXOMIND_LIVE_MODEL_ID").expect("explicit model ID required");
+    let key = std::env::var("EXOMIND_LIVE_MODEL_KEY")
+        .ok()
+        .filter(|key| !key.is_empty());
+    let host = Arc::new(BetaHost::open(&artifact.join("host")).unwrap());
+    let owner = host.owner_session().unwrap();
+    let p = ProfileId::new();
+    let q = ProfileId::new();
+    host.provision_profile(&owner, p, "Synthetic live-model P")
+        .unwrap();
+    host.provision_profile(&owner, q, "Synthetic excluded Q")
+        .unwrap();
+    let human = host.native_human_session(&owner, p).unwrap();
+    let other = host.native_human_session(&owner, q).unwrap();
+    host.capture(
+        &other,
+        &CaptureCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: q,
+            occurred_at_ms: 1794560000000,
+            text: "EXCLUDED_Q_MARKER_71c8".into(),
+            tags: vec![],
+            originals: vec![],
+        },
+    )
+    .unwrap();
+    let block = completed(&host, &human, p);
+    let selection = host.summary_block_selection(&human, p, block).unwrap();
+    let source_text = "合成验收事实：单元甲完成了三项校验，核对总数为42。合成反馈：记录保持完整；没有读取任何图像或音视频正文。";
+    host.capture(
+        &human,
+        &CaptureCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: p,
+            occurred_at_ms: selection.from_ms,
+            text: source_text.into(),
+            tags: vec!["synthetic-live-model".into()],
+            originals: vec![],
+        },
+    )
+    .unwrap();
+    host.configure_summary_model(
+        &owner,
+        p,
+        &SummaryModelConfigurationCommand {
+            command_id: Uuid::new_v4(),
+            expected_revision: None,
+            enabled: true,
+            base_url: base,
+            model,
+            api_key: match key {
+                Some(value) => SummaryModelSecretUpdate::Set { value },
+                None => SummaryModelSecretUpdate::Clear,
+            },
+            max_output_tokens: 8192,
+            timeout_ms: 60000,
+            include_suggestions: false,
+        },
+    )
+    .unwrap();
+    host.start_services().unwrap();
+    println!("Explicit synthetic live-model QA started; credentials and endpoint are not logged");
+    let end = Instant::now() + Duration::from_secs(150);
+    let mut last = Instant::now();
+    let final_task = loop {
+        let page = host.summary_tasks_page(&human, p, None, 25).unwrap();
+        if let Some(task) = page.items.into_iter().next() {
+            if matches!(
+                task.state,
+                SummaryState::Succeeded | SummaryState::Failed | SummaryState::Cancelled
+            ) {
+                break task;
+            }
+            if last.elapsed() > Duration::from_secs(5) {
+                println!("Synthetic live-model task state: {:?}", task.state);
+                last = Instant::now();
+            }
+        }
+        assert!(
+            Instant::now() < end,
+            "Finite live model QA deadline exceeded"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+    let artifacts = host
+        .summary_artifacts_page(&human, p, final_task.task_id, None, 25)
+        .unwrap();
+    let report = json!({"scope":"explicit synthetic BetaHost/Core/model worker; not Windows GUI or Android UI","core_schema":exomind_core::CORE_SCHEMA_VERSION,"profile_id":p,"task":final_task,"artifacts":artifacts,"expected_synthetic_text":source_text,"excluded_marker":"EXCLUDED_Q_MARKER_71c8","source_head":std::env::var("EXOMIND_VALIDATION_SOURCE").ok()});
+    std::fs::write(
+        artifact.join("result.json"),
+        serde_json::to_vec_pretty(&report).unwrap(),
+    )
+    .unwrap();
+    host.stop().unwrap();
+    println!(
+        "Synthetic live-model proof saved; task state: {:?}",
+        final_task.state
+    );
+    assert_eq!(
+        final_task.state,
+        SummaryState::Succeeded,
+        "Live model task did not complete; inspect the private proof's static failure code"
+    );
+    assert_eq!(artifacts.items.len(), 1);
+    let output = &artifacts.items[0].output;
+    assert!(!output.narrative.contains("EXCLUDED_Q_MARKER_71c8"));
+    assert!(!output.evidence.is_empty());
+    assert!(output.read_original_ids.is_empty());
+    assert!(!output.model.include_suggestions);
+}

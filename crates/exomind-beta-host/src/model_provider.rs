@@ -211,6 +211,24 @@ pub(crate) async fn complete(
             }
             body.extend_from_slice(&chunk);
         }
+        #[cfg(test)]
+        if let Ok(directory) = std::env::var("EXOMIND_LIVE_MODEL_ARTIFACT_DIR") {
+            let directory = std::path::PathBuf::from(directory);
+            // Explicit synthetic live QA only; never enabled in a product
+            // binary or ordinary tests, never capture headers/credentials.
+            if directory.is_absolute() && directory.join("synthetic-live-model.marker").is_file() {
+                use std::io::Write;
+                let target =
+                    directory.join(format!("provider-reply-{}.json", uuid::Uuid::new_v4()));
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(target)
+                {
+                    let _ = file.write_all(&body);
+                }
+            }
+        }
         let value: Completion =
             serde_json::from_slice(&body).map_err(|_| ModelCallError::InvalidResponse)?;
         if value.choices.len() != 1
