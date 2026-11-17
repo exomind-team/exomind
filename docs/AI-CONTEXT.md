@@ -98,6 +98,7 @@ src-tauri/        # Rust 后端（Tauri 2.0）
 | 前端 UI 统一规范 | [docs/development/ui-spec.md](development/ui-spec.md) |
 | Alpha UI/UX 复用与 Beta 前端指导 | [Alpha UI/UX 参考](development/alpha-ui-ux-reference.md) |
 | Beta 当前核心缺陷/P1推进 | [核心缺陷优先迭代](plans/2026-11-17-v0.6-beta-core-first-iteration.md) |
+| Beta11当前暂停交接/交付/未决项 | [暂停交接](plans/2026-11-17-beta11-paused-handoff.md) |
 | Beta 多来源历史、证明、ACK与闲置判变 | [多来源复制合同](development/beta-multiorigin-sync.md) |
 | Beta 本机性能/运行诊断面板 | [观测面板设计](plans/2026-11-17-beta-observability-ui-design.md) |
 | Beta 性能实测、能耗边界与包体 | [性能调查与父代理续测](research/2026-11-17-beta-performance-investigation.md) |
