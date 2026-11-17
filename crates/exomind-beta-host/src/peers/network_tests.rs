@@ -373,6 +373,16 @@ async fn until_hint(
 async fn pair_hosts(a: &Arc<BetaHost>, oa: &Session, b: &Arc<BetaHost>, ob: &Session) -> ProfileId {
     let p = ProfileId::new();
     a.provision_profile(oa, p, "same native profile").unwrap();
+    pair_into_profile(a, oa, b, ob, p).await;
+    p
+}
+async fn pair_into_profile(
+    a: &Arc<BetaHost>,
+    oa: &Session,
+    b: &Arc<BetaHost>,
+    ob: &Session,
+    p: ProfileId,
+) {
     let mut listener = a
         .listen_peer_transport(oa, "127.0.0.1:0".parse().unwrap(), transport_options())
         .await
@@ -425,7 +435,262 @@ async fn pair_hosts(a: &Arc<BetaHost>, oa: &Session, b: &Arc<BetaHost>, ob: &Ses
     })
     .await
     .unwrap();
-    p
+}
+
+async fn serve_only(
+    host: &Arc<BetaHost>,
+    owner: &Session,
+) -> (SocketAddr, PeerCancellation, tokio::task::JoinHandle<()>) {
+    let mut listener = host
+        .listen_peer_transport(owner, "127.0.0.1:0".parse().unwrap(), transport_options())
+        .await
+        .unwrap();
+    let address = listener.addr();
+    let cancel = PeerCancellation::new();
+    let stop = cancel.clone();
+    let host = host.clone();
+    let owner = owner.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            match listener.accept(stop.clone()).await {
+                Ok(channel) => {
+                    host.accept_peer_service(&owner, channel).await.unwrap();
+                }
+                Err(HostError::PeerTimeout) => {}
+                Err(HostError::PeerCancelled) => break,
+                Err(error) => panic!("owned service listener: {error}"),
+            }
+        }
+    });
+    (address, cancel, task)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn no_discovery_memo_detects_received_origin_on_either_endpoint() {
+    let (_ra, a, oa) = host();
+    let (_rb, b, ob) = host();
+    let (_rc, c, oc) = host();
+    let (_rd, d, od) = host();
+    let p = pair_hosts(&a, &oa, &b, &ob).await;
+    pair_into_profile(&a, &oa, &c, &oc, p).await;
+    // A owns the B/C join edges; C can invite a fresh D. Do not replace C's
+    // existing issuer binding to manufacture a B<->C pair for this fixture.
+    pair_into_profile(&c, &oc, &d, &od, p).await;
+    let (address, stop_a, service_a) = serve_only(&a, &oa).await;
+    let (local, stop_c, service_c) = serve_only(&c, &oc).await;
+    // Exercise the actual worker's finite memo path with real service
+    // endpoints, but without a discovery reactor or automatic forced jobs.
+    let controller = PeerNetwork::new(c.clone(), oc.clone()).unwrap();
+    controller.shared.lock().unwrap().addresses = vec![local];
+    let worker = controller.worker();
+    let route = Route {
+        profile: p,
+        device: a.device_id,
+        endpoints: vec![address],
+    };
+    let pin = a.device_identity(&oa).unwrap().fingerprint_sha256;
+    let mut memo = None;
+    for _ in 0..4 {
+        let value = worker
+            .transfer_attempt(
+                &route,
+                &pin,
+                PeerCancellation::new(),
+                0,
+                c.local_history_fingerprint(&oc, p).unwrap(),
+                memo.clone(),
+                false,
+            )
+            .await
+            .unwrap();
+        match value {
+            Some(value) => memo = Some(value),
+            None => break,
+        }
+    }
+    assert!(memo.as_ref().is_some_and(|m| m.events_complete));
+    let idle = worker
+        .transfer_attempt(
+            &route,
+            &pin,
+            PeerCancellation::new(),
+            0,
+            c.local_history_fingerprint(&oc, p).unwrap(),
+            memo.clone(),
+            false,
+        )
+        .await
+        .unwrap();
+    assert!(
+        idle.is_none(),
+        "unchanged history must retain the cheap probe path"
+    );
+    let own_a = a.local_origin_state(&oa, p).unwrap();
+    let own_c = c.local_origin_state(&oc, p).unwrap();
+    record(
+        &b,
+        &ob,
+        p,
+        "B history reaches the hub without a hub-authored fact",
+    );
+    let channel = b
+        .connect_peer_transport(
+            &ob,
+            address,
+            PeerPin::from_sha256(&pin).unwrap(),
+            transport_options(),
+            PeerCancellation::new(),
+        )
+        .await
+        .unwrap();
+    b.select_peer_service(
+        &ob,
+        &channel,
+        PeerServiceKind::Sync,
+        Some(p),
+        Some(a.device_id),
+        0,
+    )
+    .await
+    .unwrap();
+    b.synchronize_peer_profile_over_transport(
+        &ob,
+        p,
+        a.device_id,
+        channel,
+        PeerSyncOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(a.local_origin_state(&oa, p).unwrap(), own_a);
+    assert_eq!(c.local_origin_state(&oc, p).unwrap(), own_c);
+    let pull = worker
+        .transfer_attempt(
+            &route,
+            &pin,
+            PeerCancellation::new(),
+            0,
+            c.local_history_fingerprint(&oc, p).unwrap(),
+            memo.clone(),
+            false,
+        )
+        .await
+        .unwrap();
+    let arrived = facts(&c, &oc, p) == facts(&b, &ob, p);
+    if let Some(value) = pull.clone() {
+        memo = Some(value);
+    }
+    // Settle the frozen inventory memo again before introducing an update
+    // only at the local endpoint. All three memberships existed beforehand.
+    let mut local_forwarded = false;
+    if arrived {
+        for _ in 0..4 {
+            match worker
+                .transfer_attempt(
+                    &route,
+                    &pin,
+                    PeerCancellation::new(),
+                    0,
+                    c.local_history_fingerprint(&oc, p).unwrap(),
+                    memo.clone(),
+                    false,
+                )
+                .await
+                .unwrap()
+            {
+                Some(value) => memo = Some(value),
+                None => break,
+            }
+        }
+        assert!(
+            worker
+                .transfer_attempt(
+                    &route,
+                    &pin,
+                    PeerCancellation::new(),
+                    0,
+                    c.local_history_fingerprint(&oc, p).unwrap(),
+                    memo.clone(),
+                    false
+                )
+                .await
+                .unwrap()
+                .is_none()
+        );
+        record(
+            &d,
+            &od,
+            p,
+            "D history reaches only C while C's own origin stays fixed",
+        );
+        let local_pin = c.device_identity(&oc).unwrap().fingerprint_sha256;
+        let channel = d
+            .connect_peer_transport(
+                &od,
+                local,
+                PeerPin::from_sha256(&local_pin).unwrap(),
+                transport_options(),
+                PeerCancellation::new(),
+            )
+            .await
+            .unwrap();
+        d.select_peer_service(
+            &od,
+            &channel,
+            PeerServiceKind::Sync,
+            Some(p),
+            Some(c.device_id),
+            0,
+        )
+        .await
+        .unwrap();
+        d.synchronize_peer_profile_over_transport(
+            &od,
+            p,
+            c.device_id,
+            channel,
+            PeerSyncOptions::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(facts(&a, &oa, p).len(), 1);
+        assert_eq!(a.local_origin_state(&oa, p).unwrap(), own_a);
+        assert_eq!(c.local_origin_state(&oc, p).unwrap(), own_c);
+        let push = worker
+            .transfer_attempt(
+                &route,
+                &pin,
+                PeerCancellation::new(),
+                0,
+                c.local_history_fingerprint(&oc, p).unwrap(),
+                memo.clone(),
+                false,
+            )
+            .await
+            .unwrap();
+        local_forwarded = push.is_some()
+            && facts(&a, &oa, p) == facts(&c, &oc, p)
+            && facts(&a, &oa, p).len() == 2;
+    }
+    // Cleanup before asserting the intended red condition.
+    stop_a.cancel();
+    stop_c.cancel();
+    service_a.await.unwrap();
+    service_c.await.unwrap();
+    drop(controller);
+    stopped(a).await;
+    stopped(b).await;
+    stopped(c).await;
+    stopped(d).await;
+    assert!(
+        pull.is_some() && arrived,
+        "remote third-origin progress was mistaken for unchanged own-origin state"
+    );
+    assert!(memo.is_some());
+    assert!(
+        local_forwarded,
+        "local third-origin progress was mistaken for unchanged own-origin state"
+    );
 }
 fn loopback(network: &PeerNetwork) -> SocketAddr {
     network
@@ -515,6 +780,95 @@ async fn native_owned_controllers_sync_without_ui_and_notice_new_local_or_remote
     drop(nb);
     stopped(a).await;
     stopped(b).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn idle_native_controllers_forward_third_origin_without_a_hub_local_write() {
+    // 8d49542c / 68e5bd54 / ac1dcc95 / 90d8bd80. No UI, manual refresh,
+    // forced synchronize or B<->C membership may make this regression pass.
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_ra, a, oa) = host();
+    let (_rb, b, ob) = host();
+    let (_rc, c, oc) = host();
+    let p = ProfileId::new();
+    a.provision_profile(&oa, p, "three native controllers")
+        .unwrap();
+    let na = PeerNetwork::new(a.clone(), oa.clone()).unwrap();
+    let nb = PeerNetwork::new(b.clone(), ob.clone()).unwrap();
+    let nc = PeerNetwork::new(c.clone(), oc.clone()).unwrap();
+    let invite = na.create_invitation(p).await.unwrap().invitation.unwrap();
+    nb.join(&invite, Uuid::new_v4()).await.unwrap();
+    let invite = na.create_invitation(p).await.unwrap().invitation.unwrap();
+    nc.join(&invite, Uuid::new_v4()).await.unwrap();
+    let initialized = tokio::time::timeout(Duration::from_secs(18), async {
+        loop {
+            let idle = [&na, &nb, &nc].iter().all(|n| {
+                n.status(p)
+                    .unwrap()
+                    .peers
+                    .iter()
+                    .all(|v| v.event_sync == "complete")
+            });
+            if idle {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+    })
+    .await
+    .is_ok();
+    let hub_before = a.local_origin_state(&oa, p).unwrap();
+    record(&b, &ob, p, "B changes after the idle memo was established");
+    let hub_received = tokio::time::timeout(Duration::from_secs(18), async {
+        while facts(&a, &oa, p).len() != 1 {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+    })
+    .await
+    .is_ok();
+    let forwarded = tokio::time::timeout(Duration::from_secs(18), async {
+        while facts(&c, &oc, p) != facts(&b, &ob, p) {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+    })
+    .await
+    .is_ok();
+    let hub_unchanged = a.local_origin_state(&oa, p).unwrap() == hub_before;
+    let no_pair = b
+        .peer_members(&ob, p)
+        .unwrap()
+        .iter()
+        .all(|m| m.device_id != c.device_id)
+        && c.peer_members(&oc, p)
+            .unwrap()
+            .iter()
+            .all(|m| m.device_id != b.device_id);
+    let snapshots = (
+        facts(&a, &oa, p).len(),
+        facts(&b, &ob, p).len(),
+        facts(&c, &oc, p).len(),
+    );
+    na.stop().await.unwrap();
+    nb.stop().await.unwrap();
+    nc.stop().await.unwrap();
+    drop((na, nb, nc));
+    stopped(a).await;
+    stopped(b).await;
+    stopped(c).await;
+    assert!(initialized, "initial idle snapshot did not settle");
+    assert!(hub_received, "B never reached its paired hub");
+    assert!(
+        hub_unchanged,
+        "test accidentally advanced the hub's own origin"
+    );
+    assert!(
+        no_pair,
+        "third-source forwarding must not create network membership"
+    );
+    assert!(
+        forwarded,
+        "third-origin history stayed behind an idle own-origin memo; fact counts {snapshots:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -62,6 +62,7 @@ struct Progress {
     last_seen: Option<i64>,
     observed_runtime: Option<Uuid>,
     observed_snapshot: Option<PeerSnapshot>,
+    observed_history_fingerprint: Option<String>,
 }
 struct Candidate {
     endpoint: SocketAddr,
@@ -429,7 +430,7 @@ impl PeerNetwork {
         let settings = self.host.peer_network_settings(&self.owner)?;
         let members = self.host.peer_members(&self.owner, profile)?;
         let routes = self.host.peer_routes(&self.owner)?;
-        let own = self.host.local_origin_state(&self.owner, profile)?;
+        let own = self.host.local_history_fingerprint(&self.owner, profile)?;
         let local_generation = members
             .iter()
             .find(|m| {
@@ -449,12 +450,14 @@ impl PeerNetwork {
                         m.events_complete
                             && Some(m.local_member_generation) == local_generation
                             && (!m.can_send
-                                || m.sent_snapshot
+                                || m.sent_history_fingerprint
                                     .as_ref()
-                                    .is_some_and(|s| s.origin == own.0 && s.head == own.1))
+                                    .is_some_and(|s| s == &own))
                             && (!m.can_receive
                                 || (m.peer_runtime_id == p.observed_runtime
-                                    && m.received_snapshot == p.observed_snapshot))
+                                    && m.received_history_fingerprint.as_ref().is_some_and(|s| {
+                                        Some(s) == p.observed_history_fingerprint.as_ref()
+                                    })))
                     })
             });
             let revoked = member.revoked;
@@ -859,6 +862,7 @@ impl Worker {
                     p.memo = Some(value.clone());
                     p.observed_runtime = value.peer_runtime_id;
                     p.observed_snapshot = value.received_snapshot.clone();
+                    p.observed_history_fingerprint = value.received_history_fingerprint.clone();
                     p.last_sync = Some(now());
                     p.last_seen = p.last_sync;
                     p.error = None;
@@ -935,6 +939,7 @@ impl Worker {
             if shared.generation == generation {
                 let p = shared.progress.entry(key).or_default();
                 p.observed_runtime = Some(probe.runtime_id);
+                p.observed_history_fingerprint = probe.history_fingerprint.clone();
                 p.observed_snapshot =
                     probe
                         .origin
@@ -993,7 +998,9 @@ impl Worker {
             return Err(HostError::PeerMembershipDenied);
         }
         let key = (route.profile, route.device);
-        let own = self.host.local_origin_state(&self.owner, route.profile)?;
+        let own = self
+            .host
+            .local_history_fingerprint(&self.owner, route.profile)?;
         let id = Uuid::new_v4();
         let memo = {
             let mut shared = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
@@ -1036,7 +1043,7 @@ impl Worker {
         pin: &str,
         cancel: PeerCancellation,
         generation: u64,
-        own: (exomind_core::OriginIdentity, exomind_core::OriginCursor),
+        own: String,
         memo: Option<PeerSyncResult>,
         force: bool,
     ) -> Result<Option<PeerSyncResult>, HostError> {
@@ -1056,11 +1063,10 @@ impl Worker {
                 if let Some(saved) = &memo {
                     if saved.events_complete
                         && (!saved.can_send
-                            || saved.sent_snapshot.as_ref()
-                                == Some(&PeerSnapshot {
-                                    origin: own.0.clone(),
-                                    head: own.1.clone(),
-                                }))
+                            || saved
+                                .sent_history_fingerprint
+                                .as_ref()
+                                .is_some_and(|s| s == &own))
                     {
                         if let Ok(channel) = self
                             .host
@@ -1093,16 +1099,12 @@ impl Worker {
                                     self.promote(route.profile, route.device, *endpoint)?;
                                     if saved.peer_runtime_id == Some(probe.runtime_id)
                                         && (!saved.can_receive
-                                            || saved.received_snapshot.as_ref()
-                                                == probe
-                                                    .origin
-                                                    .as_ref()
-                                                    .zip(probe.head.as_ref())
-                                                    .map(|(origin, head)| PeerSnapshot {
-                                                        origin: origin.clone(),
-                                                        head: head.clone(),
-                                                    })
-                                                    .as_ref())
+                                            || saved
+                                                .received_history_fingerprint
+                                                .as_ref()
+                                                .is_some_and(|s| {
+                                                    Some(s) == probe.history_fingerprint.as_ref()
+                                                }))
                                     {
                                         return Ok(None);
                                     }

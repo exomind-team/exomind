@@ -133,4 +133,20 @@ impl BetaHost {
             core.origin_checkpoint(&reader, profile)?,
         ))
     }
+    /// Bounded metadata-only hint for anti-entropy. Never a fact/proof ACK or
+    /// profile capability; a real transfer still requalifies every page.
+    pub fn local_history_fingerprint(
+        &self,
+        owner: &Session,
+        profile: ProfileId,
+    ) -> Result<String, HostError> {
+        let state = self.active_state()?;
+        self.owner(owner)?;
+        let core = &crate::resources(&state)?.core;
+        let reader = core.local_human(profile)?;
+        super::source_history::inventory_fingerprint(
+            profile,
+            &core.origin_inventory(&reader, profile, super::source_history::MAX_SOURCES)?,
+        )
+    }
 }

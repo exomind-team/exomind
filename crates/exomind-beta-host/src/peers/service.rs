@@ -3,7 +3,7 @@
 //! other services seal their profile scope before reading further input.
 use super::{
     OriginalTransferOptions, OriginalTransferResult, PeerChannel, PeerJoinStatus, PeerSyncOptions,
-    PeerSyncResult, authorization::PeerOriginState,
+    PeerSyncResult,
 };
 use crate::{BetaHost, HostError, Session};
 use exomind_core::{DeviceId, ProfileId};
@@ -41,6 +41,8 @@ pub struct PeerProbe {
     pub device_id: DeviceId,
     pub origin: Option<exomind_core::OriginIdentity>,
     pub head: Option<exomind_core::OriginCursor>,
+    #[serde(default)]
+    pub history_fingerprint: Option<String>,
 }
 pub enum PeerServiceOutcome {
     Joined(PeerJoinStatus),
@@ -235,8 +237,8 @@ impl BetaHost {
                 }
                 let permissions = self.peer_sync_permissions(&channel, &scope)?;
                 if matches!(header.service, PeerServiceKind::Probe) {
-                    let source: Option<PeerOriginState> = if permissions.send {
-                        Some(self.peer_origin_state(&channel, &scope)?)
+                    let source = if permissions.send {
+                        Some(self.peer_history_probe(&channel, &scope)?)
                     } else {
                         None
                     };
@@ -245,8 +247,9 @@ impl BetaHost {
                         runtime_id: self.runtime_id,
                         profile_id: profile,
                         device_id: self.device_id,
-                        origin: source.as_ref().map(|s| s.origin.clone()),
-                        head: source.map(|s| s.head),
+                        origin: source.as_ref().map(|s| s.0.clone()),
+                        head: source.as_ref().map(|s| s.1.clone()),
+                        history_fingerprint: source.map(|s| s.2),
                     };
                     channel
                         .send_frame(
@@ -325,6 +328,14 @@ impl BetaHost {
             || response.origin.is_some() != response.head.is_some()
         {
             return Err(HostError::PeerMembershipDenied);
+        }
+        if response.history_fingerprint.as_ref().is_some_and(|v| {
+            v.len() != 64
+                || !v
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        }) {
+            return Err(HostError::InvalidRequest);
         }
         if let Some(origin) = &response.origin {
             if origin.profile_id != profile

@@ -15,13 +15,16 @@ pub(super) struct PeerOriginState {
     pub origin: exomind_core::OriginIdentity,
     pub head: exomind_core::OriginCursor,
 }
-const SYNC_PROTOCOL: &str = "exomind-peer-sync/1";
+const SYNC_PROTOCOL: &str = "exomind-peer-sync/2";
 
 pub(super) enum PeerOperation {
     ReadTimeline,
     AppendFacts,
     ReadOriginals,
     MaterializeOriginals,
+    SendHistory,
+    ReceiveHistory,
+    SyncHealth,
 }
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,10 +35,11 @@ pub(super) struct PeerSyncPermissions {
 impl PeerOperation {
     fn permitted(&self, capabilities: PeerCapabilities) -> bool {
         match self {
-            Self::ReadTimeline => capabilities.read_timeline,
-            Self::AppendFacts => capabilities.append_facts,
+            Self::ReadTimeline | Self::SendHistory => capabilities.read_timeline,
+            Self::AppendFacts | Self::ReceiveHistory => capabilities.append_facts,
             Self::ReadOriginals => capabilities.read_originals,
             Self::MaterializeOriginals => true,
+            Self::SyncHealth => capabilities.read_timeline || capabilities.append_facts,
         }
     }
 }
@@ -129,71 +133,73 @@ impl BetaHost {
         })
     }
 
-    pub(super) fn peer_receive_cursor(
-        &self,
-        channel: &PeerChannel,
-        scope: &PeerProfileScope,
-        origin: &exomind_core::OriginIdentity,
-    ) -> Result<exomind_core::OriginCursor, HostError> {
-        self.with_peer_scope(
-            channel,
-            scope,
-            PeerOperation::AppendFacts,
-            |core, member| {
-                if origin.profile_id != member.profile_id || origin.device_id != member.device_id {
-                    return Err(HostError::PeerMembershipDenied);
-                }
-                let context = core.trusted_replica_context(
-                    member.profile_id,
-                    member.device_id,
-                    origin.restoration_epoch,
-                    member.generation,
-                )?;
-                Ok(core.replication_cursor(&context)?)
-            },
-        )
-    }
-
-    pub(super) fn peer_import_origin_page(
-        &self,
-        channel: &PeerChannel,
-        scope: &PeerProfileScope,
-        page: &exomind_core::OriginPage,
-    ) -> Result<exomind_core::ImportAck, HostError> {
-        self.with_peer_scope(
-            channel,
-            scope,
-            PeerOperation::AppendFacts,
-            |core, member| {
-                if page.origin.profile_id != member.profile_id
-                    || page.origin.device_id != member.device_id
-                {
-                    return Err(HostError::PeerMembershipDenied);
-                }
-                let context = core.trusted_replica_context(
-                    member.profile_id,
-                    member.device_id,
-                    page.origin.restoration_epoch,
-                    member.generation,
-                )?;
-                Ok(core.import_origin_page(&context, page)?)
-            },
-        )
-    }
-
-    pub(super) fn peer_export_origin_page(
+    pub(super) fn peer_export_signed_origin_page(
         &self,
         channel: &PeerChannel,
         scope: &PeerProfileScope,
         query: &exomind_core::OriginPageQuery,
-    ) -> Result<exomind_core::OriginPage, HostError> {
-        self.with_peer_scope(
+    ) -> Result<super::origin_proof::SignedOriginPage, HostError> {
+        self.with_peer_resources(
             channel,
             scope,
-            PeerOperation::ReadTimeline,
-            |core, member| {
-                let reader = core.local_human(member.profile_id)?;
-                Ok(core.export_origin_page(&reader, member.profile_id, query)?)
+            PeerOperation::SendHistory,
+            |resources, member| {
+                let identity = resources
+                    .peer_identity
+                    .as_deref()
+                    .ok_or(HostError::PeerIdentityRecoveryRequired)?;
+                super::origin_proof::export_local_page(
+                    identity,
+                    &resources.core,
+                    member.profile_id,
+                    query,
+                )
+            },
+        )
+    }
+
+    /// Direct source admission is the first signed seam. A foreign source
+    /// still needs explicit qualification before relay support can use it;
+    /// a valid signature under a supplied key alone is never that authority.
+    pub(super) fn peer_import_signed_origin_page(
+        &self,
+        channel: &PeerChannel,
+        scope: &PeerProfileScope,
+        signed: &super::origin_proof::SignedOriginPage,
+    ) -> Result<exomind_core::ImportAck, HostError> {
+        self.with_peer_resources(
+            channel,
+            scope,
+            PeerOperation::ReceiveHistory,
+            |resources, member| {
+                let origin = &signed.page.origin;
+                if origin.profile_id != member.profile_id
+                    || origin.device_id != member.device_id
+                    || signed.signer.device_id != member.device_id
+                    || signed.signer.fingerprint_sha256 != member.pin
+                {
+                    return Err(HostError::PeerMembershipDenied);
+                }
+                signed.verify_positions(origin, &signed.signer)?;
+                let key = exomind_core::OriginProvenanceKey {
+                    public_key_spki: signed.signer.spki_der.clone(),
+                    fingerprint_sha256: signed.signer.fingerprint_sha256.clone(),
+                };
+                let context = resources.core.trusted_verified_origin_context(
+                    member.profile_id,
+                    member.device_id,
+                    origin,
+                    member.generation,
+                    key,
+                )?;
+                Ok(resources.core.import_verified_origin_page(
+                    &context,
+                    &signed.page,
+                    &exomind_core::OriginPageProof {
+                        entry_signatures: signed.entry_signatures.clone(),
+                        through_signature: signed.through_signature.clone(),
+                    },
+                )?)
             },
         )
     }
@@ -293,7 +299,20 @@ impl BetaHost {
         {
             return Err(HostError::PeerMembershipDenied);
         }
+        if matches!(operation, PeerOperation::SendHistory)
+            && !qualified.local_capabilities.append_facts
+            || matches!(operation, PeerOperation::ReceiveHistory)
+                && !qualified.local_capabilities.read_timeline
+        {
+            return Err(HostError::PeerMembershipDenied);
+        }
         let member = qualified.remote;
+        if matches!(operation, PeerOperation::SyncHealth)
+            && !(qualified.local_capabilities.append_facts && member.capabilities.read_timeline
+                || qualified.local_capabilities.read_timeline && member.capabilities.append_facts)
+        {
+            return Err(HostError::PeerMembershipDenied);
+        }
         if !operation.permitted(member.capabilities) {
             return Err(HostError::PeerMembershipDenied);
         }

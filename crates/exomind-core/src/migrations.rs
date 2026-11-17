@@ -77,6 +77,7 @@ pub(crate) fn validate_backup_directory(path: &Path) -> Result<(), CoreError> {
             .or_else(|| name.strip_prefix("schema-4-"))
             .or_else(|| name.strip_prefix("schema-5-"))
             .or_else(|| name.strip_prefix("schema-6-"))
+            .or_else(|| name.strip_prefix("schema-7-"))
             .and_then(|name| name.strip_suffix(".sqlite3"))
             .ok_or(CoreError::ForeignRoot)?;
         if Uuid::parse_str(id)
@@ -287,7 +288,7 @@ fn initialize_transaction(
     let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
     let application: i64 =
         transaction.pragma_query_value(None, "application_id", |row| row.get(0))?;
-    if ![0, 1, 2, 3, 4, 5, 6, SCHEMA_VERSION].contains(&version) {
+    if ![0, 1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION].contains(&version) {
         return Err(CoreError::UnsupportedSchema(version));
     }
     if application != 0 && application != APPLICATION_ID {
@@ -386,6 +387,11 @@ fn initialize_transaction(
     } else {
         crate::external_summaries::validate_schema(&transaction)?;
         crate::replication::validate_agent_summary_schema(&transaction)?;
+    }
+    if version < 8 {
+        crate::replication::migrate_provenance(&transaction)?;
+    } else {
+        crate::replication::validate_provenance(&transaction)?;
     }
     if transaction
         .prepare("PRAGMA foreign_key_check")?

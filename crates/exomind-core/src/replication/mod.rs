@@ -2,11 +2,17 @@
 mod facts;
 mod ingest;
 mod origin;
+mod provenance;
 mod schema;
 mod transfer;
 use crate::{Core, CoreError, DeviceId, ProfileId};
 pub use facts::ReplicatedFact;
 pub(crate) use origin::{provision_local_origin, record_local_fact};
+pub use provenance::{
+    OriginPageProof, OriginProvenanceKey, OriginReceiveState, VerifiedOriginContext,
+    VerifiedOriginState,
+};
+pub(crate) use provenance::{migrate as migrate_provenance, validate as validate_provenance};
 pub(crate) use schema::{migrate, validate_objects, validate_schema};
 pub(crate) use schema::{migrate_agent_summary_facts, validate_agent_summary_schema};
 pub(crate) use schema::{migrate_summary_facts, validate_summary_schema};
@@ -28,6 +34,20 @@ pub struct OriginIdentity {
 pub struct OriginCursor {
     pub seq: u64,
     pub hash: String,
+}
+
+/// Bounded source inventory metadata, not an integrity attestation or member
+/// grant. Page export/import validates actual facts before they are transferred.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OriginSnapshot {
+    pub origin: OriginIdentity,
+    pub head: OriginCursor,
+    /// Read-only progress metadata, not a fresh signature verification. Local
+    /// origins are available through their own durable head; legacy received
+    /// data can have no retained proof, or a shorter authenticated prefix.
+    #[serde(default)]
+    pub verified_head: Option<OriginCursor>,
 }
 
 /// An in-process, direct-origin capability, never a request DTO. This carries

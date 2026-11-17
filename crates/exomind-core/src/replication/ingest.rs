@@ -379,12 +379,27 @@ pub(super) fn import_page(
     context: &ReplicaContext,
     page: &OriginPage,
 ) -> Result<ImportAck, CoreError> {
+    import_page_with_provenance(core, context, page, None)
+}
+
+pub(super) fn import_page_with_provenance(
+    core: &Core,
+    context: &ReplicaContext,
+    page: &OriginPage,
+    proof: Option<(&super::OriginProvenanceKey, &super::OriginPageProof)>,
+) -> Result<ImportAck, CoreError> {
     core.check_replica_context(context)?;
     validate_page(context, page)?;
     let mut connection = core.connection()?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut conflict = None;
-    match apply_page(&transaction, core, context, page, &mut conflict) {
+    let applied = apply_page(&transaction, core, context, page, &mut conflict).and_then(|ack| {
+        if let Some((key, proof)) = proof {
+            super::provenance::admit(&transaction, page, key, proof)?;
+        }
+        Ok(ack)
+    });
+    match applied {
         Ok(ack) => {
             transaction.commit()?;
             Ok(ack)

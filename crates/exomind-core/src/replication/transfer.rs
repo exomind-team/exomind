@@ -141,7 +141,24 @@ impl Core {
         profile: ProfileId,
         query: &OriginPageQuery,
     ) -> Result<OriginPage, CoreError> {
-        self.check_scope(context, profile)?;
+        let id = self.replication_identity(context, profile)?;
+        self.export_known_origin_page(context, &id, query)
+    }
+
+    /// Read an already materialized origin without changing its author, stream
+    /// positions or receipts. This is data access under the local profile
+    /// context, not relay authority: Host must authenticate portable origin
+    /// proofs and its current carrier/member scope before sending this page.
+    pub fn export_known_origin_page(
+        &self,
+        context: &WriterContext,
+        id: &OriginIdentity,
+        query: &OriginPageQuery,
+    ) -> Result<OriginPage, CoreError> {
+        self.check_scope(context, id.profile_id)?;
+        if id.restoration_epoch.is_nil() {
+            return Err(CoreError::InvalidReplication("invalid origin identity"));
+        }
         if query.limit == 0
             || query.limit > 100
             || query.max_bytes == 0
@@ -150,7 +167,32 @@ impl Core {
             return Err(CoreError::InvalidQuery("origin page budget"));
         }
         let connection = self.connection()?;
-        let id = origin::local_identity(&connection, profile, self.device_id())?;
+        let registered: Option<Option<String>> = if id.device_id == self.device_id() {
+            connection.query_row(
+                "SELECT CASE WHEN typeof(restoration_epoch)='text' AND length(restoration_epoch)=36 THEN restoration_epoch END FROM local_origin_epochs WHERE profile_id=?1",
+                [id.profile_id.to_string()], |row| row.get(0),
+            ).optional()?
+        } else {
+            connection.query_row(
+                "SELECT CASE WHEN typeof(restoration_epoch)='text' AND length(restoration_epoch)=36 THEN restoration_epoch END FROM accepted_origin_epochs WHERE profile_id=?1 AND origin_device=?2",
+                params![id.profile_id.to_string(), id.device_id.to_string()], |row| row.get(0),
+            ).optional()?
+        };
+        match registered {
+            None => {
+                let orphaned:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM origin_heads WHERE profile_id=?1 AND origin_device=?2) OR EXISTS(SELECT 1 FROM receive_cursors WHERE profile_id=?1 AND origin_device=?2)",params![id.profile_id.to_string(),id.device_id.to_string()],|row|row.get(0))?;
+                return Err(if orphaned || id.device_id == self.device_id() {
+                    CoreError::RecoveryRequired
+                } else {
+                    CoreError::InvalidReplication("unknown materialized origin")
+                });
+            }
+            Some(None) => return Err(CoreError::RecoveryRequired),
+            Some(Some(epoch)) if epoch != id.restoration_epoch.to_string() => {
+                return Err(CoreError::OriginEpochChanged);
+            }
+            Some(Some(_)) => {}
+        }
         let head = origin::head(&connection, &id)?;
         let through = query.through.clone().unwrap_or(head.clone());
         if through.seq > head.seq || cursor_at(&connection, &id, through.seq)? != through {
@@ -173,8 +215,8 @@ impl Core {
         };
         let mut statement=connection.prepare("SELECT origin_seq,CASE WHEN length(event_id)=36 THEN event_id END,CASE WHEN length(chain_hash)=64 THEN chain_hash END,CASE WHEN length(fact_type)<=16 THEN fact_type END,CASE WHEN length(digest)=64 THEN digest END FROM origin_entries WHERE profile_id=?1 AND origin_device=?2 AND restoration_epoch=?3 AND origin_seq>?4 AND origin_seq<=?5 ORDER BY origin_seq LIMIT ?6")?;
         let mut rows = statement.query(params![
-            profile.to_string(),
-            self.device_id().to_string(),
+            id.profile_id.to_string(),
+            id.device_id.to_string(),
             id.restoration_epoch.to_string(),
             page.from.seq,
             page.through.seq,
@@ -191,8 +233,8 @@ impl Core {
                 .ok_or(CoreError::RecoveryRequired)?;
             let fact = load_fact(&connection, event)?.ok_or(CoreError::RecoveryRequired)?;
             if seq != page.to.seq + 1
-                || fact.profile_id() != profile
-                || fact.device_id() != self.device_id()
+                || fact.profile_id() != id.profile_id
+                || fact.device_id() != id.device_id
                 || row.get::<_, Option<String>>(3)?.as_deref() != Some(fact.fact_type())
                 || row.get::<_, Option<String>>(4)?.as_deref() != Some(fact.digest())
                 || origin::entry_hash(

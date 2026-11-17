@@ -1,6 +1,9 @@
 use crate::{HostError, storage};
 use exomind_core::DeviceId;
-use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
+use ring::{
+    rand::SystemRandom,
+    signature::{ED25519, Ed25519KeyPair, UnparsedPublicKey},
+};
 use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
@@ -131,6 +134,14 @@ fn sync_directory(path: &Path) -> Result<(), HostError> {
     Ok(())
 }
 impl Identity {
+    pub(super) fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, HostError> {
+        self.certified
+            .key
+            .choose_scheme(&[rustls::SignatureScheme::ED25519])
+            .ok_or(HostError::PeerIdentityUnavailable)?
+            .sign(message)
+            .map_err(|_| HostError::PeerIdentityUnavailable)
+    }
     pub(crate) fn has_evidence(root: &Path) -> Result<bool, HostError> {
         Ok(exists(&root.join(DIRECTORY))? || exists(&root.join(INITIALIZED))?)
     }
@@ -332,4 +343,21 @@ impl Identity {
             certified: signing,
         })
     }
+}
+
+/// Public-key integrity only. Profile/member authority belongs to the Host gate.
+pub(super) fn verify_message(
+    signer: &DeviceIdentityInfo,
+    message: &[u8],
+    signature: &[u8],
+) -> Result<(), HostError> {
+    if !valid_spki(&signer.spki_der)
+        || fingerprint(&signer.spki_der) != signer.fingerprint_sha256
+        || signature.len() != 64
+    {
+        return Err(HostError::PeerMembershipDenied);
+    }
+    UnparsedPublicKey::new(&ED25519, &signer.spki_der[12..])
+        .verify(message, signature)
+        .map_err(|_| HostError::PeerMembershipDenied)
 }

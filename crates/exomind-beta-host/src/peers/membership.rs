@@ -7,7 +7,6 @@ mod types;
 use super::{Identity, PeerChannel, PeerPin, identity, membership_store as store};
 use crate::{BetaHost, HostError, Session};
 use exomind_core::{DeviceId, ProfileId};
-use ring::signature::{ED25519, UnparsedPublicKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 pub use types::*;
@@ -104,13 +103,7 @@ fn message<T: Serialize>(domain: &[u8], value: &T) -> Result<Vec<u8>, HostError>
     Ok(bytes)
 }
 fn sign<T: Serialize>(identity: &Identity, domain: &[u8], value: &T) -> Result<Vec<u8>, HostError> {
-    identity
-        .certified
-        .key
-        .choose_scheme(&[rustls::SignatureScheme::ED25519])
-        .ok_or(HostError::PeerIdentityUnavailable)?
-        .sign(&message(domain, value)?)
-        .map_err(|_| HostError::PeerIdentityUnavailable)
+    identity.sign_message(&message(domain, value)?)
 }
 fn verify<T: Serialize>(
     issuer: &super::DeviceIdentityInfo,
@@ -118,15 +111,7 @@ fn verify<T: Serialize>(
     value: &T,
     signature: &[u8],
 ) -> Result<(), HostError> {
-    if !identity::valid_spki(&issuer.spki_der)
-        || identity::fingerprint(&issuer.spki_der) != issuer.fingerprint_sha256
-        || signature.len() != 64
-    {
-        return Err(HostError::PeerMembershipDenied);
-    }
-    UnparsedPublicKey::new(&ED25519, &issuer.spki_der[12..])
-        .verify(&message(domain, value)?, signature)
-        .map_err(|_| HostError::PeerMembershipDenied)
+    identity::verify_message(issuer, &message(domain, value)?, signature)
 }
 fn validate_offer(signed: &SignedOffer) -> Result<(), HostError> {
     validate_stored_offer(signed)?;

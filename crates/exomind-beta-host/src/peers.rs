@@ -7,6 +7,8 @@ mod test_discovery;
 pub use original_transfer::{OriginalTransferOptions, OriginalTransferResult};
 pub(crate) mod framing;
 pub(crate) mod identity;
+mod origin_proof;
+mod source_history;
 mod network;
 mod network_management;
 mod network_store;

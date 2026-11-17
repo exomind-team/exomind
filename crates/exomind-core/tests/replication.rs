@@ -82,6 +82,90 @@ fn original(bytes: &[u8]) -> OriginalRef {
 }
 
 #[test]
+fn source_inventory_notices_imports_when_the_receivers_own_origin_does_not_change() {
+    let (_a, _b, source, destination, p) = pair();
+    let reader = destination.local_human(p).unwrap();
+    let original_own = destination.origin_checkpoint(&reader, p).unwrap();
+    let before = destination.origin_inventory(&reader, p, 8).unwrap();
+    capture(&source, p, "another device changes the profile", vec![]);
+    let input = page(&source, p);
+    destination
+        .import_origin_page(&peer(&destination, p, &source), &input)
+        .unwrap();
+    let after = destination.origin_inventory(&reader, p, 8).unwrap();
+    assert_ne!(before, after);
+    assert_eq!(
+        destination.origin_checkpoint(&reader, p).unwrap(),
+        original_own
+    );
+    assert!(
+        after
+            .iter()
+            .any(|s| s.origin == input.origin && s.head == input.to)
+    );
+    assert!(destination.origin_inventory(&reader, p, 1).is_err());
+    assert!(destination.origin_inventory(&reader, p, 0).is_err());
+    assert!(destination.origin_inventory(&reader, p, 4097).is_err());
+    let q = destination.create_profile("other inventory scope").unwrap();
+    assert!(
+        destination
+            .origin_inventory(&destination.local_human(q).unwrap(), p, 8)
+            .is_err()
+    );
+}
+
+#[test]
+fn materialized_origin_export_preserves_provenance_without_receipts_or_cursor_writes() {
+    let (_a, _b, source, destination, p) = pair();
+    for i in 0..3 {
+        capture(&source, p, &format!("portable history {i}"), vec![]);
+    }
+    let original = page(&source, p);
+    let context = peer(&destination, p, &source);
+    destination.import_origin_page(&context, &original).unwrap();
+    let reader = destination.local_human(p).unwrap();
+    let before = destination.replication_cursor(&context).unwrap();
+    let copy = destination
+        .export_known_origin_page(&reader, &original.origin, &OriginPageQuery::default())
+        .unwrap();
+    assert_eq!(
+        serde_json::to_vec(&copy).unwrap(),
+        serde_json::to_vec(&original).unwrap()
+    );
+    assert_eq!(destination.replication_cursor(&context).unwrap(), before);
+    let db = rusqlite::Connection::open(destination.database_path()).unwrap();
+    let receipts: i64 = db
+        .query_row("SELECT count(*) FROM command_receipts", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(receipts, 0);
+    // The existing public own-origin export remains own-origin only.
+    assert!(page(&destination, p).entries.is_empty());
+    let mut unknown = original.origin.clone();
+    unknown.device_id = DeviceId::new();
+    assert!(
+        destination
+            .export_known_origin_page(&reader, &unknown, &OriginPageQuery::default())
+            .is_err()
+    );
+    let mut changed_epoch = original.origin;
+    changed_epoch.restoration_epoch = Uuid::new_v4();
+    assert!(matches!(
+        destination.export_known_origin_page(&reader, &changed_epoch, &OriginPageQuery::default()),
+        Err(CoreError::OriginEpochChanged)
+    ));
+    let q = destination.create_profile("other profile").unwrap();
+    assert!(
+        destination
+            .export_known_origin_page(
+                &destination.local_human(q).unwrap(),
+                &copy.origin,
+                &OriginPageQuery::default()
+            )
+            .is_err()
+    );
+}
+
+#[test]
 fn direct_capture_import_preserves_fact_without_forging_receipt_and_recovers_a_lost_ack() {
     let (_a, b, source, destination, p) = pair();
     let bytes = b"remote unknown\0\xff";
@@ -642,6 +726,10 @@ fn typed_child_before_parent_is_explicitly_incomplete_and_later_rebuilds_without
     let now = destination
         .trusted_clock_stamp(Uuid::new_v4(), 2000, 0)
         .unwrap();
+    assert_eq!(
+        destination.replication_health(&local, p).unwrap(),
+        (false, false)
+    );
     assert!(matches!(
         destination.timeblock_snapshot(&local, p, &now),
         Err(CoreError::InvalidTimeblockHistory)
@@ -659,6 +747,10 @@ fn typed_child_before_parent_is_explicitly_incomplete_and_later_rebuilds_without
     second.entries.remove(0);
     let ack = destination.import_origin_page(&context, &second).unwrap();
     assert!(ack.projection_complete);
+    assert_eq!(
+        destination.replication_health(&local, p).unwrap(),
+        (true, false)
+    );
     let active = destination
         .timeblock_snapshot(&local, p, &now)
         .unwrap()

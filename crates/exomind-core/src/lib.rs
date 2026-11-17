@@ -30,11 +30,13 @@ pub use originals::{
 };
 pub use replication::{
     DEFAULT_ORIGIN_PAGE_BYTES, ImportAck, MAX_ORIGIN_PAGE_BYTES, OriginCursor, OriginEntry,
-    OriginIdentity, OriginPage, OriginPageQuery, ReplicaContext, ReplicatedFact,
+    OriginIdentity, OriginPage, OriginPageProof, OriginPageQuery, OriginProvenanceKey,
+    OriginReceiveState, OriginSnapshot, ReplicaContext, ReplicatedFact, VerifiedOriginContext,
+    VerifiedOriginState,
 };
 use serde::{Deserialize, Serialize};
 pub use store::Core;
-pub const CORE_SCHEMA_VERSION: i64 = 7;
+pub const CORE_SCHEMA_VERSION: i64 = 8;
 /// Durable UTF-8 JSON fact encoding, independent of the smaller wire-page
 /// budget. Includes worst-case escaping of all existing capture input limits.
 pub const MAX_FACT_BYTES: usize = 2 * 1024 * 1024;

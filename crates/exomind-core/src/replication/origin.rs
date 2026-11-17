@@ -1,4 +1,4 @@
-use super::{OriginCursor, OriginIdentity};
+use super::{OriginCursor, OriginIdentity, OriginSnapshot};
 use crate::{Core, CoreError, DeviceId, EventId, ProfileId, WriterContext};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
@@ -242,6 +242,132 @@ pub(crate) fn record_local_fact(
     Ok(())
 }
 impl Core {
+    /// A bounded change inventory for all already materialized sources in P.
+    /// This reads only stream/endpoint metadata, never fact bodies or original
+    /// bytes. It is not an attestation: export/import still validate canonical
+    /// facts before they can be sent or admitted. Overflow is explicit rather
+    /// than a truncated inventory being mistaken for complete source coverage.
+    pub fn origin_inventory(
+        &self,
+        context: &WriterContext,
+        profile: ProfileId,
+        limit: usize,
+    ) -> Result<Vec<OriginSnapshot>, CoreError> {
+        const MAX_INVENTORY: usize = 4096;
+        self.check_scope(context, profile)?;
+        if limit == 0 || limit > MAX_INVENTORY {
+            return Err(CoreError::InvalidQuery("origin inventory budget"));
+        }
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT
+                CASE WHEN typeof(h.origin_device)='text' AND length(h.origin_device)=36 THEN h.origin_device END,
+                CASE WHEN typeof(h.restoration_epoch)='text' AND length(h.restoration_epoch)=36 THEN h.restoration_epoch END,
+                h.head_seq,CASE WHEN typeof(h.head_hash)='text' AND length(h.head_hash)=64 THEN h.head_hash END,
+                CASE WHEN h.origin_device=?2 THEN l.restoration_epoch ELSE a.restoration_epoch END,
+                (SELECT CASE WHEN length(e.chain_hash)=64 THEN e.chain_hash END FROM origin_entries e WHERE e.profile_id=h.profile_id AND e.origin_device=h.origin_device AND e.restoration_epoch=h.restoration_epoch AND e.origin_seq=h.head_seq),
+                EXISTS(SELECT 1 FROM origin_entries e WHERE e.profile_id=h.profile_id AND e.origin_device=h.origin_device AND e.restoration_epoch=h.restoration_epoch),
+                v.verified_seq,v.verified_hash,s.chain_hash,
+                CASE WHEN typeof(s.signature)='blob' THEN length(s.signature) END,
+                (SELECT chain_hash FROM origin_entries e WHERE e.profile_id=h.profile_id AND e.origin_device=h.origin_device AND e.restoration_epoch=h.restoration_epoch AND e.origin_seq=v.verified_seq),
+                CASE WHEN typeof(k.public_key_spki)='blob' AND length(k.public_key_spki)=44 AND typeof(k.fingerprint_sha256)='text' AND length(k.fingerprint_sha256)=64 THEN k.fingerprint_sha256 END
+             FROM origin_heads h
+             LEFT JOIN local_origin_epochs l ON l.profile_id=h.profile_id
+             LEFT JOIN accepted_origin_epochs a ON a.profile_id=h.profile_id AND a.origin_device=h.origin_device
+             LEFT JOIN verified_origin_prefixes v ON v.profile_id=h.profile_id AND v.origin_device=h.origin_device AND v.restoration_epoch=h.restoration_epoch
+             LEFT JOIN origin_position_proofs s ON s.profile_id=v.profile_id AND s.origin_device=v.origin_device AND s.restoration_epoch=v.restoration_epoch AND s.origin_seq=v.verified_seq
+             LEFT JOIN origin_provenance_keys k ON k.profile_id=h.profile_id AND k.origin_device=h.origin_device
+             WHERE h.profile_id=?1 ORDER BY h.origin_device,h.restoration_epoch LIMIT ?3",
+        )?;
+        let mut rows = statement.query(params![
+            profile.to_string(),
+            self.device_id().to_string(),
+            limit + 1
+        ])?;
+        let mut inventory = Vec::new();
+        while let Some(row) = rows.next()? {
+            if inventory.len() == limit {
+                return Err(CoreError::InvalidQuery("origin inventory exceeds budget"));
+            }
+            let device = row
+                .get::<_, Option<String>>(0)?
+                .ok_or(CoreError::RecoveryRequired)?;
+            let epoch = row
+                .get::<_, Option<String>>(1)?
+                .ok_or(CoreError::RecoveryRequired)?;
+            let seq = row.get::<_, u64>(2)?;
+            let hash = row
+                .get::<_, Option<String>>(3)?
+                .ok_or(CoreError::RecoveryRequired)?;
+            let registered: Option<String> = row.get(4)?;
+            let endpoint: Option<String> = row.get(5)?;
+            let has_entries: bool = row.get(6)?;
+            let identity = OriginIdentity {
+                profile_id: profile,
+                device_id: device.parse()?,
+                restoration_epoch: epoch.parse().map_err(|_| CoreError::RecoveryRequired)?,
+            };
+            if identity.restoration_epoch.is_nil()
+                || registered.as_deref() != Some(epoch.as_str())
+                || seq > i64::MAX as u64
+                || !hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                || seq == 0 && (has_entries || hash != genesis(&identity)?)
+                || seq > 0 && endpoint.as_deref() != Some(hash.as_str())
+            {
+                return Err(CoreError::RecoveryRequired);
+            }
+            let proof_seq: Option<u64> = row.get(7)?;
+            let proof_hash: Option<String> = row.get(8)?;
+            let signed_hash: Option<String> = row.get(9)?;
+            let signature_length: Option<usize> = row.get(10)?;
+            let proof_endpoint: Option<String> = row.get(11)?;
+            let key_pin: Option<String> = row.get(12)?;
+            let own = identity.device_id == self.device_id();
+            let verified_head = match (proof_seq, proof_hash) {
+                (None, None) => {
+                    if signed_hash.is_some() || signature_length.is_some() || key_pin.is_some() {
+                        return Err(CoreError::RecoveryRequired);
+                    }
+                    own.then(|| OriginCursor {
+                        seq,
+                        hash: hash.clone(),
+                    })
+                }
+                (Some(position), Some(digest)) if !own => {
+                    if position > seq
+                        || digest.len() != 64
+                        || !digest
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                        || signed_hash.as_deref() != Some(digest.as_str())
+                        || signature_length != Some(64)
+                        || key_pin.as_ref().is_none_or(|p| {
+                            !p.bytes()
+                                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                        })
+                        || position == 0 && digest != genesis(&identity)?
+                        || position > 0 && proof_endpoint.as_deref() != Some(digest.as_str())
+                    {
+                        return Err(CoreError::RecoveryRequired);
+                    }
+                    Some(OriginCursor {
+                        seq: position,
+                        hash: digest,
+                    })
+                }
+                _ => return Err(CoreError::RecoveryRequired),
+            };
+            inventory.push(OriginSnapshot {
+                origin: identity,
+                head: OriginCursor { seq, hash },
+                verified_head,
+            });
+        }
+        Ok(inventory)
+    }
+
     pub fn replication_identity(
         &self,
         context: &WriterContext,

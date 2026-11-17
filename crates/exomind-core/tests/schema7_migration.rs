@@ -122,7 +122,7 @@ fn actual_schema6_upgrade_preserves_all_history_and_allows_independent_external_
         database
             .pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
             .unwrap(),
-        7
+        CORE_SCHEMA_VERSION
     );
     for (name, values) in &expected {
         assert_eq!(
