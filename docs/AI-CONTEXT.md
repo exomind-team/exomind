@@ -96,6 +96,9 @@ src-tauri/        # Rust 后端（Tauri 2.0）
 | 源码工作目录 Agent 合同 | [AGENTS.md](../AGENTS.md) |
 | 用户侧 runtime agent 契约 | [docs/agents/runtime-agent-contract.md](agents/runtime-agent-contract.md) |
 | 前端 UI 统一规范 | [docs/development/ui-spec.md](development/ui-spec.md) |
+| Alpha UI/UX 复用与 Beta 前端指导 | [Alpha UI/UX 参考](development/alpha-ui-ux-reference.md) |
+| Beta 当前核心缺陷/P1推进 | [核心缺陷优先迭代](plans/2026-11-17-v0.6-beta-core-first-iteration.md) |
+| Beta 本机性能/运行诊断面板 | [观测面板设计](plans/2026-11-17-beta-observability-ui-design.md) |
 | Git / worktree / PR / 发布操作 | [docs/development/repo-agent-workflow.md](development/repo-agent-workflow.md) |
 | Git / worktree 权威规范 | [docs/development/git-spec.md](development/git-spec.md) |
 | 多 worktree 端口与联调 | [docs/development/port-env-configuration.md](development/port-env-configuration.md) |
