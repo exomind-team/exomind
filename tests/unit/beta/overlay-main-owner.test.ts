@@ -20,6 +20,16 @@ async function fixture(){
   return{client,capture,focus,owner,committed,validateTicket,async close(){owner.dispose();await Promise.all([capture.close(),focus.close()]);}};
 }
 describe('Native verified tickets execute through the single Main owner',()=>{
+  it('24b0368d: a background snapshot read does not pulse the hydrated overlay controls busy',async()=>{
+    const f=await fixture(),gate=deferred<ReturnType<typeof activeSnapshot>>();
+    try{
+      f.client.timeblocks.snapshot.mockReturnValueOnce(gate.promise);const reading=f.focus.refresh();
+      expect(f.focus.snapshot().loading).toBe(true);expect(f.owner.snapshot().focus_busy).toBe(false);
+      gate.resolve(activeSnapshot());await reading;
+      f.client.timeblocks.snapshot.mockRejectedValueOnce({code:'network',message:'read failed'});await f.focus.refresh();
+      expect(f.owner.snapshot().focus_error).toBe('read failed');
+    }finally{gate.resolve(activeSnapshot());await f.close();}
+  });
   it('rechecks the Native-issued ticket immediately before mutation, including a revoked document generation',async()=>{
     const f=await fixture();try{f.validateTicket.mockRejectedValueOnce({code:'overlay_scope_changed',message:'document revoked'});
       expect(await f.owner.execute(ticket({kind:'pause',block_id:B}))).toMatchObject({ok:false,code:'overlay_scope_changed'});expect(f.client.timeblocks.command).not.toHaveBeenCalled();

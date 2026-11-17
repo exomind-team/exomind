@@ -9,6 +9,18 @@ function fixture(){const client=timeblockClient();const storage=memoryStorage();
   const create=(profile=P)=>new BetaTimeblockController(client,D,profile,storage,{uuid,monotonicNow:()=>now});
   return{client,storage,create,advance:(ms:number)=>{now+=ms;}};}
 describe('authoritative Beta timeblock controller',()=>{
+  it('68e5bd54: retains recovery diagnostics, the last snapshot and unsent draft until a successful read',async()=>{
+    const f=fixture(),controller=f.create();await controller.refresh();controller.setStartDraft({name:'local draft'});
+    f.client.timeblocks.snapshot.mockRejectedValueOnce({code:'timeblock_history_incomplete',message:'history incomplete'});
+    await controller.refresh();
+    expect(controller.snapshot()).toMatchObject({errorCode:'timeblock_history_incomplete',remote:snapshot(),draft:{name:'local draft'}});
+    const read=deferred<ReturnType<typeof snapshot>>();f.client.timeblocks.snapshot.mockReturnValueOnce(read.promise);
+    const refreshing=controller.refresh();
+    expect(controller.snapshot()).toMatchObject({loading:true,errorCode:'timeblock_history_incomplete',error:'history incomplete'});
+    read.resolve(snapshot());await refreshing;
+    expect(controller.snapshot()).toMatchObject({loading:false,errorCode:null,error:null,draft:{name:'local draft'}});
+    expect(f.client.timeblocks.command).not.toHaveBeenCalled();controller.dispose();
+  });
   it('persists the entire start command before RPC; lost receipt/reopen retries exactly the old revision and IDs',async()=>{
     const f=fixture();const first=f.create();await first.refresh();first.setStartDraft({name:'original'});
     f.client.timeblocks.command.mockRejectedValueOnce({code:'network',message:'lost receipt'});await first.start();

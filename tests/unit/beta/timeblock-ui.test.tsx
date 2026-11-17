@@ -3,6 +3,7 @@ import { afterEach,describe,expect,it,vi } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
 import { BetaFocusTimer } from '@/beta/BetaFocusTimer';
 import { BetaTimeblockController } from '@/beta/timeblocks-controller';
+import { nativeBetaPeersClient } from '@/beta/peers-client';
 import { asyncDraftLocks,deferred } from './fixtures';
 import { memoryIntentJournal } from './timeblock-ui-fixtures';
 import { P,Q,D,R,B,C,snapshot,activeSnapshot,timeblockClient,receipt } from './timeblock-fixtures';
@@ -10,6 +11,79 @@ import type { BetaTimeblockSnapshot,BetaTimeblockCommand } from '@/beta/timebloc
 
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 describe('shared Alpha focus presentation with real Beta commands',()=>{
+  it('24b0368d: keeps hydrated controls stable during a snapshot read but disables them on a read failure',async()=>{
+    const client=timeblockClient();client.timeblocks.snapshot.mockResolvedValue(activeSnapshot());
+    const owner=await BetaTimeblockController.open(client,D,P,{journal:memoryIntentJournal()});
+    const ui=render(<BetaFocusTimer controller={owner} client={client} profileId={P}/>);
+    let pending:ReturnType<typeof deferred<ReturnType<typeof snapshot>>>|undefined;
+    try{
+      const append=await screen.findByRole('button',{name:'追加反馈'});
+      await waitFor(()=>expect(append).toBeEnabled());
+      const select=screen.getByRole('combobox',{name:'反馈时间块'});
+      pending=deferred<ReturnType<typeof snapshot>>();client.timeblocks.snapshot.mockReturnValueOnce(pending.promise);
+      fireEvent.click(screen.getByRole('button',{name:'刷新时间块'}));
+      await waitFor(()=>expect(owner.snapshot().loading).toBe(true));
+      expect(append).toBeEnabled();expect(screen.getByTestId('new-focus-pause-resume-button')).toBeEnabled();
+      expect(screen.getByRole('combobox',{name:'反馈时间块'})).toBe(select);
+      await act(async()=>{pending!.resolve(activeSnapshot());});
+      client.timeblocks.snapshot.mockRejectedValueOnce({code:'network',message:'read failed'});
+      fireEvent.click(screen.getByRole('button',{name:'刷新时间块'}));
+      await screen.findByText('read failed');expect(append).toBeDisabled();
+      expect(client.timeblocks.command).not.toHaveBeenCalled();
+    }finally{pending?.resolve(activeSnapshot());ui.unmount();await owner.close();}
+  });
+  it('8d49542c: an initial history failure shows recovery instead of an endless loading message',async()=>{
+    const client=timeblockClient();client.timeblocks.snapshot.mockRejectedValue({code:'timeblock_history_incomplete',message:'history incomplete'});
+    const owner=await BetaTimeblockController.open(client,D,P,{journal:memoryIntentJournal()});
+    const ui=render(<BetaFocusTimer controller={owner} client={client} profileId={P}/>);
+    try{
+      expect(await screen.findByText('尚未读取到可用的时间块状态，请按错误提示处理后刷新。')).toBeInTheDocument();
+      expect(screen.getByText(/先让参与过此档案时间块的设备上线/)).toBeInTheDocument();
+      expect(screen.queryByText('正在恢复并读取时间块…')).not.toBeInTheDocument();
+      expect(client.timeblocks.command).not.toHaveBeenCalled();
+    }finally{ui.unmount();await owner.close();}
+  });
+  it('ac1dcc95: opens the real sync section and returns to the same timeblock draft without submitting',async()=>{
+    const locks=Object.getOwnPropertyDescriptor(navigator,'locks');Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const client=timeblockClient();client.profiles.mockResolvedValue([{profile_id:P,display_name:'P'}]);
+    const peers=nativeBetaPeersClient(async name=>{
+      if(name==='beta_peer_status')return{runtime_id:R,device_id:D,profile_id:P,network_enabled:false,local_addresses:[],peers:[]};
+      throw new Error(`Unexpected mutation: ${name}`);
+    });
+    const ui=render(<BetaApp client={client} peers={peers} intentJournal={memoryIntentJournal()}/>);
+    try{
+      fireEvent.click(await screen.findByTestId('new-focus-idle-card'));
+      fireEvent.change(screen.getByTestId('new-focus-task-input'),{target:{value:'same draft after sync navigation'}});
+      await screen.findByText('草稿已暂存 · 尚未提交');
+      client.timeblocks.snapshot.mockRejectedValue({code:'timeblock_history_incomplete',message:'history incomplete'});
+      fireEvent.click(screen.getByRole('button',{name:'刷新时间块'}));
+      fireEvent.click(await screen.findByRole('button',{name:'查看设备同步'}));
+      expect(await screen.findByRole('heading',{name:'设备同步'})).toBeVisible();
+      fireEvent.click(screen.getByRole('button',{name:'当下',exact:true}));
+      expect(screen.getByTestId('new-focus-task-input')).toHaveValue('same draft after sync navigation');
+      expect(client.timeblocks.command).not.toHaveBeenCalled();
+    }finally{ui.unmount();await act(async()=>{await Promise.resolve();});if(locks)Object.defineProperty(navigator,'locks',locks);else Reflect.deleteProperty(navigator,'locks');}
+  });
+  it('90d8bd80: keeps the draft and offers sync recovery when causal history cannot be projected',async()=>{
+    const client=timeblockClient(),journal=memoryIntentJournal(),openSync=vi.fn();
+    const owner=await BetaTimeblockController.open(client,D,P,{journal});
+    owner.setStartDraft({name:'retained local draft'});await owner.refresh();
+    client.timeblocks.snapshot.mockRejectedValue({code:'timeblock_history_incomplete',message:'时间块历史暂不能完整解释，现有记录已保留'});
+    const ui=render(<BetaFocusTimer controller={owner} client={client} profileId={P} onOpenSync={openSync}/>);
+    try{
+      expect(await screen.findByText(/先让参与过此档案时间块的设备上线/)).toBeInTheDocument();
+      expect(screen.getByTestId('new-focus-task-input')).toHaveValue('retained local draft');
+      expect(screen.getByTestId('new-focus-start-button')).toBeDisabled();
+      fireEvent.click(screen.getByRole('button',{name:'查看设备同步'}));expect(openSync).toHaveBeenCalledOnce();
+      expect(client.timeblocks.command).not.toHaveBeenCalled();
+      client.timeblocks.snapshot.mockResolvedValue(snapshot());
+      fireEvent.click(screen.getByRole('button',{name:'刷新时间块'}));
+      await waitFor(()=>expect(screen.getByTestId('new-focus-start-button')).toBeEnabled());
+      expect(screen.queryByText(/先让参与过此档案时间块的设备上线/)).not.toBeInTheDocument();
+      expect(screen.getByTestId('new-focus-task-input')).toHaveValue('retained local draft');
+      expect(client.timeblocks.command).not.toHaveBeenCalled();
+    }finally{ui.unmount();await owner.close();}
+  });
   it('reopens the authoritative active block ahead of a retained next draft, which only an explicit rotation reveals',async()=>{
     const client=timeblockClient(),journal=memoryIntentJournal();client.timeblocks.snapshot.mockResolvedValue({...activeSnapshot(),active:{...activeSnapshot().active!,name:'active A'}});
     const previous=await BetaTimeblockController.open(client,D,P,{journal});previous.setStartDraft({name:'next B'});await previous.close();
@@ -94,7 +168,7 @@ describe('shared Alpha focus presentation with real Beta commands',()=>{
       const oldId=client.timeblocks.command.mock.calls[0][0].action;
       const firstId=oldId.kind==='start'?oldId.block_id:B;
       await waitFor(()=>expect(screen.getByRole('button',{name:`填写反馈 ${firstId.slice(0,8)}`})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:`填写反馈 ${firstId.slice(0,8)}`}));
-      fireEvent.click(await screen.findByRole('button',{name:'明确跳过反馈'}));
+      fireEvent.click(await screen.findByRole('button',{name:'跳过',exact:true}));
       await waitFor(()=>expect(screen.queryByTestId('new-focus-feedback-textarea')).not.toBeInTheDocument());
       await waitFor(()=>expect(screen.getByRole('button',{name:'追加反馈'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'追加反馈'}));
       const appended=await screen.findByTestId('new-focus-feedback-textarea');fireEvent.change(appended,{target:{value:'later note'}});

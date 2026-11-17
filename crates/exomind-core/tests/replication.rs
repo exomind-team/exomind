@@ -670,6 +670,193 @@ fn typed_child_before_parent_is_explicitly_incomplete_and_later_rebuilds_without
 }
 
 #[test]
+fn beta09_cross_device_history_requires_each_origin_and_recovers_without_discarding_facts() {
+    // Field events 8d49542c/68e5bd54/ac1dcc95/90d8bd80: a phone can
+    // receive all desktop facts while still lacking a tablet's causal parent.
+    // This synthetic topology is a reproduction condition, not a claim about
+    // the unavailable field phone's database or membership.
+    let (_a, _b, desktop, tablet, p) = pair();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let phone = Core::open(phone_dir.path()).unwrap();
+    phone.provision_profile(p, "replicated profile").unwrap();
+    let block = TimeblockId::new();
+    let epochs = [
+        (desktop.device_id(), Uuid::new_v4()),
+        (tablet.device_id(), Uuid::new_v4()),
+        (phone.device_id(), Uuid::new_v4()),
+    ];
+    let apply = |core: &Core, elapsed: u32, action| {
+        let epoch = epochs
+            .iter()
+            .find(|(device, _)| *device == core.device_id())
+            .unwrap()
+            .1;
+        let human = core.local_human(p).unwrap();
+        let stamp = core
+            .trusted_clock_stamp(epoch, 1000 + i64::from(elapsed), u64::from(elapsed))
+            .unwrap();
+        let command = TimeblockCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: p,
+            expected_revision: core.timeblock_snapshot(&human, p, &stamp).unwrap().revision,
+            action,
+        };
+        core.apply_timeblock(&human, &command, &stamp).unwrap();
+    };
+    apply(
+        &desktop,
+        0,
+        TimeblockAction::Start {
+            block_id: block,
+            name: "synthetic desktop block".into(),
+            note: String::new(),
+            timer: TimerSpec::CountUp,
+        },
+    );
+    tablet
+        .import_origin_page(&peer(&tablet, p, &desktop), &page(&desktop, p))
+        .unwrap();
+    apply(&tablet, 10, TimeblockAction::Pause { block_id: block });
+    desktop
+        .import_origin_page(&peer(&desktop, p, &tablet), &page(&tablet, p))
+        .unwrap();
+    apply(&desktop, 20, TimeblockAction::Resume { block_id: block });
+    let text = capture(
+        &desktop,
+        p,
+        "text arrives independently of projection",
+        vec![],
+    );
+    let desktop_context = peer(&phone, p, &desktop);
+    let desktop_page = page(&desktop, p);
+    let ack = phone
+        .import_origin_page(&desktop_context, &desktop_page)
+        .unwrap();
+    assert!(!ack.projection_complete);
+    let partial = phone
+        .timeline_page(&phone.local_human(p).unwrap(), p, &EventQuery::default())
+        .unwrap();
+    assert!(partial.items.iter().any(
+        |item| matches!(item, TimelineItem::Capture(event) if event.event_id == text.event_id)
+    ));
+    assert_eq!(
+        partial
+            .items
+            .iter()
+            .filter(|item| matches!(item, TimelineItem::Timeblock(_)))
+            .count(),
+        2
+    );
+    assert_eq!(
+        phone.replication_cursor(&desktop_context).unwrap(),
+        desktop_page.to
+    );
+    let human = phone.local_human(p).unwrap();
+    assert!(
+        phone
+            .events(&human, p)
+            .unwrap()
+            .iter()
+            .any(|event| event.event_id == text.event_id)
+    );
+    assert_eq!(
+        phone
+            .timeblock_nodes(&human, p, &EventQuery::default())
+            .unwrap()
+            .items
+            .len(),
+        2
+    );
+    let stamp = phone.trusted_clock_stamp(Uuid::new_v4(), 2000, 0).unwrap();
+    assert!(matches!(
+        phone.timeblock_snapshot(&human, p, &stamp),
+        Err(CoreError::InvalidTimeblockHistory)
+    ));
+    // Replaying the desktop stream cannot manufacture the absent tablet fact.
+    assert!(
+        !phone
+            .import_origin_page(&desktop_context, &desktop_page)
+            .unwrap()
+            .projection_complete
+    );
+    assert!(
+        phone
+            .import_origin_page(&peer(&phone, p, &tablet), &page(&tablet, p))
+            .unwrap()
+            .projection_complete
+    );
+    let restored = phone
+        .timeblock_snapshot(&human, p, &stamp)
+        .unwrap()
+        .active
+        .unwrap();
+    assert_eq!(restored.block_id, block);
+    assert_eq!(restored.phase, TimeblockPhase::Running);
+    let facts = |core: &Core| {
+        let mut facts: Vec<_> = core
+            .timeblock_nodes(&core.local_human(p).unwrap(), p, &EventQuery::default())
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|node| (node.event_id.to_string(), node.digest))
+            .collect();
+        facts.sort();
+        facts
+    };
+    assert_eq!(facts(&phone), facts(&desktop));
+    apply(&phone, 30, TimeblockAction::EndAction { block_id: block });
+    apply(
+        &phone,
+        40,
+        TimeblockAction::SubmitFeedback {
+            block_id: block,
+            feedback: FeedbackInput::Skipped,
+        },
+    );
+    apply(
+        &phone,
+        50,
+        TimeblockAction::Start {
+            block_id: TimeblockId::new(),
+            name: "new phone record after recovery".into(),
+            note: String::new(),
+            timer: TimerSpec::CountUp,
+        },
+    );
+    drop(phone);
+    let reopened = Core::open(phone_dir.path()).unwrap();
+    let reader = reopened.local_human(p).unwrap();
+    let stamp = reopened
+        .trusted_clock_stamp(Uuid::new_v4(), 3000, 0)
+        .unwrap();
+    assert_eq!(
+        reopened
+            .timeblock_snapshot(&reader, p, &stamp)
+            .unwrap()
+            .active
+            .unwrap()
+            .name,
+        "new phone record after recovery"
+    );
+    assert_eq!(
+        reopened
+            .timeblock_nodes(&reader, p, &EventQuery::default())
+            .unwrap()
+            .items
+            .len(),
+        6
+    );
+    assert!(
+        reopened
+            .events(&reader, p)
+            .unwrap()
+            .iter()
+            .any(|event| event.event_id == text.event_id)
+    );
+}
+
+#[test]
 fn importing_a_remote_pause_cancels_a_previously_issued_local_deadline_ticket() {
     let (_a, _b, source, destination, p) = pair();
     let local = destination.local_human(p).unwrap();

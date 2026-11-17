@@ -11,7 +11,12 @@ export interface BetaFeedbackDraft { text:string; revision:number }
 type DraftLink={kind:'start';revision:number}|{kind:'feedback';block_id:string;revision:number};
 export interface PendingTimeblock { command:BetaTimeblockCommand; state:'pending'|'unknown'|'rejected'; link?:DraftLink; message?:string; code?:string }
 interface Persisted {version:1;draft:BetaStartDraft;feedback:Record<string,BetaFeedbackDraft>;pending:PendingTimeblock[];confirmed:BetaReceipt[]}
-export interface BetaTimeblockState extends Persisted {remote:BetaTimeblockSnapshot|null;identity:BetaStatus|null;receivedAt:number;loading:boolean;error:string|null;cacheError:string|null;persistenceState:'idle'|'pending'|'failed'}
+export interface BetaTimeblockState extends Persisted {remote:BetaTimeblockSnapshot|null;identity:BetaStatus|null;receivedAt:number;loading:boolean;error:string|null;errorCode:string|null;cacheError:string|null;persistenceState:'idle'|'pending'|'failed'}
+/** A read in flight does not invalidate the last authoritative revision.
+ * Commands carry that revision to Core, which rejects intervening changes. */
+export function timeblockControlsBlocked(state:Pick<BetaTimeblockState,'remote'|'pending'|'cacheError'|'error'>):boolean{
+  return !state.remote||state.pending.some(item=>item.state!=='rejected')||!!state.cacheError||!!state.error;
+}
 type StorageLike=Pick<Storage,'getItem'|'setItem'>;
 const durable=(storage:StorageLike):storage is DurableIntentStorage=>'durable'in storage&&storage.durable===true;
 const storageKey=(device:string,profile:string)=>`exomind:beta:timeblocks:${JSON.stringify([device,profile])}`;
@@ -59,7 +64,7 @@ export class BetaTimeblockController {
     this.uuid=options.uuid??betaUuid;this.now=options.monotonicNow??(()=>performance.now());
     let restored=initial();let cacheError:null|string=null;
     try{restored=load(storage.getItem(this.storageKey),profileId);}catch{this.blocked=true;cacheError='时间块草稿缓存无法读取，已保留原缓存并停止提交';}
-    this.state={...restored,remote:null,identity:null,receivedAt:0,loading:false,error:null,cacheError,persistenceState:cacheError?'failed':'idle'};
+    this.state={...restored,remote:null,identity:null,receivedAt:0,loading:false,error:null,errorCode:null,cacheError,persistenceState:cacheError?'failed':'idle'};
     if(durable(storage))this.unsubscribePersistence=storage.subscribe(()=>{const status=storage.snapshot();this.emit({...this.state,persistenceState:status.state,cacheError:status.error});});
   }
   snapshot=():BetaTimeblockState=>this.state;
@@ -87,7 +92,9 @@ export class BetaTimeblockController {
     this.save({...this.state,feedback:{...this.state.feedback,[blockId]:{text,revision:previous.revision+1}}});
   }
   async refresh():Promise<void>{
-    if(this.disposed)return;const generation=++this.readGeneration;this.emit({...this.state,loading:true,error:null});
+    // Keep the last failure/recovery explanation until an authoritative read
+    // succeeds; periodic reads must not make the recovery entry blink away.
+    if(this.disposed)return;const generation=++this.readGeneration;this.emit({...this.state,loading:true});
     try{
       if(!this.client.timeblocks)throw new BetaApiError('unsupported_timeblocks','当前连接未提供时间块能力');
       const identity=await this.client.status();if(this.disposed||generation!==this.readGeneration)return;
@@ -96,8 +103,8 @@ export class BetaTimeblockController {
       const after=await this.client.status();if(this.disposed||generation!==this.readGeneration)return;
       if(after.device_id!==identity.device_id||after.runtime_id!==identity.runtime_id)throw new BetaApiError('runtime_changed','服务已重启，旧时间块读取未应用，请刷新');
       const remote=validateTimeblockSnapshot(raw,this.profileId,this.deviceId);
-      this.emit({...this.state,remote,identity,receivedAt:this.now(),loading:false,error:null});
-    }catch(error){if(!this.disposed&&generation===this.readGeneration)this.emit({...this.state,loading:false,error:message(error)});}
+      this.emit({...this.state,remote,identity,receivedAt:this.now(),loading:false,error:null,errorCode:null});
+    }catch(error){if(!this.disposed&&generation===this.readGeneration)this.emit({...this.state,loading:false,error:message(error),errorCode:code(error)});}
   }
   displayClock(){return this.state.remote?timeblockClock(this.state.remote,this.now()-this.state.receivedAt):null;}
   private current():BetaTimeblockSnapshot{

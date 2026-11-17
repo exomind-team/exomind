@@ -1,6 +1,6 @@
 import { BetaApiError,type BetaClient,type BetaReceipt } from '../client';
 import type { BetaDraftController } from '../drafts';
-import type { BetaTimeblockController } from '../timeblocks-controller';
+import { timeblockControlsBlocked,type BetaTimeblockController } from '../timeblocks-controller';
 import type { InputSendMode } from '@/lib/input-send-shortcut';
 import { canonicalOverlayRequest,overlayScopeKey,type MainOverlayPort,type OverlayBinding,type OverlayResponse,type OverlayScope,type OverlayTicket,type OverlayView } from './protocol';
 
@@ -21,7 +21,7 @@ export class MainOverlayOwner {
     const {scope,capture,focus}=this.options,c=capture.snapshot(),f=focus.snapshot(),draft=c.drafts[scope.profile_id];
     const feedback=Object.fromEntries(Object.entries(f.feedback).filter(([id,value])=>value.text.trim()||id===f.remote?.active?.block_id||f.remote?.pending_feedback.includes(id)));
     return{scope,theme:this.options.dark?.()?'dark':'light',input_send_mode:this.options.inputSendMode?.()??'ctrl-enter-send',remote:f.remote,clock:focus.displayClock(),capture:{text:draft?.text??'',revision:draft?.revision??0,file_count:draft?.files?.length??0,state:c.persistenceState,error:c.persistenceError},
-      feedback,focus_state:f.persistenceState,focus_error:f.cacheError??f.error,focus_busy:f.loading||f.pending.some(item=>item.state!=='rejected'),
+      feedback,focus_state:f.persistenceState,focus_error:f.cacheError??f.error,focus_busy:timeblockControlsBlocked(f),
       focus_pending:f.pending.map(item=>({command_id:item.command.command_id,state:item.state,message:item.message})),
       capture_pending:c.pending.filter(item=>item.command.profile_id===scope.profile_id&&item.state!=='committed').map(item=>({command_id:item.command.command_id,state:item.state,message:item.message}))};
   }

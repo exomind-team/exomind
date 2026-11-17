@@ -3,7 +3,7 @@ import { FocusTimerView,type FocusTimerViewModel } from '@/ui/app/components/Foc
 import { TimeBlockFeedbackDialog } from '@/ui/app/components/TimeBlockFeedbackDialog';
 import { Button } from '@/components/ui/button';
 import type { BetaClient,BetaReceipt } from './client';
-import { BetaTimeblockController } from './timeblocks-controller';
+import { BetaTimeblockController,timeblockControlsBlocked } from './timeblocks-controller';
 import { inputSendShortcutLabel, shouldSubmitOnEnter, useBetaInputSendMode } from './input-preferences';
 
 const message=(error:unknown)=>error&&typeof error==='object'&&'message'in error?String(error.message):'时间块操作尚未确认，请查证后重试';
@@ -13,7 +13,7 @@ export interface BetaFocusHandoffTarget {handoffId:string;blockId:string;attempt
 
 /** Presentation is the actual Alpha View. This component owns only transient
  * panel/dialog choices; controller/journal/Host own intent and business state. */
-export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffTarget,onHandoffReady}:{controller:BetaTimeblockController;client:BetaClient;profileId:string;onCommitted?:()=>void;handoffTarget?:BetaFocusHandoffTarget;onHandoffReady?:(id:string,hint:string,attempt:number)=>void}){
+export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffTarget,onHandoffReady,onOpenSync}:{controller:BetaTimeblockController;client:BetaClient;profileId:string;onCommitted?:()=>void;handoffTarget?:BetaFocusHandoffTarget;onHandoffReady?:(id:string,hint:string,attempt:number)=>void;onOpenSync?:()=>void}){
   const state=useSyncExternalStore(controller.subscribe,controller.snapshot);
   const inputSendMode = useBetaInputSendMode();
   const [panel,setPanel]=useState<Panel>(null);
@@ -50,8 +50,7 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
   },[client,profileId,state.remote?.revision]);
   useEffect(()=>{if(panel)configInput.current?.focus();},[panel?.kind]);
   useEffect(()=>{if(custom.editing){customInput.current?.focus();customInput.current?.select();}},[custom.editing]);
-  const unresolved=state.pending.some(item=>item.state!=='rejected');
-  const disabled=state.loading||unresolved||!!state.cacheError||!!state.error||!state.remote;
+  const disabled=timeblockControlsBlocked(state);
   async function run(action:()=>Promise<BetaReceipt|null>,completed?:()=>void){
     setError('');try{const receipt=await action();if(receipt&&alive.current){completed?.();onCommitted?.();}}catch(failure){if(alive.current)setError(message(failure));}
   }
@@ -109,9 +108,15 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
       {state.persistenceState==='pending'?<span role="status">正在暂存时间块草稿…</span>:state.persistenceState==='idle'&&(state.draft.name.trim()||Object.values(state.feedback).some(item=>item.text.trim()))?<span role="status">草稿已暂存 · 尚未提交</span>:null}
     </div>
     {(error||state.error||state.cacheError)&&<p role="alert" className="px-5 py-2 text-xs text-destructive">{error||state.error||state.cacheError}</p>}
+    {state.errorCode==='timeblock_history_incomplete'&&<div className="space-y-2 px-5 pb-2 text-xs text-secondary">
+      <p>现有记录已保留，请保留当前草稿。时间块状态尚未确认，暂不能开始或控制计时。文字已到达不代表时间块历史已补齐。</p>
+      <p>先让参与过此档案时间块的设备上线，在同步页核对同一档案的设备授权和连接，逐台点击「立即同步」，然后返回刷新时间块。当前同步只从直接连接的来源设备补齐记录。</p>
+      <p>若仍未恢复，请保留资料，记录未连接的来源设备和同步页错误以继续核对；不要清空档案或重建时间块历史。</p>
+      {onOpenSync&&<Button variant="outline" size="sm" onClick={onOpenSync}>查看设备同步</Button>}
+    </div>}
     {state.persistenceState==='failed'&&<Button size="sm" variant="outline" className="mx-5 mb-2" onClick={()=>{void controller.flush().then(()=>setError('')).catch(failure=>setError(message(failure)));}}>重试本机暂存</Button>}
     {state.pending.map(item=><div key={item.command.command_id} className="flex items-center gap-2 px-5 py-2 text-xs text-secondary"><span className="min-w-0 flex-1">{item.state==='pending'?'正在确认时间块操作…':item.state==='rejected'?'时间块已变化，此操作被拒绝':'时间块操作结果待确认'}{item.message&&`：${item.message}`}</span>{item.state==='rejected'?<Button size="sm" variant="outline" onClick={()=>{controller.dismissRejected(item.command.command_id);void controller.refresh();}}>放弃被拒操作</Button>:<Button size="sm" variant="outline" disabled={item.state==='pending'} onClick={()=>void run(()=>controller.retry(item.command.command_id))}>查证时间块操作</Button>}</div>)}
-    {!state.remote?<p role="status" className="px-5 py-3 text-xs text-muted">正在恢复并读取时间块…</p>:<>
+    {!state.remote?<p role="status" className="px-5 py-3 text-xs text-muted">{state.error?'尚未读取到可用的时间块状态，请按错误提示处理后刷新。':'正在恢复并读取时间块…'}</p>:<>
       {panel?.kind==='rotate'&&<p className="px-5 text-xs text-muted">切换目标：{panel.name}</p>}
       {panel&&<label className="flex items-center gap-2 px-5 text-xs text-secondary">倒计时到点<select aria-label="倒计时到点方式" className="rounded-md border border-input bg-transparent p-1" value={state.draft.endMode} onChange={event=>setDraft({endMode:event.target.value as 'soft'|'hard'})}><option value="soft">继续超时</option><option value="hard">结束行动并待反馈</option></select></label>}
       <FocusTimerView model={model} actionsDisabled={disabled} actions={{
