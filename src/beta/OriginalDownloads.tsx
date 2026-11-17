@@ -17,7 +17,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
-export function OriginalDownloads({ client, profileId, originals }: { client: BetaClient; profileId: string; originals: BetaOriginal[] }) {
+export function OriginalDownloads({ client, profileId, originals, deviceId = 'local', visible = true }: { client: BetaClient; profileId: string; originals: BetaOriginal[]; deviceId?: string; visible?: boolean }) {
   const [busy, setBusy] = useState<string | null>(null); const [error, setError] = useState('');const [notice,setNotice]=useState('');
   const active = useRef(true);const request=useRef<{id:string;client:BetaClient}|null>(null);
   useEffect(() => {
@@ -46,11 +46,11 @@ export function OriginalDownloads({ client, profileId, originals }: { client: Be
     try{const accepted=await owned.client.originalExports.cancel(owned.id);if(active.current&&request.current===owned)setNotice(accepted?'正在取消导出…':'导出已进入完成阶段，正在等待确认');}
     catch(failure){if(active.current&&request.current===owned)setError(errorMessage(failure));}
   }
-  return <div className="mt-2 max-w-[90%] space-y-1">{originals.map(original => <OriginalAttachment key={`${profileId}:${original.original_id}:${original.sha256}`} client={client} profileId={profileId} original={original} exporting={busy!==null} onDownload={()=>{void download(original);}}/>)}{busy && <div className="flex items-center gap-2 text-xs text-muted"><p role="status">{client.originalExports?'正在流式导出并校验原件…':'正在读取并校验原件…'}</p>{client.originalExports&&<Button variant="ghost" size="sm" onClick={()=>{void cancel();}}>取消导出</Button>}</div>}{notice&&<p role="status" className="text-xs text-muted">{notice}</p>}{error && <p role="alert" className="text-xs text-destructive">{error}</p>}</div>;
+  return <div className="mt-2 w-full max-w-sm space-y-2">{originals.map(original => <OriginalAttachment key={`${deviceId}:${profileId}:${original.original_id}:${original.sha256}`} client={client} deviceId={deviceId} visible={visible} profileId={profileId} original={original} exporting={busy!==null} onDownload={()=>{void download(original);}}/>)}{busy && <div className="flex items-center gap-2 text-xs text-muted"><p role="status">{client.originalExports?'正在流式导出并校验原件…':'正在读取并校验原件…'}</p>{client.originalExports&&<Button variant="ghost" size="sm" onClick={()=>{void cancel();}}>取消导出</Button>}</div>}{notice&&<p role="status" className="text-xs text-muted">{notice}</p>}{error && <p role="alert" className="text-xs text-destructive">{error}</p>}</div>;
 }
 
 type Lifetime={active:boolean};
-function OriginalAttachment({client,profileId,original,exporting,onDownload}:{client:BetaClient;profileId:string;original:BetaOriginal;exporting:boolean;onDownload:()=>void}){
+function OriginalAttachment({client,deviceId,visible,profileId,original,exporting,onDownload}:{client:BetaClient;deviceId:string;visible:boolean;profileId:string;original:BetaOriginal;exporting:boolean;onDownload:()=>void}){
   const acquisition=client.originalAcquisition;
   const [status,setStatus]=useState<BetaOriginalTransferStatus|null>(null);
   const [statusError,setStatusError]=useState(false);
@@ -75,18 +75,18 @@ function OriginalAttachment({client,profileId,original,exporting,onDownload}:{cl
   useEffect(()=>{
     const owner={active:true};life.current=owner;operation.current=null;cancelFlight.current=null;
     setStatus(null);setStatusError(false);setExpanded(false);setSources(null);setSource('');setSourcesBusy(false);setFetching(false);setCancelling(false);setError('');setNotice('');
-    void inspect(owner);
     // Fetch jobs belong to the Host. Leaving this row stops observation, not
     // the durable partial transfer; explicit Cancel targets its exact UUID.
     return()=>{owner.active=false;++checkSequence.current;};
-  },[acquisition,profileId,original.original_id,original.sha256,original.byte_length,original.file_name,original.media_type]);
+  },[client,acquisition,deviceId,profileId,original.original_id,original.sha256,original.byte_length,original.file_name,original.media_type]);
+  useEffect(()=>{if(visible)void inspect(life.current);},[client,acquisition,deviceId,profileId,original.original_id,original.sha256,original.byte_length,original.file_name,original.media_type,visible]);
   const running=fetching||!!status&&originalTransferActive(status);
   useEffect(()=>{
-    if(!acquisition||!running)return;const owner=life.current;let timer:ReturnType<typeof setTimeout>|undefined;let disposed=false;
+    if(!visible||!acquisition||!running)return;const owner=life.current;let timer:ReturnType<typeof setTimeout>|undefined;let disposed=false;
     async function tick(){await inspect(owner);if(!disposed&&current(owner))timer=setTimeout(()=>{void tick();},1000);}
     timer=setTimeout(()=>{void tick();},250);
     return()=>{disposed=true;clearTimeout(timer);};
-  },[acquisition,running,profileId,original.original_id,original.sha256]);
+  },[acquisition,running,profileId,original.original_id,original.sha256,visible]);
   async function chooseSource(){
     if(!acquisition||sourcesBusy)return;const owner=life.current;setExpanded(true);setSourcesBusy(true);setError('');setNotice('');
     try{const next=await acquisition.sources(profileId);if(current(owner)){setSources(next);setSource(previous=>next.devices.includes(previous)?previous:next.devices[0]??'');}}
@@ -118,9 +118,9 @@ function OriginalAttachment({client,profileId,original,exporting,onDownload}:{cl
   const label=statusError?'本机原件状态待重新确认':!status?'正在检查本机原件…':status.availability==='complete'?'本机原件已完整校验':status.availability==='hash_mismatch'?'原件校验失败，尚不可用':status.availability==='missing'?'本机缺少原件，仅有记录信息':`已收到 ${formatBytes(status.next_offset)} / ${formatBytes(status.byte_length)}，尚未完整校验`;
   const transferLabel=status?.transfer_state==='verifying'?'正在校验原件…':status?.transfer_state==='confirming'?'本机已校验，正在确认传输…':'正在获取原件…';
   const statusFailure=status?.last_error_code?originalAcquisitionError(status.last_error_code):'';
-  return <div className="rounded-2xl border border-[#E7E5E4] bg-white/90 px-3 py-2 dark:border-[#292524] dark:bg-[#1C1917]">
-    {readable && <BetaImagePreview identity={`${profileId}:${original.original_id}:${original.sha256}`} fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={() => collectOriginalDownload(client, profileId, original)} />}
-    <div className="flex items-center gap-2"><FileText size={16} className="shrink-0 text-[#C75B3A] dark:text-[#FDBA74]" />
+  return <div className="space-y-2 rounded-2xl border border-border-page bg-surface px-3 py-2">
+    {readable && <BetaImagePreview identity={`${deviceId}:${profileId}:${original.original_id}:${original.sha256}`} sourceScope={client} visible={visible} inline fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={() => collectOriginalDownload(client, profileId, original)} />}
+    <div className="flex items-center gap-2"><FileText size={16} className="shrink-0 text-brand-accent" aria-hidden="true" />
       <div className="min-w-0 flex-1"><p className="break-all text-xs font-medium">{original.file_name}</p><p className="text-[10px] text-muted">{formatBytes(original.byte_length)}</p></div>
       <Button variant="ghost" size="icon" aria-label={`下载 ${original.file_name}`} disabled={exporting||!readable||!client.originalExports&&original.byte_length>MAX_BASIC_DOWNLOAD_BYTES} onClick={onDownload}><Download size={14}/></Button>
     </div>

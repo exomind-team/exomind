@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 
 /** Date omission depends on wall time, including waking across midnight. */
-export function useBetaNow(): number {
+export function useBetaNow(active = true): number {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
+    if (!active) return;
     let timer: ReturnType<typeof setTimeout>;
     function refresh() {
       clearTimeout(timer);
@@ -19,6 +20,6 @@ export function useBetaNow(): number {
       window.removeEventListener('focus', refresh); window.removeEventListener('pageshow', refresh);
       document.removeEventListener('visibilitychange', visible);
     };
-  }, []);
+  }, [active]);
   return now;
 }

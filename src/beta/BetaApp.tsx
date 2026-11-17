@@ -24,6 +24,9 @@ import { betaTimeblockLabel } from './timeblock-label';
 import type { SummaryTasksController } from './summary-tasks-controller';
 import { BetaTimeblockController } from './timeblocks-controller';
 import { BetaFocusTimer } from './BetaFocusTimer';
+import { BetaWorkspacePane, BetaWorkspaceToolbar } from './BetaWorkspaceView';
+import { updateBetaWorkspaceLayout, useBetaWorkspaceLayout, type BetaWorkspaceLayout } from './workspace-layout';
+import { useBetaViewActive } from './view-activity';
 import { MainOverlayBridge } from './overlay/MainOverlayBridge';
 import { keepBetaEditableInViewport } from './editable-viewport';
 import { BetaAppShell, type BetaSection } from './BetaAppShell';
@@ -240,9 +243,9 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   const handoff=useBetaDeadlineHandoff(handoffs,status?`${status.device_id}:${status.runtime_id??''}:${generation.current}`:'',!!status&&!!prepareSwitch.current&&!switching&&!creating,openDeadlineHandoff);
   useEffect(()=>{if(handoff.pending||handoff.failed)setSection('now');},[handoff.pending?.handoff_id,handoff.failed]);
   return <><BetaAppShell section={section} onSectionChange={setSection} profileName={profileName} onProfileClick={()=>setProfileDialog(true)}
-    sync={<BetaPeersPage peers={peers} profileId={profileId} profileName={profileName} runtimeId={status?.runtime_id??''} deviceId={status?.device_id??''} onJoined={joined} onEventsChanged={changed=>{if(changed===profileId)setEventRevision(value=>value+1);}}/>}
+    sync={<BetaPeersPage peers={peers} visible={section==='sync'} profileId={profileId} profileName={profileName} runtimeId={status?.runtime_id??''} deviceId={status?.device_id??''} onJoined={joined} onEventsChanged={changed=>{if(changed===profileId)setEventRevision(value=>value+1);}}/>}
     settings={<BetaSettingsPage profileName={profileName} profileId={profileId} deviceId={status?.device_id??''} endpoint={endpoint} onManageProfile={()=>setProfileDialog(true)} summaryModel={client.summaryModel} onDisconnect={persistenceBusy?undefined:onDisconnect}/>}
-    now={<PageShell title="当下" headerTop={<BetaRuntimeLocation endpoint={endpoint}/>} className="min-h-0 overflow-y-auto" headerClassName="shrink-0" contentClassName="flex flex-col"
+    now={<PageShell title="当下" headerTop={<BetaRuntimeLocation endpoint={endpoint}/>} className="min-h-0 overflow-hidden" headerClassName="shrink-0" contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
     headerAction={<div className="flex max-w-[15rem] items-center gap-1">{status&&profileId&&<>
       <label className="sr-only" htmlFor="beta-profile">当前档案</label>
       <select id="beta-profile" className={`${selectClass} min-w-0 max-w-36`} value={profileId} disabled={!prepareSwitch.current||switching||creating} onChange={event => {void changeProfile(event.target.value);}}>
@@ -345,6 +348,13 @@ async function readTimeline(client:BetaClient,profileId:string,query:BetaQuery):
 }
 function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visible, externalRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync,intentJournal,summaryOwner }: { client: BetaClient; controller: BetaDraftController; focus:BetaTimeblockController|null; deviceId:string;profileId: string; visible:boolean;externalRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void;intentJournal?:LocalIntentJournal;summaryOwner:MutableRefObject<SummaryTasksController|null> }) {
   const drafts = useSyncExternalStore(controller.subscribe, controller.snapshot);
+  const savedLayout = useBetaWorkspaceLayout();
+  const [temporaryLayout, setTemporaryLayout] = useState<BetaWorkspaceLayout | null>(null);
+  const layout = temporaryLayout ?? savedLayout;
+  const [layoutError, setLayoutError] = useState('');
+  const workspaceActive = useBetaViewActive(visible);
+  const recordsActive = workspaceActive && layout.records === 'expanded';
+  const deferredRefresh = useRef(false);
   const inputSendMode = useBetaInputSendMode();
   const [page, setPage] = useState<BetaTimelinePage | null>(null);
   const pageRef=useRef(page);pageRef.current=page;
@@ -352,51 +362,76 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
   const [search, setSearch] = useState(''); const [query, setQuery] = useState('');
   const [revision, setRevision] = useState(0); const [loading, setLoading] = useState(false);
   const [error, setError] = useState(''); const generation = useRef(0);
+  const [historyError, setHistoryError] = useState('');
   const scroll = useRef<HTMLDivElement>(null); const olderHeight = useRef<number | null>(null);
-  const alive = useRef(true); const now = useBetaNow();
+  const historyContent = useRef<HTMLDivElement>(null);
+  const alive = useRef(true); const now = useBetaNow(recordsActive);
   const mode=useBetaDateDisplayMode();
   const readingTop=useRef(0);const followTail=useRef(true);
   const [reviewsOpen,setReviewsOpen]=useState(false),[reviewTarget,setReviewTarget]=useState<SummaryArtifactRecord|null>(null),[summarySource,setSummarySource]=useState<SummarySourceRef|null>(null);
   const sourceReader=useMemo(()=>client.timelineEvent?(profile:string,event:string)=>client.timelineEvent!(profile,event):undefined,[client,client.timelineEvent]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  function changeLayout(patch: Partial<BetaWorkspaceLayout>) {
+    try { updateBetaWorkspaceLayout(temporaryLayout ? { ...temporaryLayout, ...patch } : patch); setTemporaryLayout(null); setLayoutError(''); }
+    catch { setTemporaryLayout({ ...layout, ...patch }); setLayoutError('布局已应用，但本机偏好未能保存；本窗口仍可继续使用，重启后可能恢复原布局'); }
+  }
   useEffect(() => {
+    if (visible && deadlineLocation?.profileId === profileId) changeLayout({ focus: 'expanded' });
+  }, [visible, profileId, deadlineLocation?.handoffId, deadlineLocation?.attempt]);
+  useEffect(() => {
+    if (recordsActive && deferredRefresh.current) { deferredRefresh.current = false; setRevision(value => value + 1); }
+  }, [recordsActive]);
+  useEffect(() => {
+    // Visibility does not itself invalidate a retained reading window. Changed
+    // facts/queries while hidden are reconciled once when the pane returns.
+    if (!recordsActive) { deferredRefresh.current = true; return; }
     const same=pageOwner.current.client===client&&pageOwner.current.profileId===profileId&&pageOwner.current.query===query;
     const previous=same?pageRef.current:null;
     if(!same){setPage(null);pageRef.current=null;followTail.current=true;readingTop.current=0;}
     pageOwner.current={client,profileId,query};
-    const current = ++generation.current; setLoading(true); setError('');
+    const current = ++generation.current; setLoading(true);
     void refreshTimelineWindow(next=>readTimeline(client,profileId,next),previous,query).then(result => {
-      if (current === generation.current) { olderHeight.current = null; setPage(result); }
-    }).catch(failure => { if (current === generation.current) setError(errorMessage(failure)); })
+      if (current === generation.current) { olderHeight.current = null; setPage(result); setHistoryError(''); }
+    }).catch(failure => { if (current === generation.current) setHistoryError(errorMessage(failure)); })
       .finally(() => { if (current === generation.current) setLoading(false); });
     return () => { ++generation.current; };
   }, [client, profileId, query, revision,externalRevision]);
   useEffect(()=>{
-    if(!visible||!client.summaries||loading)return;
+    if(!recordsActive||!client.summaries||loading)return;
     // Read-only foreground refresh, serialized by the existing timeline load.
     // Each reconciliation remains bounded to the existing 16-page window.
     const refresh=()=>{if(!document.hidden&&alive.current)setRevision(value=>value+1);};
     const timer=setTimeout(refresh,3000);document.addEventListener('visibilitychange',refresh);
     return()=>{clearTimeout(timer);document.removeEventListener('visibilitychange',refresh);};
-  },[visible,client,client.summaries,profileId,loading,query]);
+  },[recordsActive,client,client.summaries,profileId,loading,query]);
   useLayoutEffect(() => {
     const element = scroll.current; if (!element) return;
-    if(!visible)return;
+    if(!recordsActive)return;
     if (olderHeight.current !== null) element.scrollTop += element.scrollHeight - olderHeight.current;
     else if(followTail.current)element.scrollTop = element.scrollHeight;
     else element.scrollTop=readingTop.current;
     readingTop.current=element.scrollTop;
     olderHeight.current = null;
-  }, [page,visible]);
+  }, [page,recordsActive]);
+  useLayoutEffect(() => {
+    if (!recordsActive || !historyContent.current || typeof ResizeObserver === 'undefined') return;
+    // Image decoding can change height after the timeline commit. Follow only
+    // readers already at the tail; native scroll anchoring handles older text.
+    const observer = new ResizeObserver(() => {
+      if (followTail.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
+    });
+    observer.observe(historyContent.current); return () => observer.disconnect();
+  }, [recordsActive]);
   async function older() {
     if (!page || page.next_before === null || loading) return;
-    const current = generation.current; setLoading(true); setError('');
+    const current = generation.current; setLoading(true);
     try {
       const result = await readTimeline(client,profileId, { before: page.next_before, through: page.highwater, limit: 100, ...(query ? { search: query } : {}) });
       if (current !== generation.current) return;
       olderHeight.current = scroll.current?.scrollHeight ?? null;
       setPage({ ...result, items: mergeTimelineItems(page.items,result.items) });
-    } catch (failure) { if (current === generation.current) setError(errorMessage(failure)); }
+      setHistoryError('');
+    } catch (failure) { if (current === generation.current) setHistoryError(errorMessage(failure)); }
     finally { if (current === generation.current) setLoading(false); }
   }
   async function submit(commandId?: string) {
@@ -460,22 +495,26 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
   const pending = drafts.pending.filter(item => item.command.profile_id === profileId && item.state !== 'committed');
   const busy = pending.some(item => item.state === 'pending' && item.draft_revision === draft?.revision);
   const preparing = draft?.files?.some(file => !file.original || file.state === 'preparing') ?? false;
-  return <>
+  return <div data-beta-workspace className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div data-beta-workspace-content className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+    <BetaWorkspaceToolbar layout={layout} onChange={changeLayout} hasFocus={!!focus} />
+    {layoutError && <p role="alert" className="shrink-0 px-5 py-2 text-xs text-destructive">{layoutError}</p>}
     {focus&&<MainOverlayBridge client={client} capture={controller} focus={focus} profileId={profileId} onCommitted={()=>setRevision(value=>value+1)}/>}
-    {focus&&<BetaFocusTimer controller={focus} client={client} profileId={profileId}
+    {focus&&<BetaWorkspacePane kind="focus" state={layout.focus} onToggle={()=>changeLayout({focus:layout.focus==='collapsed'?'expanded':'collapsed'})}><div className="max-h-[48dvh] overflow-y-auto overscroll-contain"><BetaFocusTimer controller={focus} client={client} profileId={profileId} visible={visible&&layout.focus==='expanded'}
       onCommitted={()=>setRevision(value=>value+1)} onOpenSync={onOpenSync}
-      handoffTarget={visible&&deadlineLocation?.profileId===profileId?deadlineLocation:undefined}
+      handoffTarget={visible&&layout.focus==='expanded'&&deadlineLocation?.profileId===profileId?deadlineLocation:undefined}
       onHandoffReady={(id,hint,attempt)=>{
-        const region=scroll.current?.parentElement?.querySelector<HTMLElement>('section[aria-label="时间块"]');
+        const region=scroll.current?.closest('[data-beta-workspace]')?.querySelector<HTMLElement>('section[aria-label="时间块"]');
         if(region){
           region.scrollIntoView({block:'start',inline:'nearest',behavior:'instant'});
           onDeadlineLocated(id,hint,attempt);
         }
-      }}/>
+      }}/></div></BetaWorkspacePane>
     }
+    <BetaWorkspacePane kind="records" state={layout.records} onToggle={()=>changeLayout({records:layout.records==='collapsed'?'expanded':'collapsed'})}>
     {!client.timelinePage&&<p className="px-5 py-1 text-[11px] text-muted">此连接仅提供兼容记录历史，尚未提供完整时间线</p>}
     <div className="flex flex-wrap gap-2 border-b border-border-page px-5 py-2">
-      <form className="flex min-w-0 flex-1 gap-2" onSubmit={event => { event.preventDefault(); setQuery(search); }}>
+      <form className="flex min-w-0 flex-1 basis-full gap-2 sm:basis-0" onSubmit={event => { event.preventDefault(); setQuery(search); }}>
         <Input aria-label="搜索记录" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索文字" />
         <Button variant="outline" type="submit">搜索</Button>
       </form>
@@ -486,12 +525,12 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
       <Button variant="ghost" size="icon" aria-label="刷新记录" onClick={() => setRevision(value => value + 1)}><RefreshCw className="size-4" /></Button>
       <Button variant="outline" size="sm" onClick={()=>{setReviewTarget(null);setReviewsOpen(true);}}>回顾</Button>
     </div>
-    {error && <p role="alert" className="px-5 py-2 text-sm text-destructive">{error}</p>}
-    <div ref={scroll} className="min-h-[8rem] flex-1 overflow-y-auto px-5 py-4" aria-label="记录历史" aria-busy={loading} onScroll={event=>{if(!visible)return;const element=event.currentTarget;readingTop.current=element.scrollTop;followTail.current=element.scrollHeight-element.clientHeight-element.scrollTop<64;}}>
+    {historyError && <p role="alert" className="shrink-0 px-5 py-2 text-sm text-destructive">{historyError}</p>}
+    <div ref={scroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4" aria-label="记录历史" aria-busy={loading} onScroll={event=>{if(!recordsActive)return;const element=event.currentTarget;readingTop.current=element.scrollTop;followTail.current=element.scrollHeight-element.clientHeight-element.scrollTop<64;}}>
       {page?.next_before !== null && page && <div className="mb-4 text-center"><Button variant="ghost" disabled={loading} onClick={() => void older()}>加载更早记录</Button></div>}
-      {loading && <p role="status" className="text-center text-sm text-muted">正在读取…</p>}
+      {loading && !page && <p role="status" className="text-center text-sm text-muted">正在读取…</p>}
       {page?.items.length === 0 && <p className="py-8 text-center text-sm text-muted">{query ? '没有匹配记录' : '还没有记录'}</p>}
-      <div className="space-y-4">{page && [...page.items].reverse().map(item => item.kind==='timeblock'?<ChatMessageRowView key={item.record.event_id} eventId={item.record.event_id} timelineKind="timeblock" tone="system"
+      <div ref={historyContent} className="space-y-4">{page && [...page.items].reverse().map(item => item.kind==='timeblock'?<ChatMessageRowView key={item.record.event_id} eventId={item.record.event_id} timelineKind="timeblock" tone="system"
         avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className="bg-surface text-brand-accent"><Timer size={16}/></AvatarFallback></Avatar>}
         metadata={<><span className="text-xs font-semibold text-strong">{item.record.source.kind==='scheduler'?'计时服务':'我 · 时间块'}</span><EventTimestamp timestamp={item.record.occurred_at_ms} now={now} mode={mode}/></>}
         content={<p className="whitespace-pre-wrap break-words">{betaTimeblockLabel(item.record)}</p>}/>
@@ -501,8 +540,12 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
         avatar={<Avatar className={`${event.author_kind==='human'?'':'mt-0.5 '}h-8 w-8 shrink-0`}><AvatarFallback className={event.author_kind==='human'?'rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100':'bg-surface text-brand-accent'}>{event.author_kind==='human'?'我':<Bot size={16}/>}</AvatarFallback></Avatar>}
         metadata={<><span className="text-muted">设备 {event.device_id.slice(0,8)}</span><EventTimestamp timestamp={event.occurred_at_ms} now={now} mode={mode}/><span className="text-xs font-semibold text-strong">{event.author_kind==='human'?'我':'Agent 记录'}</span></>}
         content={event.text?<p className="whitespace-pre-wrap break-words">{event.text}</p>:null}
-        afterBubble={!!event.originals?.length&&<OriginalDownloads client={client} profileId={profileId} originals={event.originals}/>}/>;})())}</div>
+        afterBubble={!!event.originals?.length&&<OriginalDownloads client={client} deviceId={deviceId} profileId={profileId} originals={event.originals} visible={recordsActive}/>}/>;})())}</div>
     </div>
+    </BetaWorkspacePane>
+    {layout.records!=='expanded'&&<div className="flex min-h-0 flex-1 items-center justify-center px-5 py-6">{layout.records==='hidden'&&(!focus||layout.focus==='hidden')&&<p className="text-center text-sm text-muted">工作区已收起，仍可记录想法。上方可恢复视图。</p>}</div>}
+    </div>
+    {error && <p role="alert" className="shrink-0 px-5 py-2 text-sm text-destructive">{error}</p>}
     <BetaSummaryTasksPanel open={reviewsOpen} onOpenChange={setReviewsOpen} client={client} deviceId={deviceId} profileId={profileId} target={reviewTarget} revision={page?.highwater??0} now={now} dateMode={mode} onConfigure={onConfigureSummary} onChanged={()=>{if(alive.current)setRevision(value=>value+1);}} onOpenSource={sourceReader?source=>setSummarySource(source):undefined} intentJournal={intentJournal} onOwner={owner=>{summaryOwner.current=owner;}}/>
     <BetaSummarySourceDialog profileId={profileId} source={summarySource} reader={sourceReader} onClose={()=>setSummarySource(null)} now={now} dateMode={mode}/>
     <NowInputRowView
@@ -535,9 +578,9 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
         const operation = target ? controller.reselectFile(profileId, target, selected[0]) : controller.addFiles(profileId, selected);
         void operation.catch(failure => { if (alive.current) setError(errorMessage(failure)); });
       }} />
-      {!!draft?.files?.length && <div className="mb-2 flex flex-col gap-2" aria-label="原件队列">
+      {!!draft?.files?.length && <div className="mb-2 flex max-h-[28dvh] flex-col gap-2 overflow-y-auto overscroll-contain" aria-label="原件队列">
         {draft.files.map(file => <div key={file.id} className="flex items-center gap-2 rounded-2xl border border-[#E7E5E4] bg-white/90 px-3 py-2 shadow-sm dark:border-[#292524] dark:bg-[#1C1917]">
-          {file.original && <BetaImagePreview identity={`${deviceId}:${profileId}:${file.id}:${file.original.sha256}`} fileName={file.file_name} mediaType={file.media_type} byteLength={file.byte_length} load={() => controller.previewSource(profileId, file.id)} thumbnail />}
+          {file.original && <BetaImagePreview identity={`${deviceId}:${profileId}:${file.id}:${file.original.sha256}`} sourceScope={client} visible={workspaceActive} fileName={file.file_name} mediaType={file.media_type} byteLength={file.byte_length} load={() => controller.previewSource(profileId, file.id)} thumbnail />}
           {(!file.original || !file.media_type.startsWith('image/')) && <FileText size={16} className="shrink-0 text-[#C75B3A] dark:text-[#FDBA74]" />}
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-medium text-stone-700 dark:text-stone-100">{file.file_name}</p>
@@ -554,14 +597,14 @@ function ProfileWorkspace({ client, controller, focus, deviceId,profileId, visib
       </div>}
       {drafts.persistenceError && <p role="alert" className="mb-2 text-xs text-destructive">{drafts.persistenceError}</p>}
       {drafts.persistenceState==='failed'&&<Button variant="outline" size="sm" className="mb-2" onClick={()=>{void controller.flush().catch(failure=>setError(errorMessage(failure)));}}>重试记录草稿暂存</Button>}
-      {pending.map(item => <div key={item.command.command_id} className="mb-2 flex items-center gap-2 text-xs text-secondary">
+      {pending.map(item => <div key={item.command.command_id} role={item.state==='pending'?'status':'alert'} className="mb-2 flex items-center gap-2 text-xs text-secondary">
         <div className="min-w-0 flex-1"><p>{item.state === 'pending' ? item.capture_attempted === false ? '正在准备固定整组原件…' : '正在确认保存…' : item.state === 'failed' ? '原件或本机暂存未就绪，记录未提交' : `结果待确认${item.error_code ? `（${item.error_code}）` : ''}`}</p><p className="truncate">{item.command.text}</p>{!!item.command.originals?.length && <p className="truncate">{item.command.originals.map(file => file.file_name).join('、')}</p>}{item.message && <p>{item.message}</p>}</div>
         {item.state !== 'pending' && <Button variant="outline" size="sm" onClick={() => void submit(item.command.command_id)}>查证并重试</Button>}
       </div>)}
       </>}
       afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{clipboardBusy?'正在粘贴…':drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':pending.length ? '待确认的提交会保留原文与原命令' : draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision) ? '本机已保存' : draft?.text.trim()||draft?.files?.length?'记录草稿已暂存 · 尚未提交':`${inputSendShortcutLabel(inputSendMode)} · 支持粘贴图片`}</p>}
     />
-  </>;
+  </div>;
 }
 
 function formatBytes(bytes: number): string {

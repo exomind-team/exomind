@@ -20,6 +20,25 @@ function peers(){return{
 const props={profileId:Q,profileName:'原档案Q',runtimeId:R,deviceId:D};
 
 describe('Beta device joining UI',()=>{
+  it('pauses hidden observation and a late previous read cannot overwrite the resumed status',async()=>{
+    const client=peers(),old=deferred<BetaPeerStatus>();
+    client.status.mockImplementationOnce(()=>old.promise).mockResolvedValue({...status(Q),network_enabled:true});
+    const view=render(<BetaPeersPage {...props} peers={client} visible={false} onJoined={vi.fn(async()=>{})}/>);
+    expect(client.status).not.toHaveBeenCalled();
+    view.rerender(<BetaPeersPage {...props} peers={client} visible onJoined={vi.fn(async()=>{})}/>);
+    await waitFor(()=>expect(client.status).toHaveBeenCalledOnce());
+    view.rerender(<BetaPeersPage {...props} peers={client} visible={false} onJoined={vi.fn(async()=>{})}/>);
+    view.rerender(<BetaPeersPage {...props} peers={client} visible onJoined={vi.fn(async()=>{})}/>);
+    await waitFor(()=>expect(screen.getByRole('switch',{name:'设备同步'})).toBeChecked());
+    await act(async()=>{old.resolve(status(Q));await old.promise;});
+    expect(screen.getByRole('switch',{name:'设备同步'})).toBeChecked();
+    vi.useFakeTimers();
+    try{
+      view.rerender(<BetaPeersPage {...props} peers={client} visible={false} onJoined={vi.fn(async()=>{})}/>);
+      await act(async()=>{await vi.advanceTimersByTimeAsync(6000);});
+      expect(client.status).toHaveBeenCalledTimes(2);expect(client.sync).not.toHaveBeenCalled();expect(client.setEnabled).not.toHaveBeenCalled();
+    }finally{view.unmount();vi.useRealTimers();}
+  });
   it('requires authoritative network confirmation and does not optimistically mark enabled',async()=>{
     const client=peers();const enabled=deferred<void>();client.setEnabled.mockImplementationOnce(()=>enabled.promise);
     render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);

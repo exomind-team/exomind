@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EventTimestamp } from '@/ui/app/components/EventTimestamp';
 import { useBetaNow } from './date-clock';
+import { useBetaViewActive } from './view-activity';
 import { errorMessage } from './drafts';
 import { useBetaDateDisplayMode } from './preferences';
 import type { BetaInvitation, BetaInvitationPreview, BetaPeer, BetaPeerStatus, BetaPeersClient } from './peers-client';
@@ -27,7 +28,7 @@ function peerState(peer: BetaPeer): string {
   if (peer.originals_sync === 'pending') return '记录已补齐，原件按需';
   return '记录已补齐，原件状态待确认';
 }
-export function BetaPeersPage({ peers, profileId, profileName, runtimeId, deviceId, onJoined, onEventsChanged }: {
+export function BetaPeersPage({ peers, profileId, profileName, runtimeId, deviceId, onJoined, onEventsChanged, visible = true }: {
   peers: BetaPeersClient | null;
   profileId: string;
   profileName: string;
@@ -35,6 +36,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   deviceId: string;
   onJoined: (profileId: string) => Promise<void>;
   onEventsChanged?: (profileId: string) => void;
+  visible?: boolean;
 }) {
   const scope = useMemo(() => ({ peers, profileId, runtimeId, deviceId }), [peers, profileId, runtimeId, deviceId]);
   const currentScope = useRef(scope); currentScope.current = scope;
@@ -53,12 +55,17 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   const operationFlight = useRef<Life | null>(null);
   const eventsChanged = useRef(onEventsChanged); eventsChanged.current = onEventsChanged;
   const observedSync = useRef<string | null>(null);
-  const now = useBetaNow(); const dateMode = useBetaDateDisplayMode();
+  const readSequence = useRef(0);
+  const observing = useBetaViewActive(visible);
+  const now = useBetaNow(observing); const dateMode = useBetaDateDisplayMode();
   const isCurrent = (life: Life) => life.active && lifecycle.current === life && currentScope.current === scope;
   async function refresh(life: Life) {
     if (!peers || !profileId) return;
-    const result = await peers.status(profileId);
-    if (!isCurrent(life)) return;
+    const sequence = ++readSequence.current;
+    let result: BetaPeerStatus;
+    try { result = await peers.status(profileId); }
+    catch (failure) { if (!isCurrent(life) || sequence !== readSequence.current) return; throw failure; }
+    if (!isCurrent(life) || sequence !== readSequence.current) return;
     if (result.device_id !== deviceId || result.runtime_id !== runtimeId) throw new Error('本机服务已切换，请重新连接后查看同步状态');
     setStatus(result);
     setStatusError('');
@@ -70,18 +77,23 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   useEffect(() => {
     const life: Life = { active: true }; lifecycle.current = life;
     setStatus(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setInvitationText(''); setPendingJoin(null); setRevoke(null); observedSync.current = null; inputRevision.current++;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    return () => { life.active = false; if (operationFlight.current === life) operationFlight.current = null; };
+  }, [scope]);
+  useEffect(() => {
+    const life = lifecycle.current;
+    if (!observing || !life) return;
+    let timer: ReturnType<typeof setTimeout> | undefined; let stopped = false;
     const poll = async () => {
       try { await refresh(life); }
       catch (failure) { if (isCurrent(life)) setStatusError(errorMessage(failure)); }
-      if (isCurrent(life) && peers && profileId) timer = setTimeout(() => { void poll(); }, 2000);
+      if (!stopped && isCurrent(life) && peers && profileId) timer = setTimeout(() => { void poll(); }, 2000);
     };
     void poll();
-    return () => { life.active = false; if (timer) clearTimeout(timer); if (operationFlight.current === life) operationFlight.current = null; };
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
     // The memoized scope is the complete request owner. Status updates do not
     // restart the lifecycle or move an old P response into Q.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope]);
+  }, [scope, observing]);
   async function perform(label: string, action: (life: Life) => Promise<void>) {
     const life = lifecycle.current;
     if (!peers || !life || operationFlight.current === life || !isCurrent(life)) return;

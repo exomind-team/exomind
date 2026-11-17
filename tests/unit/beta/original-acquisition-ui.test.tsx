@@ -20,6 +20,15 @@ function fixture(){
 }
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 describe('Original cards acquire real bytes before export',()=>{
+  it('rechecks a changed descriptor instead of leaving the replacement row in initial loading',async()=>{
+    const f=fixture();const ui=render(<OriginalDownloads client={f.client} profileId={P} originals={[original]}/>);
+    await screen.findByText('本机缺少原件，仅有记录信息');
+    const changed={...original,file_name:'replacement.raw'};f.setSnapshot({original:changed});
+    ui.rerender(<OriginalDownloads client={f.client} profileId={P} originals={[changed]}/>);
+    await waitFor(()=>expect(f.status).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('本机缺少原件，仅有记录信息')).toBeVisible();
+    expect(screen.getByRole('button',{name:'下载 replacement.raw'})).toBeDisabled();expect(f.fetch).not.toHaveBeenCalled();
+  });
   it('shows missing metadata honestly, polls bounded progress and cancels the exact acquisition UUID',async()=>{
     const f=fixture();render(<OriginalDownloads client={f.client} profileId={P} originals={[original]}/>);
     await screen.findByText('本机缺少原件，仅有记录信息');const download=screen.getByRole('button',{name:'下载 fixture.raw'});expect(download).toBeDisabled();

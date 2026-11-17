@@ -14,7 +14,7 @@ function artifact():SummaryArtifactView{return{event_id:A,profile_id:P,occurred_
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 describe('Beta review is a pure Alpha message composition',()=>{
   it('renders only the seven Core states as human-facing labels, with conflict/reason disclosed separately',()=>{
-    const labels:Record<SummaryState,string>={waiting_configuration:'等待配置回顾模型',queued:'已排队',running:'正在生成回顾',retry_wait:'等待重试',succeeded:'回顾已生成',failed:'回顾生成失败',cancelled:'回顾已取消'};
+    const labels:Record<SummaryState,string>={waiting_configuration:'等待配置回顾模型',queued:'已排队',running:'正在生成回顾',retry_wait:'等待重试',succeeded:'结果待读取',failed:'回顾生成失败',cancelled:'回顾已取消'};
     const ui=render(<BetaReviewView {...props} task={task()}/>);
     for(const [state,label]of Object.entries(labels)){ui.rerender(<BetaReviewView {...props} task={{...task(state as SummaryState),reason:'synthetic-private-native-path',conflicts:[E]}}/>);expect(screen.getByText(label)).toBeInTheDocument();expect(ui.container.textContent).not.toContain(state);expect(ui.container.textContent).not.toContain('synthetic-private-native-path');expect(screen.getByText('生成归属存在冲突，需要确认后继续。')).toBeInTheDocument();}
     expect(screen.getByTestId('new-mobile-system-message-row')).toBeInTheDocument();expect(ui.container.querySelector('.bg-card')).toBeInTheDocument();expect(screen.getByText('材料尚未冻结，不能声明已读取任何记录或原件。')).toBeInTheDocument();
@@ -30,8 +30,9 @@ describe('Beta review is a pure Alpha message composition',()=>{
     const old=artifact();const next=snapshot();next.sources=[{event_id:N,kind:'capture',digest:'1'.repeat(64)}];next.coverage.metadata_only=[];next.coverage.unread_originals=[];
     const current:SummaryTaskView={...task('succeeded'),latest_artifact_id:N,coverage_changed:true,current_run:{run_id:N,run_generation:2,owner_generation:1,snapshot:next,attempt:null}};
     const openSource=vi.fn(),openLatest=vi.fn(),update=vi.fn();const ui=render(<BetaReviewView {...props} task={current} artifact={old} actions={{openSource,openLatest,update}}/>);
-    expect(screen.getByText('A retained narrative')).toBeInTheDocument();expect(screen.getByText('原件正文未读取 1 件')).toBeInTheDocument();expect(screen.getByText(/有新材料，可更新另存/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button',{name:`来源 ${E.slice(0,8)}`}));expect(openSource).toHaveBeenLastCalledWith(old.snapshot.sources[0],P);
+    expect(screen.getByText('A retained narrative')).toBeInTheDocument();expect(screen.getByText('原件正文未读取 1 件')).toBeInTheDocument();expect(screen.getByText('有新材料，可更新另存',{exact:true})).toBeVisible();
+    fireEvent.click(screen.getByText('查看引用来源 · 1 条'));
+    fireEvent.click(screen.getByRole('button',{name:`来源 1 · ${E.slice(0,8)}`}));expect(openSource).toHaveBeenLastCalledWith(old.snapshot.sources[0],P);
     fireEvent.click(screen.getByRole('button',{name:'查看新版本'}));expect(openLatest).toHaveBeenLastCalledWith(N,P);expect(screen.getByText('A retained narrative')).toBeInTheDocument();expect(ui.container.textContent).not.toContain('1'.repeat(64));
     expect(ui.container.querySelectorAll('time')).toHaveLength(3);
   });
@@ -43,8 +44,8 @@ describe('Beta review is a pure Alpha message composition',()=>{
     expect(ui.container.textContent).toContain('未选择给模型');expect(ui.container.textContent).toContain('不作为模型已读内容');expect(ui.container.textContent).not.toContain('本次结果记录为模型已读');expect(screen.getByText(/输入用量：0/)).toHaveTextContent('输出用量：供应商未提供');
   });
   it('renders model text as text, denies an unknown citation, and refuses cross-profile artifacts',()=>{
-    const result=artifact();result.output.narrative='<img src="synthetic" onerror="synthetic()">';result.output.evidence=[N];const openSource=vi.fn();
-    const ui=render(<BetaReviewView {...props} task={task('succeeded')} artifact={result} actions={{openSource}}/>);expect(screen.getByText(result.output.narrative)).toBeInTheDocument();expect(ui.container.querySelector('img')).toBeNull();expect(screen.getByText('引用来源不在此快照中')).toBeInTheDocument();expect(openSource).not.toHaveBeenCalled();
+    const result=artifact();result.output.narrative='保留正常叙述\n\n<img src="synthetic" onerror="synthetic()">\n\n保留后续段落';result.output.evidence=[N];const openSource=vi.fn();
+    const ui=render(<BetaReviewView {...props} task={task('succeeded')} artifact={result} actions={{openSource}}/>);expect(screen.getByText('保留正常叙述')).toBeInTheDocument();expect(screen.getByText('保留后续段落')).toBeInTheDocument();expect(ui.container.querySelector('img')).toBeNull();expect(ui.container.textContent).not.toContain('onerror');expect(screen.getByText('引用来源不在此快照中')).toBeInTheDocument();expect(openSource).not.toHaveBeenCalled();
     ui.rerender(<BetaReviewView {...props} task={task('succeeded')} artifact={{...result,profile_id:N}} actions={{openSource}}/>);expect(screen.getByRole('alert')).toHaveTextContent('回顾版本与当前档案不一致');expect(screen.queryByText(result.output.narrative)).not.toBeInTheDocument();
   });
   it('shows the artifact creation date rather than its selection end, with cross-day/year disclosure and date toggling',()=>{
@@ -63,6 +64,6 @@ describe('Beta review is a pure Alpha message composition',()=>{
   it('does not call an unread generated result absent and discloses omitted conflict diagnostics',()=>{
     const conflicts=Array.from({length:10},(_,index)=>`01234567-89ab-4def-8abc-${index.toString(16).padStart(12,'0')}`);
     const ui=render(<BetaReviewView {...props} task={{...task('succeeded'),latest_artifact_id:A,conflicts}}/>);
-    expect(screen.getByText('结果正文尚未读取，请刷新或继续读取版本；原始记录保留。')).toBeInTheDocument();expect(ui.container.textContent).toContain('还有 2 项，未在此展开');expect(ui.container.textContent).not.toContain(conflicts[9]);
+    expect(screen.getByText('结果正文待读取，原始记录保留。')).toBeInTheDocument();expect(ui.container.textContent).toContain('还有 2 项，未在此展开');expect(ui.container.textContent).not.toContain(conflicts[9]);
   });
 });

@@ -1,9 +1,17 @@
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BetaSettingsPage } from '@/beta/BetaSettingsPage';
 import type { BetaDeadlineAlertStatus, BetaDeadlineAlertsClient } from '@/beta/deadline-alert-client';
 import { deferred } from './fixtures';
+
+const host = vi.hoisted(() => ({ native: true }));
+vi.mock('@tauri-apps/api/core', async importOriginal => ({
+  ...await importOriginal<typeof import('@tauri-apps/api/core')>(),
+  isTauri: () => host.native,
+  invoke: vi.fn(async () => { throw new Error('synthetic unavailable native endpoint'); }),
+}));
+beforeEach(() => { host.native = true; vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Android UI fixture'); });
 
 const ready: BetaDeadlineAlertStatus = { platform_state: 'ready', notification_permission: 'denied', exact_alarm: false, pending_count: 2, scheduled_count: 0, delivered_count: 0, keepalive_requested: true, last_error_code: null };
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
@@ -30,10 +38,11 @@ describe('Beta reminder qualification settings use Alpha rows', () => {
     expect(screen.queryByRole('button', { name: '请求通知权限' })).not.toBeInTheDocument();
   });
   it('reports Web/unavailable without presenting reminder enablement or a permission button', async () => {
+    host.native = false;
     const ui = render(<BetaSettingsPage profileName="P" deadlineAlerts={null}/>);
-    expect(screen.getByText('当前环境不提供安卓系统提醒')).toBeInTheDocument(); expect(screen.queryByRole('button', { name: '请求通知权限' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('beta-deadline-alert-settings')).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: '请求通知权限' })).not.toBeInTheDocument();
     const client = fixture({ ...ready, platform_state: 'unavailable', notification_permission: 'unavailable' });
-    ui.rerender(<BetaSettingsPage profileName="P" deadlineAlerts={client}/>);
+    ui.unmount(); host.native = true; render(<BetaSettingsPage profileName="P" deadlineAlerts={client}/>);
     await waitFor(() => expect(client.status).toHaveBeenCalledTimes(1)); await screen.findByText('当前环境不提供安卓系统提醒');
     expect(screen.queryByText('已请求')).not.toBeInTheDocument(); expect(screen.queryByText('具备')).not.toBeInTheDocument(); expect(client.requestPermission).not.toHaveBeenCalled();
   });

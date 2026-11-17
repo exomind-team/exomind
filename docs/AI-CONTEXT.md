@@ -43,6 +43,8 @@ Tauri 2.0 + React 18 + TypeScript + Rust | Zustand | Tailwind CSS + Radix UI | B
 
 ## 当前阶段
 
+2026-11-18最新前端增量：用户恢复Web优先UI迭代，独立显隐/内联图片/反馈合同已实现，Beta前端328项、完整Web16场景及生产Beta Web构建通过；详见[工作区迭代](plans/2026-11-18-beta-ui-workspace-iteration.md)。实机/能源与完整Beta仍待，旧APK/EXE未包含本轮前端变更。
+
 当前 0.6 的最新状态以 [Alpha 阶段收尾](plans/2026-11-13-v0.6-alpha-closeout.md) 和 [Beta 功能计划](plans/2026-11-13-v0.6-beta-feature-plan.md) 为准：Alpha05 阶段已完成，二进制来源 `99b6b648`，148 项相关测试、Windows 精确候选 73 项验收、四平台仅构建 CI 通过；Android 新装本机记录、重启、系统栏/全屏复验通过，用户已人工确认当下发送、系统栏避让与全屏效果。Android 卸载后新装不计入保留数据升级，新协议、完整跨端矩阵与后台恢复仍待 Beta。Beta 主链路已有实现与专项证据，完整验收尚未通过；当前状态见 [最新 Beta 全项盘点](plans/2026-11-17-v0.6-beta-progress-audit.md)；任务状态与后续验证以 [Beta 实施记录](plans/2026-11-13-v0.6-beta-execution.md) 为准。Alpha 手机与平板的局域网消息同步另获用户人工验收通过，但不代替 Beta 新协议与完整设备矩阵。[r3 计划](plans/2026-11-11-v0.6-migration-ui-tauri-validation-plan.md) 与 [27题审批决定](plans/2026-11-11-v0.6-approved-decisions.md) 保留需求来源。新版保留档案权限隔离、自定义标签、只增记录、通用原件和时间块轮转；配对单位为设备上的档案，同名档案不自动相连。小文件自动、大文件按需同步，以最终一致和恢复为准。UI 直接复用旧 React 组件/布局/字体/暖石主题，不复建任务/提案/终端会话管理，不要求迁移 0.5。未公开发布 0.6，未切换日用入口。
 
 下述 0.5 阶段结论保留为历史背景；其中“恢复迭代从 0.5.3 开始”针对继续 0.5.x 的候选，不覆盖用户已明确授权的独立 0.6 路线。`v0.5.2` 失败标签仍不可移动或复用，长期产品愿景与既有架构资料不因本计划被重写。
@@ -97,6 +99,7 @@ src-tauri/        # Rust 后端（Tauri 2.0）
 | 用户侧 runtime agent 契约 | [docs/agents/runtime-agent-contract.md](agents/runtime-agent-contract.md) |
 | 前端 UI 统一规范 | [docs/development/ui-spec.md](development/ui-spec.md) |
 | Alpha UI/UX 复用与 Beta 前端指导 | [Alpha UI/UX 参考](development/alpha-ui-ux-reference.md) |
+| Beta 独立显隐/内联图片/完整Web交互迭代 | [前端工作区迭代](plans/2026-11-18-beta-ui-workspace-iteration.md) |
 | Beta 当前核心缺陷/P1推进 | [核心缺陷优先迭代](plans/2026-11-17-v0.6-beta-core-first-iteration.md) |
 | Beta11当前暂停交接/交付/未决项 | [暂停交接](plans/2026-11-17-beta11-paused-handoff.md) |
 | Beta 多来源历史、证明、ACK与闲置判变 | [多来源复制合同](development/beta-multiorigin-sync.md) |
