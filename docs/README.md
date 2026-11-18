@@ -1,13 +1,14 @@
 # ExoMind 文档导航
 
-> 本索引覆盖 docs/ 下所有文档。人类和 AI Agent 共用。
+> 常用文档导航，人类和 AI Agent 共用。当前状态以 [AI Context](AI-CONTEXT.md) 为准。
 
 ---
 
 ## 架构与设计
 
 - [系统原则](architecture/principles.md) -- invariant / affordance、生命判据与命名语义
-- [架构总览](architecture/overview.md) -- 分层模型、Port/Service、Phase 路线（唯一权威）
+- [0.6 Beta 维护入口](../src/beta/README.md) -- 当前所有者、入口、命名与验证范围
+- [历史架构总览](architecture/overview.md) -- v4.0 / 0.5 的 Port/Service/Phase 来源，不替代 Beta 当前实现
 - [Agent Workbench 共享工作图谱](architecture/agent-workbench-shared-graph-spec.md) -- Agent Workbench 长期架构规格与实施阶段
 - [信号池架构](architecture/ARCH-signal-pool-agent-process.md) -- SignalPool 进程模型与信号流
 - [同步架构](architecture/ARCH-SYNC.md) -- 多设备同步模块架构分析
@@ -118,19 +119,19 @@
 - [Agent Hub Claude/Codex 调研](plans/2026-03-06-agent-hub-claude-codex-runtime-research.md) -- Agent Runtime 对接调研
 - [Agent Hub 拓扑布局设计](plans/2026-03-06-agent-hub-topology-layout-design.md) -- Topology Layout 设计
 - [Agent Hub 拓扑布局计划](plans/2026-03-06-issue-382-agent-hub-topology-layout-plan.md) -- Issue #382 实现计划
-- [Agent Runtime 编排计划](plans/2026-03-07-issue-385-agent-hub-claude-codex-runtime-plan.md) -- Issue #385 实现计划
+- [Agent Runtime 编排计划](plans/archive/2026-03-07-issue-385-agent-hub-claude-codex-runtime-plan.md) -- Issue #385 历史归档
 - [Agent Runtime 编排设计](plans/2026-03-07-issue-385-agent-runtime-orchestration-design.md) -- Issue #385 设计
 - [个人成长到文明路线图](plans/2026-03-07-personal-growth-to-civilization-roadmap.md) -- 远期愿景路线
 - [混合身份架构](plans/2026-03-07-user-system-hybrid-identity-architecture.md) -- 用户系统架构方案
 - [Volcano 原生流式实现](plans/2026-03-10-volcano-native-streaming-implementation-plan.md) -- Volcano Native Streaming
-- [RT EventLog SQLite 计划](plans/2026-03-11-issue-484-rt-eventlog-sqlite-plan.md) -- Issue #484 实现计划
+- [RT EventLog SQLite 计划](plans/archive/2026-03-11-issue-484-rt-eventlog-sqlite-plan.md) -- Issue #484 历史归档
 - [RT TimeBlock SQLite 设计](plans/2026-03-11-issue-485-rt-timeblock-sqlite-design.md) -- Issue #485 设计
-- [RT TimeBlock SQLite 计划](plans/2026-03-11-issue-485-rt-timeblock-sqlite-plan.md) -- Issue #485 实现计划
-- [Review Agent B2 实现](plans/2026-03-11-review-agent-b2-implementation.md) -- Phase B2 实现计划
-- [Review Agent C Prompt 设计](plans/2026-03-11-review-agent-phase-c-prompt-loading-design.md) -- Phase C Prompt Loading 设计
-- [Review Agent C Prompt 计划](plans/2026-03-11-review-agent-phase-c-prompt-loading-plan.md) -- Phase C 实现计划
-- [Review Agent C2/C3 修复](plans/2026-03-11-review-agent-phase-c2-c3-fixes-plan.md) -- Phase C2/C3 修复计划
-- [Review Agent B2 后续修复](plans/2026-03-11-review-agent-post-b2-fixes-plan.md) -- Post-B2 修复计划
+- [RT TimeBlock SQLite 计划](plans/archive/2026-03-11-issue-485-rt-timeblock-sqlite-plan.md) -- Issue #485 历史归档
+- [Review Agent B2 实现](plans/archive/2026-03-11-review-agent-b2-implementation.md) -- Phase B2 历史归档
+- [Review Agent C Prompt 设计](plans/archive/2026-03-11-review-agent-phase-c-prompt-loading-design.md) -- Phase C 历史设计
+- [Review Agent C Prompt 计划](plans/archive/2026-03-11-review-agent-phase-c-prompt-loading-plan.md) -- Phase C 历史归档
+- [Review Agent C2/C3 修复](plans/archive/2026-03-11-review-agent-phase-c2-c3-fixes-plan.md) -- Phase C2/C3 历史归档
+- [Review Agent B2 后续修复](plans/archive/2026-03-11-review-agent-post-b2-fixes-plan.md) -- Post-B2 历史归档
 - [语音输入体验设计](plans/2026-03-11-voice-input-experience-design.md) -- Voice Input UX 设计
 - [语音输入体验计划](plans/2026-03-11-voice-input-experience-implementation-plan.md) -- Voice Input UX 实现计划
 - [语音悬浮卡片设计](plans/2026-03-11-voice-overlay-soft-floating-card-design.md) -- Soft Floating Card 设计

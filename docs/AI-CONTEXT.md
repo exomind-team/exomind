@@ -26,7 +26,14 @@ Tauri 2.0 + React 18 + TypeScript + Rust | Zustand | Tailwind CSS + Radix UI | B
 
 -> [docs/architecture/overview.md](architecture/overview.md)
 
-快速参考：L1 Adapter -> L2 Environment -> L3 Service / Actor / Agent -> L4 UI
+上面的总览解释 0.5 主线。当前 0.6 Beta 的持久事实、命令、复制与窗口关系见
+[Beta 维护入口](../src/beta/README.md)、
+[Native 工作区](development/beta-native-workspace.md)和
+[多来源复制合同](development/beta-multiorigin-sync.md)。共享 React 展示组件不意味着
+复用旧 Runtime 的业务所有权；Alpha 与 Beta 的配置/数据/候选身份分别核对。
+
+旧主线快速参考：L1 Adapter -> L2 Environment -> L3 Service / Actor / Agent -> L4 UI。
+Beta 的 Core/Host/Native/UI 边界按上面的当前入口读取，不把下表当作其完整运行图。
 
 | 层级 | 职责 | 接口归属 |
 |------|------|----------|
@@ -77,7 +84,7 @@ Phase 2 完成（SignalPool L3-L5），Phase 3 待启动（资源管控 + 可观
 | `docs/specs/` | 模块规格 |
 | `docs/product/` | 产品方向、PRD、路线图 |
 | `docs/development/` | 开发指南、Git 规范、Repo Agent 操作细节 |
-| `docs/plans/` | 活跃实施计划（仅进行中） |
+| `docs/plans/` | 活跃计划与历史验收/封存，以文档状态为准 |
 | `docs/memory/` | AI 对话记忆 |
 | `docs/agents/` | 用户侧 / runtime agent 文档与专项 agent 契约 |
 | `docs/research/` | 技术调研 |
@@ -85,7 +92,8 @@ Phase 2 完成（SignalPool L3-L5），Phase 3 待启动（资源管控 + 可观
 
 ## 活跃工作
 
--> `docs/plans/` 中的所有文件均为进行中的计划。
+-> `docs/plans/` 包含活跃计划和历史验收/封存记录；以文档内状态与本页当前阶段为准，
+不能仅因目录名就把已完成计划重新执行。
 
 ## 源码结构
 
@@ -103,6 +111,7 @@ src-tauri/        # Rust 后端（Tauri 2.0）
 
 | 场景 | 文档 |
 |------|------|
+| 0.6 历史/返工、反例与接管成本 | [历史与返工审计](research/2026-11-19-v0.6-history-and-rework-audit.md)、[当前维护入口](../src/beta/README.md) |
 | Beta 根因回归、Agent-spec 试点与空间 GC | [迭代门禁](development/beta-iteration-guards.md)、[工业化路线图](plans/2026-11-19-v0.6-industrial-iteration-roadmap.md) |
 | 源码工作目录 Agent 合同 | [AGENTS.md](../AGENTS.md) |
 | 用户侧 runtime agent 契约 | [docs/agents/runtime-agent-contract.md](agents/runtime-agent-contract.md) |

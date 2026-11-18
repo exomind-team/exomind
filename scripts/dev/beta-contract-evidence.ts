@@ -42,7 +42,7 @@ export function nativeBindings(value: unknown): NativeBindings {
 }
 
 /** Admit the CLI's plan, without building a second intent compiler. */
-export function verifyIntentPlan(value: unknown, specName: string): void {
+export function verifyIntentPlan(value: unknown, specName: string, expectedScenarios: number): void {
   const plan = object(value);
   requireProof(plan.version === 1, 'unsupported intent plan');
   requireProof(array(plan.parse_errors).length === 0 && array(plan.diagnostics).length === 0, 'intent plan has diagnostics');
@@ -52,6 +52,10 @@ export function verifyIntentPlan(value: unknown, specName: string): void {
   const spec = array(plan.specs).map(object).find(row=>row.name === specName);
   requireProof(spec && array(spec.satisfies).includes('REQ-BETA-RUNTIME'), 'pilot contract is absent from intent plan');
   requireProof(requirements.some(row=>row.id === 'REQ-BETA-RUNTIME') && units.some(row=>row.requirement_id === 'REQ-BETA-RUNTIME'), 'pilot requirement has no ready work unit');
+  const requirement = requirements.filter(row=>row.id === 'REQ-BETA-RUNTIME');
+  const workUnits = units.filter(row=>row.requirement_id === 'REQ-BETA-RUNTIME');
+  requireProof(Number.isSafeInteger(expectedScenarios) && expectedScenarios > 0, 'contract scenario count is missing');
+  requireProof(requirement.length === 1 && workUnits.length === 1 && requirement[0].scenario_count === expectedScenarios && workUnits[0].scenario_count === expectedScenarios, 'accepted requirement, work unit and contract scenario counts disagree');
 }
 
 export function verifyNativeProof(bindings: NativeBindings, value: unknown) {

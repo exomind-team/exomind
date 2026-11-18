@@ -13,8 +13,15 @@ on:
       - 'scripts/dev/beta-contract-*.ts'
       - 'tests/unit/scripts/beta-contract-*.test.ts'
       - 'crates/exomind-beta-host/**'
+      - 'crates/exomind-core/**'
+      - 'Cargo.toml'
       - 'src-tauri/src/beta*'
       - 'src/beta/**'
+      - 'src/ui/app/components/**'
+      - 'src/components/ui/**'
+      - 'vitest.config.ts'
+      - 'tests/setup.ts'
+      - 'scripts/dev/supervised-command*'
       - 'tests/unit/beta/**'
       - 'package.json'
       - 'bun.lock'
@@ -57,12 +64,12 @@ jobs:
         run: |
           echo "CARGO_TARGET_DIR=$RUNNER_TEMP/exomind-contract-cache" >> "$GITHUB_ENV"
           echo "CONTRACT_OUT=$RUNNER_TEMP/exomind-contract-evidence" >> "$GITHUB_ENV"
-      - name: Install pinned Agent-spec CLI
-        run: cargo install agent-spec --version 1.4.0 --locked
       - name: Install frozen frontend dependencies
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Check evidence rejection rules
         run: bun run test:beta:contract-evidence
+      - name: Install pinned Agent-spec CLI
+        run: cargo install agent-spec --version 1.4.0 --locked
       - name: Run source contracts and explicit UI regressions
         shell: bash
         run: |

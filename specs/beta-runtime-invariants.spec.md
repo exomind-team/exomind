@@ -16,6 +16,8 @@ packaged application, a physical device, appearance, or energy consumption.
 - Workspace observations reuse qualified authorization instead of minting rows.
 - Competing drafts use compare-and-update and preserve newer or corrupt input.
 - Native proof uses the existing isolated exomind-beta-host integration tests.
+- The allow-list records this pilot's maintenance scope. Check it explicitly for
+  a task; do not impose it as permanent path policy on every future Beta change.
 
 ## Boundaries
 
@@ -36,6 +38,11 @@ packaged application, a physical device, appearance, or energy consumption.
 - docs/development/beta-iteration-guards.md
 - docs/plans/2026-11-19-v0.6-industrial-iteration-roadmap.md
 - docs/AI-CONTEXT.md
+- docs/README.md
+- docs/architecture/overview.md
+- docs/development/repo-agent-workflow.md
+- docs/development/beta-native-workspace.md
+- docs/research/2026-11-19-v0.6-history-and-rework-audit.md
 
 ### Forbidden
 - Do not change product data schemas, pairing authority or signing rules.

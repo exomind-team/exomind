@@ -96,7 +96,7 @@
 |----------|----------|--------|
 | 任意源码任务起步 | `docs/AI-CONTEXT.md` | 建立仓库索引、文档地图和技术栈全局视图 |
 | 前端页面、组件、样式、交互、导航 | `docs/development/ui-spec.md`、`docs/plans/2026-04-02-issue-807-ui-unification-implementation-plan.md` | 避免破坏现有 UI 统一化边界 |
-| 系统命名、行为语义、产品语义映射 | `docs/architecture/principles.md`、`docs/architecture/overview.md` | 保持 invariant / affordance 与分层模型一致 |
+| 系统命名、行为语义、产品语义映射 | `docs/architecture/principles.md`；0.6 读 `src/beta/README.md`，旧主线读 `docs/architecture/overview.md` | 区分当前所有者与历史分层，保持 invariant / affordance 一致 |
 | Runtime agent、prompt、用户侧助理行为 | `docs/agents/runtime-agent-contract.md`、`docs/development/exomind-runtime-agents-api.md` | 区分源码开发合同与用户侧 agent 契约 |
 | Issue 修复、PR 评论、`jj`、验证链路、multi-agent、图标刷新、发布 | `docs/development/repo-agent-workflow.md` | 技术操作细节全部外置到这里 |
 | 分支、worktree、Git 命令边界 | `docs/development/git-spec.md` | 这是 Git / worktree 的权威来源 |

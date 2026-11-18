@@ -53,6 +53,7 @@ function validateTicket(value:unknown):OverlayTicket{
   if('block_id'in a)id(a.block_id);if('command_id'in a)id(a.command_id);if('draft_revision'in a)integer(a.draft_revision);if('text'in a)text(a.text);if('skipped'in a)flag(a.skipped);
   return{ticket_id:id(raw.ticket_id),request:{request_id:id(r.request_id),seq,overlay_generation:id(r.overlay_generation),scope:validateOverlayScope(r.scope),expected_revision:revision,action:a as unknown as OverlayRequest['action']}};
 }
+/** @deprecated Historical transport fixture only; beta_overlay_main is not registered in production. */
 export function nativeMainOverlayPort(invoker:OverlayInvoke=invoke):MainOverlayPort {
   const main=<T>(operation:Record<string,unknown>)=>call<T>(invoker,'beta_overlay_main',{operation});
   return{async register(binding:OverlayBinding){return validateOverlayScope(await main({kind:'register',binding}));},async publish(scope,view){await main({kind:'publish',scope,view});},async take(scope){const tickets=await main<unknown>({kind:'take',scope});if(!Array.isArray(tickets)||tickets.length>64)return invalid();return tickets.map(validateTicket);},async validate(scope,ticket_id){await main({kind:'validate',scope,ticket_id});},async respond(scope,ticket_id,response){await main({kind:'respond',scope,ticket_id,response});},async revoke(scope){await main({kind:'revoke',scope});}};

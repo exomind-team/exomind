@@ -70,21 +70,29 @@ describe('Beta contract proof acceptance',()=>{
 });
 
 describe('Beta intent plan admission',()=>{
-  const plan=()=>({version:1,requirements:[{id:'REQ-BETA-RUNTIME',status:'ready'}],
-    work_units:[{id:'WU-REQ-BETA-RUNTIME',requirement_id:'REQ-BETA-RUNTIME',status:'ready'}],
+  const plan=()=>({version:1,requirements:[{id:'REQ-BETA-RUNTIME',status:'ready',scenario_count:1}],
+    work_units:[{id:'WU-REQ-BETA-RUNTIME',requirement_id:'REQ-BETA-RUNTIME',status:'ready',scenario_count:1}],
     specs:[{name:'beta-runtime-invariants',satisfies:['REQ-BETA-RUNTIME']}],diagnostics:[],parse_errors:[]});
   it('accepts the CLI ready plan for the pilot contract',()=>{
-    expect(()=>verifyIntentPlan(plan(),'beta-runtime-invariants')).not.toThrow();
+    expect(()=>verifyIntentPlan(plan(),'beta-runtime-invariants',1)).not.toThrow();
   });
   it('rejects missing, empty and malformed plans',()=>{
     for (const value of [{}, {...plan(),requirements:[]}, {...plan(),work_units:[]}, {...plan(),specs:[]}]) {
-      expect(()=>verifyIntentPlan(value,'beta-runtime-invariants')).toThrow();
+      expect(()=>verifyIntentPlan(value,'beta-runtime-invariants',1)).toThrow();
     }
   });
   it('rejects blocked requirements, diagnostics and a different contract',()=>{
     const blocked=plan(); blocked.requirements[0].status='blocked';
-    expect(()=>verifyIntentPlan(blocked,'beta-runtime-invariants')).toThrow();
-    expect(()=>verifyIntentPlan({...plan(),diagnostics:[{severity:'error'}]},'beta-runtime-invariants')).toThrow();
-    expect(()=>verifyIntentPlan(plan(),'another-contract')).toThrow();
+    expect(()=>verifyIntentPlan(blocked,'beta-runtime-invariants',1)).toThrow();
+    expect(()=>verifyIntentPlan({...plan(),diagnostics:[{severity:'error'}]},'beta-runtime-invariants',1)).toThrow();
+    expect(()=>verifyIntentPlan(plan(),'another-contract',1)).toThrow();
+  });
+  it('rejects a ready plan when its accepted requirement has more scenarios than the selected contract',()=>{
+    const reduced=plan(); reduced.requirements[0].scenario_count=3; reduced.work_units[0].scenario_count=3;
+    expect(()=>verifyIntentPlan(reduced,'beta-runtime-invariants',1)).toThrow();
+  });
+  it('rejects a work unit that silently drops accepted requirement scenarios',()=>{
+    const reduced=plan(); reduced.work_units[0].scenario_count=0;
+    expect(()=>verifyIntentPlan(reduced,'beta-runtime-invariants',1)).toThrow();
   });
 });

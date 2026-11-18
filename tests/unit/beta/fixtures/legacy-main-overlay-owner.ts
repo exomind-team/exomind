@@ -1,17 +1,17 @@
-import { BetaApiError,type BetaClient,type BetaReceipt } from '../client';
-import type { BetaDraftController } from '../drafts';
-import { timeblockControlsBlocked,type BetaTimeblockController } from '../timeblocks-controller';
+import { BetaApiError,type BetaClient,type BetaReceipt } from '@/beta/client';
+import type { BetaDraftController } from '@/beta/drafts';
+import { timeblockControlsBlocked,type BetaTimeblockController } from '@/beta/timeblocks-controller';
 import type { InputSendMode } from '@/lib/input-send-shortcut';
-import { canonicalOverlayRequest,overlayScopeKey,type MainOverlayPort,type OverlayBinding,type OverlayResponse,type OverlayScope,type OverlayTicket,type OverlayView } from './protocol';
+import { canonicalOverlayRequest,overlayScopeKey,type OverlayResponse,type OverlayScope,type OverlayTicket,type OverlayView } from '@/beta/overlay/protocol';
 
 const failure=(code:string,message:string):never=>{throw new BetaApiError(code,message);};
 const message=(error:unknown)=>error&&typeof error==='object'&&'message'in error?String(error.message):'浮窗操作未确认，请保留输入并查证';
 const code=(error:unknown)=>error&&typeof error==='object'&&'code'in error?String(error.code):'overlay_unavailable';
 function freeze<T>(value:T):T{if(value&&typeof value==='object'){for(const item of Object.values(value))freeze(item);Object.freeze(value);}return value;}
 
-/** References the controllers owned by DeviceWorkspace's Web Lock. It neither
- * opens a journal nor creates another client/controller. Native-issued tickets
- * are the only execution input; ordinary web events are never authority. */
+/** Historical Beta12 main-relay model, retained only for its rejection regressions.
+ * Production moved execution to NativeWorkspace in 5f6980a6. This fixture must
+ * never become the owner used by Main or the floating window. */
 export class MainOverlayOwner {
   private active=true;
   private readonly requests=new Map<string,{body:string;result:Promise<OverlayResponse>}>();
@@ -74,33 +74,4 @@ export class MainOverlayOwner {
     if(!receipt&&['capture','pause','resume','end_action','submit_feedback','append_feedback','retry_capture','retry_timeblock'].includes(action.kind))failure('overlay_result_unknown','操作结果待确认，原命令已保留，请查证后重试');
     return{ok:true,view:this.snapshot(),receipt};
   }
-}
-
-/** One bounded Native polling loop. Pending Core calls are not awaited here,
- * so the single Main writer can still accept later draft edits. */
-export async function connectMainOverlay(options:{port:MainOverlayPort;binding:OverlayBinding;client:BetaClient;capture:BetaDraftController;focus:BetaTimeblockController;onCommitted?:()=>void;dark?:()=>boolean;inputSendMode?:()=>InputSendMode;onReady?:()=>void;onError?:(error:unknown)=>void}){
-  const scope=await options.port.register(options.binding),owner=new MainOverlayOwner({...options,scope,validateTicket:ticket=>options.port.validate(scope,ticket.ticket_id)});
-  let stopped=false,timer:ReturnType<typeof setTimeout>|undefined;
-  const replies=new Map<string,OverlayResponse>();const busy=new Set<string>();
-  async function poll(){
-    if(stopped)return;
-    try{
-      await options.port.publish(scope,owner.snapshot());if(stopped)return;
-      const tickets=await options.port.take(scope);if(stopped)return;
-      // A response can be stored in Native even if its IPC ACK was lost.
-      // Absence from the complete pending-ticket list is enough to release
-      // this transient copy; Native's sequence tombstone prevents reexecution.
-      const pendingIds=new Set(tickets.map(ticket=>ticket.ticket_id));
-      for(const id of replies.keys())if(!pendingIds.has(id)){replies.delete(id);owner.acknowledged(id);}
-      options.onReady?.();
-      for(const ticket of tickets){
-        if(replies.has(ticket.ticket_id)){await options.port.respond(scope,ticket.ticket_id,replies.get(ticket.ticket_id)!);replies.delete(ticket.ticket_id);owner.acknowledged(ticket.ticket_id);continue;}
-        if(busy.has(ticket.ticket_id))continue;busy.add(ticket.ticket_id);
-        void owner.execute(ticket).then(response=>{if(!stopped)replies.set(ticket.ticket_id,response);}).finally(()=>busy.delete(ticket.ticket_id));
-      }
-    }catch(error){if(!stopped)options.onError?.(error);}
-    finally{if(!stopped)timer=setTimeout(()=>void poll(),250);}
-  }
-  void poll();
-  return{scope,close(){if(stopped)return;stopped=true;clearTimeout(timer);owner.dispose();void options.port.revoke(scope).catch(()=>{});}};
 }

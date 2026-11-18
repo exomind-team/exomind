@@ -26,7 +26,7 @@ flowchart TB
 | 绘制、预览与纯显示查询 | 每个界面自己的观察期 | 不反向获得业务停止权 |
 | 主窗草稿镜像 | 本窗控制器；可销毁/重新读取 | 不能覆盖另一客户端更新的共享草稿 |
 
-`beta_overlay_read/request` 在可信浮窗内直接进入 Native；`beta_workspace_bind` 是显式对象选择，主窗正常挂载只同步应用级呈现偏好并订阅已提交事件。浮窗无绑定且存在多个档案时可以自行选择。`beta_overlay_main` 不再登记到生产 invoke handler；旧 TS 主窗执行模型仅留作迁移期历史测试参照，已脱离产品装配。
+`beta_overlay_read/request` 在可信浮窗内直接进入 Native；`beta_workspace_bind` 是显式对象选择，主窗正常挂载只同步应用级呈现偏好并订阅已提交事件。浮窗无绑定且存在多个档案时可以自行选择。`beta_overlay_main` 不再登记到生产 invoke handler；旧 TS 主窗执行模型已移入 [历史测试夹具](../../tests/unit/beta/fixtures/legacy-main-overlay-owner.ts)，只保留拒绝语义回归；无消费者的旧 250ms 转发循环已删除，不属于产品装配。
 
 保留 `ui_owner_generation` 这一内部 wire 字段名以兼容解析与已有夹具，其语义已变为 Native 工作区绑定代际，绝不能再由主文档重载生成。Native 仍核对窗口 label、精确 URL/origin、运行实例、设备、档案、代际、顺序、请求体和幂等回执；不是给任意窗口或 HTTP Actor 发放 owner 能力。
 

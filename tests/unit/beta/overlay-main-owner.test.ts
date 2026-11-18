@@ -1,5 +1,5 @@
 import { describe,expect,it,vi } from 'vitest';
-import { MainOverlayOwner } from '@/beta/overlay/main-owner';
+import { MainOverlayOwner } from './fixtures/legacy-main-overlay-owner';
 import type { OverlayAction,OverlayScope,OverlayTicket } from '@/beta/overlay/protocol';
 import { BetaDraftController } from '@/beta/drafts';
 import { BetaTimeblockController } from '@/beta/timeblocks-controller';
@@ -19,7 +19,7 @@ async function fixture(){
   const committed=vi.fn(),validateTicket=vi.fn(async()=>{});const owner=new MainOverlayOwner({scope,client,capture,focus,validateTicket,onCommitted:committed});
   return{client,capture,focus,owner,committed,validateTicket,async close(){owner.dispose();await Promise.all([capture.close(),focus.close()]);}};
 }
-describe('Native verified tickets execute through the single Main owner',()=>{
+describe('historical main-relay model rejection regressions (not the production owner)',()=>{
   it('24b0368d: a background snapshot read does not pulse the hydrated overlay controls busy',async()=>{
     const f=await fixture(),gate=deferred<ReturnType<typeof activeSnapshot>>();
     try{

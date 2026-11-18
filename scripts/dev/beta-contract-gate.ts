@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { startSupervisedCommand, readSupervisedCommand } from './supervised-command';
 import { nativeBindings, verifyIntentPlan, verifyNativeProof, verifyUiProof, UI_REGRESSIONS } from './beta-contract-evidence';
+import { collectVerificationInput } from './beta-contract-inputs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const SPEC = 'specs/beta-runtime-invariants.spec.md';
@@ -51,10 +52,10 @@ function checkDisk(paths: string[]) {
 function checkMemory() {
   if (process.platform === 'win32' && (freemem() < 12*1024**3 || freemem()/totalmem() < .35)) throw new Error('Windows memory gate: need 12 GiB and 35% free');
 }
-function runChecks(out: string, base?: string) {
+function runChecks(out: string, base: string | undefined, checkBoundaries: boolean) {
   const checks = join(out,'checks'); mkdirSync(checks);
   let env: NodeJS.ProcessEnv = process.env;
-  const summary: Record<string,unknown> = {passed:false,scope:'source-regressions-only',notAssessed:['packaged-runtime','physical-devices','visual-approval','energy','full-beta'],startedAt:new Date().toISOString()};
+  const summary: Record<string,unknown> = {passed:false,scope:'source-regressions-only',notAssessed:['packaged-runtime','physical-devices','visual-approval','energy','full-beta',...(checkBoundaries?[]:['task-boundaries'])],startedAt:new Date().toISOString()};
   let phase = 'start';
   const command = (name: string, executable: string, args: string[], heavy = false) => {
     phase = name; if (heavy) { checkMemory(); checkDisk([out,env.CARGO_TARGET_DIR!,tmpdir()]); }
@@ -73,36 +74,30 @@ function runChecks(out: string, base?: string) {
     const version = command('tool-version','agent-spec',['--version']).trim();
     if (version !== 'agent-spec 1.4.0') throw new Error('This pilot requires agent-spec 1.4.0; no silent tool substitution');
     summary.agentSpec = version;
-    summary.repositoryBase = command('repository-base','git',['rev-parse','HEAD']).trim();
+    phase = 'source-inputs';
+    const inputs = collectVerificationInput(ROOT,base);
+    summary.repositoryBase = inputs.head;
+    summary.sourceFingerprint = inputs.sourceFingerprint;
+    summary.sourceScope = inputs.scope;
+    summary.changedPaths = inputs.changedPaths;
     summary.specSha256 = createHash('sha256').update(readFileSync(join(ROOT,SPEC))).digest('hex');
     command('knowledge','agent-spec',['lint-knowledge','--knowledge','knowledge','--gate']);
     const contract = nativeBindings(JSON.parse(command('contract','agent-spec',['contract',SPEC,'--format','json'])));
-    verifyIntentPlan(JSON.parse(command('intent-plan','agent-spec',['requirements','plan','--knowledge','knowledge','--specs','specs','--format','json','--gate'])),contract.specName);
+    verifyIntentPlan(JSON.parse(command('intent-plan','agent-spec',['requirements','plan','--knowledge','knowledge','--specs','specs','--format','json','--gate'])),contract.specName,contract.scenarios.length);
     command('lint','agent-spec',['lint',SPEC,'--min-score','0.7']);
     command('structural','agent-spec',['check-structure','--code',ROOT,'--forbid','beta_overlay_main','--in','src-tauri/src/beta_native.rs']);
     const changes: string[] = [];
-    let files: string[];
-    if (base) {
-      if (!/^[a-f0-9]{40}$/.test(base)) throw new Error('--base requires an exact commit SHA');
-      files = command('changed-paths','git',['diff','--no-renames','--name-only','-z',base,'HEAD','--']).split('\0').filter(Boolean);
-      summary.boundaryScope = 'commit-diff';
-    } else {
-      // CLI 1.4.0 auto-detection supplies non-verbatim absolute Windows paths,
-      // while its boundary root is canonical (\\?\). Literal relative argv
-      // avoids that mismatch without changing the CLI's boundary semantics.
-      files = [...new Set([
-        ...command('changed-paths','git',['diff','--no-renames','--name-only','-z','HEAD','--']).split('\0'),
-        ...command('untracked-paths','git',['ls-files','--others','--exclude-standard','-z']).split('\0'),
-      ].filter(Boolean))];
-      summary.boundaryScope = 'worktree';
-    }
-    for (const file of files) changes.push('--change',file);
-    summary.changedPaths = files;
+    // A task allow-list is not permanent architecture policy for every future
+    // Beta change. Apply it only when the caller explicitly selects that scope.
+    if (checkBoundaries) for (const file of inputs.changedPaths) changes.push('--change',file);
+    summary.boundaryScope = checkBoundaries ? inputs.scope : 'not-requested';
     const uiFile = join(checks,'ui.json');
     command('ui','node',['node_modules/vitest/vitest.mjs','run',...UI_REGRESSIONS,'--maxWorkers=1','--reporter=json',`--outputFile=${uiFile}`],true);
     summary.ui = verifyUiProof(ROOT,JSON.parse(readFileSync(uiFile,'utf8')));
     const lifecycle = JSON.parse(command('lifecycle','agent-spec',['lifecycle',SPEC,'--code',ROOT,...changes,'--ai-mode','off','--review-mode','strict','--min-score','0.7','--format','json','--run-log-dir',join(out,'lifecycle')],true));
     summary.native = verifyNativeProof(contract,lifecycle);
+    phase = 'source-stability';
+    if (collectVerificationInput(ROOT,base).sourceFingerprint !== inputs.sourceFingerprint) throw new Error('Verification source changed during the run; retain this result as stale and rerun the intended source');
     summary.passed = true;
   } catch (error) {
     summary.failure = {phase,message:error instanceof Error ? error.message : 'Unknown gate failure'};
@@ -115,15 +110,15 @@ function runChecks(out: string, base?: string) {
 }
 
 async function main() {
-  const {values} = parseArgs({options:{out:{type:'string'},base:{type:'string'},worker:{type:'boolean',default:false}},allowPositionals:false});
+  const {values} = parseArgs({options:{out:{type:'string'},base:{type:'string'},'check-boundaries':{type:'boolean',default:false},worker:{type:'boolean',default:false}},allowPositionals:false});
   const out = outputDirectory(values.out);
-  if (values.worker) { runChecks(out,values.base); return; }
+  if (values.worker) { runChecks(out,values.base,values['check-boundaries']); return; }
   if (existsSync(out)) throw new Error('Use a new evidence directory; earlier results are preserved');
   mkdirSync(out); setPriority(0,osConstants.priority.PRIORITY_BELOW_NORMAL);
-  if (process.platform !== 'win32') { runChecks(out,values.base); return; }
+  if (process.platform !== 'win32') { runChecks(out,values.base,values['check-boundaries']); return; }
   checkMemory();
   const receipt = await startSupervisedCommand({version:1,artifactDir:join(out,'supervision'),executable:process.execPath,
-    args:[fileURLToPath(import.meta.url),'--worker','--out',out,...(values.base?['--base',values.base]:[])],cwd:ROOT,
+    args:[fileURLToPath(import.meta.url),'--worker','--out',out,...(values.base?['--base',values.base]:[]),...(values['check-boundaries']?['--check-boundaries']:[])],cwd:ROOT,
     timeoutMs:LIMITS.totalMs,noProgressTimeoutMs:LIMITS.idleMs});
   const deadline = Date.now()+LIMITS.totalMs+30000;
   while (Date.now() < deadline) {

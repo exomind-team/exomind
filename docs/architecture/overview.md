@@ -1,6 +1,10 @@
 # ExoMind 架构总览
 
-> 本文档是 ExoMind 系统架构的唯一权威描述。
+> 本文保留 v4.0 / 0.5 主线的历史架构，仍用于解释旧 Runtime 和共享 UI 的来源。
+> 0.6 Beta 是隔离的 Core / Host / Native / UI 链路，入口见
+> [Beta Native 工作区](../development/beta-native-workspace.md)、
+> [多来源复制合同](../development/beta-multiorigin-sync.md)和
+> [架构原则](principles.md)。不要将本页的旧包名、API 或 Agent/Signal 模型直接套入 Beta。
 > 更新日期：2026-03-14
 > 版本：v4.0（合并自 4 份历史架构文档）
 
