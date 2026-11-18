@@ -18,7 +18,7 @@ on:
         description: Beta config version to build; never inferred from Alpha package.json
         required: true
         type: string
-        default: 0.6.0-beta15
+        default: 0.6.0-beta16
 
 permissions:
   contents: read
