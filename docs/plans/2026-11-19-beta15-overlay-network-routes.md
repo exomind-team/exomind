@@ -18,7 +18,7 @@
 | E15-R02 身份与路由分离 | 邀请原身份/签名不改，用户可提供一个覆盖网络备用SocketAddr；TLS pin通过后才发送加入材料，最终核对原P/issuer | 已实现join_with_route；真实TLS错设备拒绝/正确备用端点加入及保存优先路由通过，网络组11项通过 |
 | E15-R03 可执行恢复入口 | 加入失败保留邀请/旧档案，可按需更换拨号地址再查证；pending不切档，ready身份匹配才切档 | UI原例1失败→相关2文件9项通过；完整371项/28个Edge场景及类型/Web构建通过 |
 | E15-R04 T3源码交叉调查 | Luna只读追踪driver/supervisor/registry、peer/link及snapshot/replay；区分远程客户端和多主复制 | 已完成，12条机制/反例和调用链见[对照研究](../research/2026-11-19-easytier-t3-connections-and-sync.md)，未改变T3或运行其测试 |
-| E15-R05 精确候选与现场 | Web/必要Rust先过，再决定候选构建；不关闭/替换用户正在运行的Beta13，不读写其授权库 | Native lib编译通过；准备Beta15/6015固定Windows候选，Android未构建，物理加入未验 |
+| E15-R05 精确候选与现场 | Web/必要Rust先过，再决定候选构建；不关闭/替换用户正在运行的Beta13，不读写其授权库 | 固定Windows候选构建、9项真实双窗加入/自动数据与UI通过；Android未构建，物理加入未验 |
 
 ## 保持的合同
 
@@ -33,3 +33,15 @@
 `route-host-green`首次真实TLS已报告pin_mismatch，测试误期待通用PeerTls而失败；按既有明确PeerPinMismatch合同修正断言，未改生产错误分类。后续网络组10过1失败，UDP发现等待候选超时。冻结8fdf2e66原源码的独立archive在同环境也复现相同失败；当时生产43343端口由现场Beta13持有。将单元测试发现端口改成本测试进程临时端口，生产仍为43343，避免与日用实例共享发现流量；`route-host-green-c`11项全部通过、正常0/清理确认。没有停止用户应用、放宽TTL/信任或删除失败。
 
 备用地址只作拨号提示；先使用它，再有限尝试原候选。成功端点优先保存，持久路由仍最多8个。它不是自动补齐所有EasyTier地址，更不是修复旧无签名历史；后续仍需实际平板邀请、文字/时间块/原件分别对账。
+
+## 精确 Windows 候选（2026-11-19）
+
+源码`a9553d938fb6220c42b455c665cfc4c38c480469`已推送。`route-windows-build`正常0/清理确认，Web9.13秒、Rust约62秒。EXE为67,482,624B，SHA256 `10b284d443eefe45f4d85db5270edeae9cfd677eb886c1d6614dce5a2c37c830`，Product/FileVersion均0.6.0-beta15，路径 `G:/exomind-deliverables/0.6.0-beta15/a9553d938fb6/windows/ExoMind-0.6.0-beta15-windows-x64.exe`。Core8/Host auth5/peer wire不变；仅Windows候选，没有Beta15 APK或四平台运行结论。
+
+`route-native-runtime-d`在两个新Root、独立Native身份上9项通过：备用监听地址不在签名邀请里，真实WebView检查邀请/输入地址并加入原P及issuer、源事件ID+digest自动到达、备用地址在后续自动路由提升后仍保留、原Q与sentinel保持、消息正文实际自动显示。两端退出0，监督正常0/清理确认。实际页面截图已核验，不将它写成物理EasyTier/Android场景通过。
+
+a批在异步加入尚未创建P时立即查询status，把预期not_found当失败；b批已经加入/复制，但脚本要求备用地址一直排首位，实际后台切到了另一条同设备可达路由，原备用地址仍保留；c批8项通过后，d批进一步等待消息真实显示再截图，9项通过。仅修夹具时序/过严的路由顺序假定，没有放宽身份、数据或旧档案保留断言。所有批次保留。
+
+`route-native-cross-version`另用精确`835d0620` Beta13 Windows作为邀请发起端、上述Beta15作为接收端，同样9项全部通过、两端退出0/清理确认。分别核旧/新EXE hash，没有重写全局候选指针或使用现场邀请。它证明此版本组合在Windows上的协议路径，不替代Android或真实EasyTier加入。
+
+现场操作：正常退出电脑Beta13后打开本候选，保留其资料；平板继续Beta13并重新生成有效邀请。电脑检查邀请后展开「更换连接地址」，填平板覆盖IP及实际peer端口再确认。旧档案保留，只有ready且P/issuer匹配才切换；已过期截图邀请不可作为当前测试输入。尚不能关闭物理加入、旧档案证明、切网/OEM和能耗未决项。
