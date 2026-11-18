@@ -359,6 +359,76 @@ fn restart_preserves_authority_data_and_invalidates_old_runtime_sessions() {
     restarted.stop().unwrap();
 }
 
+#[test]
+fn desktop_preferences_do_not_prevent_restart_or_change_facts() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("beta");
+    let host = BetaHost::open(&root).unwrap();
+    let device = host.status().unwrap().device_id;
+    let owner = host.owner_session().unwrap();
+    let profile = ProfileId::new();
+    host.provision_profile(&owner, profile, "synthetic restart")
+        .unwrap();
+    let writer = host.native_human_session(&owner, profile).unwrap();
+    let input = command(profile, "preserved across desktop settings restart");
+    let saved = host.capture(&writer, &input).unwrap();
+    let original_owner = token(&root);
+    host.stop().unwrap();
+    for bytes in [
+        br#"{"version":1,"shortcut":null,"quick_focus":false,"customized":true}"#.as_slice(),
+        b"synthetic malformed preferences".as_slice(),
+    ] {
+        std::fs::write(root.join("desktop-preferences.beta.json"), bytes).unwrap();
+        let restarted = BetaHost::open(&root).unwrap();
+        assert_eq!(restarted.status().unwrap().device_id, device);
+        assert!(token(&root) == original_owner);
+        let owner = restarted.owner_session().unwrap();
+        assert_eq!(restarted.profiles(&owner).unwrap()[0].profile_id, profile);
+        let writer = restarted.native_human_session(&owner, profile).unwrap();
+        let replay = restarted.capture(&writer, &input).unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.event_id, saved.event_id);
+        assert_eq!(replay.event_digest, saved.event_digest);
+        assert_eq!(
+            std::fs::read(root.join("desktop-preferences.beta.json")).unwrap(),
+            bytes
+        );
+        restarted.stop().unwrap();
+    }
+}
+
+#[test]
+fn desktop_preferences_interrupted_write_is_retained_without_admitting_foreign_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("beta");
+    BetaHost::open(&root).unwrap().stop().unwrap();
+    let temporary = root.join(format!(
+        "desktop-preferences.beta.{}.tmp",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&temporary, b"synthetic partial preferences").unwrap();
+    BetaHost::open(&root).unwrap().stop().unwrap();
+    assert_eq!(
+        std::fs::read(&temporary).unwrap(),
+        b"synthetic partial preferences"
+    );
+    let foreign = root.join("desktop-preferences.beta.unowned.tmp");
+    std::fs::write(&foreign, b"unowned sentinel").unwrap();
+    assert!(matches!(BetaHost::open(&root), Err(HostError::ForeignRoot)));
+    assert_eq!(std::fs::read(foreign).unwrap(), b"unowned sentinel");
+    let fresh = directory.path().join("foreign");
+    std::fs::create_dir(&fresh).unwrap();
+    std::fs::write(
+        fresh.join("desktop-preferences.beta.json"),
+        b"not host ownership",
+    )
+    .unwrap();
+    assert!(matches!(
+        BetaHost::open(&fresh),
+        Err(HostError::ForeignRoot)
+    ));
+}
+
 #[tokio::test]
 async fn queued_work_loses_commit_eligibility_after_revoke_and_stop() {
     let (_directory, host, server, _url) = start().await;

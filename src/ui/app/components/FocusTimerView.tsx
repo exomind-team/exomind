@@ -337,7 +337,7 @@ export function FocusTimerView({
               onClick={enterConfigState}
               aria-expanded="false"
               aria-controls="new-focus-config-panel"
-              aria-label="展开专注配置（Expand focus configuration）"
+              aria-label="配置时间块"
               className={`absolute left-4 right-4 top-4 flex h-[68px] items-center justify-between rounded-[24px] px-5 py-[18px] text-left backdrop-blur-[24px] ${glassCardShadowClass()} ${
                 isOverlaySurface
                   ? "border border-white/55 bg-[rgba(28,25,23,0.78)] text-[#FAFAF9]"
@@ -352,12 +352,12 @@ export function FocusTimerView({
                   <p
                     className={`truncate text-[16px] font-semibold leading-[1.4] ${isOverlaySurface ? "text-[#F5EDE7]" : "text-[#1C1917] dark:text-[#FAFAF9]"}`}
                   >
-                    点击开启时间块
+                    配置时间块
                   </p>
                   <p
                     className={`truncate text-[12px] leading-[1.4] ${isOverlaySurface ? "text-[#D6C2B8]" : "text-[#78716C]"}`}
                   >
-                    配置时间块，开启新计时
+                    先设置，再开始计时
                   </p>
                 </div>
               </div>
@@ -508,7 +508,7 @@ export function FocusTimerView({
                 className="h-10 w-full rounded-[12px] bg-[#C75B3A] text-[14px] font-medium text-white hover:bg-[#B24D2F] dark:bg-[#C75B3A] dark:hover:bg-[#B24D2F]"
               >
                 <Play size={16} className="mr-2" />
-                开始
+                开始计时
               </Button>
             </div>
           </div>

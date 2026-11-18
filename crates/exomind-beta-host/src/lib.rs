@@ -66,6 +66,13 @@ use storage::{Persistence, token, token_hash};
 use uuid::Uuid;
 
 pub const PROTOCOL: &str = "exomind-beta/1";
+/// Native UI preferences are optional; unreadable preferences never redefine
+/// ownership of the already initialized Host or its record store.
+pub const DESKTOP_PREFERENCES_FILE: &str = "desktop-preferences.beta.json";
+
+pub fn desktop_preferences_temporary_file(id: Uuid) -> String {
+    format!("desktop-preferences.beta.{id}.tmp")
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {

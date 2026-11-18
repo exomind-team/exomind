@@ -82,7 +82,7 @@ export default {
         'brand-accent': "hsl(var(--brand-accent))",
         'brand-gradient': "var(--brand-gradient)",
         // 用户消息气泡
-        'user-bubble': "#C75B3A",
+        'user-bubble': "#B24D2F",
         'user-bubble-text': "#FAFAF9",
       },
       borderRadius: {

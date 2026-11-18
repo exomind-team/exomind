@@ -55,11 +55,14 @@ test('one editor survives image preview, reading, independent panes, navigation 
 });
 
 test('timer, feedback and message input keep their own keyboard and touch semantics', async ({ page }, info) => {
-  await activate(page, page.getByTestId('new-focus-idle-card'));
+  await activate(page, page.getByRole('button', { name: '配置时间块', exact: true }));
+  await activate(page, page.getByTestId('new-focus-config-collapse-button'));
+  expect((await counters(page)).timerCommands).toBe(0);
+  await activate(page, page.getByRole('button', { name: '配置时间块', exact: true }));
   const name = page.getByTestId('new-focus-task-input');
   await name.fill('写下一轮计划');
-  await expect(page.getByTestId('new-focus-start-button')).toBeInViewport();
-  await activate(page, page.getByTestId('new-focus-start-button'));
+  await expect(page.getByRole('button', { name: '开始计时', exact: true })).toBeInViewport();
+  await activate(page, page.getByRole('button', { name: '开始计时', exact: true }));
   await expect(page.getByTestId('new-focus-running-name-display')).toHaveText('写下一轮计划');
   await activate(page, page.getByTestId('new-focus-pause-resume-button'));
   await expect(page.getByTestId('new-focus-pause-resume-button')).toHaveAccessibleName('继续（Resume）');
@@ -91,9 +94,9 @@ test('real container keeps controls reachable and fits narrow or short layouts',
   await expect(page.getByRole('textbox', { name: '记录当下' })).toBeInViewport({ ratio: 1 });
   await expect(page.getByRole('button', { name: '发送', exact: true })).toBeInViewport({ ratio: 1 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-  await activate(page, page.getByTestId('new-focus-idle-card'));
+  await activate(page, page.getByRole('button', { name: '配置时间块', exact: true }));
   await page.getByTestId('new-focus-task-input').fill('短屏仍能开始');
-  await activate(page, page.getByTestId('new-focus-start-button'));
+  await activate(page, page.getByRole('button', { name: '开始计时', exact: true }));
   await expect(page.getByTestId('new-focus-running-name-display')).toHaveText('短屏仍能开始');
   await expect(page.getByRole('textbox', { name: '记录当下' })).toBeInViewport({ ratio: 1 });
   await page.screenshot({ path: info.outputPath('short-layout.png'), fullPage: true });
@@ -115,4 +118,27 @@ test('keyboard operates the same pane controls and keeps the editor selection ac
   await page.getByRole('button', { name: '当下', exact: true }).focus(); await page.keyboard.press('Enter');
   expect(await input.evaluate(element => ({ start: (element as HTMLTextAreaElement).selectionStart, end: (element as HTMLTextAreaElement).selectionEnd }))).toEqual(selected);
   expect((await counters(page)).captures).toBe(0);
+});
+
+test('record body and durable draft status retain readable contrast in the active theme', async ({ page }) => {
+  await page.getByRole('textbox', { name: '记录当下' }).fill('对比度验收');
+  const body = page.getByLabel('记录历史').getByText('第 48 条合成记录', { exact: false });
+  const status = page.getByText('记录草稿已暂存 · 尚未提交', { exact: true });
+  await expect(status).toBeVisible();
+  for (const target of [body, status]) {
+    const ratio = await target.evaluate(element => {
+      const channels = (color: string) => color.match(/[\d.]+/g)!.map(Number);
+      const foreground = channels(getComputedStyle(element).color);
+      let background: number[] | null = null;
+      for (let parent: Element | null = element; parent; parent = parent.parentElement) {
+        const color = channels(getComputedStyle(parent).backgroundColor);
+        if (color.length === 3 || color[3] === 1) { background = color; break; }
+      }
+      if (!background) throw new Error('No verified opaque background');
+      const luminance = (rgb: number[]) => rgb.slice(0, 3).map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+      const first = luminance(foreground), second = luminance(background);
+      return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+    });
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  }
 });

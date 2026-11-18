@@ -35,7 +35,7 @@ describe('shared Alpha FocusTimerView extraction contract', () => {
     expect(button).toHaveAttribute('aria-controls', 'new-focus-config-panel');
     expect(button).toHaveClass('h-[68px]', 'rounded-[24px]', 'backdrop-blur-[24px]');
     expect(button.querySelector('svg.lucide-target')).toHaveAttribute('width', '20');
-    expect(screen.getByText('点击开启时间块')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '配置时间块', exact: true })).toBeInTheDocument();
     fireEvent.click(button);
     expect(callbacks.expand).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('new-focus-state-config')).not.toBeInTheDocument();

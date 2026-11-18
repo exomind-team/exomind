@@ -1,6 +1,6 @@
 //! Beta-owned desktop preferences. The Alpha settings engine can render these
 //! values without opening its old Runtime config database.
-use super::{trusted_window, Failure, NativeState};
+use super::{Failure, NativeState, trusted_window};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
@@ -8,8 +8,8 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
     },
 };
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
@@ -79,7 +79,7 @@ fn unsupported() -> Failure {
 
 impl DesktopPreferences {
     pub(super) fn open(root: &Path) -> Self {
-        let path = root.join("desktop-preferences.beta.json");
+        let path = root.join(exomind_beta_host::DESKTOP_PREFERENCES_FILE);
         // Invalid settings must not stop the record store or get silently
         // overwritten by reading the page. An explicit shortcut change can
         // replace this one preferences file; all other data stays untouched.
@@ -87,7 +87,7 @@ impl DesktopPreferences {
             let metadata = match fs::symlink_metadata(&path) {
                 Ok(metadata) => metadata,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    return Ok(SavedPreferences::default())
+                    return Ok(SavedPreferences::default());
                 }
                 Err(_) => return Err(()),
             };
@@ -169,9 +169,11 @@ impl DesktopPreferences {
                 return Err(unavailable());
             }
         }
-        let temporary = self
-            .path
-            .with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+        let temporary =
+            self.path
+                .with_file_name(exomind_beta_host::desktop_preferences_temporary_file(
+                    uuid::Uuid::new_v4(),
+                ));
         let result = (|| -> Result<(), Failure> {
             let bytes = serde_json::to_vec(saved).map_err(|_| unavailable())?;
             let mut options = OpenOptions::new();

@@ -72,8 +72,14 @@ fn children_are_owned(root: &Path) -> Result<(), HostError> {
                 | crate::model_config::DATABASE
                 | crate::model_config::JOURNAL
                 | crate::model_config::INITIALIZED
+                | crate::DESKTOP_PREFERENCES_FILE
                 | CONNECTION
         ) && !(name.starts_with("connection.beta.") && name.ends_with(".tmp"))
+            && !name
+                .strip_prefix("desktop-preferences.beta.")
+                .and_then(|name| name.strip_suffix(".tmp"))
+                .and_then(|id| Uuid::parse_str(id).ok())
+                .is_some_and(|id| crate::desktop_preferences_temporary_file(id) == name)
         {
             return Err(HostError::ForeignRoot);
         }

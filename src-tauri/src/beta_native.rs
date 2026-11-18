@@ -30,8 +30,8 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
     },
 };
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
@@ -865,6 +865,47 @@ fn data_root(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
     Ok(root)
 }
 
+fn report_startup_failure(app: &AppHandle, error: &HostError) {
+    log::error!("Beta storage startup failed: {error}");
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+        use windows::core::PCWSTR;
+        let reason = match error {
+            HostError::RootInUse => {
+                "这份资料正在由另一个外心 Beta 实例使用，请先退出该实例再重试。"
+            }
+            HostError::ForeignRoot => "资料目录包含此版本无法识别的条目，需要开发者核对目录归属。",
+            HostError::PrivatePermissions => {
+                "资料目录的访问权限未能确认，请保留目录并核对本机权限。"
+            }
+            _ => "本机资料未能打开，请保留启动日志供进一步核对。",
+        };
+        let log_dir = app.path().app_log_dir().ok();
+        let message = format!(
+            "{reason}\n\n现有资料已保留，请勿清空或重建档案。\n启动日志目录：{}",
+            log_dir
+                .as_ref()
+                .map(|path| path.to_string_lossy())
+                .unwrap_or_default()
+        );
+        let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
+        let title: Vec<u16> = "外心 Beta 启动受阻".encode_utf16().chain(Some(0)).collect();
+        // Startup has no usable WebView/event loop yet. The OS dialog keeps
+        // this failure visible without blocking on a Tauri dialog callback.
+        unsafe {
+            MessageBoxW(
+                None,
+                PCWSTR(message.as_ptr()),
+                PCWSTR(title.as_ptr()),
+                MB_OK | MB_ICONERROR,
+            );
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = app;
+}
+
 pub fn run(mut context: tauri::Context<tauri::Wry>) {
     let dev_origin = context
         .config()
@@ -929,10 +970,13 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                 Err(std::env::VarError::NotPresent) => 0,
                 Err(_) => return Err("EXOMIND_BETA_PORT must be valid Unicode".into()),
             };
-            let state = Arc::new(NativeState::open(
-                &data_root(app.handle())?,
-                dev_origin.clone(),
-            )?);
+            let state = match NativeState::open(&data_root(app.handle())?, dev_origin.clone()) {
+                Ok(state) => Arc::new(state),
+                Err(error) => {
+                    report_startup_failure(app.handle(), &error);
+                    return Err(error.into());
+                }
+            };
             app.manage(state.clone());
             #[cfg(target_os = "android")]
             state
@@ -1272,10 +1316,12 @@ mod tests {
             Some("{\"draft\":\"retained local text\"}")
         );
         let human = reopened.native_human_session(&owner, profile).unwrap();
-        assert!(reopened
-            .events_page(&human, profile, &EventQuery::default())
-            .unwrap()
-            .items
-            .is_empty());
+        assert!(
+            reopened
+                .events_page(&human, profile, &EventQuery::default())
+                .unwrap()
+                .items
+                .is_empty()
+        );
     }
 }
