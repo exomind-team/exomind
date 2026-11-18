@@ -43,7 +43,7 @@ Tauri 2.0 + React 18 + TypeScript + Rust | Zustand | Tailwind CSS + Radix UI | B
 
 ## 当前阶段
 
-2026-11-18 Beta12推进：Beta11 EXE重启闪退已定位为Host归属清单遗漏Native桌面偏好文件；隔离反例/Host14项及UI337项/20场景通过，Astra high盲审两项P1已落地。正在冻结构建并补Windows实际启动/重启证据，见[Beta12记录](plans/2026-11-18-beta12-startup-and-ui.md)。
+2026-11-18 Beta12已交本机构建候选：Beta11 EXE重启闪退定位为Host归属清单遗漏Native桌面偏好文件；Host14项、UI337项/20场景通过，Astra high盲审两项P1已落地。源码a244f567的Windows实际隔离启动/设置保存后重启、身份/记录/回执保值及错误对话框验证通过；同源ARM64 APK为6012并与Beta10同签名，未真机安装。文件/hash/边界见[Beta12记录](plans/2026-11-18-beta12-startup-and-ui.md)。
 
 2026-11-18最新前端增量：用户恢复Web优先UI迭代，独立显隐/内联图片/反馈合同已实现，Beta前端328项、完整Web16场景及生产Beta Web构建通过；详见[工作区迭代](plans/2026-11-18-beta-ui-workspace-iteration.md)。实机/能源与完整Beta仍待，旧APK/EXE未包含本轮前端变更。
 

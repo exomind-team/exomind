@@ -32,6 +32,19 @@ Windows Host初始化失败时先记录原因并显示系统错误对话框，�
 
 `tauri.beta.conf.json`改为0.6.0-beta12/6012，独立包名不变，Core8/Host auth5/sync2不变；手动CI默认版本同步，但不运行公开Release/Pages或移动旧标签。候选须从冻结提交构建，Windows与ARM64保持同源；旧Beta11失败候选不覆盖。
 
-构建与实际Windows启动/设置保存后重启结果将在交付后补录。本轮包含c8f79e27的工作区显隐、内联图片及反馈快捷键，并包含本记录的启动/两项UI修复。Android设备未连接，不把签名/构建当真机升级、同步或能耗通过。
+候选源码冻结为`a244f5675ea387cf48e4c33077d7dda29b780200`并已立即推送；本轮包含c8f79e27的工作区显隐、内联图片及反馈快捷键，以及本记录的启动/两项UI修复。后续交付记录提交不作为二进制源码。
+
+| 交付 | 文件与结果 |
+| --- | --- |
+| Windows x64 | `G:/exomind-deliverables/0.6.0-beta12/a244f5675ea3/windows/ExoMind-0.6.0-beta12-windows-x64.exe`，66432512字节，SHA256 `4af4c404a3b3579dbcc5338602c0a1cc3b7c43ed3ba9965b06987aed7442675a`。PE GUI子系统2，Product/FileVersion均0.6.0-beta12；Web8.81秒、Rust60秒，正常0/清理确认。 |
+| Android arm64 | 同源`android/ExoMind-0.6.0-beta12-arm64-v8a.apk`，108534089字节，SHA256 `4a5307ac5045b461db2cf9a813a0505e0c8baad8a4136b15ae4abfbaa330fa66`。包名com.exomind.app.v06.beta、6012/Beta12、arm64-v8a、debuggable；V2验签通过，证书SHA256 `768f3a1338da7e8d62abb93f3e124b472db5645f1338e221b9a497e42583ec80`与Beta10相同。 |
+
+Android Web8.64秒/Rust67秒后在已知Windows symlink权限边界停止，失败保留且Job已清理。核对fresh ARM64 ELF/未解析符号后复制到jniLibs，独立单路Gradle80秒完成；未改变系统权限。核验报告和SHA256SUMS写交付目录，未创建Release/tag/Pages；旧Beta11原件hash再次核对未变。
+
+`native-smoke`使用原Beta11反例的同一合成Host根，两次实际启动/优雅退出均0：通过Native IPC确认根目录、Host运行与打包Beta12界面；保存新记录、桌面快捷键/快速聚焦设置后退出，再启动确认设备身份、原回执、记录正文与设置均保留。两次Tauri MCP截图分别为`native-phase-1/window.png`与`native-phase-2/window.png`，父代理已查看真实渲染。没有打开用户真实Beta档案或触发模型调用；这不计真实用户档案升级验收。
+
+`popup-smoke-b`实际观察Windows启动错误对话框、保留资料说明，并确认拒绝未知根后sentinel和目录条目未变。应用按预期错误101退出；外层验收脚本正常0/Job清理确认。首轮脚本假定确认按钮ID=1失败，改为关闭已核PID/标题的同一原生对话框后复验；未把夹具按钮定位失败写成产品缺陷。
+
+Android设备未连接，APK尚未现场安装；保留数据升级、同版多端同步/时间块/原件与能耗仍待。Core8不能由旧Core7程序直接打开；多端复测使用同版Beta12，不清库或卸载来掩盖问题。
 
 原始证据：`G:/exomind-runs/beta12-startup-20261118-a/`，不提交日志、截图、配置、数据库或构建产物。所有重型操作串行、单任务低优先级、lld单路链接；首次Host红例编译按资源规范切换后取消，后续run有独立终态/清理记录。
