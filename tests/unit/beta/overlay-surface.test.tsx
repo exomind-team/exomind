@@ -23,9 +23,19 @@ function fixture(active=true){
     return{ok:true as const,view,receipt:null};
   });
   const session={snapshot:()=>state,subscribe:(fn:()=>void)=>{listeners.add(fn);return()=>{listeners.delete(fn);};},send,retry:vi.fn()} as unknown as OverlaySession;
-  return{session,send,update,disconnect,view:()=>view};
+  const pending=(requests:OverlaySessionState['pending'])=>{state={...state,pending:requests};listeners.forEach(fn=>fn());};
+  return{session,send,update,disconnect,pending,view:()=>view};
 }
 describe('real Beta overlay uses shared Alpha presentation and Native workspace actions',()=>{
+  it('B14-U04: transport edits do not pulse feedback buttons while domain submissions still block duplicates',async()=>{
+    const f=fixture();f.update({...f.view(),remote:{...f.view().remote!,active:{...f.view().remote!.active!,phase:'feedback_pending'},pending_feedback:[B]},feedback:{[B]:{text:'retained feedback',revision:1}}});
+    render(<BetaOverlaySurface session={f.session}/>);fireEvent.click(screen.getByTestId('new-focus-end-button'));const button=await screen.findByTestId('now-overlay-feedback-confirm');
+    const request={request_id:R,seq:1,overlay_generation:C,scope:f.view().scope,expected_revision:f.view().remote!.revision};
+    act(()=>f.pending([{...request,action:{kind:'feedback_edit',block_id:B,draft_revision:1,text:'retained feedback'}}]));
+    expect(screen.getByTestId('now-overlay-feedback-confirm')).toBe(button);expect(button).toBeEnabled();expect(screen.getByRole('button',{name:'跳过'})).toBeEnabled();
+    act(()=>f.pending([{...request,action:{kind:'submit_feedback',block_id:B,draft_revision:1,skipped:false}}]));expect(button).toBeDisabled();
+    act(()=>f.pending([]));expect(button).toBeEnabled();
+  });
   it('B14-U03: immediate Ctrl+Enter waits for the owned draft acknowledgement instead of dropping the action',async()=>{
     const f=fixture(),gate=deferred<void>(),originalSend=f.send.getMockImplementation()!;
     f.update({...f.view(),remote:{...f.view().remote!,active:{...f.view().remote!.active!,phase:'feedback_pending'},pending_feedback:[B]}});

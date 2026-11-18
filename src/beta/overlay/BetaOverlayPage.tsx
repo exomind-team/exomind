@@ -64,7 +64,7 @@ function ConnectedSurface({session,view,onRetire,hasRetained}:{session:OverlaySe
   useEffect(()=>{if(!active){setMini(false);setHover(false);}else{setIdleHover(false);setIdleFocus(false);}},[active?.block_id]);
   const statusError=error||state.error||draft.error||view.capture.error||view.focus_error||(view.clock?.stale?'显示等待本机服务刷新；界面不会自行结束时间块':'');
   const surface=useOverlayWindowLayout({mode,mini,peek:mini&&hover,expanded,feedback:!!feedback||!!statusError||hasRetained,feedbackSurface:feedback?feedbackSurface:null,onError:failure=>{if(alive.current)setError(message(failure));}});
-  const disabled=!state.ready||acting||active?.phase==='completed'||view.focus_busy||view.focus_state==='failed'||!!view.focus_error||!!view.clock?.stale||state.pending.some(item=>overlayScopeKey(item.scope)===overlayScopeKey(view.scope));
+  const disabled=!state.ready||acting||active?.phase==='completed'||view.focus_busy||view.focus_state==='failed'||!!view.focus_error||!!view.clock?.stale||state.pending.some(item=>overlayScopeKey(item.scope)===overlayScopeKey(view.scope)&&!['capture_edit','feedback_edit'].includes(item.action.kind));
   async function run(action:OverlayAction,done?:(response:OverlayResponse)=>void){
     const current=session.snapshot().view;
     if(!alive.current||!current||overlayScopeKey(current.scope)!==overlayScopeKey(view.scope)||operationLock.current)return;
