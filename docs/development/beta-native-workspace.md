@@ -48,4 +48,6 @@ Native 在执行 Core 变更前，先保存固定命令和未知结果状态；�
 
 ## Android 符号与构建身份
 
-以往 Android debug 配置显式保留所有 ABI 的原生符号，Beta12 也确为未优化的 debug 候选。生成目录被 Git 忽略，因此修复位于维护源 `scripts/dev/beta-android-prepare.ts`，每次 fresh init 后应用；不是手改生成文件。Beta13 正常调试包保留 Java/WebView 调试能力，交由 AGP 裁剪非装载符号；需要 LLDB 时使用 `-Pexomind.keepNativeSymbols=true`。LF/CRLF 及重复准备 9 项回归通过。原始 Rust `.so` 应单独归档，不放进普通 APK。验证必须比较 ABI、执行 section、动态符号、版本与签名，并实际启动。文件体积、安装占用、运行内存和能耗是不同证据，正式 release 同源对照仍待单独完成。
+以往 Android debug 配置显式保留所有 ABI 的原生符号，Beta12 也确为未优化的 debug 候选。生成目录被 Git 忽略，因此修复位于维护源 `scripts/dev/beta-android-prepare.ts`，每次 fresh init 后应用；不是手改生成文件。Beta13 正常调试包保留 Java/WebView 调试能力，交由 AGP 裁剪非装载符号；需要 LLDB 时使用 `-Pexomind.keepNativeSymbols=true`。首个包因 AGP 选择未安装 NDK、缺 strip 工具而没有缩小；维护源进一步共用已安装 NDK 的解析与 Gradle 固定逻辑，准备策略 9 项及 NDK 10 项回归分别通过。
+
+最终 `835d0620` ARM64 包 68,910,081B，`.text/.rodata/.dynsym/.dynstr` 与未裁剪 SO 字节一致，原始 Rust `.so` 已单独归档在仓库外。V2 签名、实际安装哈希、Java/WebView 调试与同源 PC/平板同步均已核验。Windows 同源 22 项实测还覆盖主页面换成无应用代码的图片文档后，浮窗继续读写和计时，主窗重挂/P→Q 不重建或转移其绑定。文件体积、安装占用、运行内存和能耗是不同证据；正式 release 同源对照、长时性能与真机升级仍待单独完成。
