@@ -1,5 +1,7 @@
 //! Isolated Beta embedding. No legacy runtime/config/store is opened here.
 
+#[path = "beta_native_attachments.rs"]
+mod attachments;
 #[path = "beta_native_deadlines.rs"]
 mod deadlines;
 #[path = "beta_native_settings.rs"]
@@ -31,8 +33,8 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
     },
 };
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
@@ -241,6 +243,8 @@ struct NativeState {
     owner: Session,
     peers: Arc<exomind_beta_host::PeerNetwork>,
     exports: Arc<export::ExportManager>,
+    attachment_jobs: Arc<attachments::AttachmentJobs>,
+    original_observer: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     deadlines: deadlines::Bridge,
     dev_origin: Option<url::Origin>,
     server: tokio::sync::Mutex<Option<RunningServer>>,
@@ -267,6 +271,8 @@ impl NativeState {
             owner,
             peers,
             exports: Arc::new(export::ExportManager::default()),
+            attachment_jobs: Arc::new(attachments::AttachmentJobs::default()),
+            original_observer: Mutex::new(None),
             deadlines: deadlines::Bridge::default(),
             dev_origin,
             server: tokio::sync::Mutex::new(None),
@@ -306,12 +312,24 @@ impl NativeState {
     }
 
     async fn stop(&self) -> Result<(), HostError> {
+        let observer = self
+            .original_observer
+            .lock()
+            .map_err(|_| HostError::StatePoisoned)?
+            .take();
+        if let Some(observer) = observer {
+            observer.abort();
+            let _ = observer.await;
+        }
         self.deadlines.stop().await?;
         self.exports.request_stop();
+        self.attachment_jobs.request_stop();
         self.peers.stop().await?;
         let exports = self.exports.clone();
+        let attachments = self.attachment_jobs.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            exports.wait_empty(std::time::Duration::from_secs(10))
+            exports.wait_empty(std::time::Duration::from_secs(10))?;
+            attachments.wait_empty(std::time::Duration::from_secs(10))
         })
         .await
         .map_err(|_| HostError::Shutdown)??;
@@ -806,6 +824,7 @@ fn request_exit(app: &AppHandle, code: i32) {
     }
     // Fence HTTP as well as IPC immediately, before scheduling resource close.
     state.exports.request_stop();
+    state.attachment_jobs.request_stop();
     state.host.request_stop();
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -887,8 +906,8 @@ fn report_startup_failure(app: &AppHandle, error: &HostError) {
     log::error!("Beta storage startup failed: {error}");
     #[cfg(target_os = "windows")]
     {
+        use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
         use windows::core::PCWSTR;
-        use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
         let reason = match error {
             HostError::RootInUse => {
                 "这份资料正在由另一个外心 Beta 实例使用，请先退出该实例再重试。"
@@ -996,6 +1015,33 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                 }
             };
             app.manage(state.clone());
+            let mut changes = state.peers.subscribe_original_changes();
+            let originals_app = app.handle().clone();
+            *state
+                .original_observer
+                .lock()
+                .map_err(|_| "Original observer lock unavailable")? =
+                Some(tauri::async_runtime::spawn(async move {
+                    loop {
+                        match changes.recv().await {
+                            Ok(change) => {
+                                if originals_app
+                                    .emit("beta-original-availability-changed", change)
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                let _ = originals_app.emit(
+                                    "beta-original-availability-changed",
+                                    serde_json::json!({"profile_id":null,"original_id":null}),
+                                );
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                }));
             #[cfg(target_os = "android")]
             state
                 .deadlines
@@ -1056,6 +1102,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
         })
         .invoke_handler(tauri::generate_handler![
             export::beta_export_original,
+            export::beta_open_original,
             export::beta_cancel_original_export,
             peer_commands::beta_peer_status,
             peer_commands::beta_peer_set_enabled,
@@ -1066,6 +1113,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             peer_commands::beta_peer_revoke,
             peer_commands::beta_peer_original_status,
             peer_commands::beta_peer_original_fetch,
+            peer_commands::beta_peer_original_fetch_any,
             peer_commands::beta_peer_original_cancel,
             overlay::beta_overlay_attach,
             overlay::beta_overlay_read,
@@ -1093,9 +1141,16 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             local_sources::beta_begin_local_source,
             local_sources::beta_local_source_status,
             local_sources::beta_write_local_source_chunk,
+            local_sources::beta_write_local_source_binary,
             local_sources::beta_finish_local_source,
             local_sources::beta_read_local_source_range,
             local_sources::beta_remove_local_source,
+            attachments::beta_describe_attachment_paths,
+            attachments::beta_pick_attachment_files,
+            attachments::beta_clipboard_files,
+            attachments::beta_import_attachment_path,
+            attachments::beta_stage_local_attachment,
+            attachments::beta_cancel_attachment_work,
             beta_provision_profile,
             beta_capture,
             beta_events_page,
@@ -1343,10 +1398,12 @@ mod tests {
             Some("{\"draft\":\"retained local text\"}")
         );
         let human = reopened.native_human_session(&owner, profile).unwrap();
-        assert!(reopened
-            .events_page(&human, profile, &EventQuery::default())
-            .unwrap()
-            .items
-            .is_empty());
+        assert!(
+            reopened
+                .events_page(&human, profile, &EventQuery::default())
+                .unwrap()
+                .items
+                .is_empty()
+        );
     }
 }

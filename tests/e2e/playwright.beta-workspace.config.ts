@@ -11,7 +11,7 @@ export default defineConfig({
   webServer: process.env.EXOMIND_UI_BASE_URL ? undefined : {
     command: 'node node_modules/vite/bin/vite.js --config tests/e2e/vite.beta-workspace.config.ts --host 127.0.0.1 --port 15420 --strictPort',
     cwd: fileURLToPath(new URL('../..', import.meta.url)), url: `${baseURL}/tests/e2e/fixtures/beta-workspace.html`, reuseExistingServer: false,
-    env: { EXOMIND_WEB_PORT: '15420', EXOMIND_HMR_PORT: '15421', VITE_APP_VERSION: '0.6.0-beta13' },
+    env: { EXOMIND_WEB_PORT: '15420', EXOMIND_HMR_PORT: '15421', VITE_APP_VERSION: '0.6.0-beta14' },
   },
   projects: [
     { name: 'desktop-light', use: { viewport: { width: 1280, height: 900 }, colorScheme: 'light' } },

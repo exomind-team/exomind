@@ -1,6 +1,7 @@
 import { useEffect,useRef,useState,useSyncExternalStore } from 'react';
 import { Dialog,DialogContent,DialogDescription,DialogFooter,DialogHeader,DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { FieldSelect } from '@/components/ui/field-select';
 import { SettingsSection } from '@/ui/app/components/settings/settings-section';
 import { Divider,SettingRow } from '@/ui/app/components/settings-shared';
 import { formatEventTimestamp,type EventDateDisplayMode } from '@/lib/eventlog/format-event-timestamp';
@@ -45,7 +46,7 @@ function TaskPanelBody({client,owner,open,target,revision,now,dateMode,canConfig
     </SettingsSection><div className="min-w-0 space-y-3">
       {!task?<p role="status" className="text-sm text-muted">{state.detail?.loading?'正在读取任务资格…':'请选择一项任务。'}</p>:<>
         <div className="flex flex-wrap gap-2"><Button variant="ghost" size="sm" disabled={state.detail?.loading} onClick={()=>{void owner.refreshSelected();}}>刷新所选任务</Button>
-          {!!versions.length&&<select aria-label="回顾版本" className="h-9 max-w-full rounded-md border border-input bg-page px-2 text-xs dark:bg-page-dark" value={state.detail?.selected?.event_id??''} disabled={state.detail?.loading} onChange={event=>owner.selectArtifact(event.target.value)}><option value="" disabled>选择已读取版本</option>{versions.map(item=><option key={item.event_id} value={item.event_id}>{formatEventTimestamp(item.occurred_at_ms,dateMode,now)} · {item.event_id.slice(0,8)}</option>)}</select>}
+          {!!versions.length&&<FieldSelect label="回顾版本" className="max-w-full" value={state.detail?.selected?.event_id??''} disabled={state.detail?.loading} onValueChange={value=>owner.selectArtifact(value)} options={[{value:'',label:'选择已读取版本',disabled:true},...versions.map(item=>({value:item.event_id,label:`${formatEventTimestamp(item.occurred_at_ms,dateMode,now)} · ${item.event_id.slice(0,8)}`}))]}/>}
         </div>
         <BetaReviewView task={task} artifact={state.detail?.selected} now={now} dateMode={dateMode} localDeviceId={owner.deviceId} qualificationPending={state.detail?.qualificationPending}
           pendingAction={intent?.phase==='sending'?(intent.kind==='resume'||intent.kind==='takeover'?'retry':intent.kind):null}

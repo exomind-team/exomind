@@ -11,7 +11,8 @@ import { OverlayDraftBuffer } from './draft-buffer';
 import { nativeOverlayWindow, nativeWorkspaceBind, nativeWorkspaceProfiles } from './native-port';
 import { overlayScopeKey,type OverlayAction,type OverlayResponse,type OverlayScope,type OverlayView } from './protocol';
 import { useOverlayWindowLayout } from './window-layout';
-import { inputSendShortcutLabel, shouldSubmitOnEnter } from '../input-preferences';
+import { shouldSubmitOnEnter } from '../input-preferences';
+import { runActionOnPrimaryModifierEnter } from '@/ui/app/components/dialog-submit-shortcuts';
 
 const message=(error:unknown)=>error instanceof Error?error.message:'浮窗操作尚未确认，请保留输入并重试';
 interface RetainedInput {kind:'capture'|'feedback';blockId?:string;text:string}
@@ -112,18 +113,25 @@ function RetainedInputs({values,onResolved}:{values:RetainedScope[];onResolved:(
 }
 function FeedbackSurface({target,view,buffer,disabled,statusError,onSurfaceMount,onClose,onAppend,onSubmit}:{target:{id:string;kind:'submit'|'append'};view:OverlayView;buffer:OverlayDraftBuffer;disabled:boolean;statusError:string;onSurfaceMount:(element:HTMLDivElement|null)=>void;onClose:()=>void;onAppend:()=>void;onSubmit:(skipped:boolean)=>Promise<void>}){
   const draft=useSyncExternalStore(buffer.subscribe,buffer.snapshot);
-  const [error,setError]=useState('');const submit=(skipped=false)=>{if(disabled||draft.dirty||draft.saving||draft.error||!skipped&&!draft.text.trim())return;void onSubmit(skipped).catch(failure=>setError(message(failure)));};
+  const [error,setError]=useState(''),[submitting,setSubmitting]=useState(false),flight=useRef(false),active=useRef(true);
+  useEffect(()=>{active.current=true;return()=>{active.current=false;};},[]);
+  const submit=(skipped=false)=>{
+    if(disabled||flight.current||draft.error||!skipped&&!draft.text.trim())return;
+    flight.current=true;setSubmitting(true);setError('');
+    void onSubmit(skipped).catch(failure=>{if(active.current)setError(message(failure));}).finally(()=>{flight.current=false;if(active.current)setSubmitting(false);});
+  };
   return<TimeBlockFeedbackDialog open onOpenChange={open=>{if(!open)onClose();}} title={target.kind==='append'?'追加反馈':'结束反馈'} description={view.remote?.active?.block_id===target.id?view.remote.active.name:target.id.slice(0,8)} compact dialogRef={onSurfaceMount} overlayClassName="bg-transparent" dialogClassName="w-[380px] max-w-[calc(100vw-2rem)]"
-    feedback={draft.text} onFeedbackChange={text=>buffer.edit(text)} onFeedbackKeyDown={event=>{if(!event.nativeEvent.isComposing&&shouldSubmitOnEnter(view.input_send_mode??'ctrl-enter-send',event)){event.preventDefault();submit();}}}
-    feedbackPlaceholder="记录本次专注的反馈..." onSubmit={()=>submit()} submitLabel={target.kind==='append'?'确认追加':'提交反馈'} submitDisabled={disabled||draft.dirty||draft.saving||!!draft.error||!draft.text.trim()} tasks={[]} autoFocusFeedback
+    feedback={draft.text} feedbackReadOnly={submitting} onFeedbackChange={text=>buffer.edit(text)} onFeedbackKeyDown={event=>{runActionOnPrimaryModifierEnter(event,()=>submit());}}
+    feedbackPlaceholder="记录本次专注的反馈..." onSubmit={()=>submit()} submitLabel={submitting?'正在提交…':target.kind==='append'?'确认追加':'提交反馈'} submitDisabled={disabled||submitting||!!draft.error||!draft.text.trim()} tasks={[]} autoFocusFeedback
     dialogTestId="now-overlay-feedback-surface" feedbackTestId="now-overlay-feedback-textarea" submitTestId="now-overlay-feedback-confirm"
     textareaClassName="min-h-[88px] resize-none text-[13px] dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
     submitButtonClassName="h-9 rounded-[10px] bg-[#C75B3A] px-4 text-sm font-semibold text-white hover:bg-[#B24D2F] disabled:cursor-not-allowed disabled:opacity-60"
-    footerContent={target.kind==='submit'&&<Button variant="ghost" className="h-9 rounded-[10px]" disabled={disabled||draft.dirty||draft.saving||!!draft.error} onClick={()=>submit(true)}>跳过</Button>}
+    footerContent={target.kind==='submit'&&<Button variant="ghost" className="h-9 rounded-[10px]" disabled={disabled||submitting||!!draft.error} onClick={()=>submit(true)}>跳过</Button>}
     extraContent={<>
-      <p className="hidden text-[11px] text-muted [@media(pointer:fine)]:block">{inputSendShortcutLabel(view.input_send_mode??'ctrl-enter-send').replace('发送','提交')}</p>
+      <p className="hidden text-[11px] text-muted [@media(pointer:fine)]:block">Ctrl/Cmd+Enter 提交 · Enter 换行</p>
+      {submitting&&<p role="status" className="text-xs text-secondary">正在暂存并提交反馈…</p>}
       {(error||draft.error||statusError)&&<p role="alert" className="text-xs text-destructive">{error||draft.error||statusError}</p>}
       {draft.error&&<Button variant="outline" size="sm" onClick={()=>{void buffer.retry().catch(failure=>setError(message(failure)));}}>重试反馈暂存</Button>}
-      {target.kind==='submit'&&!view.remote?.pending_feedback.includes(target.id)&&view.remote?.active?.block_id!==target.id&&<Button variant="outline" size="sm" disabled={disabled} onClick={onAppend}>改为追加反馈</Button>}
+      {target.kind==='submit'&&!view.remote?.pending_feedback.includes(target.id)&&view.remote?.active?.block_id!==target.id&&<Button variant="outline" size="sm" disabled={disabled||submitting} onClick={onAppend}>改为追加反馈</Button>}
     </>}/>;
 }

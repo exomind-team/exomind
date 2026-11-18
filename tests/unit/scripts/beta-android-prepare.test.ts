@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -28,11 +28,21 @@ function fixture(namespace = beta) {
   put(files.gradle, `android {\n    namespace = "${namespace}"\n    defaultConfig {\n        applicationId = "${beta}"\n    }\n}\n`);
   put(files.manifest, '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n<uses-permission android:name="android.permission.INTERNET"/>\n<application android:label="ExoMind Beta"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application>\n</manifest>\n');
   put(files.activity, freshActivity);
+  cpSync(join(process.cwd(),'src-tauri/icons/android'),join(root,'src-tauri/icons/android'),{recursive:true});
   return { root, files, snapshot: () => Object.fromEntries(Object.entries(files).map(([key,path]) => [key,readFileSync(path,'utf8')])) };
 }
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe('isolated Beta Android preparation', () => {
+  it('B14-U05: replaces template launcher resources from the maintained brand pack, including round/adaptive icons',async()=>{
+    const {prepareBetaAndroid}=await import('../../../scripts/dev/beta-android-prepare');const work=fixture();
+    const target=join(work.root,'src-tauri/gen/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png');mkdirSync(dirname(target),{recursive:true});writeFileSync(target,'synthetic Tauri template icon');
+    prepareBetaAndroid(work.root,{ndkVersion:null});
+    expect(readFileSync(target)).toEqual(readFileSync(join(work.root,'src-tauri/icons/android/mipmap-xhdpi/ic_launcher.png')));
+    const round=readFileSync(join(work.root,'src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml'),'utf8');expect(round).toContain('@mipmap/ic_launcher_foreground');
+    expect(work.snapshot().manifest).toContain('android:icon="@mipmap/ic_launcher"');expect(work.snapshot().manifest).toContain('android:roundIcon="@mipmap/ic_launcher_round"');
+    expect(prepareBetaAndroid(work.root,{ndkVersion:null}).changedFiles).toEqual([]);
+  });
   it('B12-08: pins the AGP strip NDK explicitly and preserves repeated preparation',async()=>{
     const {prepareBetaAndroid}=await import('../../../scripts/dev/beta-android-prepare');const work=fixture();
     prepareBetaAndroid(work.root,{ndkVersion:'28.0.13004108'});
@@ -54,7 +64,7 @@ describe('isolated Beta Android preparation', () => {
     const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
     const work = fixture(); const before = work.snapshot();
     const result = prepareBetaAndroid(work.root,{ndkVersion:null});
-    expect(result.changedFiles).toHaveLength(2);
+    expect(result.changedFiles).toContain(work.files.manifest);expect(result.changedFiles).toContain(work.files.activity);expect(result.changedFiles).not.toContain(work.files.gradle);
     const after = work.snapshot(); expect(after.gradle).toBe(before.gradle); expect(after.config).toBe(before.config);
     expect(after.activity).toContain('fun setExomindFullscreen(enabled: Boolean)');
     expect(after.activity).toContain('override fun onConfigurationChanged(newConfig: android.content.res.Configuration)');

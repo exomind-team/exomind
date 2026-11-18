@@ -25,7 +25,32 @@ function fixture(active=true){
   const session={snapshot:()=>state,subscribe:(fn:()=>void)=>{listeners.add(fn);return()=>{listeners.delete(fn);};},send,retry:vi.fn()} as unknown as OverlaySession;
   return{session,send,update,disconnect,view:()=>view};
 }
-describe('real Beta overlay uses shared Alpha presentation and Main actions',()=>{
+describe('real Beta overlay uses shared Alpha presentation and Native workspace actions',()=>{
+  it('B14-U03: immediate Ctrl+Enter waits for the owned draft acknowledgement instead of dropping the action',async()=>{
+    const f=fixture(),gate=deferred<void>(),originalSend=f.send.getMockImplementation()!;
+    f.update({...f.view(),remote:{...f.view().remote!,active:{...f.view().remote!.active!,phase:'feedback_pending'},pending_feedback:[B]}});
+    f.send.mockImplementationOnce(async action=>{await gate.promise;return originalSend(action);});
+    const ui=render(<BetaOverlaySurface session={f.session}/>);
+    try{
+      fireEvent.click(screen.getByTestId('new-focus-end-button'));const input=await screen.findByTestId('now-overlay-feedback-textarea');
+      fireEvent.change(input,{target:{value:'submit this exact feedback'}});await waitFor(()=>expect(f.send).toHaveBeenCalledTimes(1));
+      expect(screen.getByTestId('now-overlay-feedback-confirm')).toBeEnabled();
+      fireEvent.keyDown(input,{key:'Enter',ctrlKey:true});expect(await screen.findByText('正在暂存并提交反馈…')).toBeVisible();expect(input).toHaveAttribute('readonly');
+      expect(f.send.mock.calls.filter(([action])=>action.kind==='submit_feedback')).toHaveLength(0);
+      await act(async()=>{gate.resolve();});await waitFor(()=>expect(f.send.mock.calls.filter(([action])=>action.kind==='submit_feedback')).toHaveLength(1));
+    }finally{gate.resolve();ui.unmount();}
+  });
+  it.each(['enter-send','ctrl-enter-send'] as const)('B14-U02: feedback always uses Ctrl/Cmd+Enter with message preference %s',async input_send_mode=>{
+    const f=fixture();f.update({...f.view(),input_send_mode,remote:{...f.view().remote!,active:{...f.view().remote!.active!,phase:'feedback_pending'},pending_feedback:[B]}});
+    render(<BetaOverlaySurface session={f.session}/>);fireEvent.click(screen.getByTestId('new-focus-end-button'));
+    const input=await screen.findByTestId('now-overlay-feedback-textarea');fireEvent.change(input,{target:{value:'fixed feedback shortcut'}});
+    await waitFor(()=>expect(screen.getByTestId('now-overlay-feedback-confirm')).toBeEnabled());
+    const submits=()=>f.send.mock.calls.filter(([action])=>action.kind==='submit_feedback');
+    await act(async()=>{fireEvent.keyDown(input,{key:'Enter'});});expect(submits()).toHaveLength(0);
+    await act(async()=>{fireEvent.keyDown(input,{key:'Enter',ctrlKey:true,isComposing:true});});expect(submits()).toHaveLength(0);
+    fireEvent.keyDown(input,{key:'Enter',ctrlKey:true});await waitFor(()=>expect(submits()).toHaveLength(1));
+    expect(submits()[0][0]).toMatchObject({kind:'submit_feedback',block_id:B});
+  });
   it('identifies the pinned Native profile even while the idle window is collapsed',()=>{
     const f=fixture(false);f.update({...f.view(),profile_name:'Pinned profile P'});render(<BetaOverlaySurface session={f.session}/>);
     expect(screen.getByTestId('now-overlay-idle-pill')).toHaveTextContent('当下 · Pinned profile P');

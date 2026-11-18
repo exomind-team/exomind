@@ -1,3 +1,4 @@
+import { selectField } from './select-field';
 import { act,fireEvent,render,screen,waitFor,cleanup } from '@testing-library/react';
 import { afterEach,describe,expect,it,vi } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
@@ -223,11 +224,11 @@ describe('shared Alpha focus presentation with real Beta commands',()=>{
     try{
       const input=await screen.findByRole('textbox',{name:'记录当下'});fireEvent.change(input,{target:{value:'retain P'}});
       await screen.findByRole('button',{name:'重试记录草稿暂存'});
-      const select=screen.getByRole('combobox',{name:'当前档案'});fireEvent.change(select,{target:{value:Q}});
+      const select=screen.getByRole('combobox',{name:'当前档案'});await selectField(select,Q);
       await screen.findByText(/未切换档案/);expect(select).toHaveValue(P);expect(screen.getByRole('textbox',{name:'记录当下'})).toHaveValue('retain P');
       expect(manager.request).toHaveBeenCalledTimes(1);fireEvent.change(input,{target:{value:'retain P and keep editing'}});
-      fail=false;fireEvent.change(select,{target:{value:Q}});await waitFor(()=>expect(select).toHaveValue(Q));await screen.findByRole('textbox',{name:'记录当下'});
-      fireEvent.change(select,{target:{value:P}});await waitFor(()=>expect(select).toHaveValue(P));expect(await screen.findByRole('textbox',{name:'记录当下'})).toHaveValue('retain P and keep editing');
+      fail=false;await selectField(select,Q);await waitFor(()=>expect(select).toHaveValue(Q));await screen.findByRole('textbox',{name:'记录当下'});
+      await selectField(select,P);await waitFor(()=>expect(select).toHaveValue(P));expect(await screen.findByRole('textbox',{name:'记录当下'})).toHaveValue('retain P and keep editing');
     }finally{fail=false;ui.unmount();await act(async()=>{await Promise.resolve();});if(locks)Object.defineProperty(navigator,'locks',locks);else Reflect.deleteProperty(navigator,'locks');}
   });
 });

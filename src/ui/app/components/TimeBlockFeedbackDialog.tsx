@@ -37,6 +37,7 @@ interface TimeBlockFeedbackDialogProps {
   title: string;
   description: string;
   feedback: string;
+  feedbackReadOnly?: boolean;
   onFeedbackChange: (value: string) => void;
   onFeedbackKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   feedbackPlaceholder: string;
@@ -67,6 +68,7 @@ export function TimeBlockFeedbackDialog({
   title,
   description,
   feedback,
+  feedbackReadOnly = false,
   onFeedbackChange,
   onFeedbackKeyDown,
   feedbackPlaceholder,
@@ -110,6 +112,7 @@ export function TimeBlockFeedbackDialog({
         <Textarea
           data-testid={feedbackTestId}
           value={feedback}
+          readOnly={feedbackReadOnly}
           onChange={(event) => onFeedbackChange(event.target.value)}
           onKeyDown={onFeedbackKeyDown}
           placeholder={feedbackPlaceholder}

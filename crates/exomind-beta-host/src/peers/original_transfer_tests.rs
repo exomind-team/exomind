@@ -557,6 +557,82 @@ fn original_bytes(host: &BetaHost, p: ProfileId, id: OriginalId) -> Vec<u8> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automatic_small_original_ignores_unprovable_unrelated_history() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let bytes = b"known attachment remains independently retrievable\0\xff";
+    let r = rig(bytes).await;
+    let third_root = tempdir().unwrap();
+    let (third, third_owner) = open(&third_root);
+    third
+        .provision_profile(&third_owner, r.p, "synthetic legacy source")
+        .unwrap();
+    seed(&third, r.p, b"unrelated legacy history", true);
+    let page = {
+        let state = third.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        core.export_origin_page(
+            &core.local_human(r.p).unwrap(),
+            r.p,
+            &OriginPageQuery::default(),
+        )
+        .unwrap()
+    };
+    {
+        let state = r.a.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        let context = core
+            .trusted_replica_context(r.p, third.device_id, page.origin.restoration_epoch, 1)
+            .unwrap();
+        core.import_origin_page(&context, &page).unwrap();
+        assert!(
+            core.verified_origin_state(&core.local_human(r.p).unwrap(), &page.origin)
+                .unwrap()
+                .is_none()
+        );
+    }
+    let (source, target) = auto_controllers(&r, 1024 * 1024, None).await;
+    let retrieved = tokio::time::timeout(Duration::from_secs(18), async {
+        loop {
+            if target
+                .original_status(r.p, r.original.original_id)
+                .is_ok_and(|s| s.availability == "complete")
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .is_ok();
+    if retrieved {
+        assert_eq!(original_bytes(&r.b, r.p, r.original.original_id), bytes);
+    }
+    let status = target.status(r.p).unwrap();
+    let carrier = status
+        .peers
+        .iter()
+        .find(|peer| peer.device_id == r.a.device_id)
+        .unwrap();
+    assert!(
+        carrier
+            .history_gaps
+            .iter()
+            .any(|gap| gap.origin_device_id == third.device_id
+                && gap.materialized_seq == page.through.seq
+                && gap.available_seq.is_none())
+    );
+    source.stop().await.unwrap();
+    target.stop().await.unwrap();
+    stop(r.a).await;
+    stop(r.b).await;
+    stop(third).await;
+    assert!(
+        retrieved,
+        "B14-S02: unrelated unsigned history must not block an authorized, referenced small original"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn automatic_small_originals_sync_both_directions_without_ui_and_keep_large_and_other_profile()
  {
     let _discovery = crate::peers::test_discovery::lease().await;
@@ -574,6 +650,7 @@ async fn automatic_small_originals_sync_both_directions_without_ui_and_keep_larg
     .await;
     assert_eq!(original_bytes(&r.b, r.p, r.original.original_id), bytes);
     let large = seed(&r.a, r.p, &vec![0xff; 1024 * 1024 + 1], true);
+    let mut changes = target.subscribe_original_changes();
     let late = seed(&r.a, r.p, b"late automatic P bytes\0\xff", true);
     wait_auto("late metadata and automatic bytes", || {
         target
@@ -581,6 +658,17 @@ async fn automatic_small_originals_sync_both_directions_without_ui_and_keep_larg
             .is_ok_and(|s| s.availability == "complete")
     })
     .await;
+    let changed = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let change = changes.recv().await.unwrap();
+            if change.original_id == late.original_id {
+                break change;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(changed.profile_id, r.p);
     wait_auto("large metadata available", || {
         target.original_status(r.p, large.original_id).is_ok()
     })

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type MutableRefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { Bot, FileText, FolderOpen, PanelsTopLeft, X } from 'lucide-react';
 import { PageShell } from '@/ui/app/components/PageShell';
@@ -52,9 +52,14 @@ import { inputSendShortcutLabel, shouldSubmitOnEnter, useBetaInputSendMode } fro
 import { BetaCaptureStatus } from './BetaCaptureStatus';
 import { BetaOriginalExportCenter } from './BetaOriginalExportCenter';
 import { BetaTimeblockAvatar } from './BetaTimeblockAvatar';
+import { BetaAttachmentProgress } from './BetaAttachmentProgress';
+import { FieldSelect } from '@/components/ui/field-select';
+import { pickNativeFiles } from './native-attachments';
+import { useNativeAttachmentDrop } from './native-attachment-drop';
+import type { AttachmentSelection } from './native-attachment-types';
+import { useBetaDeviceNames } from './device-names';
 
 const SESSION_KEY = 'exomind:beta:connection';
-const selectClass = 'h-9 max-w-full rounded-md border border-input bg-page px-2 text-sm dark:bg-page-dark';
 
 /** A separate entry: no legacy runtime/profile/event-store bootstrap. */
 export function BetaApp({ client: injected, sourceStore, intentJournal, intentPredecessor, peers: injectedPeers, handoffs: injectedHandoffs }: { client?: BetaClient; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; peers?:BetaPeersClient|null; handoffs?:BetaDeadlineHandoffsClient|null }) {
@@ -248,9 +253,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   useEffect(()=>{if(handoff.pending||handoff.failed)setSection('now');},[handoff.pending?.handoff_id,handoff.failed]);
   const workspaceTools = <>{client.originalExports&&<BetaOriginalExportCenter client={client} profileId={profileId}/>}<BetaRuntimeLocation endpoint={endpoint} compact/>
     {isTauri()&&!/Android|iPhone|iPad/i.test(navigator.userAgent)&&<Button size="icon" variant="ghost" aria-label="专注浮窗" title="在浮窗打开当前档案" onClick={()=>{void invoke('beta_workspace_bind',{profileId}).then(()=>setBetaOverlayEnabled(true)).catch(failure=>setError(errorMessage(failure)));}}><PanelsTopLeft size={16}/></Button>}
-    <select id="beta-profile" aria-label="当前档案" title="当前档案" className={`${selectClass} h-8 min-w-0 max-w-28`} value={profileId} disabled={!prepareSwitch.current||switching||creating} onChange={event=>{void changeProfile(event.target.value);}}>
-      {profiles.map(profile=><option key={profile.profile_id} value={profile.profile_id}>{profile.display_name}</option>)}
-    </select>
+    <FieldSelect id="beta-profile" label="当前档案" title="当前档案" className="max-w-28" value={profileId} disabled={!prepareSwitch.current||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profile.display_name}))}/>
     <Button variant="ghost" size="icon" aria-label="管理档案" title={`档案：${profileName || '未选择'}`} onClick={()=>setProfileDialog(true)}><FolderOpen size={16}/></Button>
     {onDisconnect&&<Button variant="ghost" size="sm" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}</>;
   return <><BetaAppShell section={section} onSectionChange={setSection} profileName={profileName} onProfileClick={()=>setProfileDialog(true)}
@@ -259,9 +262,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     now={<PageShell title="当下" hideHeader={!!status&&!!profileId} className="min-h-0 overflow-hidden" headerClassName="shrink-0" contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
     headerAction={<div className="flex max-w-[15rem] items-center gap-1">{status&&profileId&&<>
       <label className="sr-only" htmlFor="beta-profile">当前档案</label>
-      <select id="beta-profile" className={`${selectClass} min-w-0 max-w-36`} value={profileId} disabled={!prepareSwitch.current||switching||creating} onChange={event => {void changeProfile(event.target.value);}}>
-        {profiles.map(item => <option key={item.profile_id} value={item.profile_id}>{item.display_name}</option>)}
-      </select>
+      <FieldSelect id="beta-profile" label="当前档案" className="max-w-36" value={profileId} disabled={!prepareSwitch.current||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profile.display_name}))}/>
       </>}
       <Button variant="ghost" size="sm" aria-label="管理档案" onClick={()=>setProfileDialog(true)}>档案</Button>
       {onDisconnect&&<Button variant="ghost" size="sm" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}
@@ -361,6 +362,7 @@ async function readTimeline(client:BetaClient,profileId:string,query:BetaQuery):
 }
 function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profileId, visible, externalRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync,intentJournal,summaryOwner }: { workspace: BetaWorkspacePresentation; client: BetaClient; controller: BetaDraftController; focus:BetaTimeblockController|null; deviceId:string;profileId: string; visible:boolean;externalRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void;intentJournal?:LocalIntentJournal;summaryOwner:MutableRefObject<SummaryTasksController|null> }) {
   const drafts = useSyncExternalStore(controller.subscribe, controller.snapshot);
+  const deviceNames=useBetaDeviceNames(deviceId);
   const { layout, change: changeLayout } = workspace;
   const workspaceActive = useBetaViewActive(visible);
   const recordsActive = workspaceActive && (layout.minimal || layout.records === 'expanded');
@@ -476,18 +478,18 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       resizeNowInputTextarea(textareaRef.current);
     });
   }
-  async function pasteClipboard(read: () => Promise<{ files: File[]; text: string }>) {
+  async function pasteClipboard(read: () => Promise<{ files: AttachmentSelection[]; text: string }>) {
     if (clipboardFlight.current) return;
     const flight = {}; clipboardFlight.current = flight; setClipboardBusy(true); setError('');
     const revision = controller.snapshot().drafts[profileId]?.revision ?? 0;
     try {
       const result = await read();
       if (!alive.current || clipboardFlight.current !== flight) return;
-      if (!result.files.length && !result.text) throw new Error('剪贴板没有可粘贴的图片或文字');
+      if (!result.files.length && !result.text) throw new Error('剪贴板没有可粘贴的文件或文字');
       // A system permission dialog can outlive edits or a profile switch. Never
       // replace newer input with text captured for the earlier draft.
       if (result.text && revision !== (controller.snapshot().drafts[profileId]?.revision ?? 0)) throw new Error('草稿已变化，请再次粘贴；现有输入已保留');
-      if (result.files.length && !client.originals) throw new Error('当前服务尚不支持图片原件');
+      if (result.files.length && !client.originals) throw new Error('当前服务尚不支持附件原件');
       insertClipboardText(result.text);
       if (result.files.length) await controller.addFiles(profileId, result.files);
       if (alive.current && clipboardFlight.current === flight) reportPaste('success');
@@ -502,9 +504,32 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
   const pending = drafts.pending.filter(item => item.command.profile_id === profileId && item.state !== 'committed');
   const busy = pending.some(item => item.state === 'pending' && item.draft_revision === draft?.revision);
   const preparing = draft?.files?.some(file => !file.original || file.state === 'preparing') ?? false;
+  const attachmentsBusy=workspaceActive&&!!draft?.files?.some(file=>file.state==='preparing'||file.state==='uploading');
+  const [attachmentNow,setAttachmentNow]=useState(Date.now);
+  useEffect(()=>{if(!attachmentsBusy)return;setAttachmentNow(Date.now());const timer=setInterval(()=>setAttachmentNow(Date.now()),1000);return()=>clearInterval(timer);},[attachmentsBusy]);
   const currentCommitted = draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision);
   const captureStatus = drafts.persistenceState === 'failed' ? 'error' : clipboardBusy || drafts.persistenceState === 'pending' || pending.length ? 'pending' : currentCommitted ? 'committed' : draft?.text.trim() || draft?.files?.length ? 'draft' : 'idle';
-  return <div data-beta-workspace className="flex min-h-0 flex-1 flex-col overflow-hidden">
+  const dropRoot=useRef<HTMLDivElement>(null);
+  const mountDroppedFiles=useCallback(async(files:AttachmentSelection[])=>{if(!client.originals)throw new Error('当前服务尚不支持附件原件');await controller.addFiles(profileId,files);},[client,controller,profileId]);
+  const dropError=useCallback((failure:unknown)=>{if(alive.current)setError(errorMessage(failure));},[]);
+  const nativeDropOver=useNativeAttachmentDrop({root:dropRoot,active:workspaceActive,onFiles:mountDroppedFiles,onError:dropError});
+  async function chooseFiles(target:string|null=null){
+    reselectTarget.current=target;
+    if(isTauri()&&!/Android|iPhone|iPad/i.test(navigator.userAgent)){
+      try{const files=await pickNativeFiles(target===null);if(!alive.current||!files.length)return;reselectTarget.current=null;if(target)await controller.reselectFile(profileId,target,files[0]);else await controller.addFiles(profileId,files);}
+      catch(failure){if(alive.current)setError(errorMessage(failure));}
+    }else if(fileInput.current){fileInput.current.multiple=target===null;fileInput.current.click();}
+  }
+  return <div ref={dropRoot} data-beta-workspace className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+    onDragOver={event=>{if(workspaceActive&&Array.from(event.dataTransfer.types).includes('Files')){event.preventDefault();event.dataTransfer.dropEffect=client.originals?'copy':'none';}}}
+    onDrop={event=>{
+      const files=clipboardImageFiles(event.dataTransfer);if(!files.length)return;
+      event.preventDefault();event.stopPropagation();
+      if(!workspaceActive)return;
+      if(!client.originals){setError('当前服务尚不支持附件原件');return;}
+      void controller.addFiles(profileId,files).catch(failure=>{if(alive.current)setError(errorMessage(failure));});
+    }}>
+    {nativeDropOver&&<div className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-brand-accent bg-page/90 text-sm font-medium text-brand-accent dark:bg-page-dark/90" role="status">松开以挂载附件 · 不会自动发送</div>}
     <div data-beta-workspace-content className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
     <MainOverlayBridge profileId={profileId} onCommitted={()=>setRevision(value=>value+1)}/>
     {focus&&<BetaWorkspacePane kind="focus" chrome={layout.focus!=='expanded'} state={layout.minimal ? 'hidden' : layout.focus} onToggle={()=>changeLayout({focus:layout.focus==='collapsed'?'expanded':'collapsed'})}><div><BetaFocusTimer controller={focus} client={client} profileId={profileId} visible={visible&&!layout.minimal&&layout.focus==='expanded'} onCollapse={()=>changeLayout({focus:'collapsed'})}
@@ -527,10 +552,10 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
         <Input aria-label="搜索记录" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索文字" />
         <Button variant="outline" type="submit">搜索</Button>
       </form>
-      <select aria-label="日期显示" className={selectClass} value={mode} onChange={event => {
-        const value = event.target.value as EventDateDisplayMode;
+      <FieldSelect label="日期显示" value={mode} onValueChange={next => {
+        const value = next as EventDateDisplayMode;
         try { setBetaDateDisplayMode(value); } catch { setError('日期偏好暂时无法保存'); }
-      }}><option value="compact">简略日期</option><option value="full">完整日期</option><option value="weekday">星期日期</option></select>
+      }} options={[{value:'compact',label:'简略日期'},{value:'full',label:'完整日期'},{value:'weekday',label:'星期日期'}]}/>
     </div>
     {historyError && <p role="alert" className="shrink-0 px-5 py-2 text-sm text-destructive">{historyError}</p>}
     <div ref={scroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4" aria-label="记录历史" aria-busy={loading} onScroll={event=>{if(!recordsActive)return;const element=event.currentTarget;readingTop.current=element.scrollTop;followTail.current=element.scrollHeight-element.clientHeight-element.scrollTop<64;}}>
@@ -545,7 +570,7 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       :item.kind==='agent_summary/1'?<BetaExternalSummaryHistoryRow key={item.record.event_id} record={item.record} now={now} dateMode={mode} onOpenSource={sourceReader?source=>setSummarySource(source):undefined}/>
       :(()=>{const event=item.record;return <ChatMessageRowView key={event.event_id} eventId={event.event_id} timelineKind="capture" tone={event.author_kind==='human'?'user':'agent-feedback'}
         avatar={<Avatar className={`${event.author_kind==='human'?'':'mt-0.5 '}h-8 w-8 shrink-0`}><AvatarFallback className={event.author_kind==='human'?'rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100':'bg-violet-600 text-white'}>{event.author_kind==='human'?'我':<Bot size={16}/>}</AvatarFallback></Avatar>}
-        metadata={<><span className="text-muted">设备 {event.device_id.slice(0,8)}</span><EventTimestamp timestamp={event.occurred_at_ms} now={now} mode={mode}/><span className="text-xs font-semibold text-strong">{event.author_kind==='human'?'我':'Agent 记录'}</span></>}
+        metadata={<><span className="text-muted">{deviceNames.label(event.device_id)}</span><EventTimestamp timestamp={event.occurred_at_ms} now={now} mode={mode}/><span className="text-xs font-semibold text-strong">{event.author_kind==='human'?'我':'Agent 记录'}</span></>}
         content={event.text?<p className="whitespace-pre-wrap break-words">{event.text}</p>:null}
         afterBubble={!!event.originals?.length&&<OriginalDownloads client={client} deviceId={deviceId} profileId={profileId} originals={event.originals} visible={recordsActive}/>}/>;})())}</div>
     </div>
@@ -566,9 +591,9 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       onKeyDown={event => { if (!event.nativeEvent.isComposing && shouldSubmitOnEnter(inputSendMode, event)) { event.preventDefault(); void submit(); } }}
       onPaste={event => {
         const files = clipboardImageFiles(event.clipboardData);
-        if (!files.length) return;
+        if (!files.length) {if(isTauri()){event.preventDefault();void pasteClipboard(readBetaClipboard);}return;}
         event.preventDefault();
-        if (clipboardFlight.current) { setError('正在粘贴图片，请稍候再试'); return; }
+        if (clipboardFlight.current) { setError('正在读取剪贴板，请稍候再试'); return; }
         const text = event.clipboardData.getData('text/plain');
         void pasteClipboard(async () => ({ files, text }));
       }}
@@ -576,7 +601,7 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       pasteFeedback={pasteFeedback}
       pasteFailureLabel="未粘贴"
       onSend={() => submit()}
-      onAttachmentClick={client.originals ? () => { reselectTarget.current = null; if (fileInput.current) { fileInput.current.multiple = true; fileInput.current.click(); } } : undefined}
+      onAttachmentClick={client.originals ? () => {void chooseFiles();} : undefined}
       sendDisabled={(!draft?.text.trim() && !draft?.files?.length) || preparing || busy || clipboardBusy || !!drafts.persistenceError}
       beforeControls={<>
       <input ref={fileInput} type="file" multiple hidden aria-label="选择原件" onChange={event => {
@@ -594,13 +619,14 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
             <p className="truncate text-xs font-medium text-stone-700 dark:text-stone-100">{file.file_name}</p>
             <p className="text-[10px] text-stone-500 dark:text-[#A8A29E]">{formatBytes(file.byte_length)} · {file.state === 'verified' ? '原件已暂存，尚未提交记录' : file.state === 'preparing' ? '正在复制并校验本机源…' : file.state === 'uploading' ? `正在暂存 ${formatBytes(file.next_offset)}` : file.state === 'source_missing' ? '本机源缺失，请重选' : '暂存未完成'}</p>
             {file.message && <p className="text-xs text-destructive">{file.message}</p>}
+            <BetaAttachmentProgress name={file.file_name} progress={drafts.fileProgress[file.id]} now={attachmentNow} active={workspaceActive&&(file.state==='preparing'||file.state==='uploading')}/>
           </div>
           {(file.state === 'failed' || file.state === 'source_missing') && <>
             {file.original && <Button size="sm" variant="ghost" onClick={() => { void controller.resumeFiles(profileId); }}>恢复暂存</Button>}
-            <Button size="sm" variant="ghost" onClick={() => { reselectTarget.current = file.id; if (fileInput.current) { fileInput.current.multiple = false; fileInput.current.click(); } }}>重新选择</Button>
+            <Button size="sm" variant="ghost" onClick={() => {void chooseFiles(file.id);}}>重新选择</Button>
           </>}
-          <button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:text-[#78716C] dark:hover:bg-[#292524] dark:hover:text-[#E7E5E4]"
-            aria-label={`移除原件：${file.file_name}`} onClick={() => { try { controller.removeFile(profileId, file.id); } catch (failure) { setError(errorMessage(failure)); } }}><X size={14} /></button>
+          <Button type="button" size="icon" variant="ghost" className="h-9 w-9 shrink-0 rounded-full text-muted [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+            aria-label={`移除原件：${file.file_name}`} title={pending.some(item=>item.files?.some(selected=>selected.id===file.id))?'仅从下一份草稿移除；已提交的固定整组不受影响':file.state==='preparing'||file.state==='uploading'?'取消准备并移除附件（当前步骤完成后停止）':'移除附件'} onClick={() => { try { controller.removeFile(profileId, file.id); } catch (failure) { setError(errorMessage(failure)); } }}><X size={14} /></Button>
         </div>)}
       </div>}
       {drafts.persistenceError && <p role="alert" className="mb-2 text-xs text-destructive">{drafts.persistenceError}</p>}

@@ -1406,6 +1406,7 @@ version = "0.6.0-alpha05"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "clipboard-win",
  "enigo",
  "exomind-android-clipboard",
  "exomind-android-keep-awake",

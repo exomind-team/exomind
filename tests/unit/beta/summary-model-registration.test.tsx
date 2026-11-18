@@ -1,3 +1,4 @@
+import { selectField } from './select-field';
 import { StrictMode } from 'react';
 import { act,cleanup,fireEvent,render,screen,waitFor } from '@testing-library/react';
 import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
@@ -32,7 +33,7 @@ describe('Beta settings own model editors independently of Record drafts',()=>{
     const model=service(),gate=deferred<SummaryModelConfiguration>(),client=clientWith(model),journal=memoryIntentJournal();model.save.mockReturnValueOnce(gate.promise);
     render(<BetaApp client={client} intentJournal={journal}/>);const input=await screen.findByRole('textbox',{name:'记录当下'});fireEvent.change(input,{target:{value:'P Record before model save'}});await screen.findByText('记录草稿已暂存 · 尚未提交');
     fireEvent.click(screen.getByRole('button',{name:'设置'}));const field=await screen.findByRole('textbox',{name:'模型名称'});await waitFor(()=>expect(field).toHaveValue('P model'));fireEvent.change(field,{target:{value:'P accepted pending model'}});fireEvent.click(screen.getByRole('button',{name:'保存回顾配置'}));await waitFor(()=>expect(model.save).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button',{name:'当下'}));const select=screen.getByRole('combobox',{name:'当前档案'});await waitFor(()=>expect(select).toBeEnabled());fireEvent.change(select,{target:{value:Q}});await waitFor(()=>expect(select).toHaveValue(Q));
+    fireEvent.click(screen.getByRole('button',{name:'当下'}));const select=screen.getByRole('combobox',{name:'当前档案'});await waitFor(()=>expect(select).toBeEnabled());await selectField(select,Q);await waitFor(()=>expect(select).toHaveValue(Q));
     fireEvent.click(screen.getByRole('button',{name:'设置'}));await waitFor(()=>expect(screen.getByRole('textbox',{name:'模型名称'})).toHaveValue('Q model'));
     await act(async()=>{gate.resolve(receipt(P,model.save.mock.calls[0][1]));});expect(screen.getByRole('textbox',{name:'模型名称'})).toHaveValue('Q model');expect(screen.queryByText(/配置已保存；/)).not.toBeInTheDocument();
     expect(JSON.parse(journal.values.get(`exomind:beta:drafts:${D}`)!).drafts[P].text).toBe('P Record before model save');expect(model.save.mock.calls.map(([profile])=>profile)).toEqual([P]);

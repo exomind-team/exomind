@@ -273,8 +273,11 @@ impl Worker {
                     progress.error.is_none()
                         && progress.member_generation == member.generation
                         && progress.memo.as_ref().is_some_and(|memo| {
-                            memo.events_complete
-                                && memo.local_member_generation == local.generation
+                            // A known original is authorized and hash-bound at
+                            // every admission/write/seal below. Unrelated unsigned
+                            // history may keep the profile incomplete indefinitely;
+                            // it must not veto independently referenced bytes.
+                            memo.local_member_generation == local.generation
                                 && (!memo.can_send
                                     || memo
                                         .sent_snapshot

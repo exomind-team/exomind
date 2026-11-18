@@ -63,6 +63,7 @@ tauri-plugin-log = "2"
 tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
+clipboard-win = "5.4"
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

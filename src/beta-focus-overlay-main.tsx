@@ -3,6 +3,9 @@ import ReactDOM from 'react-dom/client';
 import { BetaOverlayPage } from './beta/overlay/BetaOverlayPage';
 import { initializeBetaUuid } from './beta/initialization';
 import './index.css';
+import './beta/beta-ui.css';
+
+document.documentElement.classList.add('beta-ui');
 
 document.documentElement.style.background='transparent';
 document.body.style.background='transparent';

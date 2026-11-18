@@ -1,8 +1,9 @@
 import {
-  closeSync, lstatSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync,
+  closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { ensureBetaApplicationIcons,planBetaAndroidBranding,sameGeneratedBytes,type BetaGeneratedChange as FileChange } from './beta-android-branding';
 import {
   ANDROID_CONFIG_CHANGES_VALUE,
   ensureAndroidSystemBarsInMainActivity,
@@ -21,7 +22,6 @@ export interface BetaAndroidPreparation {
   changedFiles: string[];
 }
 
-interface FileChange { path: string; before: string; after: string }
 
 /** This operation edits generated sources only. It never initializes a project,
  * runs Gradle, installs permissions, starts ADB, or selects a default root. */
@@ -147,6 +147,7 @@ function writeChanges(changes: FileChange[]): string[] {
   const completed: string[] = [];
   try {
     for (const change of changes) {
+      mkdirSync(dirname(change.path),{recursive:true});
       const temporary = `${change.path}.beta-prepare-${randomUUID()}.tmp`;
       const descriptor = openSync(temporary, 'wx');
       staged.push({ change, temporary });
@@ -154,7 +155,7 @@ function writeChanges(changes: FileChange[]): string[] {
       finally { closeSync(descriptor); }
     }
     for (const { change, temporary } of staged) {
-      if (lstatSync(change.path).isSymbolicLink() || readFileSync(change.path, 'utf8') !== change.before) {
+      if (existsSync(change.path)&&lstatSync(change.path).isSymbolicLink() || !sameGeneratedBytes(existsSync(change.path)?readFileSync(change.path):null,change.before)) {
         reject('Generated Beta source changed during preparation; preserving the newer source');
       }
       renameSync(temporary, change.path);
@@ -218,14 +219,15 @@ export function prepareBetaAndroid(projectRoot: string, options: {ndkVersion?: s
   const ndkVersion = options.ndkVersion === undefined ? resolveInstalledNdkVersion() : options.ndkVersion;
   const nextGradle = ensureConfiguredNdkVersionInGradle(prepareNativeSymbols(gradle),ndkVersion).buildGradleKts;
   assertGradle(nextGradle);
-  const nextManifest = ensureConfigChangesInManifest(manifest).manifestXml;
+  const nextManifest = ensureBetaApplicationIcons(ensureConfigChangesInManifest(manifest).manifestXml);
   const nextActivity = applyBetaImeInsets(ensureAndroidSystemBarsInMainActivity(activity, { ensureConfigurationChanged: true }).activityKotlin);
   assertManifest(nextManifest); assertActivity(nextActivity, true);
   if (attribute(withoutComments(nextManifest).match(/<activity\b[^>]*>/)?.[0] ?? '', 'android:configChanges') !== ANDROID_CONFIG_CHANGES_VALUE) {
     reject('Beta Activity configChanges integration is missing');
   }
-  const changes = [{ path: gradlePath, before: gradle, after: nextGradle }, { path: manifestPath, before: manifest, after: nextManifest }, { path: activityPath, before: activity, after: nextActivity }]
-    .filter(change => change.before !== change.after);
+  const changes:FileChange[] = [{ path: gradlePath, before: gradle, after: nextGradle }, { path: manifestPath, before: manifest, after: nextManifest }, { path: activityPath, before: activity, after: nextActivity }]
+    .filter(change => !sameGeneratedBytes(change.before,change.after));
+  changes.push(...planBetaAndroidBranding(projectRoot));
   return { projectRoot, changedFiles: writeChanges(changes) };
 }
 

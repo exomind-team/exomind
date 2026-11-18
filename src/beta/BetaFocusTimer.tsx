@@ -7,6 +7,7 @@ import { BetaTimeblockController,timeblockControlsBlocked } from './timeblocks-c
 import { runActionOnPrimaryModifierEnter } from '@/ui/app/components/dialog-submit-shortcuts';
 import { useBetaViewActive } from './view-activity';
 import { ChevronDown, RefreshCw, Target } from 'lucide-react';
+import { FieldSelect } from '@/components/ui/field-select';
 
 const message=(error:unknown)=>error&&typeof error==='object'&&'message'in error?String(error.message):'时间块操作尚未确认，请查证后重试';
 type Panel={kind:'start'}|{kind:'rotate';from:string;name:string}|null;
@@ -108,7 +109,7 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
     <div className="flex min-h-9 flex-wrap items-center gap-1 py-1 text-xs text-secondary">
       {onCollapse&&<Button size="sm" variant="ghost" aria-label="折叠专注" aria-expanded="true" onClick={onCollapse}><Target size={14} aria-hidden="true"/><ChevronDown size={12} aria-hidden="true"/></Button>}
       {active&&<Button size="sm" variant="ghost" disabled={disabled} onClick={()=>{setCustom({editing:false,text:String(state.draft.minutes)});setPanel({kind:'rotate',from:active.block_id,name:active.name});}}>切换时间块</Button>}
-      {!!Object.keys(roster).length&&<><select aria-label="反馈时间块" className="max-w-44 rounded-md border border-input bg-transparent p-1" value={selected} onChange={event=>setChoice(event.target.value)}>{Object.entries(roster).map(([id,name])=><option value={id} key={id}>{name}</option>)}</select><Button size="sm" variant="ghost" disabled={!selected||disabled} onClick={()=>setFeedback({id:selected,kind:'append'})}>追加反馈</Button></>}
+      {!!Object.keys(roster).length&&<><FieldSelect label="反馈时间块" className="max-w-44" value={selected} onValueChange={setChoice} options={Object.entries(roster).map(([id,name])=>({value:id,label:name}))}/><Button size="sm" variant="ghost" disabled={!selected||disabled} onClick={()=>setFeedback({id:selected,kind:'append'})}>追加反馈</Button></>}
       <Button size="icon" variant="ghost" className="ml-auto h-8 w-8" aria-label="刷新时间块" title="刷新时间块" onClick={()=>void controller.refresh()}><RefreshCw size={14} aria-hidden="true" /></Button>
       {state.persistenceState==='pending'?<span role="status">正在暂存时间块草稿…</span>:state.persistenceState==='idle'&&(state.draft.name.trim()||Object.values(state.feedback).some(item=>item.text.trim()))?<span role="status">草稿已暂存 · 尚未提交</span>:null}
     </div>
@@ -134,7 +135,7 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
           if(event.nativeEvent.isComposing)return;if(quick(event)){event.preventDefault();event.stopPropagation();applyMinutes(event.currentTarget.value);start();}
           else if(event.key==='Enter'){event.preventDefault();applyMinutes(event.currentTarget.value);}else if(event.key==='Escape'){event.preventDefault();setCustom({editing:false,text:String(state.draft.minutes)});}
         }},expectedTimeKeyDown:event=>{if(quick(event)){event.preventDefault();start();}},
-      }} slots={{configurationDetails:panel&&<div className="flex flex-wrap items-center gap-2 text-xs text-secondary">{panel.kind==='rotate'&&<span>当前时间块：{panel.name} → 新时间块</span>}<label className="flex items-center gap-2">倒计时到点<select aria-label="倒计时到点方式" className="rounded-md border border-input bg-page p-1 dark:bg-page-dark" value={state.draft.endMode} onChange={event=>setDraft({endMode:event.target.value as 'soft'|'hard'})}><option value="soft">继续超时</option><option value="hard">结束行动并待反馈</option></select></label></div>,dialogs:<TimeBlockFeedbackDialog open={!!feedback} onOpenChange={open=>{if(!open)setFeedback(null);}}
+      }} slots={{configurationDetails:panel&&<div className="flex flex-wrap items-center gap-2 text-xs text-secondary">{panel.kind==='rotate'&&<span>当前时间块：{panel.name} → 新时间块</span>}<label className="flex items-center gap-2">倒计时到点<FieldSelect label="倒计时到点方式" value={state.draft.endMode} onValueChange={value=>setDraft({endMode:value as 'soft'|'hard'})} options={[{value:'soft',label:'继续超时'},{value:'hard',label:'结束行动并待反馈'}]}/></label></div>,dialogs:<TimeBlockFeedbackDialog open={!!feedback} onOpenChange={open=>{if(!open)setFeedback(null);}}
         title={feedback?.kind==='append'?'追加反馈':'结束反馈'} description={feedback?roster[feedback.id]??feedback.id.slice(0,8):''} compact
         feedback={feedbackDraft} onFeedbackChange={text=>{if(feedback)try{controller.setFeedbackDraft(feedback.id,text);}catch(failure){setError(message(failure));}}}
         onFeedbackKeyDown={event=>{runActionOnPrimaryModifierEnter(event,()=>submitFeedback());}} feedbackPlaceholder="记录本次专注的反馈..." feedbackTestId="new-focus-feedback-textarea"

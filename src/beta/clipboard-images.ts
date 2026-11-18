@@ -1,17 +1,19 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Image as NativeImage } from '@tauri-apps/api/image';
+import type { AttachmentSelection } from './native-attachment-types';
+import { validateNativeFiles } from './native-attachments';
 
-export interface BetaClipboardContents { files: File[]; text: string }
+export interface BetaClipboardContents { files: AttachmentSelection[]; text: string }
 const MAX_CLIPBOARD_BYTES = 16 * 1024 * 1024;
 const MAX_CLIPBOARD_PIXELS = 16 * 1024 * 1024;
 
-/** Snapshot synchronously during the paste event: browsers clear DataTransfer
+/** Snapshot synchronously during the paste/drop event: browsers clear DataTransfer
  * once the event finishes. The caller retains normal text paste if empty. */
 export function clipboardImageFiles(data: DataTransfer): File[] {
   const items = Array.from(data.items ?? []);
-  const files = items.filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+  const files = items.filter(item => item.kind === 'file')
     .map(item => item.getAsFile()).filter((file): file is File => file !== null);
-  return files.length ? files : Array.from(data.files ?? []).filter(file => file.type.startsWith('image/'));
+  return files.length ? files : Array.from(data.files ?? []);
 }
 
 function clipboardFile(blob: Blob, name?: string): File {
@@ -59,6 +61,8 @@ async function nativeImageFile(): Promise<File | null> {
  * text is returned separately for insertion at the editor's selection. */
 export async function readBetaClipboard(): Promise<BetaClipboardContents> {
   if (isTauri()) {
+    const files=validateNativeFiles(await invoke('beta_clipboard_files'));
+    if(files.length)return{files,text:''};
     const file = await nativeImageFile();
     if (file) return { files: [file], text: '' };
     try {

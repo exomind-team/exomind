@@ -1,3 +1,4 @@
+import { selectField } from './select-field';
 import { act,cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import { afterEach,describe,expect,it } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
@@ -28,14 +29,14 @@ describe('late profile operations stay in their original client/device generatio
     const f=context();const ui=render(<BetaApp client={f.old} intentJournal={f.journal}/>);
     try{
       const input=await screen.findByRole('textbox',{name:'记录当下'});fireEvent.change(input,{target:{value:'old P durable draft'}});
-      const select=screen.getByRole('combobox',{name:'当前档案'});fireEvent.change(select,{target:{value:'old-q'}});
+      const select=screen.getByRole('combobox',{name:'当前档案'});await selectField(select,'old-q');
       expect(select).toHaveValue('old-p');
       await acknowledgeThenReplace(f,()=>ui.rerender(<BetaApp client={f.next} intentJournal={f.journal}/>));
       await waitFor(()=>expect(screen.getByRole('combobox',{name:'当前档案'})).toHaveValue('new-p'));
       await screen.findByRole('textbox',{name:'记录当下'});
       await act(async()=>{await Promise.resolve();});
       const current=screen.getByRole('combobox',{name:'当前档案'});expect(current).toHaveValue('new-p');expect(current).toBeEnabled();
-      expect(within(current).getAllByRole('option').map(option=>option.getAttribute('value'))).toEqual(['new-p','new-q']);
+      fireEvent.keyDown(current,{key:'ArrowDown'});expect(within(screen.getByRole('listbox')).getAllByRole('option').map(option=>option.getAttribute('data-option-value'))).toEqual(['new-p','new-q']);
       expect(JSON.parse(f.values.get('exomind:beta:drafts:scope-old')!).drafts['old-p'].text).toBe('old P durable draft');
       expect(f.old.capture).not.toHaveBeenCalled();expect(f.next.capture).not.toHaveBeenCalled();
       expect(restoreLastBetaProfile('scope-old',[{profile_id:'old-q'},{profile_id:'old-p'}])).toBe('old-p');
@@ -55,8 +56,8 @@ describe('late profile operations stay in their original client/device generatio
       await waitFor(()=>expect(screen.getByRole('combobox',{name:'当前档案'})).toHaveValue('new-p'));await screen.findByRole('textbox',{name:'记录当下'});
       await act(async()=>{await Promise.resolve();});
       const current=screen.getByRole('combobox',{name:'当前档案'});expect(current).toHaveValue('new-p');expect(current).toBeEnabled();
-      expect(within(current).queryByRole('option',{name:'Late old profile'})).not.toBeInTheDocument();
-      expect(within(current).getAllByRole('option')).toHaveLength(2);expect(f.next.provisionProfile).not.toHaveBeenCalled();
+      fireEvent.keyDown(current,{key:'ArrowDown'});const list=screen.getByRole('listbox');expect(within(list).queryByRole('option',{name:'Late old profile'})).not.toBeInTheDocument();
+      expect(within(list).getAllByRole('option')).toHaveLength(2);expect(f.next.provisionProfile).not.toHaveBeenCalled();
       expect(JSON.parse(f.values.get('exomind:beta:drafts:scope-old')!).drafts['old-p'].text).toBe('P input while provisioning');
       expect(restoreLastBetaProfile('scope-old',[{profile_id:id},{profile_id:'old-p'}])).toBe('old-p');
     }finally{f.gate.resolve();ui.unmount();}

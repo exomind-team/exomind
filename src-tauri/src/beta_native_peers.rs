@@ -279,6 +279,95 @@ pub(super) async fn beta_peer_original_fetch(
         .map_err(Failure::from)
 }
 #[tauri::command]
+pub(super) async fn beta_peer_original_fetch_any(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    original_id: OriginalId,
+    request_id: Uuid,
+    on_attempt: tauri::ipc::Channel<SourceAttempt>,
+) -> Result<OriginalTransferResult, Failure> {
+    trusted_window(&window, state.inner())?;
+    let lease = state
+        .attachment_jobs
+        .begin(request_id, &format!("fetch:{profile_id}:{original_id}"))?;
+    let status = state.peers.status(profile_id)?;
+    if !status.network_enabled {
+        return Err(HostError::PeerNetworkDisabled.into());
+    }
+    if !state
+        .host
+        .peer_members(&state.owner, profile_id)?
+        .iter()
+        .any(|member| {
+            member.device_id == status.device_id
+                && !member.revoked
+                && member.state == exomind_beta_host::PeerJoinState::Ready
+                && member.capabilities.read_originals
+        })
+    {
+        return Err(HostError::PeerMembershipDenied.into());
+    }
+    let mut candidates = status
+        .peers
+        .into_iter()
+        .filter(|peer| peer.member_state == "ready")
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|peer| {
+        (
+            peer.last_error_code.is_some(),
+            std::cmp::Reverse(peer.last_sync_at_ms),
+            peer.device_id.to_string(),
+        )
+    });
+    if candidates.is_empty() {
+        return Err(Failure {
+            code: "no_original_source",
+            message: "尚无已授权的来源设备，请先连接持有原件的设备",
+        });
+    }
+    let total = candidates.len();
+    let mut last = None;
+    for (index, peer) in candidates.into_iter().enumerate() {
+        lease.check(state.inner())?;
+        let _ = on_attempt.send(SourceAttempt {
+            index: index + 1,
+            total,
+            device_id: peer.device_id,
+        });
+        let result = tokio::select! {biased;
+            _=lease.cancelled()=>return Err(HostError::PeerCancelled.into()),
+            result=state.peers.fetch_original(profile_id,peer.device_id,original_id,request_id)=>result,
+        };
+        match result {
+            Ok(value) if value.verified => return Ok(value),
+            Ok(_) => last = Some(HostError::PeerSyncUnavailable),
+            Err(
+                error @ (HostError::PeerTransportUnavailable
+                | HostError::PeerTimeout
+                | HostError::PeerSyncUnavailable
+                | HostError::PeerPinMismatch
+                | HostError::PeerTls
+                | HostError::PeerProtocolMismatch
+                | HostError::PeerMembershipDenied
+                | HostError::Forbidden
+                | HostError::Unauthorized
+                | HostError::NotFound
+                | HostError::Core(exomind_core::CoreError::OriginalNotReady)),
+            ) => last = Some(error),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(last.unwrap_or(HostError::NotFound).into())
+}
+#[derive(Clone, Serialize)]
+pub(super) struct SourceAttempt {
+    index: usize,
+    total: usize,
+    device_id: DeviceId,
+}
+
+#[tauri::command]
 pub(super) async fn beta_peer_original_cancel(
     window: WebviewWindow,
     state: State<'_, Arc<NativeState>>,
@@ -287,6 +376,7 @@ pub(super) async fn beta_peer_original_cancel(
     request_id: Uuid,
 ) -> Result<bool, Failure> {
     trusted_window(&window, state.inner())?;
+    let selection_cancelled = state.attachment_jobs.cancel(request_id)?;
     if state.closing.load(std::sync::atomic::Ordering::Acquire) {
         return Err(HostError::Stopped.into());
     }
@@ -294,6 +384,7 @@ pub(super) async fn beta_peer_original_cancel(
         .peers
         .cancel_original_and_wait(profile_id, original_id, request_id)
         .await
+        .map(|cancelled| cancelled || selection_cancelled)
         .map_err(Failure::from)
 }
 

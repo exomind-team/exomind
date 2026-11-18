@@ -4,6 +4,9 @@ import { BetaApp } from './beta/BetaApp';
 import { applyBetaMobileDisplayPreference, initializeBetaUuid } from './beta/initialization';
 import { errorMessage } from './beta/drafts';
 import './index.css';
+import './beta/beta-ui.css';
+
+document.documentElement.classList.add('beta-ui');
 
 function BetaEntry() {
   const [displayError, setDisplayError] = React.useState('');

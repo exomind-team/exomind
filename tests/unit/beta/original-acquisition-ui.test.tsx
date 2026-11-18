@@ -20,6 +20,22 @@ function fixture(){
 }
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 describe('Original cards acquire real bytes before export',()=>{
+  it('B14-A04: a completed background transfer refreshes only its observed original, and leaving stops observation',async()=>{
+    const f=fixture();let changed=()=>{};const stop=vi.fn();
+    const observe=vi.fn(async(_profile:string,_original:string,notify:()=>void)=>{changed=notify;return stop;});
+    const client={...f.client,originalAcquisition:{...f.client.originalAcquisition,observe}};
+    const ui=render(<OriginalDownloads client={client} profileId={P} originals={[original]}/>);await screen.findByText('本机缺少原件，仅有记录信息');
+    f.setSnapshot({availability:'complete',next_offset:100});await act(async()=>{changed();});await screen.findByText('本机原件已完整校验');
+    expect(f.fetch).not.toHaveBeenCalled();ui.unmount();expect(stop).toHaveBeenCalledTimes(1);const reads=f.status.mock.calls.length;changed();expect(f.status).toHaveBeenCalledTimes(reads);
+  });
+  it('B14-A04: one click searches authorized sources without requiring a source picker',async()=>{
+    const f=fixture(),fetchAny=vi.fn(async(_profile:string,_original:string,_request:string,onAttempt:(value:{index:number;total:number;deviceId:string})=>void)=>{onAttempt({index:1,total:2,deviceId:D});return f.pending.promise;});
+    const client={...f.client,originalAcquisition:{...f.client.originalAcquisition,fetchAny}};
+    render(<OriginalDownloads client={client} profileId={P} originals={[original]}/>);await screen.findByText('本机缺少原件，仅有记录信息');
+    fireEvent.click(screen.getByRole('button',{name:'获取原件'}));await waitFor(()=>expect(fetchAny).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('combobox',{name:'原件来源 fixture.raw'})).not.toBeInTheDocument();expect(f.fetch).not.toHaveBeenCalled();
+    f.setSnapshot({availability:'complete',next_offset:100});await act(async()=>{f.pending.resolve({original,verified:true,resumed_from:0,transferred_bytes:100});});await screen.findByText('已获取并校验原件');
+  });
   it('rechecks a changed descriptor instead of leaving the replacement row in initial loading',async()=>{
     const f=fixture();const ui=render(<OriginalDownloads client={f.client} profileId={P} originals={[original]}/>);
     await screen.findByText('本机缺少原件，仅有记录信息');
@@ -37,7 +53,7 @@ describe('Original cards acquire real bytes before export',()=>{
     await screen.findByText('正在获取原件…');const request=f.fetch.mock.calls[0][3];
     expect(f.fetch).toHaveBeenCalledWith(P,O,D,request);
     f.setSnapshot({availability:'partial',next_offset:40,request_id:request,peer_device_id:D,transfer_state:'receiving'});
-    await waitFor(()=>expect(screen.getByRole('progressbar',{name:'原件获取进度 fixture.raw'})).toHaveAttribute('value','40'));
+    await waitFor(()=>expect(screen.getByRole('progressbar',{name:'原件获取进度 fixture.raw'})).toHaveAttribute('aria-valuenow','40'));
     fireEvent.click(screen.getByRole('button',{name:'取消获取'}));await waitFor(()=>expect(f.cancel).toHaveBeenCalledWith(P,O,request));
     f.setSnapshot({transfer_state:'cancelled',last_error_code:'cancelled'});await act(async()=>{f.pending.reject({code:'cancelled'});});
     await screen.findByText('获取已取消，已收到的部分会保留');expect(download).toBeDisabled();expect(f.save).not.toHaveBeenCalled();

@@ -38,6 +38,30 @@ function fixture() {
 const file=(name:string,bytes:BlobPart[]=['data'])=>new File(bytes,name,{type:'application/octet-stream'});
 
 describe('Beta original drafts',()=>{
+  it('B14-A03: a late selection-intent write failure preserves text typed while waiting for its acknowledgement',async()=>{
+    const f=fixture(),entered=deferred<void>(),gate=deferred<void>();
+    const owner=await BetaDraftController.open(f.client,'device-a',{legacy:memoryStorage(),sources:f.store,journal:{read:async()=>null,write:async()=>{entered.resolve();await gate.promise;}}});
+    try{const adding=owner.addFiles('p',[file('pending-file')]);await entered.promise;owner.setDraft('p','newer text while waiting');gate.reject(new Error('synthetic disk write failure'));await adding;expect(owner.snapshot().drafts.p.text).toBe('newer text while waiting');expect(f.api.begin).not.toHaveBeenCalled();expect(f.client.capture).not.toHaveBeenCalled();}
+    finally{owner.dispose();}
+  });
+  it('B14-A03: a verified draft preview remains readable after releasing its duplicate source',async()=>{
+    const f=fixture(),draft=f.create();await draft.addFiles('p',[file('preview.txt',['data'])]);
+    await vi.waitFor(()=>expect(draft.snapshot().drafts.p.files?.[0].state).toBe('verified'));
+    const selected=draft.snapshot().drafts.p.files![0];expect(f.store.blobs.size).toBe(0);
+    const source=await draft.previewSource('p',selected.id);expect(source?.size).toBe(4);expect(f.client.capture).not.toHaveBeenCalled();
+    expect(await import('@/beta/file-source-store').then(({readFileSource})=>readFileSource(source!,0,4))).toEqual(new TextEncoder().encode('data'));
+  });
+  it('B14-A03: reports real preparation progress and a removed selection cannot continue into Core',async()=>{
+    const f=fixture(),copy=deferred<void>(),entered=deferred<void>();
+    f.store.put=vi.fn(async(_key:string,_blob:Blob,work?:import('@/beta/attachment-progress').FileSourceWork)=>{
+      work?.progress('copying',2,4);entered.resolve();await copy.promise;
+    });
+    const draft=f.create();const adding=draft.addFiles('p',[file('slow',['data'])]);await entered.promise;
+    const id=draft.snapshot().drafts.p.files![0].id;
+    expect(draft.snapshot().fileProgress[id]).toMatchObject({phase:'copying',completed:2,total:4});
+    draft.removeFile('p',id);copy.resolve();await adding;
+    expect(f.store.get).not.toHaveBeenCalled();expect(f.api.begin).not.toHaveBeenCalled();expect(f.client.capture).not.toHaveBeenCalled();
+  });
   it('freezes A/B and original command while upload A is blocked, preserving same-text next revision with C',async()=>{
     const f=fixture();const gate=deferred<void>();const entered=deferred<void>();const write=f.api.write.getMockImplementation()!;
     f.api.write.mockImplementationOnce(async (...args)=>{entered.resolve();await gate.promise;return write(...args);});

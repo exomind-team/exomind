@@ -5,6 +5,7 @@ import { boundedOriginalBody, nativeOriginalClient, webOriginalClient, validateO
 import { nativeTimeblockFeatures, webTimeblockFeatures } from './timeblocks-client';
 import type { BetaTimeblockClient, BetaTimelinePage } from './timeblocks-types';
 import { nativeOriginalExports, type BetaOriginalExportsClient } from './original-export';
+import { nativeOriginalOpener, type BetaOriginalOpener } from './original-open';
 import { nativeOriginalAcquisition, type BetaOriginalAcquisitionClient } from './original-acquisition';
 import {nativeSummaryModelConfigurationService,webSummaryModelConfigurationService} from './summary-model-client';
 import type {SummaryModelConfigurationService} from './summary-model-config';
@@ -38,6 +39,7 @@ export interface BetaClient {
   timelineEvent?(profileId:string,eventId:string):Promise<import('./timeblocks-types').BetaTimelineItem|null>;
   originalAcquisition?: BetaOriginalAcquisitionClient;
   originalExports?: BetaOriginalExportsClient;
+  originalOpener?: BetaOriginalOpener;
   originals?: BetaOriginalClient;
   timeblocks?: BetaTimeblockClient;
   timelinePage?(profileId: string, query: BetaQuery): Promise<BetaTimelinePage>;
@@ -124,6 +126,7 @@ export function nativeBetaClient(call: NativeInvoke = invoke): BetaClient {
     return call<T>(name, args);
   }
   return {
+    originalOpener: nativeOriginalOpener(checked),
     summaries:nativeSummaryClient(call,async()=>check(await call('beta_status'))),
     timelineEvent:nativeTimelineEventReader(call,async()=>check(await call('beta_status'))),
     summaryModel:nativeSummaryModelConfigurationService(call,async()=>{

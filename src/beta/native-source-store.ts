@@ -2,6 +2,11 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { BetaApiError } from './api-error';
 import { hashFileSource, IndexedDbFileSourceStore, type FileSource, type FileSourceStore, type RangeFileSource } from './file-source-store';
 import { ORIGINAL_CHUNK_BYTES } from './original-types';
+import type { FileSourceWork } from './attachment-progress';
+import type { NativeAttachmentFile, NativeAttachmentSources } from './native-attachment-types';
+import type { BetaBeginStage } from './original-types';
+import { validateStage } from './original-client';
+import { runNativeAttachment } from './native-attachments';
 type NativeCall = <T>(name:string,args:Record<string,unknown>)=>Promise<T>;
 const MAX_NATIVE_SOURCE_BYTES=4*1024*1024*1024; // Native private-source/1 policy; Host independently enforces it.
 interface Info { key:string; byte_length:number; sha256:string; next_offset:number; generation:number; state:'copying'|'frozen'|'ready'|'hash_mismatch'|'released' }
@@ -18,13 +23,14 @@ class NativeSource implements RangeFileSource {
 }
 /** Native private bytes never degrade to IDB. get returns a bounded reader,
  * not a whole-file Blob assembled from native ranges. */
-export class NativeFileSourceStore implements FileSourceStore {
+export class NativeFileSourceStore implements NativeAttachmentSources {
   private closed=false;
-  constructor(private readonly call:NativeCall=invoke){}
+  constructor(private readonly call:NativeCall=invoke,private readonly binaryWrite?: (key:string,offset:number,bytes:Uint8Array)=>Promise<unknown>){}
   private active(){if(this.closed)throw new BetaApiError('inactive_session','原件暂存窗口已关闭');}
   private async rpc<T>(name:string,args:Record<string,unknown>):Promise<T>{this.active();try{const value=await this.call<T>(name,args);this.active();return value;}catch(error){if(error instanceof BetaApiError)throw error;if(error&&typeof error==='object'&&'code'in error&&'message'in error&&typeof error.code==='string'&&typeof error.message==='string')throw new BetaApiError(error.code,error.message);throw new BetaApiError('local_source_unavailable','本机原件暂存未确认；不会改用浏览器缓存，请保留源文件后重试');}}
-  async put(key:string,source:Blob):Promise<void>{
-    this.active();if(!Number.isSafeInteger(source.size)||source.size<0||source.size>MAX_NATIVE_SOURCE_BYTES)throw new BetaApiError('payload_too_large','本机单个原件暂存上限为 4 GiB，请保留源文件');const sha256=await hashFileSource(source,()=>this.closed);this.active();const command={key,byte_length:source.size,sha256};let current=info(await this.rpc('beta_begin_local_source',{command}),key);
+  async put(key:string,source:Blob,work?:FileSourceWork):Promise<void>{
+    const active=()=>{this.active();if(work?.cancelled())throw new BetaApiError('selection_removed','附件准备已取消');};
+    active();if(!Number.isSafeInteger(source.size)||source.size<0||source.size>MAX_NATIVE_SOURCE_BYTES)throw new BetaApiError('payload_too_large','本机单个原件暂存上限为 4 GiB，请保留源文件');const sha256=await hashFileSource(source,()=>this.closed||!!work?.cancelled(),completed=>work?.progress('hashing',completed,source.size));active();const command={key,byte_length:source.size,sha256};let current=info(await this.rpc('beta_begin_local_source',{command}),key);
     const bind=(next:unknown)=>{const value=info(next,key);if(value.byte_length!==source.size||value.sha256!==sha256)throw invalid();return value;};current=bind(current);
     let rebuild=current.state==='hash_mismatch';
     if(current.state==='ready'){
@@ -55,14 +61,32 @@ export class NativeFileSourceStore implements FileSourceStore {
       const previousGeneration=current.generation,result=await this.rpc<unknown>('beta_remove_local_source',{key,generation:previousGeneration});if(result!==null&&result!==undefined)throw invalid();
       current=bind(await this.rpc('beta_begin_local_source',{command}));if(current.generation<=previousGeneration||current.state==='released'||current.state==='hash_mismatch')throw invalid();
     }
-    while(current.state==='copying'&&current.next_offset<source.size){this.active();const offset=current.next_offset,length=Math.min(ORIGINAL_CHUNK_BYTES,source.size-offset),bytes=new Uint8Array(await source.slice(offset,offset+length).arrayBuffer());this.active();if(bytes.length!==length)throw new BetaApiError('source_incomplete','选择的原件未完整读取，请保留源文件');const next=bind(await this.rpc('beta_write_local_source_chunk',{key,offset,bytes:Array.from(bytes)}));if(next.next_offset!==offset+length)throw invalid();current=next;}
-    if(current.state!=='ready')current=bind(await this.rpc('beta_finish_local_source',{key}));
+    work?.progress('copying',current.next_offset,source.size);
+    while(current.state==='copying'&&current.next_offset<source.size){active();const offset=current.next_offset,length=Math.min(ORIGINAL_CHUNK_BYTES,source.size-offset),bytes=new Uint8Array(await source.slice(offset,offset+length).arrayBuffer());active();if(bytes.length!==length)throw new BetaApiError('source_incomplete','选择的原件未完整读取，请保留源文件');const next=bind(await(this.binaryWrite?this.binaryWrite(key,offset,bytes):this.rpc('beta_write_local_source_chunk',{key,offset,bytes:Array.from(bytes)})));if(next.next_offset!==offset+length)throw invalid();current=next;work?.progress('copying',current.next_offset,source.size);}
+    active();if(current.state!=='ready'){work?.progress('verifying_source',null,source.size);current=bind(await this.rpc('beta_finish_local_source',{key}));}
     if(current.state!=='ready')throw invalid();
   }
   async get(key:string):Promise<FileSource|null>{
     const value=await this.rpc<unknown>('beta_local_source_status',{key});if(value===null)return null;const current=info(value,key);if(current.state==='released')return null;
     if(current.state!=='ready')throw new BetaApiError(current.state==='hash_mismatch'?'local_source_hash_mismatch':'source_incomplete','本机原件副本尚未完整确认，旧偏移已保留；请重新选择原文件继续复制');
     return this.rangeSource(current);
+  }
+  async importFile(key:string,file:NativeAttachmentFile,work:FileSourceWork):Promise<void>{
+    this.active();if(work.cancelled())throw new BetaApiError('selection_removed','附件准备已取消');
+    const result=info(await runNativeAttachment('beta_import_attachment_path',{key,path:file.path,expectedSize:file.size},work,this.rpc.bind(this)),key);
+    if(result.state!=='ready'||result.byte_length!==file.size)throw invalid();
+  }
+  async verifySource(key:string,work:FileSourceWork):Promise<{size:number;sha256:string}>{
+    this.active();if(work.cancelled())throw new BetaApiError('selection_removed','附件准备已取消');
+    work.progress('verifying_source',null,0);
+    const result=info(await this.rpc('beta_finish_local_source',{key}),key);if(result.state!=='ready')throw invalid();
+    return{size:result.byte_length,sha256:result.sha256};
+  }
+  async stageLocalSource(key:string,command:BetaBeginStage,work:FileSourceWork){
+    this.active();if(work.cancelled())throw new BetaApiError('selection_removed','附件准备已取消');
+    const result=await runNativeAttachment<{stage:unknown;cleanup_confirmed:boolean}>('beta_stage_local_attachment',{key,command},work,this.rpc.bind(this));
+    if(typeof result?.cleanup_confirmed!=='boolean')throw invalid();
+    return{stage:validateStage(result.stage,command.profile_id,command.stage_id,command),cleanupConfirmed:result.cleanup_confirmed};
   }
   private rangeSource(current:Info):NativeSource{
     return new NativeSource(current,async(offset,length)=>{
@@ -84,4 +108,4 @@ export class NativeFileSourceStore implements FileSourceStore {
   }
   close(){this.closed=true;}
 }
-export function productionFileSources():FileSourceStore{return isTauri()?new NativeFileSourceStore():new IndexedDbFileSourceStore();}
+export function productionFileSources():FileSourceStore{return isTauri()?new NativeFileSourceStore(invoke,(key,offset,bytes)=>invoke('beta_write_local_source_binary',bytes,{headers:{'x-exomind-source-key':key,'x-exomind-source-offset':String(offset)}})):new IndexedDbFileSourceStore();}

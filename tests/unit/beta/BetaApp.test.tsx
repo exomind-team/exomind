@@ -1,3 +1,4 @@
+import { selectField } from './select-field';
 import { memoryIntentJournal } from './timeblock-ui-fixtures';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { StrictMode } from 'react';
@@ -132,14 +133,14 @@ describe('Beta React entry', () => {
     await waitFor(() => expect(client.capture).toHaveBeenCalledTimes(1));
     fireEvent.change(input, { target: { value: 'new text' } });
     await waitFor(()=>expect(screen.getByRole('combobox',{name:'当前档案'})).toBeEnabled());
-    fireEvent.change(screen.getByRole('combobox', { name: '当前档案' }), { target: { value: 'q' } });
+    await selectField(screen.getByRole('combobox', { name: '当前档案' }),'q');
     await waitFor(()=>expect(screen.getByRole('combobox',{name:'当前档案'})).toHaveValue('q'));
     fireEvent.change(await screen.findByRole('textbox', { name: '记录当下' }), { target: { value: 'other profile' } });
     await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
     await act(async () => { flight.resolve(saved(client.capture.mock.calls[0][0])); await flight.promise; });
     expect(screen.getByRole('textbox', { name: '记录当下' })).toHaveValue('other profile');
     await waitFor(()=>expect(screen.getByRole('combobox',{name:'当前档案'})).toBeEnabled());
-    fireEvent.change(screen.getByRole('combobox', { name: '当前档案' }), { target: { value: 'p' } });
+    await selectField(screen.getByRole('combobox', { name: '当前档案' }),'p');
     await waitFor(()=>expect(screen.getByRole('combobox',{name:'当前档案'})).toHaveValue('p'));
     expect(await screen.findByRole('textbox', { name: '记录当下' })).toHaveValue('new text');
     await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
@@ -150,7 +151,7 @@ describe('Beta React entry', () => {
     render(<BetaApp intentJournal={memoryIntentJournal()} client={client} />);
     const select = await screen.findByRole('combobox', { name: '当前档案' });
     await waitFor(() => expect(client.eventsPage).toHaveBeenCalledTimes(1));
-    fireEvent.change(select, { target: { value: 'q' } });
+    await selectField(select,'q');
     await waitFor(()=>expect(select).toHaveValue('q'));
     await act(async () => { oldPage.resolve({ items: [{ event_id:'old',profile_id:'p',device_id:'d',author_id:'a',author_kind:'human',occurred_at_ms:1234,text:'stale record',tags:[],digest:'a'.repeat(64),local_seq:1 }], next_before:null,highwater:1 }); });
     expect(screen.queryByText('stale record')).not.toBeInTheDocument();

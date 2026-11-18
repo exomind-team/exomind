@@ -10,6 +10,24 @@ const locks=Object.getOwnPropertyDescriptor(navigator,'locks');
 afterEach(()=>{if(locks)Object.defineProperty(navigator,'locks',locks);else Reflect.deleteProperty(navigator,'locks');localStorage.clear();});
 
 describe('Beta original composer uses the shared Alpha input',()=>{
+  it('B14-A01: dropping a file anywhere in Now mounts it without submitting or replacing typed text',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const blobs=new Map<string,Blob>();
+    const sourceStore:FileSourceStore={put:async(key,blob)=>{blobs.set(key,blob);},get:async key=>blobs.get(key)??null,remove:async key=>{blobs.delete(key);}};
+    const stages=new Map<string,BetaStage>();
+    const originals:BetaOriginalClient={
+      begin:async input=>{const stage:BetaStage={stage_id:input.stage_id,profile_id:input.profile_id,original:{original_id:input.original_id,sha256:input.expected_sha256,byte_length:input.byte_length,file_name:input.file_name,media_type:input.media_type},state:'uploading',next_offset:0,generation:1};stages.set(input.stage_id,stage);return stage;},
+      status:async(_p,id)=>stages.get(id)!,write:async()=>{throw Error('empty fixture');},verify:async(_p,id)=>({...stages.get(id)!,state:'verified'}),readStage:async()=>new Uint8Array(),readOriginal:async()=>new Uint8Array(),
+    };
+    const client={...fakeClient(),originals};
+    const ui=render(<BetaApp intentJournal={memoryIntentJournal()} client={client} sourceStore={sourceStore}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(editor,{target:{value:'keep my draft'}});
+    fireEvent.drop(ui.container.querySelector('[data-beta-workspace]')!,{dataTransfer:{types:['Files'],files:[new File([],'dropped.zip',{type:'application/zip'})]}});
+    expect(await screen.findByText('dropped.zip')).toBeVisible();
+    await waitFor(()=>expect(screen.getByRole('button',{name:'发送'})).toBeEnabled());
+    expect(editor).toHaveValue('keep my draft');expect(client.capture).not.toHaveBeenCalled();
+  });
   it('selects an unknown empty file and submits a real file-only immutable command',async()=>{
     Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
     const blobs=new Map<string,Blob>();

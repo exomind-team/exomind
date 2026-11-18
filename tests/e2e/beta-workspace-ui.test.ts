@@ -70,6 +70,8 @@ test('timer, feedback and message input keep their own keyboard and touch semant
   await activate(page, page.getByRole('button', { name: '追加反馈', exact: true }));
   const feedback = page.getByTestId('new-focus-feedback-textarea');
   await feedback.fill('现在的操作保持在同一段上下文里。');
+  expect(await page.getByRole('dialog').evaluate(element=>getComputedStyle(element).scrollbarWidth)).toBe('none');
+  expect(await page.getByRole('dialog').evaluate(element=>getComputedStyle(element,'::-webkit-scrollbar').display)).toBe('none');
   const before = (await counters(page)).timerCommands;
   await feedback.press('Enter'); await feedback.press('Shift+Enter');
   expect((await counters(page)).timerCommands).toBe(before);
@@ -84,6 +86,23 @@ test('timer, feedback and message input keep their own keyboard and touch semant
   await expect(input).toHaveValue('');
   await expect(page.getByLabel('记录历史').getByText('这一条由记录输入框提交', { exact: true })).toBeVisible();
   expect((await counters(page)).captures).toBe(1);
+});
+
+test('files dropped on Now and pasted into the editor mount without sending or replacing the draft',async({page})=>{
+  const editor=page.getByRole('textbox',{name:'记录当下'});await editor.fill('retain the current draft');
+  await page.evaluate(()=>{
+    const data=new DataTransfer();data.items.add(new File([new Uint8Array([0,255,1,42])],'synthetic-drop.bin',{type:'application/octet-stream'}));
+    document.querySelector('[data-beta-workspace]')!.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data}));
+  });
+  await expect(page.getByLabel('原件队列').getByText('synthetic-drop.bin',{exact:true})).toBeVisible();
+  await page.evaluate(()=>{
+    const data=new DataTransfer();data.items.add(new File([new Uint8Array([7,8,9])],'synthetic-paste.custom'));
+    document.querySelector('[aria-label="记录当下"]')!.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}));
+  });
+  await expect(page.getByLabel('原件队列').getByText('synthetic-paste.custom',{exact:true})).toBeVisible();
+  await expect(editor).toHaveValue('retain the current draft');
+  expect((await counters(page)).captures).toBe(0);expect((await counters(page)).timerCommands).toBe(0);
+  await expect(page.getByLabel('原件队列').getByText('原件已暂存，尚未提交记录',{exact:false})).toHaveCount(2);
 });
 
 test('real container keeps controls reachable and fits narrow or short layouts', async ({ page }, info) => {

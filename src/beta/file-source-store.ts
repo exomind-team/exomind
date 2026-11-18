@@ -1,11 +1,12 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { BetaApiError } from './client';
 import { ORIGINAL_CHUNK_BYTES } from './original-types';
+import type { FileSourceWork } from './attachment-progress';
 
 /** Browser-local byte copies. put resolves on transaction completion, not on
  * request success. Metadata/commands are stored separately in the draft cache. */
 export interface FileSourceStore {
-  put(key: string, source: Blob): Promise<void>;
+  put(key: string, source: Blob, work?: FileSourceWork): Promise<void>;
   resume?(key: string): Promise<void>;
   get(key: string): Promise<FileSource | null>;
   remove(key: string, expected?: FileSource): Promise<void>;
@@ -24,15 +25,17 @@ export function sourceKey(deviceId: string, profileId: string, id: string): stri
   return JSON.stringify([deviceId, profileId, id]);
 }
 
-export async function hashFileSource(source: FileSource, cancelled: () => boolean = () => false): Promise<string> {
+export async function hashFileSource(source: FileSource, cancelled: () => boolean = () => false, progress?: (completed:number)=>void): Promise<string> {
   if (!Number.isSafeInteger(source.size) || source.size < 0) throw new BetaApiError('source_incomplete', '原件长度无效，尚未发送');
   const hash = sha256.create();
+  progress?.(0);
   for (let offset = 0; offset < source.size; offset += ORIGINAL_CHUNK_BYTES) {
     if (cancelled()) throw new BetaApiError('inactive_session', '当前记录窗口已关闭，原件仍保留在暂存中');
     const end = Math.min(source.size, offset + ORIGINAL_CHUNK_BYTES);
     const bytes = await readFileSource(source, offset, end - offset);
     if (bytes.length !== end - offset) throw new BetaApiError('source_incomplete', '本机原件副本未完整读取，请重新选择');
     hash.update(bytes);
+    progress?.(end);
   }
   if (cancelled()) throw new BetaApiError('inactive_session', '当前记录窗口已关闭，原件仍保留在暂存中');
   const digest = Array.from(hash.digest(), byte => byte.toString(16).padStart(2, '0')).join('');
@@ -81,7 +84,12 @@ export class IndexedDbFileSourceStore implements FileSourceStore {
       transaction.onabort = () => reject(new BetaApiError('source_store_failed', '原件暂存未完成，原选择已保留，请重新选择或移除'));
     });
   }
-  async put(key: string, source: Blob): Promise<void> { await this.transaction(true, store => store.put(source.slice(), key)); }
+  async put(key: string, source: Blob, work?:FileSourceWork): Promise<void> {
+    if(work?.cancelled())throw new BetaApiError('selection_removed','附件准备已取消');
+    work?.progress('copying',null,source.size);
+    await this.transaction(true, store => store.put(source.slice(), key));
+    work?.progress('copying',source.size,source.size);
+  }
   async get(key: string): Promise<Blob | null> {
     const value: unknown = await this.transaction(false, store => store.get(key));
     if (value === undefined) return null;

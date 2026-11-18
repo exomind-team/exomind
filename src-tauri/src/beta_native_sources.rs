@@ -63,6 +63,38 @@ pub(super) async fn beta_write_local_source_chunk(
 }
 
 #[tauri::command]
+pub(super) async fn beta_write_local_source_binary(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<LocalSourceInfo, Failure> {
+    trusted_window(&window, state.inner())?;
+    let key = request
+        .headers()
+        .get("x-exomind-source-key")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| Failure::from(HostError::InvalidRequest))?
+        .to_owned();
+    let offset = request
+        .headers()
+        .get("x-exomind-source-offset")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or_else(|| Failure::from(HostError::InvalidRequest))?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(HostError::InvalidRequest.into());
+    };
+    bounded_range(offset, bytes.len())?;
+    let bytes = bytes.clone();
+    work(state.inner(), move |state| {
+        state
+            .host
+            .write_local_source_chunk(&state.owner, &key, offset, &bytes)
+    })
+    .await
+}
+
+#[tauri::command]
 pub(super) async fn beta_finish_local_source(
     window: WebviewWindow,
     state: State<'_, Arc<NativeState>>,

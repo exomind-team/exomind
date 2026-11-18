@@ -1,0 +1,39 @@
+/* Beta owns the entire document, including Radix portals and both windows.
+ * Scrolling remains native to the input device; browser chrome is never shown. */
+.beta-ui,
+.beta-ui * {
+  scrollbar-width: none;
+}
+.beta-ui::-webkit-scrollbar,
+.beta-ui *::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.beta-ui input::-webkit-inner-spin-button,
+.beta-ui input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+.beta-ui input[type='number'] {
+  -moz-appearance: textfield;
+}
+.beta-ui summary {
+  list-style: none;
+}
+.beta-ui summary::-webkit-details-marker {
+  display: none;
+}
+.beta-ui summary::before {
+  content: '';
+  display: inline-block;
+  width: 0.35rem;
+  height: 0.35rem;
+  margin-right: 0.5rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  vertical-align: 0.1em;
+}
+.beta-ui details[open] > summary::before {
+  transform: rotate(45deg);
+}

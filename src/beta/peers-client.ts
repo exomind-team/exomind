@@ -12,6 +12,7 @@ export interface BetaPeer {
   last_error_code: string | null;
   event_sync: 'pending' | 'complete';
   originals_sync: 'unknown' | 'pending' | 'complete';
+  history_gaps?:Array<{direction:'from_peer'|'to_peer';origin_device_id:string;materialized_seq:number;available_seq:number|null}>;
 }
 export interface BetaPeerStatus {
   runtime_id: string; device_id: string; profile_id: string;
@@ -55,11 +56,13 @@ function hash(value: unknown): string { const result = text(value, 64); if (!/^[
 function strings(value: unknown): string[] { if (!Array.isArray(value) || value.length > 16) return invalid(); return value.map(value => text(value, 256)); }
 function choice<T extends string>(value: unknown, values: readonly T[]): T { if (!values.includes(value as T)) return invalid(); return value as T; }
 function peer(value: unknown): BetaPeer {
-  const item = object(value, ['device_id','fingerprint_sha256','member_generation','member_state','connection_state','endpoints','last_sync_at_ms','last_error_code','event_sync','originals_sync']);
+  const extra=!!value&&typeof value==='object'&&'history_gaps'in value;
+  const item = object(value, ['device_id','fingerprint_sha256','member_generation','member_state','connection_state','endpoints','last_sync_at_ms','last_error_code','event_sync','originals_sync',...(extra?['history_gaps']:[])]);
+  const gaps=item.history_gaps;if(gaps!==undefined&&(!Array.isArray(gaps)||gaps.length>256))return invalid();
   return { device_id:uuid(item.device_id),fingerprint_sha256:hash(item.fingerprint_sha256),member_generation:integer(item.member_generation,1),
     member_state:choice(item.member_state,['pending','ready','revoked']),connection_state:choice(item.connection_state,['idle','connecting','syncing','waiting','error']),
     endpoints:strings(item.endpoints),last_sync_at_ms:item.last_sync_at_ms===null?null:integer(item.last_sync_at_ms),last_error_code:item.last_error_code===null?null:text(item.last_error_code,128),
-    event_sync:choice(item.event_sync,['pending','complete']),originals_sync:choice(item.originals_sync,['unknown','pending','complete']) };
+    event_sync:choice(item.event_sync,['pending','complete']),originals_sync:choice(item.originals_sync,['unknown','pending','complete']),...(extra?{history_gaps:(gaps as unknown[]).map(value=>{const gap=object(value,['direction','origin_device_id','materialized_seq','available_seq']),materialized=integer(gap.materialized_seq),available=gap.available_seq===null?null:integer(gap.available_seq);if(available!==null&&available>materialized)return invalid();return{direction:choice(gap.direction,['from_peer','to_peer']),origin_device_id:uuid(gap.origin_device_id),materialized_seq:materialized,available_seq:available};})}:{}) };
 }
 export function nativeBetaPeersClient(call: Call = (command, args) => invoke(command, args)): BetaPeersClient {
   return {

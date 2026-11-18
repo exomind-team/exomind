@@ -38,6 +38,14 @@ pub struct PeerConnectionView {
     pub last_error_code: Option<&'static str>,
     pub event_sync: &'static str,
     pub originals_sync: &'static str,
+    pub history_gaps: Vec<PeerHistoryGap>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct PeerHistoryGap {
+    pub direction: &'static str,
+    pub origin_device_id: DeviceId,
+    pub materialized_seq: u64,
+    pub available_seq: Option<u64>,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct PeerNetworkStatus {
@@ -499,6 +507,35 @@ impl PeerNetwork {
                     "pending"
                 } else {
                     "unknown"
+                },
+                history_gaps: if revoked {
+                    vec![]
+                } else {
+                    progress
+                        .filter(|p| p.member_generation == member.generation)
+                        .and_then(|p| p.memo.as_ref())
+                        .map(|memo| {
+                            memo.received_sources
+                                .iter()
+                                .map(|source| ("from_peer", source))
+                                .chain(memo.sent_sources.iter().map(|source| ("to_peer", source)))
+                                .filter(|(_, source)| {
+                                    source.available_head.as_ref().is_none_or(|available| {
+                                        available.seq < source.materialized_head.seq
+                                    })
+                                })
+                                .map(|(direction, source)| PeerHistoryGap {
+                                    direction,
+                                    origin_device_id: source.origin.device_id,
+                                    materialized_seq: source.materialized_head.seq,
+                                    available_seq: source
+                                        .available_head
+                                        .as_ref()
+                                        .map(|head| head.seq),
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default()
                 },
             });
         }

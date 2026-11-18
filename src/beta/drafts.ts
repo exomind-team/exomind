@@ -5,6 +5,8 @@ import { productionFileSources } from './native-source-store';
 import { ORIGINAL_CHUNK_BYTES, type BetaOriginal, type BetaStage } from './original-types';
 import { openDurableIntentStorage, type DurableIntentStorage, type LocalIntentJournal, type IntentPredecessor } from './local-intent-journal';
 import { productionIntentStorage } from './native-intent-journal';
+import type { AttachmentProgress, FileSourceWork } from './attachment-progress';
+import { hasNativeAttachmentSources, isNativeAttachment, type AttachmentSelection } from './native-attachment-types';
 
 export interface DraftFile {
   id: string; stage_id: string; source_key: string;
@@ -22,7 +24,7 @@ export interface PendingCapture {
 }
 interface Confirmation { receipt: BetaReceipt; draft_revision: number }
 interface PersistedState { version: 1; drafts: Record<string, Draft>; pending: PendingCapture[]; confirmed: Confirmation[] }
-export interface DraftSnapshot extends PersistedState { persistenceError: string | null; persistenceState: 'idle' | 'pending' | 'failed' }
+export interface DraftSnapshot extends PersistedState { persistenceError: string | null; persistenceState: 'idle' | 'pending' | 'failed'; fileProgress: Readonly<Record<string,AttachmentProgress>> }
 type DraftStorage = Pick<Storage, 'getItem' | 'setItem'>;
 function durable(storage: DraftStorage): storage is DurableIntentStorage {
   const candidate = storage as Partial<DurableIntentStorage>;
@@ -105,6 +107,8 @@ export class BetaDraftController {
   private readonly sources: FileSourceStore;
   private readonly ownsSources: boolean;
   private readonly uploads = new Map<string, Promise<BetaStage>>();
+  private readonly fileCancellation=new Map<string,AbortController>();
+  private preparationTail:Promise<void>=Promise.resolve();
   private uploadTail: Promise<unknown> = Promise.resolve();
   private unsubscribePersistence: (() => void) | undefined;
   private closing: Promise<void> | undefined;
@@ -129,10 +133,10 @@ export class BetaDraftController {
     private readonly uuid: () => string = betaUuid, private readonly clock: () => number = Date.now, sources?: FileSourceStore) {
     this.sources = sources ?? productionFileSources(); this.ownsSources = !sources;
     this.key = `exomind:beta:drafts:${deviceId}`;
-    try { this.state = { ...load(storage.getItem(this.key), deviceId), persistenceError: null, persistenceState: 'idle' }; }
+    try { this.state = { ...load(storage.getItem(this.key), deviceId), persistenceError: null, persistenceState: 'idle', fileProgress:{} }; }
     catch {
       this.restoreBlocked = true;
-      this.state = { version: 1, drafts: {}, pending: [], confirmed: [], persistenceError: '草稿缓存无法读取，已停止写入以保留原缓存', persistenceState: 'failed' };
+      this.state = { version: 1, drafts: {}, pending: [], confirmed: [], persistenceError: '草稿缓存无法读取，已停止写入以保留原缓存', persistenceState: 'failed', fileProgress:{} };
     }
     let external=durable(storage)?storage.snapshot().externalRevision??0:0;
     if (durable(storage)) this.unsubscribePersistence = storage.subscribe(() => {
@@ -196,13 +200,36 @@ export class BetaDraftController {
     }, required);
   }
   private active(): void { if (this.disposed) throw new BetaApiError('inactive_session', '当前记录窗口已关闭'); }
+  private fileWork(profileId:string,file:DraftFile):FileSourceWork {
+    let cancellation=this.fileCancellation.get(file.id);if(!cancellation){cancellation=new AbortController();this.fileCancellation.set(file.id,cancellation);}
+    return {
+      signal:cancellation.signal,
+      cancelled:()=>this.disposed||!this.needed(profileId,file.id),
+      progress:(phase,completed,total)=>{
+        if(this.disposed||!this.needed(profileId,file.id))return;
+        const now=this.clock(),previous=this.state.fileProgress[file.id];
+        if(previous?.phase===phase&&completed!==total&&now-previous.updatedAt<150)return;
+        const progress:AttachmentProgress={phase,completed,total,startedAt:previous?.startedAt??now,phaseStartedAt:previous?.phase===phase?previous.phaseStartedAt:now,updatedAt:now};
+        // Progress is observation, not a draft edit or durable journal write.
+        this.state={...this.state,fileProgress:{...this.state.fileProgress,[file.id]:progress}};
+        this.listeners.forEach(listener=>listener());
+      },
+    };
+  }
+  private selected(profileId:string,id:string):void {
+    this.active();if(!this.needed(profileId,id))throw new BetaApiError('selection_removed','附件准备已取消，已有原件保持不变');
+  }
 
   /** Read only the source still selected by this draft, never a caller's key. */
   async previewSource(profileId: string, id: string): Promise<FileSource | null> {
     this.active();
     const file = this.state.drafts[profileId]?.files?.find(item => item.id === id);
     if (!file || file.state === 'preparing') return null;
-    const source = await this.sources.get(file.source_key);
+    let source = await this.sources.get(file.source_key);
+    if(!source&&file.original&&this.client.originals){
+      const stage=this.bindStage(profileId,file,await this.client.originals.status(profileId,file.stage_id));
+      if(stage.state==='verified'){const api=this.client.originals;source={size:file.byte_length,sha256:file.original.sha256,read:(offset,length)=>api.readStage(profileId,file.stage_id,offset,length)};}
+    }
     this.active();
     const current = this.state.drafts[profileId]?.files?.find(item => item.id === id);
     // Upload progress replaces metadata objects without changing the image.
@@ -212,7 +239,7 @@ export class BetaDraftController {
     return source;
   }
 
-  async addFiles(profileId: string, selected: readonly File[]): Promise<void> {
+  async addFiles(profileId: string, selected: readonly AttachmentSelection[]): Promise<void> {
     this.active();
     if (!this.client.originals) throw new BetaApiError('unsupported_capability', '当前服务尚未提供原件暂存');
     // Persist the whole selection intent before yielding, so B cannot disappear
@@ -225,20 +252,31 @@ export class BetaDraftController {
     });
     if (!incoming.length) return;
     const previous = this.state.drafts[profileId] ?? { text: '', revision: 0 };
-    const next = { ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...previous, revision: previous.revision + 1, files: [...(previous.files ?? []), ...incoming] } } };
-    try { this.publish(next, true); if (durable(this.storage)) { await this.requiredCommit(); this.active(); } }
+    const selectedAt=this.clock(),fileProgress={...this.state.fileProgress};for(const file of incoming)fileProgress[file.id]={phase:'queued',completed:null,total:file.byte_length,startedAt:selectedAt,phaseStartedAt:selectedAt,updatedAt:selectedAt};
+    const next = { ...this.state,fileProgress, drafts: { ...this.state.drafts, [profileId]: { ...previous, revision: previous.revision + 1, files: [...(previous.files ?? []), ...incoming] } } };
+    let admitted=false;
+    try { this.publish(next, true);admitted=true; if (durable(this.storage)) { await this.requiredCommit(); this.active(); } }
     catch (error) {
-      this.publish({ ...next, drafts: { ...next.drafts, [profileId]: { ...next.drafts[profileId], files: [...(previous.files ?? []), ...incoming.map(file => ({ ...file, state: 'failed' as const, message: errorMessage(error) }))] } } });
+      const latest=this.state.drafts[profileId]??{text:'',revision:0},ids=new Set(incoming.map(file=>file.id)),existing=new Set(latest.files?.map(file=>file.id));
+      const failed=(file:DraftFile):DraftFile=>({...file,state:'failed',message:errorMessage(error)});
+      const files=[...(latest.files??[]).map(file=>ids.has(file.id)?failed(file):file),...(!admitted?incoming.filter(file=>!existing.has(file.id)).map(failed):[])];
+      this.publish({...this.state,drafts:{...this.state.drafts,[profileId]:{...latest,revision:latest.revision+(admitted?0:1),files}}});
       return;
     }
     for (let index = 0; index < incoming.length; index++) {
       const file = incoming[index];
       try {
-        this.active();
+        const prepare=this.preparationTail.catch(()=>{}).then(async()=>{
+        this.selected(profileId,file.id);
         // Complete the backend's durable source copy before publishing the
         // original manifest or beginning Core stage/capture operations.
-        await this.sources.put(file.source_key, inputs[index]);
-        this.active(); await this.prepareSource(profileId, file);
+        const input=inputs[index],work=this.fileWork(profileId,file);
+        if(isNativeAttachment(input)){
+          if(!hasNativeAttachmentSources(this.sources))throw new BetaApiError('unsupported_file_source','当前环境不能读取系统文件，请通过附件重新选择');
+          await this.sources.importFile(file.source_key,input,work);
+        }else await this.sources.put(file.source_key,input,work);
+        this.selected(profileId,file.id); await this.prepareSource(profileId, file);
+        });this.preparationTail=prepare.catch(()=>{});await prepare;
       } catch (error) {
         if (!this.disposed) this.patchFile(profileId, file.id, { state: 'failed', message: errorMessage(error) });
       }
@@ -249,16 +287,25 @@ export class BetaDraftController {
     this.active(); const previous = this.state.drafts[profileId]; if (!previous) return;
     this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...previous,
       revision: previous.revision + 1, files: previous.files?.filter(file => file.id !== id) } } });
+    if(!this.needed(profileId,id)){this.fileCancellation.get(id)?.abort();this.fileCancellation.delete(id);}
     // A frozen pending submission may still need these bytes. Removing a next
     // draft selection never deletes the Core original or its browser source.
   }
 
   private async prepareSource(profileId: string, file: DraftFile): Promise<void> {
-    await this.sources.resume?.(file.source_key); this.active();
-    const source = await this.sources.get(file.source_key); this.active();
-    if (!source) throw new BetaApiError('source_missing', '本机暂存源未找到，请重新选择原文件；不会跳过此项提交');
-    if (source.size !== file.byte_length) throw new BetaApiError('source_mismatch', '原件长度与草稿不一致，请重新选择原文件');
-    const sha = await hashFileSource(source, () => this.disposed); this.active();
+    this.selected(profileId,file.id);const work=this.fileWork(profileId,file);
+    let sha:string;
+    if(hasNativeAttachmentSources(this.sources)){
+      const verified=await this.sources.verifySource(file.source_key,work);
+      if(verified.size!==file.byte_length)throw new BetaApiError('source_mismatch','原件长度与草稿不一致，请重新选择原文件');sha=verified.sha256;
+    }else{
+      await this.sources.resume?.(file.source_key);this.selected(profileId,file.id);
+      const source=await this.sources.get(file.source_key);this.selected(profileId,file.id);
+      if(!source)throw new BetaApiError('source_missing','本机暂存源未找到，请重新选择原文件；不会跳过此项提交');
+      if(source.size!==file.byte_length)throw new BetaApiError('source_mismatch','原件长度与草稿不一致，请重新选择原文件');
+      sha=await hashFileSource(source,work.cancelled,completed=>work.progress('reading_source',completed,source.size));
+    }
+    this.selected(profileId,file.id);
     if (file.original && file.original.sha256 !== sha) throw new BetaApiError('source_mismatch', '重新选择的文件与原件 hash 不同，原提交保持不变');
     const original: BetaOriginal = { original_id: file.id, sha256: sha, byte_length: file.byte_length, file_name: file.file_name, media_type: file.media_type };
     const prepared: DraftFile = { ...file, original, state: 'uploading', message: undefined };
@@ -280,17 +327,16 @@ export class BetaDraftController {
     }
   }
 
-  async reselectFile(profileId: string, id: string, source: File): Promise<void> {
+  async reselectFile(profileId: string, id: string, source: AttachmentSelection): Promise<void> {
     this.active(); const draft = this.state.drafts[profileId]; const file = draft?.files?.find(item => item.id === id);
     if (!draft || !file) throw new BetaApiError('source_missing', '当前草稿中找不到该原件');
     if (source.size !== file.byte_length) throw new BetaApiError('source_mismatch', '重新选择的文件长度不同，原提交保持不变');
-    const sha = await hashFileSource(source, () => this.disposed); this.active();
-    if (file.original && sha !== file.original.sha256) throw new BetaApiError('source_mismatch', '重新选择的文件与原件 hash 不同，原提交保持不变');
+    if(!isNativeAttachment(source)){const sha=await hashFileSource(source,()=>this.disposed);this.active();if(file.original&&sha!==file.original.sha256)throw new BetaApiError('source_mismatch','重新选择的文件与原件 hash 不同，原提交保持不变');}
     const current = this.state.drafts[profileId];
     this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...current, revision: current.revision + 1,
       files: current.files?.map(item => item.id === id ? { ...item, state: 'preparing' as const, message: undefined } : item) } } }, true);
     if (durable(this.storage)) { await this.requiredCommit(); this.active(); }
-    try { await this.sources.put(file.source_key, source); this.active(); await this.prepareSource(profileId, file); }
+    try { const work=this.fileWork(profileId,file);if(isNativeAttachment(source)){if(!hasNativeAttachmentSources(this.sources))throw new BetaApiError('unsupported_file_source','当前环境不能读取系统文件');await this.sources.importFile(file.source_key,source,work);}else await this.sources.put(file.source_key, source,work); this.selected(profileId,file.id); await this.prepareSource(profileId, file); }
     catch (error) { if (!this.disposed) this.patchFile(profileId, id, { state: 'failed', message: errorMessage(error) }); throw error; }
   }
 
@@ -316,10 +362,17 @@ export class BetaDraftController {
 
   private async uploadFile(profileId: string, file: DraftFile): Promise<BetaStage> {
     this.active();
+    const work=this.fileWork(profileId,file);
     if (durable(this.storage)) { await this.requiredCommit(); this.active(); }
     if (!this.needed(profileId, file.id)) throw new BetaApiError('selection_removed', '此草稿项已移除，其暂存仍保留');
     const api = this.client.originals; if (!api || !file.original) throw new BetaApiError('unsupported_capability', '原件暂存尚未就绪');
     const original = file.original;
+    if(hasNativeAttachmentSources(this.sources)){
+      const result=await this.sources.stageLocalSource(file.source_key,{stage_id:file.stage_id,original_id:original.original_id,profile_id:profileId,expected_sha256:original.sha256,byte_length:original.byte_length,file_name:original.file_name,media_type:original.media_type},work),stage=this.bindStage(profileId,file,result.stage);
+      this.selected(profileId,file.id);if(stage.state!=='verified')throw new BetaApiError('original_not_ready','附件尚未校验完成');
+      this.patchFile(profileId,file.id,{state:'verified',next_offset:file.byte_length,message:result.cleanupConfirmed?undefined:'附件已就绪，本机临时副本清理待确认'});
+      return stage;
+    }
     let stage = this.bindStage(profileId, file, await api.begin({ stage_id: file.stage_id, original_id: original.original_id, profile_id: profileId,
       expected_sha256: original.sha256, byte_length: original.byte_length, file_name: original.file_name, media_type: original.media_type }));
     this.active();
@@ -331,17 +384,19 @@ export class BetaDraftController {
       const source = await this.sources.get(file.source_key); this.active();
       if (!source) throw new BetaApiError('source_missing', '本机暂存源未找到，请重新选择原文件；不会跳过此项提交');
       usedSource = source;
-      if (source.size !== file.byte_length || await hashFileSource(source, () => this.disposed) !== original.sha256) throw new BetaApiError('source_mismatch', '本机源与固定原件 hash 不同，尚未提交记录');
+      if (source.size !== file.byte_length || await hashFileSource(source,work.cancelled,completed=>work.progress('reading_source',completed,source.size)) !== original.sha256) throw new BetaApiError('source_mismatch', '本机源与固定原件 hash 不同，尚未提交记录');
+      work.progress('staging',stage.next_offset,file.byte_length);
       while (stage.next_offset < file.byte_length) {
-        this.active(); const offset = stage.next_offset;
-        const bytes = await readFileSource(source, offset, Math.min(ORIGINAL_CHUNK_BYTES, file.byte_length - offset)); this.active();
+        this.selected(profileId,file.id); const offset = stage.next_offset;
+        const bytes = await readFileSource(source, offset, Math.min(ORIGINAL_CHUNK_BYTES, file.byte_length - offset)); this.selected(profileId,file.id);
         if (!bytes.length) throw new BetaApiError('source_incomplete', '原件源读取中断，暂存偏移已保留');
         stage = this.bindStage(profileId, file, await api.write(profileId, file.stage_id, offset, bytes)); this.active();
         if (stage.next_offset < offset + bytes.length) throw new BetaApiError('original_no_progress', '原件暂存未推进，偏移已保留，可重试');
         this.patchFile(profileId, file.id, { state: 'uploading', next_offset: stage.next_offset });
+        work.progress('staging',stage.next_offset,file.byte_length);
       }
     }
-    if (stage.state !== 'verified') { this.active(); stage = this.bindStage(profileId, file, await api.verify(profileId, file.stage_id)); this.active(); }
+    if (stage.state !== 'verified') { this.selected(profileId,file.id);work.progress('verifying_stage',null,file.byte_length); stage = this.bindStage(profileId, file, await api.verify(profileId, file.stage_id)); this.active(); }
     if (stage.state !== 'verified') throw new BetaApiError('original_not_ready', '整组原件尚未校验就绪，记录未提交');
     this.patchFile(profileId, file.id, { state: 'verified', next_offset: file.byte_length, message: undefined });
     // Core owns a durable verified copy now. Only this local source duplicate is

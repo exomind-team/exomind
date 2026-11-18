@@ -34,6 +34,11 @@ pub struct PeerOriginalStatus {
     pub transfer_state: &'static str,
     pub last_error_code: Option<&'static str>,
 }
+#[derive(Debug, Clone, Serialize)]
+pub struct OriginalAvailabilityChange {
+    pub profile_id: ProfileId,
+    pub original_id: OriginalId,
+}
 struct Active {
     id: Uuid,
     peer: DeviceId,
@@ -49,12 +54,14 @@ struct Progress {
 pub(super) struct OriginalJobs {
     entries: Mutex<HashMap<(ProfileId, OriginalId), Progress>>,
     changed: Notify,
+    events: tokio::sync::broadcast::Sender<OriginalAvailabilityChange>,
 }
 impl Default for OriginalJobs {
     fn default() -> Self {
         Self {
             entries: Mutex::new(HashMap::new()),
             changed: Notify::new(),
+            events: tokio::sync::broadcast::channel(64).0,
         }
     }
 }
@@ -139,6 +146,10 @@ impl OriginalJobs {
             }
         }
         self.changed.notify_waiters();
+        let _ = self.events.send(OriginalAvailabilityChange {
+            profile_id: key.0,
+            original_id: key.1,
+        });
     }
     pub(super) fn cancel_all(&self) {
         if let Ok(entries) = self.entries.lock() {
@@ -227,6 +238,11 @@ fn original_error(error: &HostError) -> &'static str {
     }
 }
 impl PeerNetwork {
+    pub fn subscribe_original_changes(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<OriginalAvailabilityChange> {
+        self.originals.events.subscribe()
+    }
     pub fn original_status(
         &self,
         profile: ProfileId,

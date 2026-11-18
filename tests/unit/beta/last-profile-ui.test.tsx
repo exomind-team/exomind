@@ -1,3 +1,4 @@
+import { selectField } from './select-field';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
@@ -16,7 +17,7 @@ describe('Beta reopens the last successfully opened local profile', () => {
   it('restores Q after a successful selection and process-style restart, retaining the Q draft and P/Q separation', async () => {
     const client = fakeClient(); client.profiles.mockResolvedValue(profiles); const journal = memoryIntentJournal();
     const first = render(<BetaApp client={client} intentJournal={journal}/>); await screen.findByRole('textbox', { name: '记录当下' });
-    const select = screen.getByRole('combobox', { name: '当前档案' }); fireEvent.change(select, { target: { value: 'q' } }); await waitFor(() => expect(select).toHaveValue('q'));
+    const select = screen.getByRole('combobox', { name: '当前档案' }); await selectField(select,'q'); await waitFor(() => expect(select).toHaveValue('q'));
     fireEvent.change(await screen.findByRole('textbox', { name: '记录当下' }), { target: { value: 'Q unsent after restart' } });
     await waitFor(() => expect(JSON.parse(journal.values.get('exomind:beta:drafts:device-a')!).drafts.q.text).toBe('Q unsent after restart'));
     await act(async () => { first.unmount(); await Promise.resolve(); }); resetLocks();
@@ -47,7 +48,7 @@ describe('Beta reopens the last successfully opened local profile', () => {
     rememberLastBetaProfile('device-a', 'p', profiles); const client = fakeClient(); client.profiles.mockResolvedValue(profiles); const values = new Map<string, string>();
     let fail=true;const journal = { read: async (key: string) => values.get(key) ?? null, write: async (key:string,raw:string) => { if(fail)throw new Error('synthetic quota');values.set(key,raw); } };
     render(<BetaApp client={client} intentJournal={journal}/>); const input = await screen.findByRole('textbox', { name: '记录当下' }); fireEvent.change(input, { target: { value: 'P must stay' } }); await screen.findByRole('button', { name: '重试记录草稿暂存' });
-    fireEvent.change(screen.getByRole('combobox', { name: '当前档案' }), { target: { value: 'q' } }); await screen.findByText(/未切换档案/);
+    await selectField(screen.getByRole('combobox', { name: '当前档案' }),'q'); await screen.findByText(/未切换档案/);
     expect(restoreLastBetaProfile('device-a', [{ profile_id: 'q' }, { profile_id: 'p' }])).toBe('p'); expect(screen.getByRole('combobox', { name: '当前档案' })).toHaveValue('p');fail=false;
   });
   it('continues to switch and record when only preference storage is unavailable', async () => {
@@ -55,7 +56,7 @@ describe('Beta reopens the last successfully opened local profile', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (key) { if (key.startsWith('exomind:beta:last-profile:')) throw new Error('preference read denied'); return get.call(this, key); });
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) { if (key.startsWith('exomind:beta:last-profile:')) throw new Error('preference write denied'); return set.call(this, key, value); });
     const client = fakeClient(); client.profiles.mockResolvedValue(profiles); render(<BetaApp client={client} intentJournal={memoryIntentJournal()}/>); await screen.findByRole('textbox', { name: '记录当下' });
-    const select = screen.getByRole('combobox', { name: '当前档案' }); fireEvent.change(select, { target: { value: 'q' } }); await waitFor(() => expect(select).toHaveValue('q'));
+    const select = screen.getByRole('combobox', { name: '当前档案' }); await selectField(select,'q'); await waitFor(() => expect(select).toHaveValue('q'));
     fireEvent.change(await screen.findByRole('textbox', { name: '记录当下' }), { target: { value: 'record without preferences' } }); await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled()); fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(client.capture).toHaveBeenCalledTimes(1)); expect(client.capture.mock.calls[0][0].profile_id).toBe('q'); expect(await screen.findByText('本机已保存')).toBeInTheDocument(); expect(screen.queryByRole('button', { name: '重新连接' })).not.toBeInTheDocument();
   });

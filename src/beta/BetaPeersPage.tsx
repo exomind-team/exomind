@@ -13,9 +13,10 @@ import { useBetaViewActive } from './view-activity';
 import { errorMessage } from './drafts';
 import { useBetaDateDisplayMode } from './preferences';
 import type { BetaInvitation, BetaInvitationPreview, BetaPeer, BetaPeerStatus, BetaPeersClient } from './peers-client';
+import { BetaDeviceName } from './BetaDeviceName';
+import { useBetaDeviceNames } from './device-names';
 
 type Life = { active: boolean };
-function peerLabel(peer: BetaPeer): string { return `设备 ${peer.device_id.slice(0, 8)}`; }
 function peerState(peer: BetaPeer): string {
   if (peer.member_state === 'revoked') return '授权已撤销';
   if (peer.member_state === 'pending') return '正在完成加入确认';
@@ -39,6 +40,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   visible?: boolean;
 }) {
   const scope = useMemo(() => ({ peers, profileId, runtimeId, deviceId }), [peers, profileId, runtimeId, deviceId]);
+  const names=useBetaDeviceNames(deviceId),peerLabel=(peer:BetaPeer)=>names.label(peer.device_id);
   const currentScope = useRef(scope); currentScope.current = scope;
   const lifecycle = useRef<Life | null>(null);
   const [status, setStatus] = useState<BetaPeerStatus | null>(null);
@@ -164,9 +166,10 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
         {status.peers.length === 0 ? <p className="px-4 py-4 text-sm text-secondary">还没有其他设备加入。</p> : status.peers.map((peer, index) => <div key={peer.device_id}>
           {index > 0 && <Divider/>}
           <div className="space-y-2 px-4 py-4">
-            <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-sm font-medium text-foreground">{peerLabel(peer)}</p><p className="mt-1 text-xs text-secondary">{peerState(peer)}</p></div>
+            <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-sm font-medium text-foreground"><BetaDeviceName localDeviceId={deviceId} deviceId={peer.device_id}/></div><p className="mt-1 text-xs text-secondary">{peerState(peer)}</p></div>
               <Button variant="outline" size="sm" disabled={!!operation || !!statusError || !status.network_enabled || peer.member_state !== 'ready'} onClick={() => void perform('sync', async life => { await peers.sync(profileId, peer.device_id); if (isCurrent(life)) await refresh(life); })}>立即同步</Button></div>
             {peer.last_sync_at_ms !== null && <div className="flex items-center gap-1 text-xs text-muted"><span>上次确认</span><EventTimestamp timestamp={peer.last_sync_at_ms} now={now} mode={dateMode}/></div>}
+            {!!peer.history_gaps?.length&&<details className="space-y-2 text-xs text-secondary"><summary className="cursor-pointer">部分历史还不能完整中转（{peer.history_gaps.length} 项）</summary><p>上次同步发现：部分已保存历史的可验证转发前缀尚未补齐。请让仍持有原身份的来源设备用新版上线，或核对来源授权；现有资料保留。已知附件可独立获取。</p>{peer.history_gaps.map(gap=><div key={`${gap.direction}:${gap.origin_device_id}`} className="rounded-lg border border-border-card p-2"><BetaDeviceName localDeviceId={deviceId} deviceId={gap.origin_device_id}/><p>{gap.direction==='to_peer'?'本机 → 对方':'对方 → 本机'} · 保存位置 {gap.materialized_seq} · 可验证转发位置 {gap.available_seq??'尚未建立'}</p></div>)}</details>}
             <details className="text-xs text-muted"><summary className="cursor-pointer py-1">连接详情</summary><dl className="space-y-2 py-2"><div><dt>设备身份</dt><dd className="break-all font-mono">{peer.device_id}</dd></div><div><dt>身份指纹</dt><dd className="break-all font-mono">{peer.fingerprint_sha256}</dd></div>{peer.last_error_code && <div><dt>最近错误</dt><dd className="break-all">{peer.last_error_code}</dd></div>}{!!peer.endpoints.length && <div><dt>连接地址</dt><dd className="break-all">{peer.endpoints.join('、')}</dd></div>}</dl>
               <Button variant="outline" size="sm" disabled={!!operation || !!statusError} onClick={() => void perform('replace', async life => { const result = await peers.createInvitation(profileId, peer.device_id); if (isCurrent(life)) setCreated(result); })}>重新授权此设备</Button>
               {peer.member_state !== 'revoked' && <Button variant="ghost" size="sm" disabled={!!operation} onClick={() => setRevoke(peer)}><ShieldOff size={14}/>撤销设备授权</Button>}

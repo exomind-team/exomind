@@ -6,6 +6,9 @@ import type { BetaClient, BetaCommand, BetaEvent, BetaReceipt } from '../../../s
 import type { BetaOriginal, BetaStage } from '../../../src/beta/original-types';
 import type { BetaActiveBlock, BetaTimeblockNode, BetaTimeblockSnapshot } from '../../../src/beta/timeblocks-types';
 import '../../../src/index.css';
+import '../../../src/beta/beta-ui.css';
+
+document.documentElement.classList.add('beta-ui');
 
 // Full production UI with an explicitly synthetic, browser-local adapter.
 // No native IPC, real archive, network peer, credential or model is used.

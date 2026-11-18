@@ -1,8 +1,8 @@
 //! Main-window, one-original export. The save picker owns destination choice;
 //! frontend arguments contain only source IDs and a cancellation request ID.
-use super::{trusted_window, Failure, NativeState};
+use super::{Failure, NativeState, trusted_window};
 use exomind_beta_host::{BetaHost, HostError, Session};
-use exomind_core::{OriginalId, OriginalRef, ProfileId, MAX_ORIGINAL_CHUNK_BYTES};
+use exomind_core::{MAX_ORIGINAL_CHUNK_BYTES, OriginalId, OriginalRef, ProfileId};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -11,8 +11,8 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Condvar, Mutex,
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -660,6 +660,111 @@ pub(super) async fn beta_export_original(
     result
 }
 #[tauri::command]
+pub(super) async fn beta_open_original(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    original_id: OriginalId,
+    request_id: Uuid,
+) -> Result<(), Failure> {
+    trusted_window(&window, state.inner())?;
+    let lease = state.exports.begin(request_id)?;
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|_| io_failure())?
+        .join("beta-open")
+        .join(profile_id.to_string())
+        .join(original_id.to_string());
+    let native = state.inner().clone();
+    let (path, media_type, lease) = tauri::async_runtime::spawn_blocking(move || {
+        lease.check()?;
+        let session = native.human(profile_id)?;
+        let original = native
+            .host
+            .read_original_range(&session, profile_id, original_id, 0, 1)?
+            .original;
+        let source = Source {
+            host: native.host.clone(),
+            session,
+            profile: profile_id,
+            original,
+        };
+        let path = prepare_open_copy(
+            &cache,
+            &source.original,
+            |offset, length| source.read(offset, length),
+            &lease,
+        )?;
+        // A cached copy never substitutes for current archive authorization.
+        source.read(0, 1)?;
+        Ok::<_, Failure>((path, source.original.media_type.clone(), lease))
+    })
+    .await
+    .map_err(|_| io_failure())??;
+    lease.admit_publish()?;
+    #[cfg(target_os = "android")]
+    exomind_android_clipboard::open_file(&app, path.to_string_lossy().into_owned(), media_type)
+        .await
+        .map_err(|_| {
+            failure(
+                "system_open_failed",
+                "系统无法打开此格式，请安装相应应用或另存为后打开",
+            )
+        })?;
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = media_type;
+        tauri::async_runtime::spawn_blocking(move || {
+            tauri_plugin_opener::open_path(path, None::<&str>)
+        })
+        .await
+        .map_err(|_| io_failure())?
+        .map_err(|_| {
+            failure(
+                "system_open_failed",
+                "系统无法打开此格式，请设置默认应用或另存为后打开",
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn prepare_open_copy(
+    cache: &Path,
+    original: &OriginalRef,
+    mut read: impl FnMut(u64, usize) -> Result<Vec<u8>, Failure>,
+    lease: &ExportLease,
+) -> Result<PathBuf, Failure> {
+    std::fs::create_dir_all(cache).map_err(|_| io_failure())?;
+    let cache = cache.canonicalize().map_err(|_| io_failure())?;
+    let path = cache.join(suggested_name(&original.file_name));
+    if path.exists() {
+        if !std::fs::symlink_metadata(&path)
+            .map_err(|_| io_failure())?
+            .file_type()
+            .is_file()
+        {
+            return Err(io_failure());
+        }
+        verify_reader(
+            &mut File::open(&path).map_err(|_| io_failure())?,
+            original,
+            lease,
+        )?;
+        return Ok(path);
+    }
+    let mut temporary = Temporary::create(&cache)?;
+    stream_original(original, &mut read, temporary.file()?, lease)?;
+    temporary.sync()?;
+    lease.check()?;
+    // create_new semantics: another application's file is never overwritten.
+    std::fs::hard_link(&temporary.path, &path).map_err(|_| io_failure())?;
+    Ok(path)
+}
+
+#[tauri::command]
 pub(super) fn beta_cancel_original_export(
     window: WebviewWindow,
     state: State<'_, Arc<NativeState>>,
@@ -672,6 +777,54 @@ pub(super) fn beta_cancel_original_export(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn system_open_copy_requires_a_complete_digest_and_never_overwrites_a_changed_cache() {
+        let cache = tempfile::tempdir().unwrap();
+        let bytes = b"synthetic default application document";
+        let mut descriptor = original(bytes.len() as u64, format!("{:x}", Sha256::digest(bytes)));
+        descriptor.file_name = "../../synthetic-open.txt".into();
+        let manager = Arc::new(ExportManager::default());
+        let lease = manager.begin(Uuid::new_v4()).unwrap();
+        let path = prepare_open_copy(
+            cache.path(),
+            &descriptor,
+            |offset, length| {
+                Ok(bytes[offset as usize..((offset as usize) + length).min(bytes.len())].to_vec())
+            },
+            &lease,
+        )
+        .unwrap();
+        assert_eq!(
+            path.parent(),
+            Some(cache.path().canonicalize().unwrap().as_path())
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::write(&path, b"changed by external application").unwrap();
+        assert!(
+            prepare_open_copy(
+                cache.path(),
+                &descriptor,
+                |_, _| panic!("must validate the existing cache first"),
+                &lease
+            )
+            .is_err()
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"changed by external application"
+        );
+        let bad = tempfile::tempdir().unwrap();
+        assert!(
+            prepare_open_copy(
+                bad.path(),
+                &descriptor,
+                |_, length| Ok(vec![0; length]),
+                &lease
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read_dir(bad.path()).unwrap().count(), 0);
+    }
     fn original(length: u64, sha256: String) -> OriginalRef {
         OriginalRef {
             original_id: Uuid::new_v4().to_string().parse().unwrap(),

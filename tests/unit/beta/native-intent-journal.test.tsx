@@ -1,3 +1,4 @@
+import { selectField } from './select-field';
 import { act,cleanup,fireEvent,render,screen,waitFor } from '@testing-library/react';
 import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import { NativeIntentJournal } from '@/beta/native-intent-journal';
@@ -96,7 +97,7 @@ describe('Native private SQLite intent adapter and recovery',()=>{
       fireEvent.click(await screen.findByRole('button',{name:'恢复旧缓存（保留原缓存）'}));
       await screen.findByRole('textbox',{name:'记录当下'});
       await waitFor(()=>expect(screen.getByRole('combobox',{name:'当前档案'})).toBeEnabled());
-      fireEvent.change(screen.getByRole('combobox',{name:'当前档案'}),{target:{value:Q}});
+      await selectField(screen.getByRole('combobox',{name:'当前档案'}),Q);
       expect(await screen.findByRole('button',{name:'恢复旧缓存（保留原缓存）'})).toBeInTheDocument();
       expect(screen.queryByRole('textbox',{name:'记录当下'})).not.toBeInTheDocument();
       expect(journal.values.has(p.storageKey)).toBe(true);expect(journal.values.has(q.storageKey)).toBe(false);
