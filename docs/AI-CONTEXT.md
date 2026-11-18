@@ -43,7 +43,7 @@ Tauri 2.0 + React 18 + TypeScript + Rust | Zustand | Tailwind CSS + Radix UI | B
 
 ## 当前阶段
 
-2026-11-19 Beta14源码收口：附件拖放/通用粘贴、Native有界字节工作、系统打开、后台原件完成事件、自动来源查找、本机设备备注、主题控件及稳定反馈交互已实现。旧档案实况已定位第三来源5个时间块事实在PC存在、在平板缺失且PC无来源签名证明；没有自动恢复旧证明。已修自动原件错误依赖整档案同步完成，以及反馈快捷键/草稿确认前动作被吞、错误回调覆盖新输入、取消早于异步入场等问题。Android图标从已批准Alpha pack同步到fresh生成资源，精确Beta13 APK确含Tauri模板图标。类型/60文件369项、28个Edge场景、Host原件17项/Native28项及后续取消3项通过；同源候选构建与电脑实测推进中，平板已拔出。见[Beta14记录](plans/2026-11-18-beta14-attachments-and-field-sync.md)。
+2026-11-19 Beta14候选完成本机验证：Windows源码`4c72a0e5`，64MiB真实Native附件流程6项通过（12.601秒、56次UI进度、完整SHA、Ctrl+Enter提交及系统打开），双隔离Windows P2P9项通过；浮窗反馈有效稿输入147帧、零禁用切换。Android源码`b8d15ec6`另补独立FileProvider及显式依赖，APK69,736,066字节/6014/同Beta签名，15张品牌PNG和自适应引用核验通过；未装真机。类型/60文件369项、28个Edge场景及Native/TLS回归保留。旧档案第三来源5个时间块事实在PC有但无签名证明，平板缺失，未自动恢复；小原件错误历史门禁已解耦，设备名当前仅本机备注。平板已拔出，Android升级/剪贴板/系统打开/实际图标、原手机历史及能耗仍待。精确来源、哈希、失败批及后续入口见[Beta14记录](plans/2026-11-18-beta14-attachments-and-field-sync.md)。
 
 2026-11-18 Beta13固定候选 `835d0620`：精确Beta12复现确认Native仍计时而浮窗快照过期，已改Native直接读取/执行、共享草稿CAS、浮窗档案独立于主窗，并收敛导航/输入/检索、消息语义及Windows图标。UI351项/Edge24场景、Host14+Native工作区3+浮窗9项通过；最终EXE真实双窗22项、PC/实物平板双向文字/块历史/8KiB原件13项、平板离线/后台到点/实际重启8项通过。6013实装哈希匹配，APK68,910,081B；原0.5.2保留，是Beta新装而非升级。首次配对间歇identity_mismatch根因、手机用户历史、大文件与能源仍开放；主PID短时CPU/内存不能代替功耗。见[本轮记录](plans/2026-11-18-beta13-shell-and-desktop-feedback.md)、[Native工作区](development/beta-native-workspace.md)、[需求原则](development/beta-ui-user-requirements.md)和[Astra xhigh 20项审阅](research/2026-11-18-beta-ui-astra-xhigh-adversarial-review.md)。
 

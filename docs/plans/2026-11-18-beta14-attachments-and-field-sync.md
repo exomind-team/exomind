@@ -1,6 +1,6 @@
 # Beta14：附件操作与现场同步可解释性
 
-起点 `8bbb5a0a` / `dev-0.6`，初始工作区干净。问题现场双方为固定 `835d0620` 的 Beta13；本轮最终候选绑定 `4c72a0e52614519e09a7543bb6e1469be1691c55` / Beta14、6014。工作项编号不是档案事件 ID；不同候选证据分开记录。
+起点 `8bbb5a0a` / `dev-0.6`，初始工作区干净。问题现场双方为固定 `835d0620` 的 Beta13；最终Windows候选绑定 `4c72a0e52614519e09a7543bb6e1469be1691c55`，Android绑定其后仅改Android接缝/文档的 `b8d15ec6027684339cbd6d994c74cc6fdbb56983`，版本均为Beta14、6014。工作项编号不是档案事件 ID；不同候选证据分开记录。
 
 | 工作项 | 复现条件与成功判据 | 状态 |
 |---|---|---|
@@ -15,7 +15,7 @@
 | B14-U01 | 禁止原生组件，尤其白色滚动条；保留输入等价与滚动 | 主题下拉/进度已替换，主窗/浮窗/portal统一隐藏系统滚动条；28个Edge场景和Windows真实画面已核对。保留滚动，不以隐藏外观代替触摸/辅助技术全验 |
 | B14-U02/U03 | 浮窗反馈跟随消息偏好导致Ctrl+Enter失效；快速提交在草稿ACK前被吞 | 两条红例已确认；固定Ctrl/Cmd+Enter，等待已拥有的草稿确认后提交一次；39项后续相关回归通过 |
 | B14-U04 | 输入导致反馈按钮抖动 | 父层把草稿编辑等同业务忙，红例→修复。最终EXE有效反馈ACK后147帧、几何1种、透明度仅1、禁用切换0次、同一按钮节点；保留空稿→可提交的合理变化和真正提交/错误/过期围栏。Beta13及首个Beta14失败采样均保留 |
-| B14-U05 | Android应用及后台图标回退Tauri | 精确Beta13 APK的xhdpi图标与生成目录字节相同，SHA256 44e5c3dc…；与正确品牌资产539e1492…不同，已目视核验。准备脚本补品牌pack、普通/圆形/自适应资源及manifest绑定；红例→39项相关回归通过；最终APK与真机分开验收 |
+| B14-U05 | Android应用及后台图标回退Tauri | Beta13确为模板图标；最终Beta14 APK五密度15张PNG均与批准品牌逐字节一致，普通/圆形/自适应资源及manifest绑定通过，提取图已目视核对。启动器/最近任务/通知的物理显示仍待接回平板，不把包内核验冒充真机 |
 
 现场证据只放 `G:/exomind-runs/beta14-field-20261118-a/`。采集脚本只读业务接口/SQLite、`query_only`与只读连接，不输出token、不读取附件BLOB或用户记录正文。PC自动获取策略已开、阈值8MiB；624.2KiB图片的症状不能归为阈值过小，平板策略仍须另核。
 
@@ -62,3 +62,15 @@
 图标源仍为仓库批准的Alpha品牌pack。每次fresh init后准备普通/圆图/前景、背景和自适应XML，绑定manifest并覆盖已有API33模板别名；不手改或提交生成目录，也不凭空绘制新的单色品牌。最终包需核对实际资源，不以源码PNG存在替代验收。
 
 Android第一轮Rust编译完成，在既有Windows符号链接权限处失败；核对fresh AArch64 ELF与未解析符号后，`android-package-a`实际清单合并失败：原件插件和Tauri都直接声明`androidx.core.content.FileProvider`，Android按类名合并，独立authority仍冲突。改由插件自己的`BetaOriginalFileProvider`继承该类，保持原authority、`beta-open/`唯一缓存路径及只读授权，不覆盖Tauri provider或扩大文件暴露。`android-provider-green`合并通过但暴露插件未声明AndroidX Core编译依赖；按其他Android插件同版显式补依赖后，`android-provider-green-b`真实清单合并/Kotlin编译通过、正常0/清理确认。两失败保留，不把工作树验证冒充最终APK；后续重新从提交构建并核包。此项仅Android源码，已验Windows EXE仍绑定4c72a0e5。
+
+## 最终 Android 候选与交接边界（2026-11-19）
+
+从已推送的 `b8d15ec6027684339cbd6d994c74cc6fdbb56983` 重新归档，`android-build-b` Web构建8.21秒、Rust完成，仍在已知symlink权限边界退出；`android-package-b`核fresh ELF/无未解析Rust符号后实际Gradle全214任务、84秒通过，正常0/清理确认。未修改系统权限，未使用前一工作树试验包。
+
+APK为69,736,066字节，SHA256 `352f58e0753f7541d79666a61ee095b2da01f9c6a6b0a02097f7945f91f0a00a`，位于 `G:/exomind-deliverables/0.6.0-beta14/b8d15ec60276/android/ExoMind-0.6.0-beta14-arm64-v8a.apk`。aapt2/apksigner确认 `.v06.beta`、6014/Beta14、单ARM64、V2签名及与Beta13同证书 `768f3a13…`。Windows仍使用上节4c72a0e5的精确EXE与实测，不将Android提交冒充Windows运行证据。交付根目录的`build-verification.json`分别记录来源。
+
+`package-verification`确认包内五密度×三类型PNG共15项与批准Alpha品牌逐字节相同；xhdpi launcher为 `539e1492…`，已提取目视核对。普通/圆形Manifest绑定、自适应foreground/background引用均通过。合并清单中Tauri及原件Provider保持独立；原件Provider不导出，仅暴露`beta-open/`，插件打开Intent只授予读取。后台通知源码沿用`applicationInfo.icon`，无另一路Tauri图标覆盖；系统实际裁切/单色化和最近任务显示仍未验。
+
+包中主SO为62,493,640字节，未strip旁车103,562,328字节；全部SHF_ALLOC段（包含代码/动态链接数据）逐段内容与地址相同，移除非加载内容41,068,688字节，包内无symtab。这是仍未优化的dev内测构建，Java/WebView可调试，不是完整release瘦身，更不能据包体推断运行内存或能耗。与同ABI/同profile/同签名Beta13的68,910,081字节相比增加825,985字节；逐层清单保存在外部证据，性能/能耗优化仍开放。
+
+下一轮待验：Android保留数据升级、剪贴板文件/系统打开、启动器/最近任务/通知外观、真实小图自动获取/预览与大文件阶段耗时；旧档案第三来源证明缺口及原手机历史；设备名称交换（当前仅本机备注）；多候选离线恢复、完整LAN/VPN/OEM矩阵及能源归因。不得清空旧档案来把这些状态写成恢复。所有诊断、截图、构建输入与原始结果均在仓库外；没有向真实档案写开发报告或上传附件原件。
