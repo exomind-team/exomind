@@ -12,4 +12,7 @@ android {
     }
     kotlinOptions { jvmTarget = "1.8" }
 }
-dependencies { implementation(project(":tauri-android")) }
+dependencies {
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation(project(":tauri-android"))
+}
