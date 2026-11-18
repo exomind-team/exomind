@@ -21,6 +21,12 @@ recipe SHA与payload source SHA分别记录。主代理复核捕捉并修正了A
 真实临时Git的多提交push反例先红后绿；9项相关测试、定向类型和Actionlint通过。
 后续构建终态/候选hash/运行结果在外部执行交接与本计划状态中分别更新。
 
+首轮精确构建 run `44417968458` 的来源校验通过；三个桌面job进入构建。
+Android在SDK初始化请求旧 `tools` 包时失败，未编译候选；已显式只安装platform-tools，
+后续SDK/NDK仍使用固定输入。新增手动android_only重试范围，避免重复三个桌面job；
+同一payload来源与不同recipe/运行证据继续分别保留。首轮push后workflow实体已注册，
+后续dispatch是否可用以实际API结果为准，不凭此前404继续假定它永远不可用。
+
 ## 执行状态与成功标准
 
 | 单元 | 当前状态 | 成功标准 | 所有者 |

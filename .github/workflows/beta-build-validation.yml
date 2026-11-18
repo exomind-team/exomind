@@ -25,6 +25,11 @@ on:
         required: true
         type: string
         default: 0.6.0-beta16
+      android_only:
+        description: Retry Android only while retaining desktop evidence for the same immutable source
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -90,6 +95,7 @@ jobs:
 
   desktop:
     needs: resolve-source
+    if: ${{ inputs.android_only != true }}
     name: Beta ${{ matrix.label }} build
     strategy:
       fail-fast: false
@@ -216,6 +222,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     env:
+      BUILD_SCOPE: ${{ inputs.android_only && 'android-only' || 'all' }}
       SOURCE_SHA: ${{ needs.resolve-source.outputs.sha }}
       WORKFLOW_RECIPE_SHA: ${{ needs.resolve-source.outputs.recipe_sha }}
       BETA_VERSION: ${{ needs.resolve-source.outputs.version }}
@@ -241,6 +248,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -283,7 +292,7 @@ jobs:
           const apks=walk(root).filter(file=>file.endsWith('.apk')&&file.includes('debug')&&!/androidTest/i.test(file));assert.equal(apks.length,2,'Exactly two ABI-specific debug APKs required');
           const tools=path.join(process.env.ANDROID_HOME,'build-tools','36.0.0'),seen=new Set(),files=[];
           for(const source of apks){const badging=execFileSync(path.join(tools,'aapt'),['dump','badging',source],{encoding:'utf8',timeout:10000});assert.equal(/^package: name='([^']+)'/m.exec(badging)?.[1],'com.exomind.app.v06.beta');assert.equal(/versionName='([^']+)'/.exec(badging)?.[1],process.env.BETA_VERSION);assert.equal(/versionCode='([^']+)'/.exec(badging)?.[1],process.env.BETA_VERSION_CODE);assert.ok(/^application-debuggable\b/m.test(badging));const abi=/^native-code: '([^']+)'\s*$/m.exec(badging)?.[1];assert.ok(['arm64-v8a','x86_64'].includes(abi)&&!seen.has(abi));seen.add(abi);execFileSync(path.join(tools,'apksigner'),['verify',source],{stdio:'inherit',timeout:10000});const target=path.join(output,`ExoMind-${process.env.BETA_VERSION}-${abi}-${process.env.SOURCE_SHA.slice(0,12)}.apk`);fs.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);files.push({file:path.basename(target),abi,bytes:fs.statSync(target).size,sha256:hash(target),package:'com.exomind.app.v06.beta',version:process.env.BETA_VERSION,version_code:Number(process.env.BETA_VERSION_CODE)});}
-          const info={validation_only:true,workflow_recipe_sha:process.env.WORKFLOW_RECIPE_SHA,source_sha:process.env.SOURCE_SHA,version:process.env.BETA_VERSION,identifier:'com.exomind.app.v06.beta',entry:'beta.html',profile:'debug APK',core_schema:Number(fs.readFileSync('crates/exomind-core/src/lib.rs','utf8').match(/CORE_SCHEMA_VERSION:\s*i64\s*=\s*(\d+)/)?.[1]),config_sha256:process.env.BETA_CONFIG_HASH,cargo_lock_sha256:process.env.CARGO_LOCK_HASH,rustc:execFileSync('rustc',['-Vv'],{encoding:'utf8'}).trim(),ndk:'28.0.13004108',sdk:36,build_tools:'36.0.0',files,runtime_tested:false,upgrade_tested:false,published:false,signing:'Runner-local debug key only; not release-signed or guaranteed upgrade-compatible with local/previous candidates.'};fs.writeFileSync(path.join(output,'build-info.json'),JSON.stringify(info,null,2));
+          const info={validation_only:true,build_scope:process.env.BUILD_SCOPE,workflow_recipe_sha:process.env.WORKFLOW_RECIPE_SHA,source_sha:process.env.SOURCE_SHA,version:process.env.BETA_VERSION,identifier:'com.exomind.app.v06.beta',entry:'beta.html',profile:'debug APK',core_schema:Number(fs.readFileSync('crates/exomind-core/src/lib.rs','utf8').match(/CORE_SCHEMA_VERSION:\s*i64\s*=\s*(\d+)/)?.[1]),config_sha256:process.env.BETA_CONFIG_HASH,cargo_lock_sha256:process.env.CARGO_LOCK_HASH,rustc:execFileSync('rustc',['-Vv'],{encoding:'utf8'}).trim(),ndk:'28.0.13004108',sdk:36,build_tools:'36.0.0',files,runtime_tested:false,upgrade_tested:false,published:false,signing:'Runner-local debug key only; not release-signed or guaranteed upgrade-compatible with local/previous candidates.'};fs.writeFileSync(path.join(output,'build-info.json'),JSON.stringify(info,null,2));
           NODE
       - uses: actions/upload-artifact@v7
         with:
