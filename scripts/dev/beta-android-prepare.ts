@@ -8,6 +8,8 @@ import {
   ensureAndroidSystemBarsInMainActivity,
   ensureConfigChangesInManifest,
   ensureDebugNativeLibsAreStrippedInGradle,
+  ensureConfiguredNdkVersionInGradle,
+  resolveInstalledNdkVersion,
 } from './android-manifest-permission-lib';
 
 const BETA_PACKAGE = 'com.exomind.app.v06.beta';
@@ -191,7 +193,7 @@ function prepareNativeSymbols(gradle: string): string {
   ].join(newline)+carriage);
 }
 
-export function prepareBetaAndroid(projectRoot: string): BetaAndroidPreparation {
+export function prepareBetaAndroid(projectRoot: string, options: {ndkVersion?: string | null} = {}): BetaAndroidPreparation {
   if (!isAbsolute(projectRoot) || lstatSync(projectRoot).isSymbolicLink() || !lstatSync(projectRoot).isDirectory()) {
     reject('An explicit absolute Beta project root is required');
   }
@@ -211,7 +213,10 @@ export function prepareBetaAndroid(projectRoot: string): BetaAndroidPreparation 
   const manifest = readFileSync(manifestPath, 'utf8');
   const activity = readFileSync(activityPath, 'utf8');
   assertGradle(gradle); assertManifest(manifest); assertActivity(activity, false);
-  const nextGradle = prepareNativeSymbols(gradle);
+  // AGP no longer consults ANDROID_NDK_HOME. Pin its strip tool to the same
+  // installed NDK used by Rust instead of silently packaging an unstripped SO.
+  const ndkVersion = options.ndkVersion === undefined ? resolveInstalledNdkVersion() : options.ndkVersion;
+  const nextGradle = ensureConfiguredNdkVersionInGradle(prepareNativeSymbols(gradle),ndkVersion).buildGradleKts;
   assertGradle(nextGradle);
   const nextManifest = ensureConfigChangesInManifest(manifest).manifestXml;
   const nextActivity = applyBetaImeInsets(ensureAndroidSystemBarsInMainActivity(activity, { ensureConfigurationChanged: true }).activityKotlin);

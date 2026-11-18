@@ -90,6 +90,7 @@ export interface FocusTimerViewProps {
   bindings?: FocusTimerViewBindings;
   surface?: FocusTimerSurface;
   actionsDisabled?: boolean;
+  startLabel?: string;
   overlayChrome?: FocusTimerOverlayChrome;
   slots?: { keepAwake?: ReactNode; dialogs?: ReactNode; configurationDetails?: ReactNode };
 }
@@ -132,6 +133,7 @@ export function FocusTimerView({
   bindings = {},
   surface = "default",
   actionsDisabled = false,
+  startLabel = "开始计时",
   overlayChrome: overlayRunningChrome,
   slots = {},
 }: FocusTimerViewProps) {
@@ -510,7 +512,7 @@ export function FocusTimerView({
                 className={`h-10 w-full rounded-[12px] bg-[#C75B3A] text-[14px] font-medium text-white hover:bg-[#B24D2F] dark:bg-[#C75B3A] dark:hover:bg-[#B24D2F] ${isWorkspaceSurface ? 'sm:col-start-2 sm:row-start-2 sm:self-end sm:w-36' : ''}`}
               >
                 <Play size={16} className="mr-2" />
-                开始计时
+                {startLabel}
               </Button>
             </div>
           </div>

@@ -123,6 +123,7 @@ describe('shared Alpha focus presentation with real Beta commands',()=>{
       await act(async()=>{await owner.flush();});expect(JSON.parse(journal.values.get(owner.storageKey)!).draft.name).toBe('next B');
       await waitFor(()=>expect(screen.getByRole('button',{name:'切换时间块'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'切换时间块'}));
       expect(screen.getByTestId('new-focus-task-input')).toHaveValue('next B');expect(client.timeblocks.command).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('button',{name:'切换并开始'})).toBeEnabled();expect(screen.getByText('当前时间块：start A → 新时间块')).toBeVisible();
       fireEvent.click(screen.getByTestId('new-focus-start-button'));
       await waitFor(()=>expect(client.timeblocks.command).toHaveBeenCalledTimes(2));
       const second=client.timeblocks.command.mock.calls[1][0];expect(second.action).toMatchObject({kind:'rotate',from_block_id:first.action.kind==='start'?first.action.block_id:'',next:{name:'next B'}});

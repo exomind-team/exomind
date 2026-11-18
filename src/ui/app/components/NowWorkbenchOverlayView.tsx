@@ -9,6 +9,7 @@ export const NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE = { width: 390, height: 192
 const ACTIVE_VISIBLE_SURFACE_CLASS = 'ring-1 ring-inset ring-[#FDE4DE]/60';
 
 export interface NowWorkbenchOverlayViewModel {
+  idleLabel?: string;
   mode: 'running' | 'idle';
   title: string;
   statusLabel: string;
@@ -255,7 +256,7 @@ export function NowWorkbenchOverlayView({
                   <div className="flex items-center gap-2" data-tauri-drag-region>
                     <span className="h-2.5 w-2.5 rounded-full bg-[#A8A29E]" data-tauri-drag-region />
                     <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>
-                      当下
+                      {model.idleLabel ?? '当下'}
                     </span>
                   </div>
                   <p className="mt-1 truncate text-[16px] font-semibold" data-tauri-drag-region>
@@ -322,7 +323,7 @@ export function NowWorkbenchOverlayView({
                 <div className="flex items-center gap-2" data-tauri-drag-region>
                   <span className="h-2.5 w-2.5 rounded-full bg-[#A8A29E]" data-tauri-drag-region />
                   <span className="text-[15px] font-semibold text-[#D6D3D1] dark:text-[#E7E5E4]" data-tauri-drag-region>
-                    当下
+                    {model.idleLabel ?? '当下'}
                   </span>
                 </div>
                 <p className="mt-2 text-[13px] font-medium text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>

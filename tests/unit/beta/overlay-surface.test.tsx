@@ -26,6 +26,10 @@ function fixture(active=true){
   return{session,send,update,disconnect,view:()=>view};
 }
 describe('real Beta overlay uses shared Alpha presentation and Main actions',()=>{
+  it('identifies the pinned Native profile even while the idle window is collapsed',()=>{
+    const f=fixture(false);f.update({...f.view(),profile_name:'Pinned profile P'});render(<BetaOverlaySurface session={f.session}/>);
+    expect(screen.getByTestId('now-overlay-idle-pill')).toHaveTextContent('当下 · Pinned profile P');
+  });
   it('keeps original read-only recovery reachable with no Main view and does not migrate it when Q arrives',async()=>{
     const f=fixture(),gate=deferred<OverlayResponse>();f.update({...f.view(),remote:{...f.view().remote!,active:{...f.view().remote!.active!,phase:'feedback_pending'},pending_feedback:[B]}});
     const p=structuredClone(f.view());f.send.mockImplementationOnce(async()=>gate.promise);render(<BetaOverlaySurface session={f.session}/>);fireEvent.click(screen.getByTestId('new-focus-end-button'));
