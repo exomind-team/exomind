@@ -37,8 +37,6 @@ jobs:
       CARGO_BUILD_JOBS: '1'
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_DEV_INCREMENTAL: 'false'
-      CARGO_TARGET_DIR: ${{ runner.temp }}/exomind-contract-cache
-      CONTRACT_OUT: ${{ runner.temp }}/exomind-contract-evidence
       # Env values are passed as argv, never interpolated into a shell program.
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
     steps:
@@ -53,6 +51,12 @@ jobs:
         with:
           bun-version: '1.3.8'
       - uses: dtolnay/rust-toolchain@stable
+      # runner.* is unavailable in jobs.<id>.env during workflow admission.
+      - name: Set external evidence and reusable cache paths
+        shell: bash
+        run: |
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/exomind-contract-cache" >> "$GITHUB_ENV"
+          echo "CONTRACT_OUT=$RUNNER_TEMP/exomind-contract-evidence" >> "$GITHUB_ENV"
       - name: Install pinned Agent-spec CLI
         run: cargo install agent-spec --version 1.4.0 --locked
       - name: Install frozen frontend dependencies
@@ -72,6 +76,6 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: beta-source-contracts-${{ github.sha }}
-          path: ${{ env.CONTRACT_OUT }}
+          path: ${{ runner.temp }}/exomind-contract-evidence
           if-no-files-found: warn
           retention-days: 7
