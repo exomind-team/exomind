@@ -16,11 +16,13 @@ describe('Native peer management boundary',()=>{
     await client.status(P);await client.setEnabled(false);await client.createInvitation(P,B);
     expect(await client.inspectInvitation('opaque-secret')).toMatchObject({requires_replacement:true});
     await client.joinInvitation('opaque-secret');await client.sync(P,B);await client.revoke(P,B,2);
+    await client.joinInvitation('opaque-secret','192.0.2.3:43344');
     expect(call).toHaveBeenCalledWith('beta_peer_status',{profileId:P});
     expect(call).toHaveBeenCalledWith('beta_peer_set_enabled',{enabled:false});
     expect(call).toHaveBeenCalledWith('beta_peer_create_invitation',{profileId:P,peerDeviceId:B});
     expect(call).toHaveBeenCalledWith('beta_peer_inspect_invitation',{invitationText:'opaque-secret'});
     expect(call).toHaveBeenCalledWith('beta_peer_join_invitation',{invitationText:'opaque-secret'});
+    expect(call).toHaveBeenCalledWith('beta_peer_join_invitation',{invitationText:'opaque-secret',dialAddress:'192.0.2.3:43344'});
     expect(call).toHaveBeenCalledWith('beta_peer_revoke',{profileId:P,peerDeviceId:B,expectedGeneration:2});
   });
   it('rejects wrong profile, duplicate devices, unknown states and malformed identities',async()=>{

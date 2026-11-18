@@ -171,8 +171,19 @@ pub(super) async fn beta_peer_join_invitation(
     window: WebviewWindow,
     state: State<'_, Arc<NativeState>>,
     invitation_text: String,
+    dial_address: Option<String>,
 ) -> Result<JoinView, Failure> {
     trusted_window(&window, state.inner())?;
+    let dial_address = dial_address
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().parse::<std::net::SocketAddr>())
+        .transpose()
+        .map_err(|_| Failure::from(HostError::InvalidRequest))?;
+    if let Some(address) = dial_address {
+        if address.port() == 0 || address.ip().is_unspecified() || address.ip().is_multicast() {
+            return Err(Failure::from(HostError::InvalidRequest));
+        }
+    }
     let (invite, id) = work(state.inner(), move |state| {
         let invite = invitation(&invitation_text)?;
         let id = claim(&invite, state.host.status()?.device_id);
@@ -195,7 +206,11 @@ pub(super) async fn beta_peer_join_invitation(
         Ok((invite, id))
     })
     .await?;
-    let status = state.peers.join(&invite, id).await.map_err(Failure::from)?;
+    let status = state
+        .peers
+        .join_with_route(&invite, id, dial_address)
+        .await
+        .map_err(Failure::from)?;
     Ok(JoinView {
         profile_id: status.profile_id,
         peer_device_id: status.issuer_device_id,

@@ -24,7 +24,24 @@ mod original_network;
 use original_network::auto_queue::{AutoCompletion, AutoQueue};
 pub use original_network::{OriginalAutoQueueStatus, PeerOriginalStatus};
 
-const DISCOVERY_PORT: u16 = 43343;
+fn discovery_port() -> u16 {
+    #[cfg(not(test))]
+    {
+        43343
+    }
+    #[cfg(test)]
+    {
+        // Tests must not share discovery traffic with the user's running app.
+        static PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+        *PORT.get_or_init(|| {
+            std::net::UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))
+                .expect("reserve an isolated test discovery port")
+                .local_addr()
+                .expect("read test discovery port")
+                .port()
+        })
+    }
+}
 const DISCOVERY_GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 77, 68);
 #[derive(Debug, Clone, Serialize)]
 pub struct PeerConnectionView {
@@ -263,7 +280,7 @@ fn discovery_socket() -> Result<UdpSocket, HostError> {
         .set_nonblocking(true)
         .map_err(|_| HostError::PeerTransportUnavailable)?;
     socket
-        .bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT)).into())
+        .bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, discovery_port())).into())
         .map_err(|_| HostError::PeerTransportUnavailable)?;
     let std: std::net::UdpSocket = socket.into();
     let _ = std.join_multicast_v4(&DISCOVERY_GROUP, &Ipv4Addr::UNSPECIFIED);
@@ -577,9 +594,32 @@ impl PeerNetwork {
         invitation: &PeerInvitation,
         claim: Uuid,
     ) -> Result<super::PeerJoinStatus, HostError> {
+        self.join_with_route(invitation, claim, None).await
+    }
+
+    /// A route hint changes where we dial, never the signed issuer or its pin.
+    /// User-space overlays need not expose their addresses through OS interfaces.
+    pub async fn join_with_route(
+        self: &Arc<Self>,
+        invitation: &PeerInvitation,
+        claim: Uuid,
+        dial_address: Option<SocketAddr>,
+    ) -> Result<super::PeerJoinStatus, HostError> {
         let offer = invitation.verified_offer()?;
         if offer.schema != super::PEER_CORE_SCHEMA || offer.protocol != super::PEER_PROTOCOL {
             return Err(HostError::PeerProtocolMismatch);
+        }
+        if let Some(address) = dial_address {
+            super::network_store::validate_endpoints(&[address])?;
+        }
+        let mut candidates = Vec::with_capacity(offer.candidates.len() + 1);
+        if let Some(address) = dial_address {
+            candidates.push(address);
+        }
+        for address in &offer.candidates {
+            if !candidates.contains(address) {
+                candidates.push(*address);
+            }
         }
         self.set_enabled(true).await?;
         let port = self
@@ -603,7 +643,7 @@ impl PeerNetwork {
             (cancel, generation)
         };
         let mut last = HostError::PeerTransportUnavailable;
-        for endpoint in &offer.candidates {
+        for endpoint in &candidates {
             let channel = match self
                 .host
                 .connect_peer_transport(
@@ -651,7 +691,9 @@ impl PeerNetwork {
                     }
                     let mut routes = vec![*endpoint];
                     for candidate in &offer.candidates {
-                        if !routes.contains(candidate) {
+                        if routes.len() < super::network_store::MAX_ROUTE_ENDPOINTS
+                            && !routes.contains(candidate)
+                        {
                             routes.push(*candidate);
                         }
                     }
@@ -1232,7 +1274,7 @@ impl Worker {
                 },
                 _=interval.tick()=>{
                     if let Ok(mut state)=self.shared.lock(){if state.generation!=generation{break;}state.addresses=endpoints(listener.addr());}
-                    if let Some(socket)=&udp {if let Ok(identity)=self.host.device_identity(&self.owner){if let Ok(bytes)=serde_json::to_vec(&Announcement{protocol:"exomind-discovery/1".into(),device_id:self.host.device_id,fingerprint_sha256:identity.fingerprint_sha256,listen_port:listener.addr().port()}){let _=socket.try_send_to(&bytes,SocketAddr::from((DISCOVERY_GROUP,DISCOVERY_PORT)));let _=socket.try_send_to(&bytes,SocketAddr::from((Ipv4Addr::BROADCAST,DISCOVERY_PORT)));}}}
+                    if let Some(socket)=&udp {if let Ok(identity)=self.host.device_identity(&self.owner){if let Ok(bytes)=serde_json::to_vec(&Announcement{protocol:"exomind-discovery/1".into(),device_id:self.host.device_id,fingerprint_sha256:identity.fingerprint_sha256,listen_port:listener.addr().port()}){let _=socket.try_send_to(&bytes,SocketAddr::from((DISCOVERY_GROUP,discovery_port())));let _=socket.try_send_to(&bytes,SocketAddr::from((Ipv4Addr::BROADCAST,discovery_port())));}}}
                     if jobs.len()>=2{continue;}if let Ok(mut routes)=self.routes(){if !routes.is_empty(){let mut state=match self.shared.lock(){Ok(s)=>s,Err(_)=>return};let count=routes.len();routes.rotate_left(state.route_cursor%count);state.route_cursor=state.route_cursor.wrapping_add(1);routes.sort_by_key(|r|!state.forced.contains(&(r.profile,r.device)));}for route in routes {if jobs.len()>=2{break;}let key=(route.profile,route.device);let force;{let mut state=match self.shared.lock(){Ok(s)=>s,Err(_)=>return};force=state.forced.remove(&key);if state.progress.get(&key).is_some_and(|p|p.busy||(!force&&p.retry.is_some_and(|at|at>Instant::now()))){continue;}}
                         let network=self.clone();let cancel=cancel.clone();jobs.spawn(async move{let _=network.attempt(route,cancel,generation,force).await;});
                     }}

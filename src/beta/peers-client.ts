@@ -32,7 +32,7 @@ export interface BetaPeersClient {
   setEnabled(enabled: boolean): Promise<void>;
   createInvitation(profileId: string, peerDeviceId?: string): Promise<BetaInvitation>;
   inspectInvitation(invitationText: string): Promise<BetaInvitationPreview>;
-  joinInvitation(invitationText: string): Promise<BetaJoinResult>;
+  joinInvitation(invitationText: string, dialAddress?: string): Promise<BetaJoinResult>;
   sync(profileId: string, peerDeviceId: string): Promise<void>;
   revoke(profileId: string, peerDeviceId: string, expectedGeneration: number): Promise<void>;
 }
@@ -84,8 +84,8 @@ export function nativeBetaPeersClient(call: Call = (command, args) => invoke(com
       const raw = object(value, ['profile_id','profile_name','issuer_device_id','fingerprint_sha256','expires_at_ms','compatible', ...(extra ? ['requires_replacement'] : [])]);
       return { profile_id:uuid(raw.profile_id),profile_name:text(raw.profile_name,256),issuer_device_id:uuid(raw.issuer_device_id),fingerprint_sha256:hash(raw.fingerprint_sha256),expires_at_ms:integer(raw.expires_at_ms),compatible:boolean(raw.compatible), ...(extra ? {requires_replacement:boolean(raw.requires_replacement)} : {}) };
     },
-    async joinInvitation(invitationText) {
-      const raw = object(await call('beta_peer_join_invitation', { invitationText }), ['profile_id','peer_device_id','state']);
+    async joinInvitation(invitationText, dialAddress) {
+      const raw = object(await call('beta_peer_join_invitation', { invitationText, ...(dialAddress?.trim() ? {dialAddress:dialAddress.trim()} : {}) }), ['profile_id','peer_device_id','state']);
       return { profile_id:uuid(raw.profile_id),peer_device_id:uuid(raw.peer_device_id),state:choice(raw.state,['pending','ready']) };
     },
     async sync(profileId, peerDeviceId) { await call('beta_peer_sync', { profileId, peerDeviceId }); },

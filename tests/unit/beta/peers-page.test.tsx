@@ -20,6 +20,24 @@ function peers(){return{
 const props={profileId:Q,profileName:'原档案Q',runtimeId:R,deviceId:D};
 
 describe('Beta device joining UI',()=>{
+  it('recovers an unreachable invitation through another route while retaining the invitation identity and old profile',async()=>{
+    const client=peers(),joined=vi.fn(async()=>{});
+    client.joinInvitation.mockRejectedValueOnce(new Error('邀请地址暂不可达'))
+      .mockResolvedValue({profile_id:P,peer_device_id:B,state:'ready'});
+    render(<BetaPeersPage {...props} peers={client} onJoined={joined}/>);
+    fireEvent.change(screen.getByLabelText('另一设备的完整邀请'),{target:{value:'synthetic-invitation'}});
+    fireEvent.click(screen.getByRole('button',{name:'检查邀请'}));
+    await screen.findByText('加入「目标档案」');
+    fireEvent.click(screen.getByRole('button',{name:'确认加入档案'}));
+    await screen.findByText('邀请地址暂不可达');
+    expect(joined).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'更换连接地址'}));
+    fireEvent.change(screen.getByLabelText('其他连接地址'),{target:{value:'192.0.2.3:43344'}});
+    fireEvent.click(screen.getByRole('button',{name:'确认加入档案'}));
+    await waitFor(()=>expect(joined).toHaveBeenCalledWith(P));
+    expect(client.joinInvitation).toHaveBeenLastCalledWith('synthetic-invitation','192.0.2.3:43344');
+    expect(client.createInvitation).not.toHaveBeenCalled();
+  });
   it('pauses hidden observation and a late previous read cannot overwrite the resumed status',async()=>{
     const client=peers(),old=deferred<BetaPeerStatus>();
     client.status.mockImplementationOnce(()=>old.promise).mockResolvedValue({...status(Q),network_enabled:true});

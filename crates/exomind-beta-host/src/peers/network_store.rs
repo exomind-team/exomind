@@ -8,6 +8,7 @@ use std::net::SocketAddr;
 
 const LAYOUT: &str = "exomind-peer-network/1";
 const MAX_ROUTES: i64 = 256;
+pub(super) const MAX_ROUTE_ENDPOINTS: usize = 8;
 const OBJECTS: &[(&str, &str)] = &[
     (
         "peer_network_settings",
@@ -111,7 +112,7 @@ pub(super) fn save_settings(
     Ok(())
 }
 pub(super) fn validate_endpoints(endpoints: &[SocketAddr]) -> Result<(), HostError> {
-    if endpoints.is_empty() || endpoints.len() > 8 {
+    if endpoints.is_empty() || endpoints.len() > MAX_ROUTE_ENDPOINTS {
         return Err(HostError::InvalidRequest);
     }
     for (n, endpoint) in endpoints.iter().enumerate() {

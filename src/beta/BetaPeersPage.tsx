@@ -5,6 +5,7 @@ import { SettingsSection } from '@/ui/app/components/settings/settings-section';
 import { Divider, SettingRow } from '@/ui/app/components/settings-shared';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EventTimestamp } from '@/ui/app/components/EventTimestamp';
@@ -50,6 +51,8 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   const [operation, setOperation] = useState<string | null>(null);
   const [created, setCreated] = useState<BetaInvitation | null>(null);
   const [invitationText, setInvitationText] = useState('');
+  const [dialAddress, setDialAddress] = useState('');
+  const [showDialAddress, setShowDialAddress] = useState(false);
   const [preview, setPreview] = useState<BetaInvitationPreview | null>(null);
   const [pendingJoin, setPendingJoin] = useState<string | null>(null);
   const [revoke, setRevoke] = useState<BetaPeer | null>(null);
@@ -78,7 +81,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   }
   useEffect(() => {
     const life: Life = { active: true }; lifecycle.current = life;
-    setStatus(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setInvitationText(''); setPendingJoin(null); setRevoke(null); observedSync.current = null; inputRevision.current++;
+    setStatus(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setInvitationText(''); setDialAddress(''); setShowDialAddress(false); setPendingJoin(null); setRevoke(null); observedSync.current = null; inputRevision.current++;
     return () => { life.active = false; if (operationFlight.current === life) operationFlight.current = null; };
   }, [scope]);
   useEffect(() => {
@@ -108,7 +111,8 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   async function join(life: Life) {
     if (!peers || !preview) return;
     const expected = preview; const text = invitationText.trim(); const revision = inputRevision.current;
-    const result = await peers.joinInvitation(text);
+    const address = dialAddress.trim();
+    const result = await (address ? peers.joinInvitation(text, address) : peers.joinInvitation(text));
     if (!isCurrent(life) || revision !== inputRevision.current) return;
     if (result.profile_id !== expected.profile_id || result.peer_device_id !== expected.issuer_device_id) throw new Error('加入结果与邀请不一致，未切换当前档案');
     if (result.state === 'pending') {
@@ -147,7 +151,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
       <SettingsSection title="加入已有档案">
         <div className="space-y-3 px-4 py-4">
           <label htmlFor="beta-peer-invitation" className="text-sm font-medium text-foreground">另一设备的完整邀请</label>
-          <Textarea id="beta-peer-invitation" value={invitationText} maxLength={32768} placeholder="粘贴完整邀请" className="min-h-24 text-xs" onChange={event => { setInvitationText(event.target.value); setPreview(null); setPendingJoin(null); inputRevision.current++; }}/>
+          <Textarea id="beta-peer-invitation" value={invitationText} maxLength={32768} placeholder="粘贴完整邀请" className="min-h-24 text-xs" onChange={event => { setInvitationText(event.target.value); setPreview(null); setPendingJoin(null); setDialAddress(''); setShowDialAddress(false); inputRevision.current++; }}/>
           <Button variant="outline" disabled={!!operation || !invitationText.trim()} onClick={() => void perform('inspect', async life => {
             const revision = inputRevision.current; const result = await peers.inspectInvitation(invitationText.trim());
             if (isCurrent(life) && revision === inputRevision.current) setPreview(result);
@@ -157,6 +161,12 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
             <p className="text-xs leading-relaxed text-secondary">{profileId && profileId !== preview.profile_id ? `当前「${profileName}」会保留，加入确认后才切换档案。` : '加入确认后，已授权设备将自动补齐此档案。'}</p>
             {preview.requires_replacement && <p className="text-xs leading-relaxed text-secondary">这次确认会替换原连接授权，保留档案和已保存记录。旧连接的请求将不再继续。</p>}
             <p className="text-xs text-muted">有效期至 {new Date(preview.expires_at_ms).toLocaleString()}</p>
+            <Button variant="ghost" size="sm" aria-expanded={showDialAddress} onClick={()=>setShowDialAddress(true)}>更换连接地址</Button>
+            {showDialAddress && <div className="space-y-2">
+              <label htmlFor="beta-peer-dial-address" className="text-xs font-medium">其他连接地址</label>
+              <Input id="beta-peer-dial-address" value={dialAddress} maxLength={256} placeholder="设备 IP:端口" onChange={event=>{setDialAddress(event.target.value);inputRevision.current++;}}/>
+              <p className="text-xs leading-relaxed text-secondary">邀请地址不可达时，可填写发起设备的 EasyTier 等网络地址。留空使用邀请地址；仍核对原邀请的设备身份与授权。</p>
+            </div>}
             {!preview.compatible && <p className="text-sm text-destructive">两端版本暂不兼容，请更新后重新获取邀请。</p>}
             <Button disabled={!!operation || !preview.compatible} onClick={() => void perform('join', join)}><Check size={14}/>{operation === 'join' ? '正在确认…' : pendingJoin ? '继续查证加入' : preview.requires_replacement ? '确认替换连接并加入' : '确认加入档案'}</Button>
           </div>}

@@ -246,12 +246,79 @@ fn host() -> (TempDir, Arc<BetaHost>, Session) {
     .unwrap();
     (root, host, owner)
 }
+
 async fn stopped(host: Arc<BetaHost>) {
     tokio::task::spawn_blocking(move || host.stop())
         .await
         .unwrap()
         .unwrap();
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn alternate_join_route_preserves_the_signed_issuer_and_rejects_a_different_peer() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_ra, a, oa) = host();
+    let (_rb, b, ob) = host();
+    let (_rc, c, oc) = host();
+    let profile = ProfileId::new();
+    a.provision_profile(&oa, profile, "synthetic overlay route")
+        .unwrap();
+    let na = PeerNetwork::new(a.clone(), oa.clone()).unwrap();
+    let nb = PeerNetwork::new(b.clone(), ob.clone()).unwrap();
+    let nc = PeerNetwork::new(c.clone(), oc.clone()).unwrap();
+    na.set_enabled(true).await.unwrap();
+    nc.set_enabled(true).await.unwrap();
+    let loopback = |network: &Arc<PeerNetwork>| {
+        network
+            .local_addresses()
+            .unwrap()
+            .into_iter()
+            .find(|address| address.ip().is_loopback())
+            .unwrap()
+    };
+    let address = loopback(&na);
+    let other_address = loopback(&nc);
+    let invitation = a
+        .create_peer_invitation(
+            &oa,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: profile,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![other_address],
+                ttl_seconds: 600,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+    let claim = Uuid::new_v4();
+    let wrong_route = nb.join(&invitation, claim).await;
+    assert!(matches!(wrong_route, Err(HostError::PeerPinMismatch)));
+    assert!(b.profiles(&ob).unwrap().is_empty());
+    assert!(c.profiles(&oc).unwrap().is_empty());
+
+    let result = nb
+        .join_with_route(&invitation, claim, Some(address))
+        .await
+        .unwrap();
+    assert_eq!(result.profile_id, profile);
+    assert_eq!(result.issuer_device_id, a.device_id);
+    assert_eq!(result.state, PeerJoinState::Ready);
+    assert!(result.remote_ready_observed);
+    assert_eq!(
+        b.peer_routes(&ob).unwrap()[0].endpoints.first(),
+        Some(&address)
+    );
+    assert!(c.profiles(&oc).unwrap().is_empty());
+    na.stop().await.unwrap();
+    nb.stop().await.unwrap();
+    nc.stop().await.unwrap();
+    drop((na, nb, nc));
+    stopped(a).await;
+    stopped(b).await;
+    stopped(c).await;
+}
+
 fn record(host: &BetaHost, owner: &Session, profile: ProfileId, text: &str) -> EventId {
     let command = CaptureCommand {
         command_id: CommandId::new(),
@@ -354,7 +421,7 @@ async fn until_hint(
                 end.saturating_duration_since(Instant::now()),
                 socket.send_to(
                     bytes,
-                    SocketAddr::from((Ipv4Addr::LOCALHOST, DISCOVERY_PORT)),
+                    SocketAddr::from((Ipv4Addr::LOCALHOST, discovery_port())),
                 ),
             )
             .await;
