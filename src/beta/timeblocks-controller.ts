@@ -18,6 +18,7 @@ export function timeblockControlsBlocked(state:Pick<BetaTimeblockState,'remote'|
   return !state.remote||state.pending.some(item=>item.state!=='rejected')||!!state.cacheError||!!state.error;
 }
 type StorageLike=Pick<Storage,'getItem'|'setItem'>;
+const STATE_REFRESH_INTERVAL_MS = 1000;
 const durable=(storage:StorageLike):storage is DurableIntentStorage=>'durable'in storage&&storage.durable===true;
 const storageKey=(device:string,profile:string)=>`exomind:beta:timeblocks:${JSON.stringify([device,profile])}`;
 const message=(error:unknown):string=>error&&typeof error==='object'&&'message'in error&&typeof error.message==='string'?error.message:typeof error==='string'?error:'时间块服务暂时不可用，请查证后重试';
@@ -49,6 +50,7 @@ export class BetaTimeblockController {
   readonly storageKey:string;
   private state:BetaTimeblockState;
   private disposed=false;private blocked=false;private readGeneration=0;
+  private observationTimer:ReturnType<typeof setTimeout>|undefined;
   private readonly listeners=new Set<()=>void>();private readonly flights=new Map<string,Promise<BetaReceipt|null>>();
   private readonly uuid:()=>string;private readonly now:()=>number;
   private unsubscribePersistence:(()=>void)|undefined;private closing:Promise<void>|undefined;
@@ -56,7 +58,11 @@ export class BetaTimeblockController {
     const legacy=options.legacy??{getItem:(key:string)=>globalThis.localStorage?.getItem(key)??null};
     const defaults=options.journal?undefined:productionIntentStorage();
     const storage=await openDurableIntentStorage({key:storageKey(deviceId,profileId),journal:options.journal??defaults?.journal,predecessor:options.predecessor??defaults?.predecessor,allowLegacyImport:options.allowLegacyImport,legacy,validate:raw=>{load(raw,profileId);}});
-    try{return new BetaTimeblockController(client,deviceId,profileId,storage,options);}catch(error){storage.close();throw error;}
+    try{
+      const controller=new BetaTimeblockController(client,deviceId,profileId,storage,options);
+      controller.observe();
+      return controller;
+    }catch(error){storage.close();throw error;}
   }
   constructor(private readonly client:BetaClient,private readonly deviceId:string,private readonly profileId:string,private readonly storage:StorageLike,
     options:{uuid?:()=>string;monotonicNow?:()=>number}={}){
@@ -65,12 +71,12 @@ export class BetaTimeblockController {
     let restored=initial();let cacheError:null|string=null;
     try{restored=load(storage.getItem(this.storageKey),profileId);}catch{this.blocked=true;cacheError='时间块草稿缓存无法读取，已保留原缓存并停止提交';}
     this.state={...restored,remote:null,identity:null,receivedAt:0,loading:false,error:null,errorCode:null,cacheError,persistenceState:cacheError?'failed':'idle'};
-    if(durable(storage))this.unsubscribePersistence=storage.subscribe(()=>{const status=storage.snapshot();this.emit({...this.state,persistenceState:status.state,cacheError:status.error});});
+    if(durable(storage)){let external=storage.snapshot().externalRevision??0;this.unsubscribePersistence=storage.subscribe(()=>{const status=storage.snapshot();let restored:Partial<Persisted>={};if((status.externalRevision??0)!==external){external=status.externalRevision??0;restored=load(storage.getItem(this.storageKey),profileId);}this.emit({...this.state,...restored,persistenceState:status.state,cacheError:status.error});});}
   }
   snapshot=():BetaTimeblockState=>this.state;
   subscribe=(listener:()=>void):(()=>void)=>{this.listeners.add(listener);return()=>this.listeners.delete(listener);};
   dispose():void{
-    if(!this.disposed){this.disposed=true;++this.readGeneration;this.listeners.clear();this.unsubscribePersistence?.();}
+    if(!this.disposed){this.disposed=true;++this.readGeneration;clearTimeout(this.observationTimer);this.listeners.clear();this.unsubscribePersistence?.();}
     if(!this.closing){this.closing=(async()=>{try{if(durable(this.storage))await this.storage.commit();}finally{if(durable(this.storage))this.storage.close();}})();void this.closing.catch(()=>{});}
   }
   close():Promise<void>{this.dispose();return this.closing!;}
@@ -90,6 +96,16 @@ export class BetaTimeblockController {
   setFeedbackDraft(blockId:string,text:string):void{
     this.active();const previous=this.state.feedback[blockId]??{text:'',revision:0};
     this.save({...this.state,feedback:{...this.state.feedback,[blockId]:{text,revision:previous.revision+1}}});
+  }
+  /** The data owner's lifetime, never a pane, owns authoritative observation.
+   * The periodic reader is serial. Hidden views may stop painting;
+   * they cannot stale the overlay or stop reconciling Native deadline state. */
+  private observe():void{
+    const read=async()=>{
+      await this.refresh();
+      if(!this.disposed)this.observationTimer=setTimeout(()=>void read(),STATE_REFRESH_INTERVAL_MS);
+    };
+    void read();
   }
   async refresh():Promise<void>{
     // Keep the last failure/recovery explanation until an authoritative read

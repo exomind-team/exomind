@@ -5,6 +5,7 @@ import { AlphaDesktopShellView, AlphaDesktopSidebarView, AlphaMobileShellView } 
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { observeBetaCompactEditing } from './compact-editing';
 import { useBetaDesktopAdaptiveEnabled } from './preferences';
+import { betaBrandLabel } from './app-identity';
 
 export type BetaSection = 'now' | 'sync' | 'settings';
 const NAVIGATION = [
@@ -66,10 +67,11 @@ export function BetaAppShell({ section, onSectionChange, profileName, onProfileC
   const slot=<div ref={attachWorkspace} className="h-full min-h-0 overflow-hidden"/>;
   const shell=!desktop?<AlphaMobileShellView items={items} fillContainer fullscreen={compactEditing} renderNavigationItem={renderNavigationItem}>{slot}</AlphaMobileShellView>
     :<AlphaDesktopShellView fillContainer sidebar={<AlphaDesktopSidebarView items={items} collapsed={collapsed}
-    subtitle="外心 · Beta" renderNavigationItem={renderNavigationItem}
+    subtitle={betaBrandLabel} brand={<img src="/icons/32x32.png" width={28} height={28} alt="外心" draggable={false}/>} renderNavigationItem={renderNavigationItem}
     onToggleCollapsed={() => {
-      try { localStorage.setItem(SIDEBAR_KEY, String(!collapsed)); setCollapsed(!collapsed); setPreferenceError(''); }
-      catch { setPreferenceError('侧边栏显示设置未能保存，请稍后重试'); }
+      setCollapsed(!collapsed);
+      try { localStorage.setItem(SIDEBAR_KEY, String(!collapsed)); setPreferenceError(''); }
+      catch { setPreferenceError('侧边栏已切换，但显示设置未能保存；本窗口仍可继续使用'); }
     }}
     footer={<button type="button" aria-label={`打开档案：${profileName || '未打开档案'}`} onClick={onProfileClick} className={collapsed ? 'flex w-full justify-center rounded-md px-2 py-2 transition-colors hover:bg-[hsl(var(--sidebar-accent))]' : 'flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-[hsl(var(--sidebar-accent))]'}>
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--sidebar-accent))] text-xs font-semibold text-[hsl(var(--sidebar-accent-foreground))]" aria-hidden="true">{profileName.trim().charAt(0) || '?'}</div>

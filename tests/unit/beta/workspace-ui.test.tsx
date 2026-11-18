@@ -117,22 +117,23 @@ describe('Beta daily workspace continuity', () => {
     expect(screen.getByRole('textbox', { name: '记录当下' })).toBe(input);
   });
 
-  it('stops hidden timer UI reads and resumes one authoritative read without issuing a timer command', async () => {
+  it('stops hidden repaint work while the data owner keeps observing independently of the view', async () => {
+    vi.useFakeTimers();
     const client = timeblockClient();
     const owner = await BetaTimeblockController.open(client, D, P, { journal: memoryIntentJournal() });
+    await vi.advanceTimersByTimeAsync(0);
     const view = render(<BetaFocusTimer controller={owner} client={client} profileId={P} visible={false} />);
-    vi.useFakeTimers();
     try {
       const baseline = client.timeblocks.snapshot.mock.calls.length;
       await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
-      expect(client.timeblocks.snapshot).toHaveBeenCalledTimes(baseline);
+      expect(client.timeblocks.snapshot).toHaveBeenCalledTimes(baseline + 4);
       view.rerender(<BetaFocusTimer controller={owner} client={client} profileId={P} visible />);
-      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      expect(client.timeblocks.snapshot).toHaveBeenCalledTimes(baseline + 1);
-      view.rerender(<BetaFocusTimer controller={owner} client={client} profileId={P} visible={false} />);
       await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
-      expect(client.timeblocks.snapshot).toHaveBeenCalledTimes(baseline + 1);
+      expect(client.timeblocks.snapshot).toHaveBeenCalledTimes(baseline + 8);
+      view.unmount(); await owner.close();
+      await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+      expect(client.timeblocks.snapshot).toHaveBeenCalledTimes(baseline + 8);
       expect(client.timeblocks.command).not.toHaveBeenCalled();
-    } finally { vi.useRealTimers(); view.unmount(); await owner.close(); }
+    } finally { view.unmount(); await owner.close(); vi.useRealTimers(); }
   });
 });

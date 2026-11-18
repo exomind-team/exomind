@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Download, FileText, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { BetaClient } from './client';
@@ -10,6 +10,7 @@ import type { BetaOriginal } from './original-types';
 import { originalAcquisitionError, originalTransferActive, sameOriginal, type BetaOriginalSources, type BetaOriginalTransferStatus } from './original-acquisition';
 import { collectOriginalDownload } from './original-download';
 import { BetaImagePreview } from './BetaImagePreview';
+import { originalExportTasks } from './original-export-tasks';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -19,12 +20,17 @@ function formatBytes(bytes: number): string {
 
 export function OriginalDownloads({ client, profileId, originals, deviceId = 'local', visible = true }: { client: BetaClient; profileId: string; originals: BetaOriginal[]; deviceId?: string; visible?: boolean }) {
   const [busy, setBusy] = useState<string | null>(null); const [error, setError] = useState('');const [notice,setNotice]=useState('');
+  const exports=originalExportTasks(client),tasks=useSyncExternalStore(exports.subscribe,exports.snapshot);
+  const matches=tasks.filter(item=>item.profileId===profileId&&originals.some(original=>original.original_id===item.originalId&&original.sha256===item.sha256));
+  const task=matches.find(item=>item.phase==='running')??matches[matches.length-1];
+  const nativeBusy=task?.phase==='running';
   const active = useRef(true);const request=useRef<{id:string;client:BetaClient}|null>(null);
   useEffect(() => {
     active.current=true;setBusy(null);setError('');setNotice('');
-    return()=>{active.current=false;const owned=request.current;request.current=null;if(owned?.client.originalExports)void owned.client.originalExports.cancel(owned.id).catch(()=>{});};
+    return()=>{active.current=false;request.current=null;};
   },[client,profileId]);
   async function download(original: BetaOriginal) {
+    if(client.originalExports){try{exports.start(profileId,original);}catch(failure){setError(errorMessage(failure));}return;}
     if(request.current)return;
     let id:string;
     try{id=betaUuid();}catch(failure){setError(errorMessage(failure));return;}
@@ -41,12 +47,7 @@ export function OriginalDownloads({ client, profileId, originals, deviceId = 'lo
     } catch (failure) { if (active.current&&request.current===owned) setError(errorMessage(failure)); }
     finally { if(request.current===owned){request.current=null;if(active.current)setBusy(null);} }
   }
-  async function cancel(){
-    const owned=request.current;if(!owned?.client.originalExports)return;
-    try{const accepted=await owned.client.originalExports.cancel(owned.id);if(active.current&&request.current===owned)setNotice(accepted?'正在取消导出…':'导出已进入完成阶段，正在等待确认');}
-    catch(failure){if(active.current&&request.current===owned)setError(errorMessage(failure));}
-  }
-  return <div className="mt-2 w-full max-w-sm space-y-2">{originals.map(original => <OriginalAttachment key={`${deviceId}:${profileId}:${original.original_id}:${original.sha256}`} client={client} deviceId={deviceId} visible={visible} profileId={profileId} original={original} exporting={busy!==null} onDownload={()=>{void download(original);}}/>)}{busy && <div className="flex items-center gap-2 text-xs text-muted"><p role="status">{client.originalExports?'正在流式导出并校验原件…':'正在读取并校验原件…'}</p>{client.originalExports&&<Button variant="ghost" size="sm" onClick={()=>{void cancel();}}>取消导出</Button>}</div>}{notice&&<p role="status" className="text-xs text-muted">{notice}</p>}{error && <p role="alert" className="text-xs text-destructive">{error}</p>}</div>;
+  return <div className="mt-2 w-full max-w-sm space-y-2">{originals.map(original => <OriginalAttachment key={`${deviceId}:${profileId}:${original.original_id}:${original.sha256}`} client={client} deviceId={deviceId} visible={visible} profileId={profileId} original={original} exporting={busy!==null||nativeBusy} onDownload={()=>{void download(original);}}/>)}{busy && <p role="status" className="text-xs text-muted">正在读取并校验原件…</p>}{task&&<div className="flex items-center gap-2 text-xs text-secondary"><p role={task.phase==='failed'?'alert':'status'}>{task.message}</p>{task.phase==='running'&&<Button variant="ghost" size="sm" disabled={task.cancelPending} onClick={()=>{void exports.cancel(task.requestId);}}>取消导出</Button>}</div>}{notice&&<p role="status" className="text-xs text-muted">{notice}</p>}{error && <p role="alert" className="text-xs text-destructive">{error}</p>}</div>;
 }
 
 type Lifetime={active:boolean};

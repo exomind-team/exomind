@@ -134,9 +134,10 @@ export class BetaDraftController {
       this.restoreBlocked = true;
       this.state = { version: 1, drafts: {}, pending: [], confirmed: [], persistenceError: '草稿缓存无法读取，已停止写入以保留原缓存', persistenceState: 'failed' };
     }
+    let external=durable(storage)?storage.snapshot().externalRevision??0:0;
     if (durable(storage)) this.unsubscribePersistence = storage.subscribe(() => {
       if (this.disposed || this.restoreBlocked) return;
-      const status = storage.snapshot(); this.state = { ...this.state, persistenceState: status.state, persistenceError: status.error };
+      const status = storage.snapshot();let restored:Partial<PersistedState>={};if((status.externalRevision??0)!==external){external=status.externalRevision??0;restored=load(storage.getItem(this.key),deviceId);} this.state = { ...this.state,...restored, persistenceState: status.state, persistenceError: status.error };
       this.listeners.forEach(listener => listener());
     });
   }

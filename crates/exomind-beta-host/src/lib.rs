@@ -11,6 +11,7 @@ mod local_sources;
 mod model_config;
 mod model_config_http;
 mod model_provider;
+pub mod native_workspace;
 mod summary_jobs;
 mod summary_jobs_http;
 mod summary_material;
@@ -122,6 +123,8 @@ pub enum HostError {
     IntentCacheCorrupt,
     #[error("local UI intent persistence could not be confirmed")]
     IntentCacheUnavailable,
+    #[error("local intent changed in another application client")]
+    IntentCacheConflict,
     #[error("local source cache requires recovery")]
     LocalSourceCorrupt,
     #[error("local source cache persistence could not be confirmed")]

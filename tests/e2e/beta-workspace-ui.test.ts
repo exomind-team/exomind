@@ -123,7 +123,8 @@ test('keyboard operates the same pane controls and keeps the editor selection ac
 test('record body and durable draft status retain readable contrast in the active theme', async ({ page }) => {
   await page.getByRole('textbox', { name: '记录当下' }).fill('对比度验收');
   const body = page.getByLabel('记录历史').getByText('第 48 条合成记录', { exact: false });
-  const status = page.getByText('记录草稿已暂存 · 尚未提交', { exact: true });
+  await activate(page, page.getByRole('button', { name: '记录保存状态' }));
+  const status = page.getByRole('dialog').getByText('记录草稿已暂存 · 尚未提交', { exact: true });
   await expect(status).toBeVisible();
   for (const target of [body, status]) {
     const ratio = await target.evaluate(element => {
@@ -141,4 +142,31 @@ test('record body and durable draft status retain readable contrast in the activ
     });
     expect(ratio).toBeGreaterThanOrEqual(4.5);
   }
+});
+
+test('a short workspace gives records the main area and keeps configuration beside its controls', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1000, height: 650 });
+  const input = page.getByRole('textbox', { name: '记录当下' });
+  const row = page.getByTestId('new-now-input-row');
+  await expect(input).toBeInViewport({ ratio: 1 });
+  const inputBox = await input.boundingBox(), rowBox = await row.boundingBox();
+  expect(rowBox!.y + rowBox!.height - (inputBox!.y + inputBox!.height)).toBeLessThanOrEqual(14);
+  await activate(page, page.getByRole('button', { name: '配置时间块', exact: true }));
+  const card = page.locator('#new-focus-config-panel');
+  const geometry = await card.evaluate(element => {
+    const card = element.getBoundingClientRect(), workspace = element.closest('[data-beta-workspace]')!.getBoundingClientRect();
+    const history = document.querySelector('[aria-label="记录历史"]')!.getBoundingClientRect();
+    return { cardWidth: card.width, cardTop: card.top, workspaceWidth: workspace.width, historyHeight: history.height };
+  });
+  expect(geometry.cardWidth).toBeGreaterThan(geometry.workspaceWidth * 0.9);
+  expect(geometry.cardTop).toBeLessThan(130);
+  expect(geometry.historyHeight).toBeGreaterThan(200);
+  await page.screenshot({ path: info.outputPath('compact-configuration.png'), fullPage: true });
+  await activate(page, page.getByRole('button', { name: '简洁记录', exact: true }));
+  await expect(page.getByRole('button', { name: '折叠专注', exact: true })).toBeHidden();
+  await expect(page.getByRole('button', { name: '折叠记录', exact: true })).toBeHidden();
+  const historyBox = await page.getByLabel('记录历史').boundingBox();
+  expect(historyBox!.height).toBeGreaterThan(450);
+  await page.screenshot({ path: info.outputPath('quiet-records.png'), fullPage: true });
+  expect((await counters(page)).timerCommands).toBe(0);
 });

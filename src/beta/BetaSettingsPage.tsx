@@ -12,7 +12,7 @@ import type { SettingsContext } from '@/ui/app/config/settings/settings-types';
 import { DesktopSettingsLayout } from '@/ui/app/layouts/DesktopSettingsLayout';
 import { MobileSettingsLayout } from '@/ui/app/layouts/MobileSettingsLayout';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
-import { version } from '../../package.json';
+import { betaAppVersion } from './app-identity';
 import { deadlineAlertFailure, deadlineNotificationPermission, nativeBetaDeadlineAlertsClient, type BetaDeadlineAlertsClient, type BetaDeadlineAlertStatus } from './deadline-alert-client';
 import { SummaryModelConfigurationController, type SummaryModelConfigurationService } from './summary-model-config';
 import { BetaSummaryModelSettingsView } from './BetaSummaryModelSettingsView';
@@ -63,7 +63,7 @@ export function BetaSettingsPage({ profileName, profileId='', deviceId='', summa
       fullscreenQueue.current = operation.catch(() => {}); return operation;
     },
   }), []);
-  const build = resolveVersionBuildInfo(import.meta.env, version);
+  const build = resolveVersionBuildInfo(import.meta.env, betaAppVersion);
   const ctx = useMemo<SettingsContext>(() => ({
     isDesktop: desktopLayout, isLandscape: desktopLayout, isTauriWindow: native,
     copyText: async value => {

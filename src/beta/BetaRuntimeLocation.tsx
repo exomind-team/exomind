@@ -7,9 +7,10 @@ import { SettingsSection } from '@/ui/app/components/settings/settings-section';
 import { Divider, SettingRow } from '@/ui/app/components/settings-shared';
 import { errorMessage } from './drafts';
 import { betaDisplayEndpoint, readBetaRuntimeLocation, type BetaRuntimeLocationInfo } from './runtime-location';
+import { betaAppVersion } from './app-identity';
 
 /** Alpha's shared dialog/settings presentation; no legacy Runtime is started. */
-export function BetaRuntimeLocation({ endpoint }: { endpoint?: string }) {
+export function BetaRuntimeLocation({ endpoint, compact = false }: { endpoint?: string; compact?: boolean }) {
   const [native] = useState(isTauri);
   const [location, setLocation] = useState<BetaRuntimeLocationInfo | null>(null);
   const [loading, setLoading] = useState(native);
@@ -19,7 +20,7 @@ export function BetaRuntimeLocation({ endpoint }: { endpoint?: string }) {
   const [revision, setRevision] = useState(0);
   const [open, setOpen] = useState(false);
   useEffect(() => {
-    if (!native) return;
+    if (!native || compact && !open) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     setLoading(true); setError('');
@@ -37,11 +38,11 @@ export function BetaRuntimeLocation({ endpoint }: { endpoint?: string }) {
     }
     void read(0);
     return () => { active = false; clearTimeout(timer); };
-  }, [native, revision]);
+  }, [native, revision, compact, open]);
   const address = native ? location?.http_address : betaDisplayEndpoint(endpoint);
   const label = error ? '地址暂未更新' : address ?? (location?.listener_state === 'unavailable' ? '本机记录可用 · 服务端口未启动'
     : location?.listener_state === 'stopped' ? '本机服务已停止' : loading ? '正在读取本机地址…' : '当前服务地址尚未确认');
-  const appVersion = import.meta.env.VITE_APP_VERSION?.trim() || 'Beta · 开发版';
+  const appVersion = betaAppVersion;
   async function copy(value: string, name: string) {
     setNotice(''); setCopyError('');
     try {
@@ -53,9 +54,9 @@ export function BetaRuntimeLocation({ endpoint }: { endpoint?: string }) {
   }
   return <Dialog open={open} onOpenChange={next => { setOpen(next); setNotice(''); setCopyError(''); }}>
     <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted">
-      <span className="shrink-0">{appVersion}</span>
-      <DialogTrigger asChild><button type="button" className="inline-flex min-w-0 items-center gap-1 rounded-md text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="查看当前运行地址与资料目录" title={label}>
-        <MapPin size={12} className="shrink-0"/><span data-testid="beta-current-address" className="truncate">{label}</span>
+      {!compact && <span className="shrink-0">{appVersion}</span>}
+      <DialogTrigger asChild><button type="button" className={`inline-flex min-w-0 items-center justify-center gap-1 rounded-md text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${compact ? 'h-9 w-9' : ''}`} aria-label="查看当前运行地址与资料目录" title={compact ? '当前运行位置' : label}>
+        <MapPin size={compact ? 16 : 12} className="shrink-0"/>{!compact && <span data-testid="beta-current-address" className="truncate">{label}</span>}
       </button></DialogTrigger>
     </div>
     <DialogContent className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] overflow-y-auto">

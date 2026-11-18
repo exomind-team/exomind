@@ -165,6 +165,7 @@ describe('Beta React entry', () => {
     fireEvent.click(await screen.findByRole('button', { name: '加载更早记录' }));
     expect(await screen.findByText('older')).toBeInTheDocument();
     expect(client.eventsPage).toHaveBeenNthCalledWith(2, 'p', { before: 2, through: 2, limit: 100 });
+    fireEvent.click(screen.getByRole('button',{name:'检索记录'}));
     fireEvent.change(screen.getByRole('textbox', { name: '搜索记录' }), { target: { value: "中文%_'" } });
     fireEvent.click(screen.getByRole('button', { name: '搜索' }));
     await waitFor(() => expect(client.eventsPage).toHaveBeenLastCalledWith('p', { limit: 100, search: "中文%_'" }));

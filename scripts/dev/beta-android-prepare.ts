@@ -7,10 +7,12 @@ import {
   ANDROID_CONFIG_CHANGES_VALUE,
   ensureAndroidSystemBarsInMainActivity,
   ensureConfigChangesInManifest,
+  ensureDebugNativeLibsAreStrippedInGradle,
 } from './android-manifest-permission-lib';
 
 const BETA_PACKAGE = 'com.exomind.app.v06.beta';
 const ANDROID_APP = ['src-tauri', 'gen', 'android', 'app'];
+const NATIVE_SYMBOLS_PROPERTY = 'exomind.keepNativeSymbols';
 
 export interface BetaAndroidPreparation {
   projectRoot: string;
@@ -176,6 +178,19 @@ function writeChanges(changes: FileChange[]): string[] {
   }
 }
 
+function prepareNativeSymbols(gradle: string): string {
+  // Generated files are ignored. Keep this policy in the maintained prepare
+  // step so a clean android init and every local/CI candidate get the same rule.
+  if (gradle.includes(`val keepNativeSymbols = providers.gradleProperty("${NATIVE_SYMBOLS_PROPERTY}")`)) return gradle;
+  const stripped = ensureDebugNativeLibsAreStrippedInGradle(gradle).buildGradleKts;
+  const newline = gradle.includes('\r\n') ? '\r\n' : '\n';
+  return stripped.replace(/^([ \t]*)isJniDebuggable[ \t]*=[ \t]*(?:true|false)[ \t]*(\r?)$/m, (_line, indent: string, carriage: string) => [
+    `${indent}val keepNativeSymbols = providers.gradleProperty("${NATIVE_SYMBOLS_PROPERTY}").orNull?.toBoolean() ?: false`,
+    `${indent}isJniDebuggable = keepNativeSymbols`,
+    `${indent}if (keepNativeSymbols) { packaging { jniLibs.keepDebugSymbols.add("**/*.so") } }`,
+  ].join(newline)+carriage);
+}
+
 export function prepareBetaAndroid(projectRoot: string): BetaAndroidPreparation {
   if (!isAbsolute(projectRoot) || lstatSync(projectRoot).isSymbolicLink() || !lstatSync(projectRoot).isDirectory()) {
     reject('An explicit absolute Beta project root is required');
@@ -196,13 +211,15 @@ export function prepareBetaAndroid(projectRoot: string): BetaAndroidPreparation 
   const manifest = readFileSync(manifestPath, 'utf8');
   const activity = readFileSync(activityPath, 'utf8');
   assertGradle(gradle); assertManifest(manifest); assertActivity(activity, false);
+  const nextGradle = prepareNativeSymbols(gradle);
+  assertGradle(nextGradle);
   const nextManifest = ensureConfigChangesInManifest(manifest).manifestXml;
   const nextActivity = applyBetaImeInsets(ensureAndroidSystemBarsInMainActivity(activity, { ensureConfigurationChanged: true }).activityKotlin);
   assertManifest(nextManifest); assertActivity(nextActivity, true);
   if (attribute(withoutComments(nextManifest).match(/<activity\b[^>]*>/)?.[0] ?? '', 'android:configChanges') !== ANDROID_CONFIG_CHANGES_VALUE) {
     reject('Beta Activity configChanges integration is missing');
   }
-  const changes = [{ path: manifestPath, before: manifest, after: nextManifest }, { path: activityPath, before: activity, after: nextActivity }]
+  const changes = [{ path: gradlePath, before: gradle, after: nextGradle }, { path: manifestPath, before: manifest, after: nextManifest }, { path: activityPath, before: activity, after: nextActivity }]
     .filter(change => change.before !== change.after);
   return { projectRoot, changedFiles: writeChanges(changes) };
 }

@@ -6,7 +6,7 @@ import type { BetaClient,BetaReceipt } from './client';
 import { BetaTimeblockController,timeblockControlsBlocked } from './timeblocks-controller';
 import { runActionOnPrimaryModifierEnter } from '@/ui/app/components/dialog-submit-shortcuts';
 import { useBetaViewActive } from './view-activity';
-import { RefreshCw } from 'lucide-react';
+import { ChevronDown, RefreshCw, Target } from 'lucide-react';
 
 const message=(error:unknown)=>error&&typeof error==='object'&&'message'in error?String(error.message):'时间块操作尚未确认，请查证后重试';
 type Panel={kind:'start'}|{kind:'rotate';from:string;name:string}|null;
@@ -15,7 +15,7 @@ export interface BetaFocusHandoffTarget {handoffId:string;blockId:string;attempt
 
 /** Presentation is the actual Alpha View. This component owns only transient
  * panel/dialog choices; controller/journal/Host own intent and business state. */
-export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffTarget,onHandoffReady,onOpenSync,visible=true}:{controller:BetaTimeblockController;client:BetaClient;profileId:string;onCommitted?:()=>void;handoffTarget?:BetaFocusHandoffTarget;onHandoffReady?:(id:string,hint:string,attempt:number)=>void;onOpenSync?:()=>void;visible?:boolean}){
+export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffTarget,onHandoffReady,onOpenSync,onCollapse,visible=true}:{controller:BetaTimeblockController;client:BetaClient;profileId:string;onCommitted?:()=>void;handoffTarget?:BetaFocusHandoffTarget;onHandoffReady?:(id:string,hint:string,attempt:number)=>void;onOpenSync?:()=>void;onCollapse?:()=>void;visible?:boolean}){
   const state=useSyncExternalStore(controller.subscribe,controller.snapshot);
   const observing = useBetaViewActive(visible);
   const [panel,setPanel]=useState<Panel>(null);
@@ -30,11 +30,10 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[controller]);
   useEffect(()=>{
     if(!observing)return;
-    let cancelled=false;let timer:ReturnType<typeof setTimeout>;let reading=false;
-    const refresh=async()=>{if(reading||cancelled)return;reading=true;await controller.refresh();reading=false;if(!cancelled){clearTimeout(timer);timer=setTimeout(()=>void refresh(),1000);}};
-    void refresh();const display=setInterval(()=>tick(value=>value+1),250);
-    const visible=()=>{if(!document.hidden)void refresh();};window.addEventListener('focus',visible);document.addEventListener('visibilitychange',visible);
-    return()=>{cancelled=true;clearTimeout(timer);clearInterval(display);window.removeEventListener('focus',visible);document.removeEventListener('visibilitychange',visible);};
+    // Presentation owns interpolation repaint only. Controller.open/close owns
+    // the state reader shared with the independent desktop overlay.
+    const display=setInterval(()=>tick(value=>value+1),250);
+    return()=>clearInterval(display);
   },[controller,observing]);
   useEffect(()=>{
     if(!state.remote||initializedOwner.current===controller)return;
@@ -105,8 +104,9 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
     });
   }
   const selected=choice||active?.block_id||Object.keys(roster)[0]||'';
-  return <section aria-label="时间块" className="shrink-0">
-    <div className="flex flex-wrap items-center gap-2 px-5 py-2 text-xs text-secondary">
+  return <section aria-label="时间块" className="shrink-0 px-3 pb-2">
+    <div className="flex min-h-9 flex-wrap items-center gap-1 py-1 text-xs text-secondary">
+      {onCollapse&&<Button size="sm" variant="ghost" aria-label="折叠专注" aria-expanded="true" onClick={onCollapse}><Target size={14} aria-hidden="true"/><ChevronDown size={12} aria-hidden="true"/></Button>}
       {active&&<Button size="sm" variant="ghost" disabled={disabled} onClick={()=>{setCustom({editing:false,text:String(state.draft.minutes)});setPanel({kind:'rotate',from:active.block_id,name:active.name});}}>切换时间块</Button>}
       {!!Object.keys(roster).length&&<><select aria-label="反馈时间块" className="max-w-44 rounded-md border border-input bg-transparent p-1" value={selected} onChange={event=>setChoice(event.target.value)}>{Object.entries(roster).map(([id,name])=><option value={id} key={id}>{name}</option>)}</select><Button size="sm" variant="ghost" disabled={!selected||disabled} onClick={()=>setFeedback({id:selected,kind:'append'})}>追加反馈</Button></>}
       <Button size="icon" variant="ghost" className="ml-auto h-8 w-8" aria-label="刷新时间块" title="刷新时间块" onClick={()=>void controller.refresh()}><RefreshCw size={14} aria-hidden="true" /></Button>
@@ -122,9 +122,7 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
     {state.persistenceState==='failed'&&<Button size="sm" variant="outline" className="mx-5 mb-2" onClick={()=>{void controller.flush().then(()=>setError('')).catch(failure=>setError(message(failure)));}}>重试本机暂存</Button>}
     {state.pending.map(item=><div key={item.command.command_id} className="flex items-center gap-2 px-5 py-2 text-xs text-secondary"><span className="min-w-0 flex-1">{item.state==='pending'?'正在确认时间块操作…':item.state==='rejected'?'时间块已变化，此操作被拒绝':'时间块操作结果待确认'}{item.message&&`：${item.message}`}</span>{item.state==='rejected'?<Button size="sm" variant="outline" onClick={()=>{controller.dismissRejected(item.command.command_id);void controller.refresh();}}>放弃被拒操作</Button>:<Button size="sm" variant="outline" disabled={item.state==='pending'} onClick={()=>void run(()=>controller.retry(item.command.command_id))}>查证时间块操作</Button>}</div>)}
     {!state.remote?<p role="status" className="px-5 py-3 text-xs text-muted">{state.error?'尚未读取到可用的时间块状态，请按错误提示处理后刷新。':'正在恢复并读取时间块…'}</p>:<>
-      {panel?.kind==='rotate'&&<p className="px-5 text-xs text-muted">切换目标：{panel.name}</p>}
-      {panel&&<label className="flex items-center gap-2 px-5 text-xs text-secondary">倒计时到点<select aria-label="倒计时到点方式" className="rounded-md border border-input bg-transparent p-1" value={state.draft.endMode} onChange={event=>setDraft({endMode:event.target.value as 'soft'|'hard'})}><option value="soft">继续超时</option><option value="hard">结束行动并待反馈</option></select></label>}
-      <FocusTimerView model={model} actionsDisabled={disabled} actions={{
+      <FocusTimerView surface="workspace" model={model} actionsDisabled={disabled} actions={{
         expand:()=>{setCustom({editing:false,text:String(state.draft.minutes)});setPanel({kind:'start'});},collapse:()=>setPanel(null),
         selectTiming:(mode,minutes)=>{setCustom({editing:false,text:String(minutes??state.draft.minutes)});setDraft({mode,...(minutes===undefined?{}:{minutes})});},
         editCustom:()=>setCustom({editing:true,text:String(state.draft.minutes)}),start,beginRename:()=>{},
@@ -136,7 +134,7 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
           if(event.nativeEvent.isComposing)return;if(quick(event)){event.preventDefault();event.stopPropagation();applyMinutes(event.currentTarget.value);start();}
           else if(event.key==='Enter'){event.preventDefault();applyMinutes(event.currentTarget.value);}else if(event.key==='Escape'){event.preventDefault();setCustom({editing:false,text:String(state.draft.minutes)});}
         }},expectedTimeKeyDown:event=>{if(quick(event)){event.preventDefault();start();}},
-      }} slots={{dialogs:<TimeBlockFeedbackDialog open={!!feedback} onOpenChange={open=>{if(!open)setFeedback(null);}}
+      }} slots={{configurationDetails:panel&&<div className="flex flex-wrap items-center gap-2 text-xs text-secondary">{panel.kind==='rotate'&&<span>切换目标：{panel.name}</span>}<label className="flex items-center gap-2">倒计时到点<select aria-label="倒计时到点方式" className="rounded-md border border-input bg-page p-1 dark:bg-page-dark" value={state.draft.endMode} onChange={event=>setDraft({endMode:event.target.value as 'soft'|'hard'})}><option value="soft">继续超时</option><option value="hard">结束行动并待反馈</option></select></label></div>,dialogs:<TimeBlockFeedbackDialog open={!!feedback} onOpenChange={open=>{if(!open)setFeedback(null);}}
         title={feedback?.kind==='append'?'追加反馈':'结束反馈'} description={feedback?roster[feedback.id]??feedback.id.slice(0,8):''} compact
         feedback={feedbackDraft} onFeedbackChange={text=>{if(feedback)try{controller.setFeedbackDraft(feedback.id,text);}catch(failure){setError(message(failure));}}}
         onFeedbackKeyDown={event=>{runActionOnPrimaryModifierEnter(event,()=>submitFeedback());}} feedbackPlaceholder="记录本次专注的反馈..." feedbackTestId="new-focus-feedback-textarea"

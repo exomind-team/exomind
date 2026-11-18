@@ -14,6 +14,8 @@ mod overlay;
 mod peer_commands;
 #[path = "beta_native_summaries.rs"]
 mod summary_commands;
+#[path = "beta_window_icon.rs"]
+mod window_icon;
 
 use exomind_beta_host::{
     BetaHost, DeadlineEnvelope, HostError, HostStatus, RunningServer, Session,
@@ -26,12 +28,11 @@ use exomind_core::{
 };
 use serde::Serialize;
 use std::{
-    collections::HashMap,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::{
-        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
     },
 };
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
@@ -139,6 +140,10 @@ impl From<HostError> for Failure {
                 "intent_cache_unavailable",
                 "本机草稿暂存未确认，请保留窗口并重试",
             ),
+            HostError::IntentCacheConflict => (
+                "intent_cache_conflict",
+                "另一界面已更新共享草稿，本窗口输入已保留；请核对新旧输入后重新载入，未覆盖新稿",
+            ),
             HostError::LocalSourceCorrupt => (
                 "local_source_corrupt",
                 "本机文件暂存校验失败，现有数据已保留，请重新选择原文件",
@@ -231,13 +236,13 @@ impl From<HostError> for Failure {
 
 struct NativeState {
     host: Arc<BetaHost>,
+    workspace: exomind_beta_host::native_workspace::NativeWorkspace,
     data_directory: PathBuf,
     owner: Session,
     peers: Arc<exomind_beta_host::PeerNetwork>,
     exports: Arc<export::ExportManager>,
     deadlines: deadlines::Bridge,
     dev_origin: Option<url::Origin>,
-    sessions: Mutex<HashMap<ProfileId, Session>>,
     server: tokio::sync::Mutex<Option<RunningServer>>,
     listener_failed: AtomicBool,
     closing: AtomicBool,
@@ -253,15 +258,17 @@ impl NativeState {
         let owner = host.owner_session()?;
         host.start_services()?;
         let peers = exomind_beta_host::PeerNetwork::new(host.clone(), owner.clone())?;
+        let workspace =
+            exomind_beta_host::native_workspace::NativeWorkspace::new(host.clone(), owner.clone());
         Ok(Self {
             host,
+            workspace,
             data_directory: root.to_path_buf(),
             owner,
             peers,
             exports: Arc::new(export::ExportManager::default()),
             deadlines: deadlines::Bridge::default(),
             dev_origin,
-            sessions: Mutex::new(HashMap::new()),
             server: tokio::sync::Mutex::new(None),
             listener_failed: AtomicBool::new(false),
             closing: AtomicBool::new(false),
@@ -273,13 +280,7 @@ impl NativeState {
     }
 
     fn human(&self, profile: ProfileId) -> Result<Session, HostError> {
-        let mut sessions = self.sessions.lock().map_err(|_| HostError::StatePoisoned)?;
-        if let Some(session) = sessions.get(&profile) {
-            return Ok(session.clone());
-        }
-        let session = self.host.native_human_session(&self.owner, profile)?;
-        sessions.insert(profile, session.clone());
-        Ok(session)
+        self.workspace.human_session(profile)
     }
 
     async fn start_listener(&self, port: u16) -> Result<(), HostError> {
@@ -508,6 +509,23 @@ async fn beta_write_local_intent(
     trusted_window(&window, state.inner())?;
     work(state.inner(), move |state| {
         state.host.write_local_intent(&state.owner, &key, &raw)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_compare_local_intent(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    key: String,
+    expected_raw: Option<String>,
+    raw: String,
+) -> Result<(), Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .compare_local_intent(&state.owner, &key, expected_raw.as_deref(), &raw)
     })
     .await
 }
@@ -869,8 +887,8 @@ fn report_startup_failure(app: &AppHandle, error: &HostError) {
     log::error!("Beta storage startup failed: {error}");
     #[cfg(target_os = "windows")]
     {
-        use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
         use windows::core::PCWSTR;
+        use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
         let reason = match error {
             HostError::RootInUse => {
                 "这份资料正在由另一个外心 Beta 实例使用，请先退出该实例再重试。"
@@ -996,6 +1014,12 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                     .data_directory(directory.clone())
                     .build()?;
             }
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(error) = window_icon::install(&window) {
+                    log::warn!("Beta taskbar logo was not applied: {error}");
+                }
+            }
             let handle = app.handle().clone();
             let peer_state = state.clone();
             tauri::async_runtime::spawn(async move {
@@ -1043,11 +1067,13 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             peer_commands::beta_peer_original_status,
             peer_commands::beta_peer_original_fetch,
             peer_commands::beta_peer_original_cancel,
-            overlay::beta_overlay_main,
             overlay::beta_overlay_attach,
             overlay::beta_overlay_read,
             overlay::beta_overlay_request,
             overlay::beta_overlay_window,
+            overlay::beta_workspace_bind,
+            overlay::beta_workspace_preferences,
+            overlay::beta_workspace_profiles,
             beta_status,
             beta_runtime_location,
             beta_profiles,
@@ -1063,6 +1089,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             summary_commands::beta_summary_service_status,
             beta_read_local_intent,
             beta_write_local_intent,
+            beta_compare_local_intent,
             local_sources::beta_begin_local_source,
             local_sources::beta_local_source_status,
             local_sources::beta_write_local_source_chunk,
@@ -1316,12 +1343,10 @@ mod tests {
             Some("{\"draft\":\"retained local text\"}")
         );
         let human = reopened.native_human_session(&owner, profile).unwrap();
-        assert!(
-            reopened
-                .events_page(&human, profile, &EventQuery::default())
-                .unwrap()
-                .items
-                .is_empty()
-        );
+        assert!(reopened
+            .events_page(&human, profile, &EventQuery::default())
+            .unwrap()
+            .items
+            .is_empty());
     }
 }

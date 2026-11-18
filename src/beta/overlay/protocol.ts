@@ -3,6 +3,8 @@ import type { BetaTimeblockSnapshot } from '../timeblocks-types';
 import type { InputSendMode } from '@/lib/input-send-shortcut';
 
 export interface OverlayBinding { device_id:string; runtime_id:string; profile_id:string }
+// Compatibility wire name: this generation belongs to the Native workspace,
+// never to Main's DOM, controller instance or visibility.
 export interface OverlayScope extends OverlayBinding { ui_owner_generation:string }
 export type OverlayAction =
   | {kind:'refresh'}
@@ -20,6 +22,7 @@ export interface OverlayRequest {
 export interface OverlayTicket { ticket_id:string;request:OverlayRequest }
 export interface OverlayView {
   scope:OverlayScope;
+  profile_name?:string;
   theme:'light'|'dark';
   input_send_mode?: InputSendMode;
   remote:BetaTimeblockSnapshot|null;

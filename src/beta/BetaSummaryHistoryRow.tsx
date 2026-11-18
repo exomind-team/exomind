@@ -29,8 +29,8 @@ export function BetaSummaryHistoryRow({record,api,revision,now,dateMode,onInspec
   },[api,visible,record.profile_id,record.task_id,record.event_id,record.digest,record.local_seq,revision,reload]);
   const qualified=qualification&&qualification.api===api&&qualification.revision===revision&&qualification.task.profile_id===record.profile_id&&qualification.task.task_id===record.task_id&&sameSummaryArtifact(record,qualification.artifact)?qualification:null;
   const valid=!loading&&!!qualified;const sources=new Map(record.snapshot.sources.map(source=>[source.event_id,source]));
-  return<div ref={host}><ChatMessageRowView eventId={record.event_id} timelineKind="summary/1" tone="system"
-    avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className="bg-surface text-brand-accent"><Sparkles size={16}/></AvatarFallback></Avatar>}
+  return<div ref={host}><ChatMessageRowView eventId={record.event_id} timelineKind="summary/1" tone="agent-feedback"
+    avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className="bg-violet-600 text-white"><Sparkles size={16}/></AvatarFallback></Avatar>}
     metadata={<><span className="text-xs font-semibold text-strong">{summaryArtifactLabel(record.artifact_kind)}</span><EventTimestamp timestamp={record.occurred_at_ms} now={now} mode={dateMode}/>{valid&&qualified&&<span>{qualified.artifact.current?'当前版本':'历史版本'}</span>}</>}
     content={<div className="space-y-3"><BetaSummaryBody narrative={record.output.narrative}/>
       {(!valid||loading)&&<p role="status" className="text-xs text-muted">{loading?'正在核对当前状态…':'当前状态尚未确认，正文已保留'}</p>}

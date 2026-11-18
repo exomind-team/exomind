@@ -11,20 +11,25 @@ const inactive=()=>new BetaApiError('overlay_scope_changed','浮窗上下文已�
 export class OverlaySession {
   private state:OverlaySessionState={ready:false,view:null,error:null,pending:[]};
   private stopped=false;private seq=0;private timer:ReturnType<typeof setTimeout>|undefined;
+  private readGeneration=0;
   private readonly listeners=new Set<()=>void>();private responses=new Map<string,OverlayResponse>();
   private submitQueue:Promise<void>=Promise.resolve();
   private constructor(private readonly port:OverlayPort,private readonly generation:string){}
   static async open(port:OverlayPort=nativeOverlayPort()):Promise<OverlaySession>{const generation=await port.attach(),session=new OverlaySession(port,generation);await session.poll();return session;}
   snapshot=()=>this.state;
+  refresh=()=>this.read();
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener);};};
   private emit(next:OverlaySessionState){this.state=next;for(const listener of this.listeners)listener();}
-  private async poll(){
-    try{const read=await this.port.read();if(this.stopped)return;if(read.overlay_generation!==this.generation)throw inactive();
+  private async read(){
+    const generation=++this.readGeneration;
+    try{const read=await this.port.read();if(this.stopped||generation!==this.readGeneration)return;if(read.overlay_generation!==this.generation)throw inactive();
       if(read.view&&this.state.view&&overlayScopeKey(read.view.scope)!==overlayScopeKey(this.state.view.scope))this.seq=0;
       this.responses=new Map(read.responses.map(item=>[item.request_id,item.response]));
-      this.emit({...this.state,ready:read.ready,view:read.view??this.state.view,error:read.ready?null:'主窗口尚未就绪，浮窗暂不可操作'});
-    }catch(error){if(!this.stopped)this.emit({...this.state,ready:false,error:error instanceof Error?error.message:'浮窗桥暂不可用'});}
-    finally{if(!this.stopped)this.timer=setTimeout(()=>void this.poll(),250);}
+      this.emit({...this.state,ready:read.ready,view:read.view??this.state.view,error:read.ready?null:'请先选择本机档案'});
+    }catch(error){if(!this.stopped&&generation===this.readGeneration)this.emit({...this.state,ready:false,error:error instanceof Error?error.message:'本机工作区暂不可用'});}
+  }
+  private async poll(){
+    await this.read();if(!this.stopped)this.timer=setTimeout(()=>void this.poll(),1000);
   }
   close(){if(this.stopped)return;this.stopped=true;clearTimeout(this.timer);this.emit({...this.state,ready:false,error:'浮窗已关闭'});this.listeners.clear();}
   send(action:OverlayAction,view:OverlayView=this.state.view!,prepared?:(request:OverlayRequest)=>void):Promise<OverlayResponse>{
@@ -37,6 +42,8 @@ export class OverlaySession {
   private async perform(request:OverlayRequest):Promise<OverlayResponse>{
     if(this.stopped)throw inactive();
     const submitted=this.submitQueue.then(()=>{if(this.stopped)throw inactive();return this.port.submit(request);});this.submitQueue=submitted.catch(()=>{});await submitted;
+    // Confirm Native immediately; idle polling never delays a user command.
+    await this.read();
     const response=await new Promise<OverlayResponse>((resolve,reject)=>{
       let remove=()=>{};const finish=(error?:unknown,value?:OverlayResponse)=>{clearTimeout(timeout);remove();if(error)reject(error);else resolve(value!);};
       const timeout=setTimeout(()=>finish(new BetaApiError('overlay_result_unknown','浮窗操作结果未确认，请保留输入并查证原请求')),10_000);

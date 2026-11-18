@@ -62,6 +62,9 @@ fn validate_key(key: &str, device: DeviceId, core: &Core) -> Result<(), HostErro
     if key == format!("{CAPTURE_PREFIX}{device}") {
         return Ok(());
     }
+    if key == format!("exomind:beta:workspace:{device}") {
+        return Ok(());
+    }
     let encoded = key
         .strip_prefix(TIMEBLOCK_PREFIX)
         .or_else(|| key.strip_prefix(SUMMARY_PREFIX))
@@ -457,5 +460,38 @@ impl BetaHost {
             .as_mut()
             .ok_or(HostError::IntentCacheUnavailable)?
             .write(key, raw)
+    }
+
+    /// Compare and replace while holding the same Host gate as every other
+    /// private-intent writer. A stale window cannot overwrite a newer client.
+    pub fn compare_local_intent(
+        &self,
+        owner: &Session,
+        key: &str,
+        expected: Option<&str>,
+        raw: &str,
+    ) -> Result<(), HostError> {
+        let mut state = self.active_state()?;
+        self.owner(owner)?;
+        let resources = state.resources.as_mut().ok_or(HostError::Stopped)?;
+        validate_key(key, self.device_id, &resources.core)?;
+        if raw.len() > MAX_RAW_BYTES {
+            return Err(HostError::PayloadTooLarge);
+        }
+        if !raw_is_valid(raw) {
+            return Err(HostError::InvalidRequest);
+        }
+        if resources.local_intents.is_none() {
+            resources.local_intents =
+                Some(Store::open(&resources.persistence.root, self.device_id)?);
+        }
+        let store = resources
+            .local_intents
+            .as_mut()
+            .ok_or(HostError::IntentCacheUnavailable)?;
+        if store.read(key)?.as_deref() != expected {
+            return Err(HostError::IntentCacheConflict);
+        }
+        store.write(key, raw)
     }
 }

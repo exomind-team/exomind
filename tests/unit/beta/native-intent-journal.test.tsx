@@ -25,8 +25,8 @@ describe('Native private SQLite intent adapter and recovery',()=>{
     const predecessor={read:vi.fn(async()=>{throw new Error('corrupt browser');})};const legacy={getItem:vi.fn(()=>{throw new Error('weak cache');})};
     const storage=await openDurableIntentStorage({key,journal,predecessor,legacy,validate:()=>{}});
     expect(storage.getItem(key)).toBe('new raw');storage.setItem(key,'next raw');await storage.commit();
-    expect(call).toHaveBeenCalledWith('beta_read_local_intent',{key});expect(call).toHaveBeenCalledWith('beta_write_local_intent',{key,raw:'next raw'});
-    expect(call.mock.calls.every(([name])=>name==='beta_read_local_intent'||name==='beta_write_local_intent')).toBe(true);
+    expect(call).toHaveBeenCalledWith('beta_read_local_intent',{key});expect(call).toHaveBeenCalledWith('beta_compare_local_intent',{key,expectedRaw:'new raw',raw:'next raw'});
+    expect(call.mock.calls.every(([name])=>name==='beta_read_local_intent'||name==='beta_compare_local_intent')).toBe(true);
     expect(predecessor.read).not.toHaveBeenCalled();expect(legacy.getItem).not.toHaveBeenCalled();storage.close();
   });
   it('preserves structured IPC failures and never falls back to a browser journal',async()=>{

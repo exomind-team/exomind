@@ -8,7 +8,7 @@ import { Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle } from 
 import { Textarea } from '@/components/ui/textarea';
 import { OverlaySession } from './session';
 import { OverlayDraftBuffer } from './draft-buffer';
-import { nativeOverlayWindow } from './native-port';
+import { nativeOverlayWindow, nativeWorkspaceBind, nativeWorkspaceProfiles } from './native-port';
 import { overlayScopeKey,type OverlayAction,type OverlayResponse,type OverlayScope,type OverlayView } from './protocol';
 import { useOverlayWindowLayout } from './window-layout';
 import { inputSendShortcutLabel, shouldSubmitOnEnter } from '../input-preferences';
@@ -25,7 +25,7 @@ export function BetaOverlayPage(){
     return()=>{cancelled=true;owned?.close();setSession(null);};
   },[attempt]);
   if(session)return<BetaOverlaySurface session={session}/>;
-  return<div className="rounded-[24px] bg-[#1C1917] p-5 text-sm text-[#FAFAF9]"><p role="status">{error||'正在连接主窗口…'}</p>{error&&<Button variant="outline" onClick={()=>setAttempt(value=>value+1)}>重新连接浮窗</Button>}</div>;
+  return<div className="rounded-[24px] bg-[#1C1917] p-5 text-sm text-[#FAFAF9]"><p role="status">{error||'正在读取本机工作区…'}</p>{error&&<Button variant="outline" onClick={()=>setAttempt(value=>value+1)}>重新连接浮窗</Button>}</div>;
 }
 export function BetaOverlaySurface({session}:{session:OverlaySession}){
   const state=useSyncExternalStore(session.subscribe,session.snapshot);
@@ -33,8 +33,13 @@ export function BetaOverlaySurface({session}:{session:OverlaySession}){
   const retain=useCallback((value:RetainedScope)=>setRetained(previous=>[...previous.filter(item=>item.key!==value.key),value]),[]);
   return<>
     {!!retained.length&&<RetainedInputs key={state.view?overlayScopeKey(state.view.scope):'unavailable'} values={retained} onResolved={key=>setRetained(previous=>previous.filter(item=>item.key!==key))}/>}
-    {state.view?<ConnectedSurface key={overlayScopeKey(state.view.scope)} session={session} view={state.view} onRetire={retain} hasRetained={retained.length>0}/>:<div className="rounded-[24px] bg-[#1C1917] p-5 text-sm text-[#FAFAF9]" role="status">{state.error||'主窗口尚未就绪，浮窗暂不可操作'}</div>}
+    {state.view?<ConnectedSurface key={overlayScopeKey(state.view.scope)} session={session} view={state.view} onRetire={retain} hasRetained={retained.length>0}/>:<WorkspaceProfileChoice session={session} error={state.error}/>}
   </>;
+}
+function WorkspaceProfileChoice({session,error}:{session:OverlaySession;error:string|null}){
+  const [profiles,setProfiles]=useState<{profile_id:string;display_name:string}[]>([]),[failure,setFailure]=useState(''),[busy,setBusy]=useState(false);
+  useEffect(()=>{let active=true;void nativeWorkspaceProfiles().then(value=>{if(active)setProfiles(value);}).catch(error=>{if(active)setFailure(message(error));});return()=>{active=false;};},[session]);
+  return<div className="space-y-3 rounded-[24px] bg-[#1C1917] p-5 text-sm text-[#FAFAF9]"><p role="status">{error||'选择本机档案'}</p>{profiles.map(profile=><Button key={profile.profile_id} variant="outline" disabled={busy} onClick={()=>{setBusy(true);void nativeWorkspaceBind(profile.profile_id).then(()=>session.refresh()).catch(error=>setFailure(message(error))).finally(()=>setBusy(false));}}>{profile.display_name}</Button>)}{!profiles.length&&!failure&&<p>尚未找到本机档案，请先创建或加入档案。</p>}{failure&&<p role="alert">{failure}</p>}</div>;
 }
 function ConnectedSurface({session,view,onRetire,hasRetained}:{session:OverlaySession;view:OverlayView;onRetire:(value:RetainedScope)=>void;hasRetained:boolean}){
   const state=useSyncExternalStore(session.subscribe,session.snapshot);
@@ -56,13 +61,13 @@ function ConnectedSurface({session,view,onRetire,hasRetained}:{session:OverlaySe
   }});};},[capture,session,onRetire]);
   const active=view.remote?.active,mode=active?'running':'idle',expanded=idleHover||idleFocus;
   useEffect(()=>{if(!active){setMini(false);setHover(false);}else{setIdleHover(false);setIdleFocus(false);}},[active?.block_id]);
-  const statusError=error||state.error||draft.error||view.capture.error||view.focus_error||(view.clock?.stale?'显示等待主窗口刷新；界面不会自行结束时间块':'');
+  const statusError=error||state.error||draft.error||view.capture.error||view.focus_error||(view.clock?.stale?'显示等待本机服务刷新；界面不会自行结束时间块':'');
   const surface=useOverlayWindowLayout({mode,mini,peek:mini&&hover,expanded,feedback:!!feedback||!!statusError||hasRetained,feedbackSurface:feedback?feedbackSurface:null,onError:failure=>{if(alive.current)setError(message(failure));}});
   const disabled=!state.ready||acting||active?.phase==='completed'||view.focus_busy||view.focus_state==='failed'||!!view.focus_error||!!view.clock?.stale||state.pending.some(item=>overlayScopeKey(item.scope)===overlayScopeKey(view.scope));
   async function run(action:OverlayAction,done?:(response:OverlayResponse)=>void){
     const current=session.snapshot().view;
     if(!alive.current||!current||overlayScopeKey(current.scope)!==overlayScopeKey(view.scope)||operationLock.current)return;
-    if(!state.ready){setError('主窗口尚未就绪，浮窗暂不可操作');return;}
+    if(!state.ready){setError('本机工作区尚未就绪，请重新读取');return;}
     operationLock.current=true;
     setActing(true);setError('');try{const response=await session.send(action,current);if(!response.ok)throw new Error(response.message);const latest=session.snapshot().view;if(alive.current&&latest&&overlayScopeKey(latest.scope)===overlayScopeKey(view.scope)&&overlayScopeKey(response.view.scope)===overlayScopeKey(view.scope))done?.(response);}catch(failure){if(alive.current)setError(message(failure));}finally{operationLock.current=false;if(alive.current)setActing(false);}
   }
@@ -79,7 +84,7 @@ function ConnectedSurface({session,view,onRetire,hasRetained}:{session:OverlaySe
     {view.capture_pending.map(item=><Button key={item.command_id} variant="outline" disabled={!state.ready||item.state==='pending'||acting} onClick={()=>void run({kind:'retry_capture',command_id:item.command_id})}>查证记录提交</Button>)}
     {feedback&&<FeedbackSurface key={feedback.id} target={feedback} view={view} buffer={feedbackBuffer(feedback.id)} disabled={disabled} statusError={statusError} onSurfaceMount={setFeedbackSurface} onClose={()=>setFeedback(null)} onAppend={()=>setFeedback({...feedback,kind:'append'})} onSubmit={async skipped=>{const target=feedback,buffer=feedbackBuffer(target.id);await buffer.flush();const sent=buffer.submission(),text=buffer.snapshot().text;await run(target.kind==='append'?{kind:'append_feedback',block_id:target.id,draft_revision:sent.revision}:{kind:'submit_feedback',block_id:target.id,draft_revision:sent.revision,skipped},()=>{if(buffer.snapshot().text===''||buffer.submission().revision===sent.revision&&buffer.snapshot().text===text)setFeedback(current=>current?.id===target.id&&current.kind===target.kind?null:current);});}}/>}
   </>;
-  return<div className={feedback?'invisible':undefined}><NowWorkbenchOverlayView model={{mode,title:active?.name??'当下工作台',statusLabel:active?.phase==='feedback_pending'?'待反馈':active?.phase==='completed'?'已完成':active?.phase==='paused'?'已暂停':active?'进行中':'随时记录',clockText:view.clock?.text??'--:--',paused:active?.phase!=='running',miniCollapsed:mini,miniHovered:hover,idleExpanded:expanded,surfaceActive:surface.surfaceActive}}
+  return<div className={feedback?'invisible':undefined}><NowWorkbenchOverlayView model={{mode,title:active?.name??'当下工作台',statusLabel:(active?.phase==='feedback_pending'?'待反馈':active?.phase==='completed'?'已完成':active?.phase==='paused'?'已暂停':active?'进行中':'随时记录')+(view.profile_name?' · '+view.profile_name:''),clockText:view.clock?.text??'--:--',paused:active?.phase!=='running',miniCollapsed:mini,miniHovered:hover,idleExpanded:expanded,surfaceActive:surface.surfaceActive}}
     actionsDisabled={disabled} pauseDisabled={active?.phase==='feedback_pending'} onMiniHover={setHover} onIdleHover={setIdleHover} onIdleFocusCapture={()=>setIdleFocus(true)} onIdleBlurCapture={event=>{if(!event.relatedTarget||!event.currentTarget.contains(event.relatedTarget as Node))setIdleFocus(false);}}
     onIdleCollapse={()=>{setIdleHover(false);setIdleFocus(false);}} onExpand={()=>setMini(false)} onCollapse={()=>setMini(true)} onReturnToMain={()=>{void nativeOverlayWindow({kind:'return_main'}).catch(failure=>setError(message(failure)));}}
     onPauseOrResume={()=>{if(active&&!disabled)void run({kind:active.phase==='paused'?'resume':'pause',block_id:active.block_id});}} onEndBlock={end} onSurfaceMount={surface.onSurfaceMount} onSurfaceMouseDownCapture={surface.onSurfaceMouseDownCapture}
@@ -87,7 +92,7 @@ function ConnectedSurface({session,view,onRetire,hasRetained}:{session:OverlaySe
       actions={{expand:()=>{},collapse:chrome.onCollapse,selectTiming:()=>{},editCustom:()=>{},start:()=>{},beginRename:()=>{},pauseResume:()=>{if(active&&!disabled)void run({kind:active.phase==='paused'?'resume':'pause',block_id:active.block_id});},end}}/>,
       record:<NowInputRowView value={draft.text} placeholder="记录当下的事实..." textareaLabel="记录当下" sendLabel="发送" onValueChange={text=>capture.edit(text)} onKeyDown={event=>{if(!event.nativeEvent.isComposing&&shouldSubmitOnEnter(view.input_send_mode??'ctrl-enter-send',event)){event.preventDefault();void sendCapture();}}} onSend={sendCapture}
         sendDisabled={captureDisabled}
-        beforeControls={<>{view.capture.file_count>0&&<p className="mb-2 text-xs text-muted">含主窗整组 {view.capture.file_count} 个原件；回主窗管理</p>}{draft.error&&<div className="mb-2 flex gap-2"><Button size="sm" variant="outline" onClick={()=>{void capture.retry().catch(failure=>setError(message(failure)));}}>重试本机暂存</Button><Button size="sm" variant="outline" onClick={()=>capture.useMainDraft()}>使用主窗草稿</Button></div>}</>}
+        beforeControls={<>{view.capture.file_count>0&&<p className="mb-2 text-xs text-muted">含当前档案整组 {view.capture.file_count} 个原件；在完整界面管理</p>}{draft.error&&<div className="mb-2 flex gap-2"><Button size="sm" variant="outline" onClick={()=>{void capture.retry().catch(failure=>setError(message(failure)));}}>重试本机暂存</Button><Button size="sm" variant="outline" onClick={()=>capture.useMainDraft()}>使用共享草稿</Button></div>}</>}
         afterControls={<p role="status" className="mt-2 text-[11px] text-muted">{draft.saving||draft.dirty?'正在暂存，请保留窗口…':view.capture.state==='failed'?'暂存失败，请保留窗口并重试':'草稿已暂存 · 尚未提交'}</p>}/>,dialogs}}/></div>;
 }
 function RetainedInputs({values,onResolved}:{values:RetainedScope[];onResolved:(key:string)=>void}){

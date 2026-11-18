@@ -16,6 +16,7 @@ export interface NowInputRowViewProps {
   sendLabel?: string;
   beforeControls?: ReactNode;
   afterControls?: ReactNode;
+  inputStatus?: ReactNode;
   voiceControl?: ReactNode;
   onAttachmentClick?: () => void;
   attachmentFeedback?: 'idle' | 'pending';
@@ -38,7 +39,7 @@ export function resizeNowInputTextarea(element: HTMLTextAreaElement | null | und
  * this component has no runtime, profile or storage bootstrap side effects. */
 export function NowInputRowView({
   value, placeholder, inputRef, textareaLabel, onValueChange, onKeyDown, onPaste,
-  onSend, sendDisabled, sendLabel, beforeControls, afterControls, voiceControl,
+  onSend, sendDisabled, sendLabel, beforeControls, afterControls, inputStatus, voiceControl,
   onAttachmentClick, attachmentFeedback = 'idle', onPasteClick,
   pasteFeedback = 'idle', pasteFailureLabel = '',
 }: NowInputRowViewProps) {
@@ -72,14 +73,16 @@ export function NowInputRowView({
               placeholder={placeholder}
               aria-label={textareaLabel}
               rows={1}
-              className="min-h-[44px] rounded-3xl border-[#E7E5E4] bg-white px-4 py-2 pr-16 text-sm text-stone-700 placeholder:text-stone-400 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
+              className={`min-h-[44px] rounded-3xl border-[#E7E5E4] bg-white px-4 py-2 ${inputStatus ? 'pr-20' : 'pr-16'} text-sm text-stone-700 placeholder:text-stone-400 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]`}
               data-testid="new-now-input-textarea"
             />
+            <div className="absolute right-[7px] top-1/2 flex -translate-y-1/2 items-center">
+            {inputStatus}
             <button
               type="button"
               onClick={onPasteClick}
               disabled={!onPasteClick}
-              className={`absolute right-[7px] top-1/2 flex h-[30px] min-w-[30px] -translate-y-1/2 items-center justify-center rounded-[15px] px-2 ${pasteFeedback === 'error' ? 'text-red-500 dark:text-red-400' : pasteFeedback === 'success' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300' : 'text-stone-400 dark:text-[#78716C]'}`}
+              className={`flex h-[30px] min-w-[30px] items-center justify-center rounded-[15px] px-2 ${pasteFeedback === 'error' ? 'text-red-500 dark:text-red-400' : pasteFeedback === 'success' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300' : 'text-stone-400 dark:text-[#78716C]'}`}
               aria-label="剪贴板"
               data-testid="new-now-input-inline-button"
             >
@@ -89,6 +92,7 @@ export function NowInputRowView({
                   ? <span className="inline-flex items-center gap-0.5 text-[10px] font-medium leading-none"><X size={10} className="h-2.5 w-2.5" />{pasteFailureLabel}</span>
                   : <Clipboard size={16} />}
             </button>
+            </div>
           </div>
 
           <Button

@@ -11,8 +11,8 @@ import { BetaSummaryBody } from './BetaSummaryBody';
 
 export function BetaExternalSummaryHistoryRow({record,now,dateMode,onOpenSource}:{record:ExternalSummaryRecord;now:number;dateMode:EventDateDisplayMode;onOpenSource?:(source:SummarySourceRef)=>void}){
   const [shown,setShown]=useState(25);const sources=new Map(record.snapshot.sources.map(source=>[source.event_id,source]));
-  return<ChatMessageRowView eventId={record.event_id} timelineKind="agent_summary/1" tone="system"
-    avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className="bg-surface text-brand-accent"><Sparkles size={16}/></AvatarFallback></Avatar>}
+  return<ChatMessageRowView eventId={record.event_id} timelineKind="agent_summary/1" tone="agent-feedback"
+    avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className="bg-violet-600 text-white"><Sparkles size={16}/></AvatarFallback></Avatar>}
     metadata={<><span className="text-xs font-semibold text-strong">外部 Agent 回顾</span><EventTimestamp timestamp={record.occurred_at_ms} now={now} mode={dateMode}/></>}
     content={<div className="space-y-3"><BetaSummaryBody narrative={record.narrative}/><p className="text-xs text-muted">由 Agent {record.producer_agent_id.slice(0,8)} 在设备 {record.device_id.slice(0,8)} 提交。</p>
       {!!record.evidence.length&&<details className="text-xs text-muted"><summary className="cursor-pointer py-1">查看引用来源 · {record.evidence.length} 条</summary>

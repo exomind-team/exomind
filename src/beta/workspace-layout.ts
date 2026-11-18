@@ -1,7 +1,7 @@
-import { useMemo, useSyncExternalStore } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 
 export type BetaPaneState = 'expanded' | 'collapsed' | 'hidden';
-export interface BetaWorkspaceLayout { focus: BetaPaneState; records: BetaPaneState }
+export interface BetaWorkspaceLayout { focus: BetaPaneState; records: BetaPaneState; minimal?: boolean }
 const KEY = 'exomind:beta:workspace-layout';
 const CHANGE = 'exomind:beta:workspace-layout-changed';
 export const DEFAULT_WORKSPACE_LAYOUT: BetaWorkspaceLayout = { focus: 'expanded', records: 'expanded' };
@@ -13,7 +13,7 @@ function decode(raw: string | null): BetaWorkspaceLayout {
   try {
     const value = JSON.parse(raw ?? 'null');
     const valid = (state: unknown): state is BetaPaneState => state === 'expanded' || state === 'collapsed' || state === 'hidden';
-    if (value?.version === 1 && valid(value.focus) && valid(value.records)) return { focus: value.focus, records: value.records };
+    if (value?.version === 1 && valid(value.focus) && valid(value.records)) return { focus: value.focus, records: value.records, minimal: value.minimal === true };
   } catch { /* Unknown/old preferences use the established layout, never modify facts. */ }
   return DEFAULT_WORKSPACE_LAYOUT;
 }
@@ -31,4 +31,21 @@ export function updateBetaWorkspaceLayout(patch: Partial<BetaWorkspaceLayout>): 
 export function useBetaWorkspaceLayout(): BetaWorkspaceLayout {
   const raw = useSyncExternalStore(subscribe, read, () => null);
   return useMemo(() => decode(raw), [raw]);
+}
+
+export interface BetaWorkspacePresentation {
+  layout: BetaWorkspaceLayout;
+  error: string;
+  change: (patch: Partial<BetaWorkspaceLayout>) => void;
+}
+/** Lives above the profile's writer. A profile switch must not replace the
+ * navigation/select controls or discard a session-only layout on write failure. */
+export function useBetaWorkspacePresentation(): BetaWorkspacePresentation {
+  const saved = useBetaWorkspaceLayout();
+  const [temporary, setTemporary] = useState<BetaWorkspaceLayout | null>(null);
+  const [error, setError] = useState('');
+  return { layout: temporary ?? saved, error, change(patch) {
+    try { updateBetaWorkspaceLayout(temporary ? { ...temporary, ...patch } : patch); setTemporary(null); setError(''); }
+    catch { setTemporary({ ...saved, ...temporary, ...patch }); setError('布局已应用，但本机偏好未能保存；本窗口仍可继续使用，重启后可能恢复原布局'); }
+  } };
 }

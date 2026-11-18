@@ -3,10 +3,12 @@ import { BetaApiError } from './api-error';
 export interface LocalIntentJournal {
   read(key: string): Promise<string | null>;
   write(key: string, raw: string): Promise<void>;
+  compareWrite?(key: string, expectedRaw: string | null, raw: string): Promise<void>;
+  subscribe?(key: string, changed: () => void): () => void;
   close?(): void;
 }
 export type IntentPredecessor = Pick<LocalIntentJournal, 'read'>;
-export interface IntentPersistenceState { state: 'idle' | 'pending' | 'failed'; error: string | null }
+export interface IntentPersistenceState { state: 'idle' | 'pending' | 'failed'; error: string | null; externalRevision?: number }
 export interface DurableIntentStorage extends Pick<Storage, 'getItem' | 'setItem'> {
   readonly durable: true;
   commit(): Promise<void>;
@@ -143,6 +145,10 @@ interface CommitWaiter { target: number; resolve(): void; reject(error: unknown)
 class JournalStorage implements DurableIntentStorage {
   readonly durable = true as const;
   private raw: string | null;
+  private committedRaw: string | null;
+  private externalRevision = 0;
+  private externalRead = 0;
+  private unsubscribeExternal: (()=>void) | undefined;
   private sequence = 0;
   private committed = 0;
   private status: IntentPersistenceState = { state: 'idle', error: null };
@@ -152,11 +158,24 @@ class JournalStorage implements DurableIntentStorage {
   private closed = false;
   private journalClosed = false;
   constructor(private readonly key: string, private readonly journal: LocalIntentJournal, private readonly ownsJournal: boolean,
-    private readonly validate: (raw: string) => void, raw: string | null) { this.raw = raw; }
+    private readonly validate: (raw: string) => void, raw: string | null) {
+      this.raw = raw; this.committedRaw = raw;
+      this.unsubscribeExternal = journal.subscribe?.(key,()=>{void this.refreshExternal();});
+    }
+  private async refreshExternal():Promise<void>{
+    if(this.closed||this.sequence!==this.committed||this.operation)return;
+    const generation=++this.externalRead;
+    try{
+      const raw=await this.journal.read(this.key);
+      if(this.closed||generation!==this.externalRead||this.sequence!==this.committed||this.operation||raw===this.raw)return;
+      if(raw===null)throw new BetaApiError('intent_cache_corrupt','共享草稿已存在却读取为空，原输入已保留');
+      this.validate(raw);this.raw=raw;this.committedRaw=raw;++this.externalRevision;this.emit('idle');
+    }catch(error){if(!this.closed&&generation===this.externalRead&&this.sequence===this.committed&&!this.operation)this.emit('failed',error instanceof Error?error.message:'共享草稿读取未确认，原输入已保留');}
+  }
   snapshot = (): IntentPersistenceState => this.status;
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   private emit(state: IntentPersistenceState['state'], error: string | null = null): void {
-    this.status = { state, error };
+    this.status = { state, error, ...(this.externalRevision?{externalRevision:this.externalRevision}:{}) };
     for (const listener of this.listeners) { try { listener(); } catch { console.error('Local intent persistence subscriber failed'); } }
   }
   private scope(key: string): void { if (key !== this.key) throw new BetaApiError('intent_scope_mismatch', '草稿存储作用域不匹配'); }
@@ -178,7 +197,7 @@ class JournalStorage implements DurableIntentStorage {
   private async pump(): Promise<void> {
     while (this.committed < this.sequence && this.status.state !== 'failed') {
       const target = this.sequence; const raw = this.raw!;
-      try { await this.journal.write(this.key, raw); }
+      try { if(this.journal.compareWrite)await this.journal.compareWrite(this.key,this.committedRaw,raw);else await this.journal.write(this.key, raw); }
       catch (error) {
         const waiters = this.waiters.splice(0);
         const failure=error instanceof BetaApiError?error:failed();
@@ -186,6 +205,7 @@ class JournalStorage implements DurableIntentStorage {
         waiters.forEach(waiter => waiter.reject(failure)); return;
       }
       this.committed = target;
+      this.committedRaw = raw;
       const completed = this.waiters.filter(waiter => waiter.target <= target); this.waiters = this.waiters.filter(waiter => waiter.target > target);
       completed.forEach(waiter => waiter.resolve());
       this.emit(this.committed === this.sequence ? 'idle' : 'pending');
@@ -202,7 +222,7 @@ class JournalStorage implements DurableIntentStorage {
   private closeJournalIfIdle(): void {
     if (this.closed && !this.operation && !this.journalClosed) { this.journalClosed = true; if (this.ownsJournal) this.journal.close?.(); }
   }
-  close(): void { this.closed = true; this.listeners.clear(); this.closeJournalIfIdle(); }
+  close(): void { this.closed = true;++this.externalRead;this.unsubscribeExternal?.(); this.listeners.clear(); this.closeJournalIfIdle(); }
 }
 
 export async function openDurableIntentStorage(options: {

@@ -18,7 +18,7 @@ on:
         description: Beta config version to build; never inferred from Alpha package.json
         required: true
         type: string
-        default: 0.6.0-beta12
+        default: 0.6.0-beta13
 
 permissions:
   contents: read
@@ -261,7 +261,7 @@ jobs:
           NODE
       - name: Generate Beta Android project explicitly
         run: node node_modules/@tauri-apps/cli/tauri.js android init --ci --skip-targets-install --config src-tauri/tauri.beta.conf.json
-      - name: Prepare Android network/system-bars/IME integration
+      - name: Prepare Android network/system-bars/IME and symbol packaging
         shell: bash
         run: |
           bun scripts/dev/android-manifest-permission.ts

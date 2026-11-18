@@ -1,6 +1,7 @@
 //! Private desktop presentation relay. Main remains the sole journal writer.
 //! No overlay command calls Core mutation APIs or exposes a native Session.
 use super::{trusted_window, Failure, NativeState};
+use exomind_beta_host::native_workspace::{WorkspaceAction, WorkspaceError};
 use exomind_core::ProfileId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,6 +10,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use tauri::Emitter;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use uuid::Uuid;
 
@@ -19,7 +21,6 @@ const MAX_REQUEST_IDS: usize = 16_384;
 // The relay carries current text/controls, never original bytes or histories.
 // Larger metadata stays in Main; do not accumulate 64 full 8 MiB journals.
 const MAX_BODY_BYTES: usize = 1024 * 1024;
-const OWNER_HEARTBEAT: Duration = Duration::from_secs(5);
 fn denied() -> Failure {
     Failure {
         code: "forbidden",
@@ -35,7 +36,7 @@ fn stale() -> Failure {
 fn unavailable() -> Failure {
     Failure {
         code: "overlay_not_ready",
-        message: "主窗口尚未就绪，浮窗暂不可操作",
+        message: "本机工作区尚未就绪，请选择档案或检查本机服务",
     }
 }
 fn conflict() -> Failure {
@@ -147,6 +148,8 @@ pub(super) struct Broker {
     entries: VecDeque<Entry>,
     seen_ids: HashSet<Uuid>,
     position: Option<(i32, i32)>,
+    theme: String,
+    input_send_mode: String,
 }
 impl Default for Broker {
     fn default() -> Self {
@@ -157,11 +160,18 @@ impl Default for Broker {
             entries: VecDeque::new(),
             seen_ids: HashSet::new(),
             position: None,
+            theme: "dark".into(),
+            input_send_mode: "ctrl-enter-send".into(),
         }
     }
 }
 impl Broker {
     fn register(&mut self, binding: Binding) -> Scope {
+        if let Some(owner) = &self.owner {
+            if owner.scope.binding() == binding {
+                return owner.scope.clone();
+            }
+        }
         let scope = Scope {
             device_id: binding.device_id,
             runtime_id: binding.runtime_id,
@@ -197,9 +207,7 @@ impl Broker {
         Ok(())
     }
     fn ready(&self) -> bool {
-        self.owner.as_ref().is_some_and(|owner| {
-            owner.view.is_some() && owner.published.elapsed() <= OWNER_HEARTBEAT
-        })
+        self.owner.is_some()
     }
     fn attach(&mut self) -> Uuid {
         self.overlay_generation = Uuid::new_v4();
@@ -209,12 +217,9 @@ impl Broker {
         self.overlay_generation
     }
     pub(super) fn document_started(&mut self, label: &str) {
-        if label == "main" {
-            self.owner = None;
-            self.entries.clear();
-            self.seen_ids.clear();
-            self.seq = 0;
-        } else if label == LABEL {
+        // A document is a client. Main reload/close never revokes the Native
+        // application's workspace or pending commands.
+        if label == LABEL {
             self.attach();
         }
     }
@@ -468,7 +473,7 @@ pub(super) async fn beta_overlay_main(
             Ok(Value::Null)
         }
         MainOperation::Revoke { scope } => {
-            broker.revoke(&scope);
+            let _ = scope; // Legacy view-detach is not application shutdown.
             Ok(Value::Null)
         }
     }
@@ -488,28 +493,297 @@ pub(super) async fn beta_overlay_read(
     state: State<'_, Arc<NativeState>>,
 ) -> Result<Value, Failure> {
     trusted_overlay(&window, state.inner())?;
-    let broker = state.overlay.lock().map_err(|_| unavailable())?;
-    if let Some(owner) = &broker.owner {
-        check_binding(state.inner(), &owner.scope.binding())?;
-    }
-    Ok(
-        serde_json::json!({"overlay_generation":broker.overlay_generation,"ready":broker.ready(),"view":if broker.ready(){broker.owner.as_ref().and_then(|owner|owner.view.as_ref())}else{None},"responses":broker.entries.iter().filter_map(|entry|entry.response.as_ref().map(|response|serde_json::json!({"request_id":entry.ticket.request.request_id,"response":response}))).collect::<Vec<_>>()}),
-    )
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move||{
+        let mut broker=state.overlay.lock().map_err(|_|unavailable())?;
+        initialize_workspace(&state,&mut broker)?;
+        let view=broker.owner.as_ref().map(|owner|workspace_view(&state,&owner.scope,&broker)).transpose()?;
+        Ok(serde_json::json!({"overlay_generation":broker.overlay_generation,"ready":view.is_some(),"view":view,"responses":broker.entries.iter().filter_map(|entry|entry.response.as_ref().map(|response|serde_json::json!({"request_id":entry.ticket.request.request_id,"response":response}))).collect::<Vec<_>>()}))
+    }).await.map_err(|_|unavailable())?
 }
 #[tauri::command]
 pub(super) async fn beta_overlay_request(
+    app: AppHandle,
     window: WebviewWindow,
     state: State<'_, Arc<NativeState>>,
     request: Request,
 ) -> Result<(), Failure> {
     trusted_overlay(&window, state.inner())?;
     check_binding(state.inner(), &request.scope.binding())?;
-    let result = state
-        .overlay
-        .lock()
-        .map_err(|_| unavailable())?
-        .submit(request);
-    result
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move||{
+        let mut broker=state.overlay.lock().map_err(|_|unavailable())?;
+        broker.submit(request.clone())?;
+        let entry=broker.entries.iter().find(|entry|entry.ticket.request.request_id==request.request_id).ok_or_else(stale)?;
+        if entry.response.is_some(){return Ok(());}
+        let ticket=entry.ticket.clone();
+        let action:WorkspaceAction=serde_json::from_value(serde_json::to_value(&request.action).map_err(|_|invalid())?).map_err(|_|invalid())?;
+        let result=state.workspace.execute(request.scope.profile_id,request.request_id,ticket.ticket_id,&request.expected_revision,&action);
+        if matches!(&result,Ok(Some(_))){let _=app.emit("beta-workspace-committed",serde_json::json!({"profile_id":request.scope.profile_id}));}
+        // Subscribers receive only cache keys, never draft bodies or secrets.
+        if let Ok(keys)=state.workspace.intent_keys(request.scope.profile_id){let _=app.emit("beta-native-intent-changed",serde_json::json!({"keys":keys}));}
+        let view=workspace_view(&state,&request.scope,&broker)?;
+        let response=match result {Ok(receipt)=>serde_json::json!({"ok":true,"view":view,"receipt":receipt}),Err(error)=>{let failure=workspace_failure(error);serde_json::json!({"ok":false,"code":failure.code,"message":failure.message,"view":view})}};
+        broker.respond(&request.scope,ticket.ticket_id,response)
+    }).await.map_err(|_|unavailable())?
+}
+
+fn workspace_failure(error: WorkspaceError) -> Failure {
+    match error {
+        WorkspaceError::Host(error) => Failure::from(error),
+        WorkspaceError::DraftConflict => Failure {
+            code: "overlay_draft_conflict",
+            message: "另一界面已更新草稿，当前输入已保留，请核对后重试",
+        },
+        WorkspaceError::Pending => Failure {
+            code: "overlay_busy",
+            message: "上一操作或原件仍待确认，请先查证",
+        },
+        WorkspaceError::InvalidIntent => Failure {
+            code: "intent_cache_corrupt",
+            message: "共享草稿结构需要恢复，原数据已保留",
+        },
+        WorkspaceError::Missing => Failure {
+            code: "missing_submission",
+            message: "当前档案没有此待确认操作",
+        },
+    }
+}
+fn workspace_key(state: &NativeState) -> Result<String, Failure> {
+    Ok(format!(
+        "exomind:beta:workspace:{}",
+        state.host.status().map_err(Failure::from)?.device_id
+    ))
+}
+fn initialize_workspace(state: &NativeState, broker: &mut Broker) -> Result<(), Failure> {
+    if broker.owner.is_some() {
+        return Ok(());
+    }
+    let raw = state
+        .host
+        .read_local_intent(&state.owner, &workspace_key(state)?)
+        .map_err(Failure::from)?;
+    let profiles = state.host.profiles(&state.owner).map_err(Failure::from)?;
+    let profile = if let Some(raw) = raw {
+        let value: Value = serde_json::from_str(&raw).map_err(|_| invalid())?;
+        if value["version"] != 1 {
+            return Err(invalid());
+        }
+        set_presentation(
+            broker,
+            Some(value["theme"].as_str().ok_or_else(invalid)?.into()),
+            Some(
+                value["input_send_mode"]
+                    .as_str()
+                    .ok_or_else(invalid)?
+                    .into(),
+            ),
+        )?;
+        if value["profile_id"].is_null() {
+            if profiles.len() == 1 {
+                Some(profiles[0].profile_id)
+            } else {
+                None
+            }
+        } else {
+            Some(
+                value["profile_id"]
+                    .as_str()
+                    .ok_or_else(invalid)?
+                    .parse()
+                    .map_err(|_| invalid())?,
+            )
+        }
+    } else if profiles.len() == 1 {
+        Some(profiles[0].profile_id)
+    } else {
+        None
+    };
+    if let Some(profile) = profile {
+        state.human(profile).map_err(Failure::from)?;
+        let status = state.host.status().map_err(Failure::from)?;
+        broker.register(Binding {
+            device_id: status
+                .device_id
+                .to_string()
+                .parse()
+                .map_err(|_| invalid())?,
+            runtime_id: status.runtime_id,
+            profile_id: profile,
+        });
+    }
+    Ok(())
+}
+fn workspace_view(state: &NativeState, scope: &Scope, broker: &Broker) -> Result<Value, Failure> {
+    check_binding(state, &scope.binding())?;
+    let mut view = state
+        .workspace
+        .snapshot(scope.profile_id)
+        .map_err(workspace_failure)?;
+    let remote = &view["remote"];
+    let active = &remote["active"];
+    let (text, warning) = if active.is_null() {
+        ("00:00".into(), false)
+    } else {
+        let work = active["work_ms"].as_u64().ok_or_else(invalid)? as i128;
+        let left = if active["timer"]["mode"] == "count_up" {
+            work
+        } else {
+            active["timer"]["duration_ms"]
+                .as_u64()
+                .ok_or_else(invalid)? as i128
+                - work
+        };
+        let overtime = left < 0 && active["timer"]["end_mode"] == "soft";
+        let seconds = if overtime {
+            -left / 1000
+        } else {
+            left.max(0) / 1000
+        };
+        (
+            format!(
+                "{}{:02}:{:02}",
+                if overtime { "+" } else { "" },
+                seconds / 60,
+                seconds % 60
+            ),
+            active["timer"]["mode"] != "count_up" && left <= 60000,
+        )
+    };
+    let mut clock = serde_json::json!({"text":text,"warning":warning,"stale":false});
+    if remote["clock"]["epoch_changed"] == true || remote["clock"]["wall_clock_moved_back"] == true
+    {
+        clock["endTimeText"] = serde_json::json!("时钟已重新锚定，以服务状态为准");
+    } else if let Some(due) = active["deadline"]["due_at_ms"].as_i64() {
+        use chrono::TimeZone;
+        if let Some(time) = chrono::Local.timestamp_millis_opt(due).single() {
+            clock["endTimeText"] = serde_json::json!(format!("预计 {} 结束", time.format("%H:%M")));
+        }
+    }
+    view["scope"] = serde_json::to_value(scope).map_err(|_| invalid())?;
+    view["profile_name"] = serde_json::json!(
+        state
+            .host
+            .profiles(&state.owner)
+            .map_err(Failure::from)?
+            .into_iter()
+            .find(|profile| profile.profile_id == scope.profile_id)
+            .ok_or_else(stale)?
+            .display_name
+    );
+    view["theme"] = serde_json::json!(broker.theme);
+    view["input_send_mode"] = serde_json::json!(broker.input_send_mode);
+    view["clock"] = clock;
+    if serde_json::to_vec(&view).map_err(|_| invalid())?.len() > MAX_BODY_BYTES {
+        return Err(Failure {
+            code: "overlay_payload_too_large",
+            message: "共享草稿超过浮窗显示预算，请保留资料并在完整界面核对",
+        });
+    }
+    Ok(view)
+}
+
+fn set_presentation(
+    broker: &mut Broker,
+    theme: Option<String>,
+    input_send_mode: Option<String>,
+) -> Result<(), Failure> {
+    if let Some(theme) = theme {
+        if !["dark", "light"].contains(&theme.as_str()) {
+            return Err(invalid());
+        }
+        broker.theme = theme;
+    }
+    if let Some(mode) = input_send_mode {
+        if !["ctrl-enter-send", "enter-send"].contains(&mode.as_str()) {
+            return Err(invalid());
+        }
+        broker.input_send_mode = mode;
+    }
+    Ok(())
+}
+fn persist_workspace(state: &NativeState, broker: &Broker) -> Result<(), Failure> {
+    let key = workspace_key(state)?;
+    let prior = state
+        .host
+        .read_local_intent(&state.owner, &key)
+        .map_err(Failure::from)?;
+    state.host.compare_local_intent(&state.owner,&key,prior.as_deref(),&serde_json::json!({"version":1,"profile_id":broker.owner.as_ref().map(|owner|owner.scope.profile_id),"theme":broker.theme,"input_send_mode":broker.input_send_mode}).to_string()).map_err(Failure::from)
+}
+#[tauri::command]
+pub(super) async fn beta_workspace_preferences(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    theme: Option<String>,
+    input_send_mode: Option<String>,
+) -> Result<(), Failure> {
+    if window.label() == LABEL {
+        trusted_overlay(&window, state.inner())?;
+    } else {
+        trusted_window(&window, state.inner())?;
+    }
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut broker = state.overlay.lock().map_err(|_| unavailable())?;
+        initialize_workspace(&state, &mut broker)?;
+        set_presentation(&mut broker, theme, input_send_mode)?;
+        persist_workspace(&state, &broker)
+    })
+    .await
+    .map_err(|_| unavailable())?
+}
+
+#[tauri::command]
+pub(super) async fn beta_workspace_profiles(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+) -> Result<Value, Failure> {
+    if window.label() == LABEL {
+        trusted_overlay(&window, state.inner())?;
+    } else {
+        trusted_window(&window, state.inner())?;
+    }
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        serde_json::to_value(state.host.profiles(&state.owner).map_err(Failure::from)?)
+            .map_err(|_| invalid())
+    })
+    .await
+    .map_err(|_| unavailable())?
+}
+#[tauri::command]
+pub(super) async fn beta_workspace_bind(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    theme: Option<String>,
+    input_send_mode: Option<String>,
+) -> Result<Scope, Failure> {
+    if window.label() == LABEL {
+        trusted_overlay(&window, state.inner())?;
+    } else {
+        trusted_window(&window, state.inner())?;
+    }
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        state.human(profile_id).map_err(Failure::from)?;
+        let mut broker = state.overlay.lock().map_err(|_| unavailable())?;
+        set_presentation(&mut broker, theme, input_send_mode)?;
+        let status = state.host.status().map_err(Failure::from)?;
+        let scope = broker.register(Binding {
+            device_id: status
+                .device_id
+                .to_string()
+                .parse()
+                .map_err(|_| invalid())?,
+            runtime_id: status.runtime_id,
+            profile_id,
+        });
+        persist_workspace(&state, &broker)?;
+        Ok(scope)
+    })
+    .await
+    .map_err(|_| unavailable())?
 }
 
 #[derive(Deserialize)]
@@ -611,6 +885,9 @@ fn ensure_window(app: &AppHandle) -> Result<(), Failure> {
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
     let window = builder.build().map_err(|_| unavailable())?;
+    if let Err(error) = super::window_icon::install(&window) {
+        log::warn!("Beta overlay logo was not applied: {error}");
+    }
     position_window(app, &window, None)
 }
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -752,20 +1029,20 @@ mod tests {
         assert_eq!(b.submit(r).unwrap_err().code, "overlay_scope_changed");
     }
     #[test]
-    fn main_reload_immediately_revokes_ready_instead_of_waiting_for_heartbeat() {
+    fn main_document_reload_does_not_revoke_the_native_workspace_or_its_requests() {
         let (mut b, s) = ready();
         let r = request(&b, &s);
         b.document_started("main");
-        assert!(!b.ready());
-        assert_eq!(b.submit(r).unwrap_err().code, "overlay_scope_changed");
+        assert!(b.ready());
+        assert!(b.submit(r).is_ok());
     }
     #[test]
-    fn heartbeat_expiry_never_authorizes_another_operation() {
+    fn native_workspace_is_independent_of_a_frontend_publish_heartbeat() {
         let (mut b, s) = ready();
         b.owner.as_mut().unwrap().published = Instant::now() - Duration::from_secs(6);
-        assert!(!b.ready());
+        assert!(b.ready());
         let r = request(&b, &s);
-        assert_eq!(b.submit(r).unwrap_err().code, "overlay_not_ready");
+        assert!(b.submit(r).is_ok());
     }
     #[test]
     fn completed_cache_eviction_keeps_sequence_tombstone() {

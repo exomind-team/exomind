@@ -1,38 +1,42 @@
-import { useEffect,useRef,useState } from 'react';
-import { isTauri } from '@tauri-apps/api/core';
+import { useEffect, useRef, useState } from 'react';
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
-import type { BetaClient } from '../client';
-import type { BetaDraftController } from '../drafts';
-import type { BetaTimeblockController } from '../timeblocks-controller';
-import { connectMainOverlay } from './main-owner';
-import { nativeMainOverlayPort,nativeOverlayWindow } from './native-port';
-import { getBetaInputSendMode } from '../input-preferences';
-import { setBetaOverlayEnabled, useBetaOverlayEnabled } from '../preferences';
+import { nativeOverlayWindow } from './native-port';
+import { useBetaInputSendMode } from '../input-preferences';
+import { useBetaOverlayEnabled, useBetaTheme } from '../preferences';
 
-/** Mounted under DeviceWorkspace's writer lock, never in the overlay entry. */
-export function MainOverlayBridge({client,capture,focus,profileId,onCommitted}:{client:BetaClient;capture:BetaDraftController;focus:BetaTimeblockController;profileId:string;onCommitted:()=>void}){
-  const [ready,setReady]=useState(false),[error,setError]=useState(''),[attempt,setAttempt]=useState(0);
-  const overlayEnabled = useBetaOverlayEnabled();
+/** Main is a Native workspace client: it updates application preferences and
+ * observes commits. It never selects the overlay's profile implicitly,
+ * publishes business snapshots, executes overlay
+ * tickets, lends controllers, or revokes the workspace when its view leaves. */
+export function MainOverlayBridge({ profileId, onCommitted }: { profileId: string; onCommitted: () => void }) {
+  const [error, setError] = useState(''), [attempt, setAttempt] = useState(0);
+  const enabled = useBetaOverlayEnabled(), theme = useBetaTheme(), inputSendMode = useBetaInputSendMode();
+  const [systemDark,setSystemDark]=useState(()=>typeof matchMedia==='function'&&matchMedia('(prefers-color-scheme: dark)').matches);
+  useEffect(()=>{if(typeof matchMedia!=='function')return;const media=matchMedia('(prefers-color-scheme: dark)'),changed=()=>setSystemDark(media.matches);media.addEventListener('change',changed);return()=>media.removeEventListener('change',changed);},[]);
+  const resolvedTheme=theme==='system'?(systemDark?'dark':'light'):theme;
+  const previous = useRef<Promise<void> | null>(null), notify = useRef(onCommitted); notify.current = onCommitted;
+  const desktop = isTauri() && !/Android|iPhone|iPad/i.test(navigator.userAgent);
   useEffect(() => {
-    if (!ready || !overlayEnabled) return;
-    let active = true;
-    void nativeOverlayWindow({ kind: 'show' }).catch(failure => { if (active) setError(failure instanceof Error ? failure.message : '浮窗未能打开'); });
+    if (!desktop) return;
+    let active = true; const prior = previous.current;
+    const binding = (async () => {
+      if (prior) await prior.catch(() => {}); if (!active) return;
+      await invoke('beta_workspace_preferences', { theme: resolvedTheme, inputSendMode });
+      if (active && enabled) await nativeOverlayWindow({ kind: 'show' });
+      if (active) setError('');
+    })();
+    previous.current = binding;
+    void binding.catch(failure => { if (active) setError(failure instanceof Error ? failure.message : '本机工作区暂未确认'); });
     return () => { active = false; };
-  }, [ready, overlayEnabled]);
-  const previous=useRef<Promise<void>|null>(null);const notify=useRef(onCommitted);notify.current=onCommitted;
-  const desktop=isTauri()&&!/Android|iPhone|iPad/i.test(navigator.userAgent);
-  useEffect(()=>{
-    if(!desktop)return;let cancelled=false;let connected:Awaited<ReturnType<typeof connectMainOverlay>>|undefined;
-    const last=previous.current;
-    const opening=(async()=>{
-      if(last)await last.catch(()=>{});if(cancelled)return;
-      const identity=await client.status();if(cancelled)return;
-      if(!identity.runtime_id)throw new Error('本机服务身份未就绪');
-      connected=await connectMainOverlay({port:nativeMainOverlayPort(),binding:{device_id:identity.device_id,runtime_id:identity.runtime_id,profile_id:profileId},client,capture,focus,inputSendMode:getBetaInputSendMode,dark:()=>document.documentElement.classList.contains('dark'),onCommitted:()=>notify.current(),onReady:()=>{if(!cancelled){setReady(true);setError('');}},onError:failure=>{if(!cancelled){setReady(false);setError(failure instanceof Error?failure.message:'浮窗桥暂不可用');}}});
-      if(cancelled){connected.close();return;}setReady(true);setError('');
-    })();previous.current=opening;void opening.catch(failure=>{if(!cancelled){setError(failure instanceof Error?failure.message:'浮窗桥暂不可用');setReady(false);}});
-    return()=>{cancelled=true;setReady(false);connected?.close();};
-  },[desktop,client,capture,focus,profileId,attempt]);
-  if(!desktop)return null;
-  return<div className="flex flex-wrap items-center gap-2 px-5 py-1 text-xs text-secondary"><Button size="sm" variant="ghost" disabled={!ready} onClick={()=>{void setBetaOverlayEnabled(true).catch(failure=>setError(failure instanceof Error?failure.message:'浮窗未能打开'));}}>专注浮窗</Button>{error&&<><span role="alert" className="text-destructive">{error}</span><Button size="sm" variant="outline" onClick={()=>setAttempt(value=>value+1)}>重试浮窗桥</Button></>}</div>;
+  }, [desktop, resolvedTheme, inputSendMode, enabled, attempt]);
+  useEffect(() => {
+    if (!desktop) return; let active = true, unlisten: (() => void) | undefined;
+    void listen<{ profile_id: string }>('beta-workspace-committed', event => { if (active && event.payload?.profile_id === profileId) notify.current(); })
+      .then(remove => { if (active) unlisten = remove; else remove(); }).catch(failure=>{if(active)setError(failure instanceof Error?failure.message:'本机工作区订阅尚未确认');});
+    return () => { active = false; unlisten?.(); };
+  }, [desktop, profileId]);
+  if (!desktop || !error) return null;
+  return <div className="flex flex-wrap items-center gap-2 px-3 py-1 text-xs text-secondary"><span role="alert" className="text-destructive">{error}</span><Button size="sm" variant="outline" onClick={() => setAttempt(value => value + 1)}>重试本机工作区</Button></div>;
 }

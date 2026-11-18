@@ -8,7 +8,7 @@ import { B,C,D,P,Q,R,activeSnapshot } from './timeblock-fixtures';
 import { deferred } from './fixtures';
 
 vi.mock('@/beta/overlay/window-layout',()=>({useOverlayWindowLayout:()=>({onSurfaceMount:()=>{},onSurfaceMouseDownCapture:()=>{},surfaceActive:false})}));
-vi.mock('@/beta/overlay/native-port',()=>({nativeOverlayWindow:vi.fn(async()=>{}),nativeOverlayPort:vi.fn()}));
+vi.mock('@/beta/overlay/native-port',()=>({nativeOverlayWindow:vi.fn(async()=>{}),nativeOverlayPort:vi.fn(),nativeWorkspaceProfiles:vi.fn(async()=>[]),nativeWorkspaceBind:vi.fn()}));
 afterEach(cleanup);
 function fixture(active=true){
   let view:OverlayView={scope:{device_id:D,runtime_id:R,profile_id:P,ui_owner_generation:C},theme:'light',remote:{...activeSnapshot(),active:active?{...activeSnapshot().active!,name:'authoritative A'}:null},clock:{text:'00:01',warning:true,stale:false},capture:{text:'',revision:0,file_count:2,state:'idle',error:null},feedback:{},focus_state:'idle',focus_error:null,focus_busy:false,focus_pending:[],capture_pending:[]};

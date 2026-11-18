@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-export type FocusTimerSurface = "default" | "overlay";
+export type FocusTimerSurface = "default" | "overlay" | "workspace";
 export type FocusTimerMode = "countup" | "countdown";
 
 export type FocusTimerViewModel =
@@ -91,7 +91,7 @@ export interface FocusTimerViewProps {
   surface?: FocusTimerSurface;
   actionsDisabled?: boolean;
   overlayChrome?: FocusTimerOverlayChrome;
-  slots?: { keepAwake?: ReactNode; dialogs?: ReactNode };
+  slots?: { keepAwake?: ReactNode; dialogs?: ReactNode; configurationDetails?: ReactNode };
 }
 
 // The markup below is extracted from Alpha's FocusTimerWidget. Its controller
@@ -181,6 +181,7 @@ export function FocusTimerView({
   const focusBgmToggleAriaLabel = "背景音设置（Background audio settings）";
   const focusBgmToggleIcon = <Music4 size={16} />;
   const isOverlaySurface = surface === "overlay";
+  const isWorkspaceSurface = surface === "workspace";
   const overlayChrome = isOverlaySurface
     ? (overlayRunningChrome ?? null)
     : null;
@@ -189,7 +190,7 @@ export function FocusTimerView({
   const useAutoHeightConfigLayout = !isOverlaySurface;
   const useAutoHeightRunningLayout =
     !isOverlaySurface || (hasIntegratedOverlayChrome && hasRunningLinkedTasks);
-  const baseStageHeightClass = useAutoHeightConfigLayout
+  const baseStageHeightClass = isWorkspaceSurface ? "" : useAutoHeightConfigLayout
     ? "min-h-[200px] pb-4 pt-4"
     : hasIntegratedOverlayChrome
       ? "h-[192px]"
@@ -199,12 +200,12 @@ export function FocusTimerView({
     : hasIntegratedOverlayChrome
       ? "h-[186px]"
       : "h-[163px]";
-  const baseCardHeightClass = useAutoHeightConfigLayout
+  const baseCardHeightClass = isWorkspaceSurface ? "" : useAutoHeightConfigLayout
     ? "min-h-[169px]"
     : hasIntegratedOverlayChrome
       ? "h-[192px]"
       : "h-[169px]";
-  const runningStageHeightClass = useAutoHeightRunningLayout
+  const runningStageHeightClass = isWorkspaceSurface ? "" : useAutoHeightRunningLayout
     ? useAutoHeightConfigLayout
       ? "min-h-[200px] pb-4 pt-4"
       : hasIntegratedOverlayChrome
@@ -222,7 +223,7 @@ export function FocusTimerView({
         ? "h-[240px]"
         : "h-[215px]"
       : baseGlowHeightClass;
-  const runningCardHeightClass = useAutoHeightRunningLayout
+  const runningCardHeightClass = isWorkspaceSurface ? "" : useAutoHeightRunningLayout
     ? useAutoHeightConfigLayout
       ? "min-h-[169px]"
       : "min-h-[246px]"
@@ -231,8 +232,8 @@ export function FocusTimerView({
         ? "h-[246px]"
         : "h-[221px]"
       : baseCardHeightClass;
-  const showOverlaySurfaceBackdropGlow = !hasIntegratedOverlayChrome;
-  const runningCardLayoutClass = useAutoHeightRunningLayout
+  const showOverlaySurfaceBackdropGlow = !hasIntegratedOverlayChrome && !isWorkspaceSurface;
+  const runningCardLayoutClass = isWorkspaceSurface ? "relative w-full" : useAutoHeightRunningLayout
     ? (hasIntegratedOverlayChrome ? "relative w-full" : "relative mx-4")
     : (hasIntegratedOverlayChrome ? "absolute inset-x-0 top-0" : "absolute left-4 right-4 top-4");
   const overlaySurfacePressedClass = overlayChrome?.surfacePressed
@@ -317,19 +318,19 @@ export function FocusTimerView({
       data-testid="new-focus-timer-widget"
     >
       {uiState === "idle" && (
-        <section className={isOverlaySurface ? "pt-0" : "pt-[10px]"}>
+        <section className={isOverlaySurface || isWorkspaceSurface ? "pt-0" : "pt-[10px]"}>
           <div
-            className="relative mx-auto h-[104px] w-full max-w-[390px]"
+            className={isWorkspaceSurface ? "relative h-[64px] w-full" : "relative mx-auto h-[104px] w-full max-w-[390px]"}
             data-testid="new-focus-state-idle"
           >
-            <div
+            {!isWorkspaceSurface && <div
               className={`absolute left-1/2 top-[18px] h-[74px] w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] blur-[8px] ${
                 isOverlaySurface
                   ? "bg-[rgba(12,10,9,0.24)]"
                   : "bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14]"
               }`}
               aria-hidden
-            />
+            />}
 
             <button
               type="button"
@@ -338,7 +339,7 @@ export function FocusTimerView({
               aria-expanded="false"
               aria-controls="new-focus-config-panel"
               aria-label="配置时间块"
-              className={`absolute left-4 right-4 top-4 flex h-[68px] items-center justify-between rounded-[24px] px-5 py-[18px] text-left backdrop-blur-[24px] ${glassCardShadowClass()} ${
+              className={`${isWorkspaceSurface ? 'relative h-14 w-full rounded-xl px-3' : 'absolute left-4 right-4 top-4 h-[68px] rounded-[24px] px-5 py-[18px] backdrop-blur-[24px]'} flex items-center justify-between text-left ${isWorkspaceSurface ? 'border border-border-card bg-card' : glassCardShadowClass()} ${
                 isOverlaySurface
                   ? "border border-white/55 bg-[rgba(28,25,23,0.78)] text-[#FAFAF9]"
                   : "border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:border-[#FFFFFF15] dark:[background-color:rgba(28,25,23,0.5)] dark:bg-[linear-gradient(180deg,rgba(28,25,23,0.25)_0%,rgba(28,25,23,0)_100%)]"
@@ -371,29 +372,29 @@ export function FocusTimerView({
       )}
 
       {uiState === "config" && (
-        <section className={isOverlaySurface ? "pt-0" : "pt-[10px]"}>
+        <section className={isOverlaySurface || isWorkspaceSurface ? "pt-0" : "pt-[10px]"}>
           <div
-            className={`relative mx-auto w-full max-w-[390px] ${baseStageHeightClass}`}
+            className={`relative w-full ${isWorkspaceSurface ? '' : 'mx-auto max-w-[390px]'} ${baseStageHeightClass}`}
             data-testid="new-focus-state-config"
           >
-            <div
+            {!isWorkspaceSurface && <div
               className={`absolute left-1/2 top-[20px] ${baseGlowHeightClass} w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] blur-[8px] ${
                 isOverlaySurface
                   ? "bg-[rgba(12,10,9,0.24)]"
                   : "bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14]"
               }`}
               aria-hidden
-            />
+            />}
 
             <div
               id="new-focus-config-panel"
-              className={`${useAutoHeightConfigLayout ? "relative mx-4" : "absolute left-4 right-4 top-4"} flex ${baseCardHeightClass} flex-col gap-3 ${isOverlaySurface ? "overflow-y-auto" : ""} rounded-[24px] px-[18px] py-4 backdrop-blur-[24px] ${glassCardShadowClass()} ${
+              className={`${isWorkspaceSurface ? 'relative grid gap-3 rounded-xl border border-border-card bg-card p-3 sm:grid-cols-[minmax(0,1fr)_auto]' : `${useAutoHeightConfigLayout ? "relative mx-4" : "absolute left-4 right-4 top-4"} flex ${baseCardHeightClass} flex-col gap-3 rounded-[24px] px-[18px] py-4 backdrop-blur-[24px] ${glassCardShadowClass()}`} ${isOverlaySurface ? "overflow-y-auto" : ""} ${
                 isOverlaySurface
                   ? "border border-white/55 bg-[rgba(28,25,23,0.78)] text-[#FAFAF9]"
                   : "border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:border-[#FFFFFF15] dark:[background-color:rgba(28,25,23,0.5)] dark:bg-[linear-gradient(180deg,rgba(28,25,23,0.25)_0%,rgba(28,25,23,0)_100%)]"
               }`}
             >
-              <div className="flex items-center gap-[10px]">
+              <div className={`flex items-center gap-[10px] ${isWorkspaceSurface ? 'sm:col-span-2' : ''}`}>
                 <button
                   type="button"
                   data-testid="new-focus-config-collapse-button"
@@ -419,7 +420,7 @@ export function FocusTimerView({
                 />
               </div>
 
-              <div className="h-px w-full bg-[#D4785F30] dark:bg-[#D4785F20]" />
+              {!isWorkspaceSurface && <div className="h-px w-full bg-[#D4785F30] dark:bg-[#D4785F20]" />}
 
               <div className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">
@@ -498,6 +499,7 @@ export function FocusTimerView({
                 </div>
               </div>
 
+              {slots.configurationDetails && <div className={isWorkspaceSurface ? 'sm:col-span-2' : undefined}>{slots.configurationDetails}</div>}
               <Button
                 type="button"
                 data-testid="new-focus-start-button"
@@ -505,7 +507,7 @@ export function FocusTimerView({
                 onClick={() => {
                   void handleStart();
                 }}
-                className="h-10 w-full rounded-[12px] bg-[#C75B3A] text-[14px] font-medium text-white hover:bg-[#B24D2F] dark:bg-[#C75B3A] dark:hover:bg-[#B24D2F]"
+                className={`h-10 w-full rounded-[12px] bg-[#C75B3A] text-[14px] font-medium text-white hover:bg-[#B24D2F] dark:bg-[#C75B3A] dark:hover:bg-[#B24D2F] ${isWorkspaceSurface ? 'sm:col-start-2 sm:row-start-2 sm:self-end sm:w-36' : ''}`}
               >
                 <Play size={16} className="mr-2" />
                 开始计时
@@ -517,11 +519,11 @@ export function FocusTimerView({
 
       {uiState === "running" && (
         <section
-          className={isOverlaySurface ? "pt-0" : "pt-[10px]"}
+          className={isOverlaySurface || isWorkspaceSurface ? "pt-0" : "pt-[10px]"}
           data-testid="new-focus-state-running"
         >
           <div
-            className={`relative mx-auto w-full max-w-[390px] ${runningStageHeightClass}`}
+            className={`relative w-full ${isWorkspaceSurface ? '' : 'mx-auto max-w-[390px]'} ${runningStageHeightClass}`}
           >
             {showOverlaySurfaceBackdropGlow ? (
               <div
@@ -538,7 +540,7 @@ export function FocusTimerView({
               data-testid="new-focus-running-task-card"
               data-overlay-visible-surface={hasIntegratedOverlayChrome ? "true" : undefined}
               onMouseDownCapture={overlayChrome?.onSurfaceMouseDownCapture}
-              className={`${runningCardLayoutClass} flex ${runningCardHeightClass} flex-col gap-3 rounded-[24px] px-5 py-4 backdrop-blur-[24px] ${glassCardShadowClass()} ${
+              className={`${runningCardLayoutClass} flex ${runningCardHeightClass} flex-col gap-3 ${isWorkspaceSurface ? 'rounded-xl border border-border-card bg-card p-3' : `rounded-[24px] px-5 py-4 backdrop-blur-[24px] ${glassCardShadowClass()}`} ${
                 isOverlaySurface
                   ? "border border-white/55 bg-[rgba(28,25,23,0.78)] text-[#FAFAF9]"
                   : "border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:border-[#FFFFFF15] dark:[background-color:rgba(28,25,23,0.5)] dark:bg-[linear-gradient(180deg,rgba(28,25,23,0.25)_0%,rgba(28,25,23,0)_100%)]"

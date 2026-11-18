@@ -33,6 +33,16 @@ function fixture(namespace = beta) {
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe('isolated Beta Android preparation', () => {
+  it.each(['\n','\r\n'])('B12-08: prepares fresh debug native-symbol policy and keeps the diagnostic opt-in idempotent (%j)',async newline=>{
+    const {prepareBetaAndroid}=await import('../../../scripts/dev/beta-android-prepare');const work=fixture();
+    const original=readFileSync(work.files.gradle,'utf8');
+    writeFileSync(work.files.gradle,original.trimEnd().replace(/\n}$/, '\n    buildTypes {\n        getByName("debug") {\n            isDebuggable = true\n            isJniDebuggable = true\n            packaging { jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so") }\n        }\n    }\n}')+'\n');
+    writeFileSync(work.files.gradle,readFileSync(work.files.gradle,'utf8').replace(/\r?\n/g,newline));
+    prepareBetaAndroid(work.root);const prepared=work.snapshot().gradle;
+    expect(prepared).not.toContain('isJniDebuggable = true');expect(prepared).toContain('isDebuggable = true');
+    expect(prepared).toContain('exomind.keepNativeSymbols');expect(prepared).toContain('if (keepNativeSymbols)');
+    expect(prepareBetaAndroid(work.root).changedFiles).toEqual([]);expect(work.snapshot().gradle).toBe(prepared);
+  });
   it('patches fresh Beta display integration, preserves Gradle and permissions, and is idempotent', async () => {
     const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
     const work = fixture(); const before = work.snapshot();

@@ -3,6 +3,19 @@ import {deferred,memoryStorage} from './fixtures';
 afterEach(()=>vi.unstubAllGlobals());
 
 describe('durable local intent bridge',()=>{
+  it('B12-07: imports clean shared changes but rejects a stale local write without overwriting either input',async()=>{
+    const {openDurableIntentStorage}=await import('@/beta/local-intent-journal');
+    let raw='base',notify=()=>{};const gate=deferred<void>();let hold=false;
+    const journal={read:async()=>raw,write:async()=>{},subscribe:(_key:string,changed:()=>void)=>{notify=changed;return()=>{notify=()=>{};};},compareWrite:vi.fn(async(_key:string,expected:string|null,next:string)=>{if(hold)await gate.promise;if(raw!==expected)throw Error('shared draft conflict');raw=next;})};
+    const storage=await openDurableIntentStorage({key:'shared',journal,validate:()=>{}});
+    raw='from another Native client';notify();await vi.waitFor(()=>expect(storage.getItem('shared')).toBe(raw));
+    expect(storage.snapshot().externalRevision).toBe(1);
+    hold=true;storage.setItem('shared','local input still being typed');const pending=storage.commit();
+    raw='newer Native input';notify();gate.resolve();await expect(pending).rejects.toBeDefined();
+    expect(raw).toBe('newer Native input');expect(storage.getItem('shared')).toBe('local input still being typed');
+    expect(journal.compareWrite).toHaveBeenLastCalledWith('shared','from another Native client','local input still being typed');
+    storage.close();
+  });
   it('hydrates from journal even when legacy storage rolled back, and waits for the commit acknowledgement',async()=>{
     const {openDurableIntentStorage}=await import('@/beta/local-intent-journal');
     const legacy=memoryStorage();legacy.setItem('exomind:beta:drafts:device','old');

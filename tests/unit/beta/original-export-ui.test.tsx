@@ -11,7 +11,26 @@ beforeEach(()=>{localStorage.clear();sessionStorage.clear();Object.definePropert
 afterEach(()=>{if(locks)Object.defineProperty(navigator,'locks',locks);else Reflect.deleteProperty(navigator,'locks');vi.restoreAllMocks();});
 
 describe('Native original export UI',()=>{
-  it('enables large originals, discloses cancelled partial documents and cancels only its owned live request on close',async()=>{
+  it('B12-07: searching away from an attachment cannot cancel its accepted native export',async()=>{
+    const gate=deferred<BetaOriginalExportResult>(),save=vi.fn(()=>gate.promise),cancel=vi.fn(async()=>true);
+    const base=fakeClient(),original={original_id:'original',sha256:'b'.repeat(64),byte_length:MAX_BASIC_DOWNLOAD_BYTES+1,file_name:'search-safe.raw',media_type:'application/octet-stream'};
+    const event={event_id:'event',profile_id:'p',device_id:'device-a',author_id:'author',author_kind:'human' as const,occurred_at_ms:Date.now(),text:'attachment fact',tags:[],digest:'a'.repeat(64),local_seq:1,originals:[original]};
+    base.eventsPage.mockImplementation(async(_profile,query)=>({items:query.search?[]:[event],highwater:1,next_before:null}));
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={{...base,originalExports:{save,cancel}}}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'下载 search-safe.raw'}));
+    await waitFor(()=>expect(save).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button',{name:'检索记录'}));
+    fireEvent.change(screen.getByRole('textbox',{name:'搜索记录'}),{target:{value:'another fact'}});
+    fireEvent.click(screen.getByRole('button',{name:'搜索',exact:true}));
+    await waitFor(()=>expect(screen.queryByRole('button',{name:'下载 search-safe.raw'})).not.toBeInTheDocument());
+    expect(cancel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'附件导出任务'}));
+    expect(screen.getByRole('dialog')).toHaveTextContent('search-safe.raw');
+    await act(async()=>{gate.resolve({cancelled:false,byte_length:original.byte_length,sha256:original.sha256});});
+    expect(screen.getByRole('dialog')).toHaveTextContent('原件已导出并完成校验');
+    expect(cancel).not.toHaveBeenCalled();
+  });
+  it('enables large originals, discloses partial documents and cancels only on an explicit action',async()=>{
     const first=deferred<BetaOriginalExportResult>();const next=deferred<BetaOriginalExportResult>();
     const save=vi.fn((_profile:string,_original:string,_request:string)=>first.promise).mockImplementationOnce(()=>first.promise).mockImplementationOnce(()=>next.promise);
     const cancel=vi.fn(async(_request:string)=>true);
@@ -30,7 +49,7 @@ describe('Native original export UI',()=>{
     await waitFor(()=>expect(button).toBeEnabled());fireEvent.click(button);
     await waitFor(()=>expect(save).toHaveBeenCalledTimes(2));const nextId=save.mock.calls[1][2];
     expect(nextId).not.toBe(firstId);view.unmount();
-    expect(cancel).toHaveBeenLastCalledWith(nextId);
+    expect(cancel).toHaveBeenCalledTimes(1);expect(cancel).toHaveBeenLastCalledWith(firstId);
     await act(async()=>{next.resolve({cancelled:true,partial_output:false});});
   });
 });
