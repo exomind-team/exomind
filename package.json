@@ -36,6 +36,8 @@
     "test": "vitest",
     "verify:alpha04:auto": "bun scripts/dev/alpha04-automated-acceptance.ts",
     "verify:alpha04:release-isolation": "bun scripts/dev/alpha04-release-isolation.ts",
+    "verify:beta:contracts": "bun scripts/dev/beta-contract-gate.ts",
+    "test:beta:contract-evidence": "node node_modules/vitest/vitest.mjs run tests/unit/scripts/beta-contract-evidence.test.ts --maxWorkers=1",
     "mcp:exomind": "bun run ./scripts/dev/run-exomind-mcp.ts",
     "mcp:tauri": "bun x mcp-server-tauri",
     "playwright:install": "bun x playwright install",

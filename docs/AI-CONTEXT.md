@@ -103,6 +103,7 @@ src-tauri/        # Rust 后端（Tauri 2.0）
 
 | 场景 | 文档 |
 |------|------|
+| Beta 根因回归、Agent-spec 试点与空间 GC | [迭代门禁](development/beta-iteration-guards.md)、[工业化路线图](plans/2026-11-19-v0.6-industrial-iteration-roadmap.md) |
 | 源码工作目录 Agent 合同 | [AGENTS.md](../AGENTS.md) |
 | 用户侧 runtime agent 契约 | [docs/agents/runtime-agent-contract.md](agents/runtime-agent-contract.md) |
 | 前端 UI 统一规范 | [docs/development/ui-spec.md](development/ui-spec.md) |

@@ -141,6 +141,10 @@ pencil/.claude/settings.local.json
 .claude/settings.local.json
 
 # Agent 本地状态
+/.agent-spec/runs/
+/.agent-spec/trace/
+/.agent-spec/graph/
+/.agent-spec/pending-ai-*.json
 agent.test.local.state.json
 runtime-data/
 .worktrees/
