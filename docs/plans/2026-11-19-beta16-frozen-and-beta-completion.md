@@ -14,6 +14,13 @@ Beta16/6016 基于已验证 `c43a7bf62ec3e1f3cf2c1df12daa76f293664089`，
 这是内部候选冻结。Alpha 默认版本/身份与日用 0.5 数据隔离保持原合同；
 完成候选构建不等于完整 Beta 放行。内部产物、公开发行、设备验收分别记账。
 
+F0入口补记：开发分支上的 `workflow_dispatch` 曾返回404，未启动job。
+现通过仅在显式候选请求文件变更时触发的push入口，保留候选SHA不变；
+recipe SHA与payload source SHA分别记录。主代理复核捕捉并修正了Actions payload
+不含commit路径数组的问题，改用已验证的before/after完整Git区间（recipe checkout取完整历史）。
+真实临时Git的多提交push反例先红后绿；9项相关测试、定向类型和Actionlint通过。
+后续构建终态/候选hash/运行结果在外部执行交接与本计划状态中分别更新。
+
 ## 执行状态与成功标准
 
 | 单元 | 当前状态 | 成功标准 | 所有者 |
