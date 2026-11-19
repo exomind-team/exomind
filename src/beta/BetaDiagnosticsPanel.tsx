@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Activity, Clipboard, Cpu, Download, HardDrive, MemoryStick, Pause, RefreshCw, ScanSearch } from 'lucide-react';
+import { Activity, Clipboard, Cpu, Download, HardDrive, Info, MemoryStick, Pause, RefreshCw, ScanSearch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { FieldSelect } from '@/components/ui/field-select';
@@ -38,7 +38,7 @@ export function BetaDiagnosticsEntry({ client, visible }: BetaDiagnosticsPanelPr
           <Activity aria-hidden="true" className="mr-2 h-4 w-4" />查看运行诊断
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] max-w-6xl overflow-y-auto">
+      <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] max-w-6xl overflow-y-auto p-4 sm:p-6" closeButtonClassName="right-2 top-2 flex h-8 w-8 items-center justify-center">
         <DialogHeader className="sr-only">
           <DialogTitle>运行诊断</DialogTitle>
           <DialogDescription>按需查看本机进程和存储；关闭后停止诊断观察。</DialogDescription>
@@ -141,6 +141,7 @@ function formatApproximateDuration(milliseconds: number): string {
 
 function formatCpu(value: number | null): string {
   if (value === null) return '未知';
+  if (value > 0 && value < 0.01) return '<0.01 核';
   const formatted = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
   return `${formatted} 核`;
 }
@@ -263,21 +264,26 @@ function MetricCard({
   children?: ReactNode;
 }) {
   const headingId = useId();
+  const provenanceId = useId();
+  const [provenanceOpen, setProvenanceOpen] = useState(false);
   return (
     <section role="group" aria-labelledby={headingId} className="min-w-0 rounded-2xl border border-border-card bg-card p-3 shadow-sm sm:p-4">
       <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
         {icon}
-        <h3 id={headingId} className="min-w-0 truncate text-sm font-medium text-foreground">{title}</h3>
+        <h3 id={headingId} className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{title}</h3>
+        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label={`${title}指标口径`} aria-expanded={provenanceOpen} aria-controls={provenanceId} onClick={() => setProvenanceOpen(open => !open)}>
+          <Info aria-hidden="true" className="h-4 w-4" />
+        </Button>
       </div>
       <div className="mt-3 flex min-h-10 items-center overflow-hidden text-2xl font-semibold tabular-nums tracking-tight text-foreground" aria-live="polite">
         <span className="min-w-0 break-all">{value}</span>
       </div>
-      <div className="mt-3 space-y-1 text-[11px] leading-4 text-muted-foreground">
+      <p className="mt-1 min-h-5 text-[11px] leading-4 text-muted-foreground">测量窗口：{window}</p>
+      {provenanceOpen && <div id={provenanceId} className="mt-2 space-y-1 rounded-lg bg-surface p-2 text-[11px] leading-4 text-muted-foreground">
         <p>主体：{subject}</p>
         <p>来源：{source}</p>
         <p className="break-words">样本：{sampleTime}</p>
-        <p>测量窗口：{window}</p>
-      </div>
+      </div>}
       {children ? <div className="mt-3 min-w-0">{children}</div> : null}
     </section>
   );
@@ -736,7 +742,7 @@ export function BetaDiagnosticsPanel({ client, visible }: BetaDiagnosticsPanelPr
               <RefreshCw aria-hidden="true" /> 刷新快照
             </Button>
             {!observationStarted ? (
-              <Button variant="brand" size="sm" onClick={startObservation} disabled={!client || !documentVisible}>
+              <Button variant="brand" size="sm" className="bg-brand-accent text-white hover:bg-brand-accent/90" onClick={startObservation} disabled={!client || !documentVisible}>
                 <Activity aria-hidden="true" /> 开始观察
               </Button>
             ) : (
@@ -750,15 +756,15 @@ export function BetaDiagnosticsPanel({ client, visible }: BetaDiagnosticsPanelPr
           </div>
         </div>
 
-        <div className="mt-4 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-          <div className="min-w-0 rounded-xl bg-muted/50 px-3 py-2">
-            <p className="text-[11px] text-muted-foreground">最近确认样本</p>
-            <p className="mt-1 min-h-5 break-words text-sm font-medium tabular-nums">
+        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs">
+            <span className="text-muted-foreground">最近确认样本</span>
+            <p className="min-h-5 break-words font-medium tabular-nums">
               {latestProcess ? currentSampleTime : sampleStatus === 'loading' ? '正在读取一次快照…' : client ? '尚无已确认样本' : 'Native 能力未接入'}
             </p>
           </div>
-          <p className="text-[11px] leading-4 text-muted-foreground sm:max-w-sm">
-            仅覆盖 Native / Host 当前进程；不包含 WebView、GPU、其他进程或设备功耗。设备 USB 连接也不能说明净充电。
+          <p className="text-[11px] leading-4 text-muted-foreground sm:max-w-xl">
+            仅测量应用主进程，不包含 WebView、GPU、其他进程或设备功耗。USB 净充电未测量。
           </p>
         </div>
         <div className="mt-3 flex min-h-5 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
@@ -825,7 +831,7 @@ export function BetaDiagnosticsPanel({ client, visible }: BetaDiagnosticsPanelPr
             ) : null}
             {storageFailure ? <p role="alert" className="mt-2 text-xs text-destructive">{storageFailure}</p> : null}
             <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
-              logical bytes 下界；不是 allocated bytes、可释放空间或整机总量。只读元数据，不读取文件内容，也不从 UI 传路径。
+              仅统计本机数据目录中的文件大小；未完成扫描时为已统计下界，不代表可释放空间。
             </p>
             {storage ? (
               <div className="mt-2 space-y-1 text-xs text-muted-foreground">

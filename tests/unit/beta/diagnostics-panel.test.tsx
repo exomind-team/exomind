@@ -102,6 +102,36 @@ afterEach(() => {
 });
 
 describe('Beta runtime diagnostics panel', () => {
+  it('keeps metric provenance available on demand without repeating it in every card', async () => {
+    const client = diagnosticsClient();
+    render(<BetaDiagnosticsPanel client={client} visible />);
+    await waitFor(() => expect(client.sample).toHaveBeenCalledTimes(1));
+    const cpu = screen.getByRole('group', { name: 'CPU' });
+    expect(within(cpu).queryByText(/进程累计 CPU 时间差分/)).not.toBeInTheDocument();
+    const disclosure = within(cpu).getByRole('button', { name: 'CPU指标口径' });
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(within(cpu).getByText(/进程累计 CPU 时间差分/)).toBeInTheDocument();
+    fireEvent.click(disclosure);
+    expect(within(cpu).queryByText(/进程累计 CPU 时间差分/)).not.toBeInTheDocument();
+  });
+
+  it('distinguishes a small positive CPU reading from a measured zero', async () => {
+    const zero = sample({ cpu: 0 });
+    zero.process.monotonicElapsedNs = '6000000000';
+    zero.process.sampledAtUnixMs! += 5000;
+    const client = diagnosticsClient({ sample: vi.fn()
+      .mockResolvedValueOnce(sample({ cpu: 0.0031 }))
+      .mockResolvedValueOnce(zero) });
+    render(<BetaDiagnosticsPanel client={client} visible />);
+    const cpu = screen.getByRole('group', { name: 'CPU' });
+    expect(await within(cpu).findByText('<0.01 核')).toBeInTheDocument();
+    expect(within(cpu).queryByText('0 核')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '刷新快照' }));
+    expect(await within(cpu).findByText('0 核')).toBeInTheDocument();
+  });
+
   it('collects only after opening the entry and closes observation when leaving Settings', async () => {
     const client = diagnosticsClient();
     const view = render(<BetaDiagnosticsEntry client={client} visible />);
