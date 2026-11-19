@@ -25,7 +25,7 @@ import type { SummaryTasksController } from './summary-tasks-controller';
 import { BetaTimeblockController } from './timeblocks-controller';
 import { BetaFocusTimer } from './BetaFocusTimer';
 import { BetaHistoryToolbar, BetaWorkspacePane, BetaWorkspaceToolbar } from './BetaWorkspaceView';
-import { useBetaWorkspacePresentation, type BetaWorkspacePresentation } from './workspace-layout';
+import { useBetaWorkspacePresentation, type BetaWorkspaceLayout, type BetaWorkspacePresentation } from './workspace-layout';
 import { useBetaViewActive } from './view-activity';
 import { MainOverlayBridge } from './overlay/MainOverlayBridge';
 import { keepBetaEditableInViewport } from './editable-viewport';
@@ -59,6 +59,25 @@ import { pickNativeFiles } from './native-attachments';
 import { useNativeAttachmentDrop } from './native-attachment-drop';
 import type { AttachmentSelection } from './native-attachment-types';
 import { useBetaDeviceNames } from './device-names';
+import {
+  BetaMessageActions,
+  BetaMessageLocationBoundary,
+  BetaMessageReferenceDraft,
+  BetaMessageReferenceLinks,
+  type BetaMessageLocationNotice,
+} from './BetaMessageActions';
+import { locateBetaMessageReference } from './beta-message-locator';
+import {
+  buildBetaMessageReferenceUri,
+  insertBetaMessageReference,
+  removeBetaMessageReference,
+  stripBetaMessageReferencesForDisplay,
+} from './message-references';
+import type {
+  BetaMessageReference,
+  BetaMessageReferenceIdentity,
+  BetaMessageReferenceSource,
+} from './message-references';
 
 const SESSION_KEY = 'exomind:beta:connection';
 
@@ -104,6 +123,21 @@ export function BetaApp({ client: injected, sourceStore, intentJournal, intentPr
 }
 
 type DeadlineLocation={handoffId:string;profileId:string;blockId:string;attempt:number};
+type MessageReadingPosition = { top: number; followTail: boolean; layout: BetaWorkspaceLayout };
+type MessageLocationRestore =
+  | { kind: 'reading'; position: MessageReadingPosition }
+  | { kind: 'latest' };
+type MessageLocationView = {
+  reference: BetaMessageReferenceIdentity;
+  state: BetaMessageLocationNotice;
+  item?: BetaTimelinePage['items'][number];
+};
+type MessageLocationFlight = {
+  profileId: string;
+  eventId: string;
+  client: BetaClient;
+  abort: AbortController;
+};
 function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, intentJournal, intentPredecessor, endpoint }: { client: BetaClient; peers:BetaPeersClient|null; handoffs:BetaDeadlineHandoffsClient|null; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; endpoint?: string }) {
   const [status, setStatus] = useState<BetaStatus | null>(null);
   const [profiles, setProfiles] = useState<BetaProfile[]>([]);
@@ -383,9 +417,39 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
   const alive = useRef(true); const now = useBetaNow(recordsActive);
   const mode=useBetaDateDisplayMode();
   const readingTop=useRef(0);const followTail=useRef(true);
+  const [messageLocation, setMessageLocation] = useState<MessageLocationView | null>(null);
+  const messageLocationSequence = useRef(0);
+  const messageLocationFlight = useRef<MessageLocationFlight | null>(null);
+  const messageLocationOrigin = useRef<MessageReadingPosition | null>(null);
+  const pendingMessageLocationRestore = useRef<MessageLocationRestore | null>(null);
+  const [messageLocationRestoreRevision, setMessageLocationRestoreRevision] = useState(0);
+  const [messageDraftNotice, setMessageDraftNotice] = useState('');
+  const messageScope = useRef({ client, profileId });
+  messageScope.current = { client, profileId };
   const [reviewsOpen,setReviewsOpen]=useState(false),[reviewTarget,setReviewTarget]=useState<SummaryArtifactRecord|null>(null),[summarySource,setSummarySource]=useState<SummarySourceRef|null>(null);
   const sourceReader=useMemo(()=>client.timelineEvent?(profile:string,event:string)=>client.timelineEvent!(profile,event):undefined,[client,client.timelineEvent]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => () => {
+    ++messageLocationSequence.current;
+    messageLocationFlight.current?.abort.abort();
+    messageLocationFlight.current = null;
+  }, []);
+  useLayoutEffect(() => {
+    const restore = pendingMessageLocationRestore.current;
+    const element = scroll.current;
+    if (!restore || !element) return;
+
+    if (restore.kind === 'latest') {
+      followTail.current = true;
+      element.scrollTop = element.scrollHeight;
+    } else {
+      followTail.current = restore.position.followTail;
+      element.scrollTop = restore.position.top;
+    }
+
+    readingTop.current = element.scrollTop;
+    pendingMessageLocationRestore.current = null;
+  }, [messageLocationRestoreRevision]);
   useEffect(() => {
     if (visible && deadlineLocation?.profileId === profileId) changeLayout({ focus: 'expanded', minimal: false });
   }, [visible, profileId, deadlineLocation?.handoffId, deadlineLocation?.attempt]);
@@ -433,17 +497,32 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
     });
     observer.observe(historyContent.current); return () => observer.disconnect();
   }, [recordsActive]);
-  async function older() {
-    if (!page || page.next_before === null || loading) return;
-    const current = generation.current; setLoading(true);
+  async function older(): Promise<BetaTimelinePage | null> {
+    if (!page || page.next_before === null || loading) return null;
+    const current = generation.current;
+    setLoading(true);
+
     try {
-      const result = await readTimeline(client,profileId, { before: page.next_before, through: page.highwater, limit: 100, ...(query ? { search: query } : {}) });
-      if (current !== generation.current) return;
+      const result = await readTimeline(client, profileId, {
+        before: page.next_before,
+        through: page.highwater,
+        limit: 100,
+        ...(query ? { search: query } : {}),
+      });
+      if (current !== generation.current) return null;
+
       olderHeight.current = scroll.current?.scrollHeight ?? null;
-      setPage({ ...result, items: mergeTimelineItems(page.items,result.items) });
+      const merged = { ...result, items: mergeTimelineItems(page.items, result.items) };
+      pageRef.current = merged;
+      setPage(merged);
       setHistoryError('');
-    } catch (failure) { if (current === generation.current) setHistoryError(errorMessage(failure)); }
-    finally { if (current === generation.current) setLoading(false); }
+      return merged;
+    } catch (failure) {
+      if (current === generation.current) setHistoryError(errorMessage(failure));
+      return null;
+    } finally {
+      if (current === generation.current) setLoading(false);
+    }
   }
   async function submit(commandId?: string) {
     if (!commandId && clipboardFlight.current) return;
@@ -456,6 +535,147 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
   const draft = drafts.drafts[profileId];
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => { if (visible && textareaRef.current) window.dispatchEvent(new Event('beta:capture-input-ready')); }, [visible]);
+  async function openMessageReference(reference:BetaMessageReferenceIdentity){
+    messageLocationFlight.current?.abort.abort();
+    const sequence=++messageLocationSequence.current;
+    if(!messageLocationOrigin.current){
+      messageLocationOrigin.current={top:scroll.current?.scrollTop??readingTop.current,followTail:followTail.current,layout:{...layout}};
+    }
+    try{buildBetaMessageReferenceUri(reference);}catch{
+      messageLocationFlight.current=null;
+      setMessageLocation({reference,state:{kind:'failed',message:'引用身份无效，未读取任何档案数据。'}});
+      return;
+    }
+    if(reference.profileId!==profileId){
+      messageLocationFlight.current=null;
+      setMessageLocation({reference,state:{kind:'profile-mismatch'}});
+      return;
+    }
+    if(!layout.minimal&&layout.records!=='expanded')changeLayout({records:'expanded'});
+    const abort=new AbortController();
+    const flight: MessageLocationFlight = {
+      profileId,
+      eventId: reference.eventId,
+      client,
+      abort,
+    };
+    messageLocationFlight.current=flight;
+    setMessageLocation({reference,state:{kind:'loading'}});
+    const isCurrent=()=>alive.current
+      &&messageLocationSequence.current===sequence
+      &&messageLocationFlight.current===flight
+      &&messageScope.current.profileId===flight.profileId
+      &&messageScope.current.client===flight.client
+      &&reference.profileId===flight.profileId
+      &&reference.eventId===flight.eventId;
+    try{
+      const currentPage=pageRef.current;
+      const result=await locateBetaMessageReference({
+        client,
+        currentProfileId:profileId,
+        reference,
+        ...(currentPage?{highwater:currentPage.highwater,loadedItems:currentPage.items}:{}),
+        signal:abort.signal,
+        isCurrent,
+      });
+      if(!isCurrent())return;
+      messageLocationFlight.current=null;
+      if(result.kind==='found'){
+        if(result.item.kind!=='capture'){
+          setMessageLocation({reference,state:{kind:'failed',message:'引用解析返回了非消息记录；当前草稿和阅读位置已保留。'}});
+          return;
+        }
+        setMessageLocation({reference,state:{kind:'found',pagesRead:result.pagesRead,source:result.source,highwater:result.highwater},item:result.item});
+      }else if(result.kind==='profile-mismatch'){
+        setMessageLocation({reference,state:{kind:'profile-mismatch'}});
+      }else if(result.kind==='not-found'){
+        setMessageLocation({reference,state:{kind:'not-found',pagesRead:result.pagesRead,highwater:result.highwater,limitReached:result.limitReached}});
+      }else if(result.kind==='failed'){
+        setMessageLocation({reference,state:{kind:'failed',message:result.message}});
+      }else{
+        setMessageLocation({reference,state:{kind:'cancelled'}});
+      }
+    }catch(failure){
+      if(isCurrent()){
+        messageLocationFlight.current=null;
+        setMessageLocation({reference,state:{kind:'failed',message:errorMessage(failure)}});
+      }
+    }
+  }
+  function cancelMessageLocation(){
+    const flight=messageLocationFlight.current;
+    if(!flight)return;
+    ++messageLocationSequence.current;
+    flight.abort.abort();
+    messageLocationFlight.current=null;
+    setMessageLocation(current=>current&&current.reference.profileId===flight.profileId&&current.reference.eventId===flight.eventId
+      ?{...current,state:{kind:'cancelled'}}:current);
+  }
+  async function loadOlderAndRetryMessageReference(reference:BetaMessageReferenceIdentity){
+    const sequence=messageLocationSequence.current;
+    const requestedClient=client;
+    const requestedProfile=profileId;
+    const loaded=await older();
+    if(!loaded||!alive.current||messageLocationSequence.current!==sequence
+      ||messageScope.current.client!==requestedClient||messageScope.current.profileId!==requestedProfile
+      ||reference.profileId!==requestedProfile||reference.eventId!==messageLocation?.reference.eventId)return;
+    void openMessageReference(reference);
+  }
+  function closeMessageLocation(destination:'reading'|'latest'){
+    ++messageLocationSequence.current;
+    messageLocationFlight.current?.abort.abort();
+    messageLocationFlight.current=null;
+    const position=messageLocationOrigin.current??{top:scroll.current?.scrollTop??readingTop.current,followTail:followTail.current,layout:{...layout}};
+    const restoredLayout=destination==='latest'?{...position.layout,minimal:false,records:'expanded' as const}:position.layout;
+    if(restoredLayout.focus!==layout.focus||restoredLayout.records!==layout.records||restoredLayout.minimal!==layout.minimal)changeLayout(restoredLayout);
+    pendingMessageLocationRestore.current=destination==='latest'?{kind:'latest'}:{kind:'reading',position};
+    messageLocationOrigin.current=null;
+    setMessageLocation(null);
+    setMessageLocationRestoreRevision(value=>value+1);
+  }
+  function quoteMessage(source:BetaMessageReferenceSource){
+    const currentText=controller.snapshot().drafts[profileId]?.text??'';
+    const textarea=textareaRef.current;
+    const editing=!!textarea&&document.activeElement===textarea;
+    const selectionStart=editing?Math.min(textarea!.selectionStart,currentText.length):currentText.length;
+    const selectionEnd=editing?Math.min(textarea!.selectionEnd,currentText.length):currentText.length;
+    try{
+      const inserted=insertBetaMessageReference(currentText,source);
+      if(!inserted.inserted){setMessageDraftNotice('这条消息已在当前草稿中；可在引用列表中移除。');return;}
+      controller.setDraft(profileId,inserted.text);
+      const insertedRevision=controller.snapshot().drafts[profileId]?.revision;
+      setMessageDraftNotice('引用已加入当前草稿');
+      requestAnimationFrame(()=>{
+        const latest=controller.snapshot().drafts[profileId];
+        if (!alive.current
+          || messageScope.current.profileId !== profileId
+          || messageScope.current.client !== client
+          || !latest
+          || latest.text !== inserted.text
+          || latest.revision !== insertedRevision
+          || !textareaRef.current) return;
+        textareaRef.current.focus({preventScroll:true});
+        textareaRef.current.setSelectionRange(selectionStart+inserted.cursorOffsetDelta,selectionEnd+inserted.cursorOffsetDelta);
+        resizeNowInputTextarea(textareaRef.current);
+      });
+    }catch(failure){setError(errorMessage(failure));}
+  }
+  function removeDraftReference(reference:BetaMessageReferenceIdentity){
+    const currentText=controller.snapshot().drafts[profileId]?.text??'';
+    try{
+      const next=removeBetaMessageReference(currentText,reference);
+      if(next!==currentText)controller.setDraft(profileId,next);
+      setMessageDraftNotice('已从当前草稿移除引用');
+    }catch(failure){setError(errorMessage(failure));}
+  }
+  function messageReferenceSourceLabel(reference:BetaMessageReference):string|undefined{
+    if(reference.profileId!==profileId)return undefined;
+    const loaded=pageRef.current?.items.find(item=>item.kind==='capture'&&item.record.profile_id===reference.profileId&&item.record.event_id===reference.eventId);
+    if(loaded?.kind==='capture')return deviceNames.label(loaded.record.device_id);
+    const located=messageLocation?.item;
+    if(located?.kind==='capture'&&located.record.profile_id===reference.profileId&&located.record.event_id===reference.eventId)return deviceNames.label(located.record.device_id);
+    return undefined;
+  }
   const fileInput = useRef<HTMLInputElement>(null);
   const reselectTarget = useRef<string | null>(null);
   const [clipboardBusy, setClipboardBusy] = useState(false);
@@ -522,6 +742,24 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       catch(failure){if(alive.current)setError(errorMessage(failure));}
     }else if(fileInput.current){fileInput.current.multiple=target===null;fileInput.current.click();}
   }
+  const locatedMessage=messageLocation?.item?.kind==='capture'?messageLocation.item.record:null;
+  const locatedMessageText=locatedMessage?stripBetaMessageReferencesForDisplay(locatedMessage.text):'';
+  const locatedMessageContent=locatedMessage?<ChatMessageRowView eventId={locatedMessage.event_id} timelineKind="capture" tone={locatedMessage.author_kind==='human'?'user':'agent-feedback'} className="group"
+    avatar={<Avatar className={`${locatedMessage.author_kind==='human'?'':'mt-0.5 '}h-8 w-8 shrink-0`}><AvatarFallback className={locatedMessage.author_kind==='human'?'rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100':'bg-violet-600 text-white'}>{locatedMessage.author_kind==='human'?'我':<Bot size={16}/>}</AvatarFallback></Avatar>}
+    metadata={<><span className="text-muted">{deviceNames.label(locatedMessage.device_id)}</span><EventTimestamp timestamp={locatedMessage.occurred_at_ms} now={now} mode={mode}/><span className="text-xs font-semibold text-strong">{locatedMessage.author_kind==='human'?'我':'Agent 记录'}</span></>}
+    content={locatedMessageText?<p className="select-text whitespace-pre-wrap break-words">{locatedMessageText}</p>:null}
+    afterBubble={!!locatedMessage.originals?.length&&<OriginalDownloads client={client} deviceId={deviceId} profileId={profileId} originals={locatedMessage.originals} visible={recordsActive}/>}
+    actions={<><BetaMessageActions content={locatedMessage.text} profileId={profileId} eventId={locatedMessage.event_id} align={locatedMessage.author_kind==='human'?'end':'start'} onQuote={locatedMessage.text.trim()?quoteMessage:undefined}/><BetaMessageReferenceLinks value={locatedMessage.text} onOpen={openMessageReference} sourceLabel={messageReferenceSourceLabel}/></>}/>:undefined;
+  const messageLocationBoundary=messageLocation?<BetaMessageLocationBoundary
+    state={messageLocation.state}
+    onCancel={messageLocation.state.kind==='loading'?cancelMessageLocation:undefined}
+    onRetry={()=>{void openMessageReference(messageLocation.reference);}}
+    onLoadOlderAndRetry={messageLocation.state.kind==='not-found'&&messageLocation.state.limitReached&&page!==null&&page.next_before!==null&&!loading
+      ?()=>{void loadOlderAndRetryMessageReference(messageLocation.reference);}:undefined}
+    onReturnToReadingPosition={()=>closeMessageLocation('reading')}
+    onReturnToLatest={()=>closeMessageLocation('latest')}
+    children={locatedMessageContent}
+  />:null;
   return <div ref={dropRoot} data-beta-workspace className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
     onDragOver={event=>{if(workspaceActive&&Array.from(event.dataTransfer.types).includes('Files')){event.preventDefault();event.dataTransfer.dropEffect=client.originals?'copy':'none';}}}
     onDrop={event=>{
@@ -545,6 +783,7 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
         }
       }}/></div></BetaWorkspacePane>
     }
+    {messageLocation?.state.kind === 'profile-mismatch' && messageLocationBoundary}
     <BetaWorkspacePane kind="records" state={layout.minimal ? 'expanded' : layout.records} chrome={!layout.minimal&&layout.records!=='expanded'} onToggle={()=>changeLayout({records:layout.records==='collapsed'?'expanded':'collapsed'})}>
     {!client.timelinePage&&<p className="px-5 py-1 text-[11px] text-muted">此连接仅提供兼容记录历史，尚未提供完整时间线</p>}
     {!layout.minimal&&<BetaHistoryToolbar onCollapse={()=>changeLayout({records:'collapsed'})} searchOpen={searchOpen||!!query} onSearch={()=>setSearchOpen(value=>!value)} onRefresh={()=>setRevision(value=>value+1)} onReview={()=>{setReviewTarget(null);setReviewsOpen(true);}}/>}
@@ -560,6 +799,7 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       }} options={[{value:'compact',label:'简略日期'},{value:'full',label:'完整日期'},{value:'weekday',label:'星期日期'}]}/>
     </div>
     {historyError && <p role="alert" className="shrink-0 px-5 py-2 text-sm text-destructive">{historyError}</p>}
+    {messageLocation && messageLocation.state.kind !== 'profile-mismatch' && messageLocationBoundary}
     <div ref={scroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4" aria-label="记录历史" aria-busy={loading} onScroll={event=>{if(!recordsActive)return;const element=event.currentTarget;readingTop.current=element.scrollTop;followTail.current=element.scrollHeight-element.clientHeight-element.scrollTop<64;}}>
       {page?.next_before !== null && page && <div className="mb-4 text-center"><Button variant="ghost" disabled={loading} onClick={() => void older()}>加载更早记录</Button></div>}
       {loading && !page && <p role="status" className="text-center text-sm text-muted">正在读取…</p>}
@@ -570,11 +810,12 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
         content={<p className="whitespace-pre-wrap break-words">{betaTimeblockLabel(item.record)}</p>}/>
       :item.kind==='summary/1'?<BetaSummaryHistoryRow key={item.record.event_id} record={item.record} api={client.summaries} revision={page.highwater} now={now} dateMode={mode} onInspect={record=>{setReviewTarget(record);setReviewsOpen(true);}} onOpenSource={sourceReader?source=>setSummarySource(source):undefined}/>
       :item.kind==='agent_summary/1'?<BetaExternalSummaryHistoryRow key={item.record.event_id} record={item.record} now={now} dateMode={mode} onOpenSource={sourceReader?source=>setSummarySource(source):undefined}/>
-      :(()=>{const event=item.record;return <ChatMessageRowView key={event.event_id} eventId={event.event_id} timelineKind="capture" tone={event.author_kind==='human'?'user':'agent-feedback'}
+      :(()=>{const event=item.record;const displayText=stripBetaMessageReferencesForDisplay(event.text);return <ChatMessageRowView key={event.event_id} eventId={event.event_id} timelineKind="capture" tone={event.author_kind==='human'?'user':'agent-feedback'} className="group"
         avatar={<Avatar className={`${event.author_kind==='human'?'':'mt-0.5 '}h-8 w-8 shrink-0`}><AvatarFallback className={event.author_kind==='human'?'rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100':'bg-violet-600 text-white'}>{event.author_kind==='human'?'我':<Bot size={16}/>}</AvatarFallback></Avatar>}
         metadata={<><span className="text-muted">{deviceNames.label(event.device_id)}</span><EventTimestamp timestamp={event.occurred_at_ms} now={now} mode={mode}/><span className="text-xs font-semibold text-strong">{event.author_kind==='human'?'我':'Agent 记录'}</span></>}
-        content={event.text?<p className="whitespace-pre-wrap break-words">{event.text}</p>:null}
-        afterBubble={!!event.originals?.length&&<OriginalDownloads client={client} deviceId={deviceId} profileId={profileId} originals={event.originals} visible={recordsActive}/>}/>;})())}</div>
+        content={displayText?<p className="select-text whitespace-pre-wrap break-words">{displayText}</p>:null}
+        afterBubble={!!event.originals?.length&&<OriginalDownloads client={client} deviceId={deviceId} profileId={profileId} originals={event.originals} visible={recordsActive}/>}
+        actions={<><BetaMessageActions content={event.text} profileId={profileId} eventId={event.event_id} align={event.author_kind==='human'?'end':'start'} onQuote={event.text.trim()?quoteMessage:undefined}/><BetaMessageReferenceLinks value={event.text} onOpen={openMessageReference} sourceLabel={messageReferenceSourceLabel}/></>}/>;})())}</div>
     </div>
     </BetaWorkspacePane>
     {!layout.minimal&&layout.records!=='expanded'&&<div className="flex min-h-0 flex-1 items-center justify-center px-5 py-6">{layout.records==='hidden'&&(!focus||layout.focus==='hidden')&&<p className="text-center text-sm text-muted">工作区已收起，仍可记录想法。上方可恢复视图。</p>}</div>}
@@ -589,7 +830,7 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       textareaLabel="记录当下"
       voiceControl={false}
       sendLabel="发送"
-      onValueChange={(next, element) => { try { controller.setDraft(profileId, next); resizeNowInputTextarea(element); } catch (failure) { setError(errorMessage(failure)); } }}
+      onValueChange={(next, element) => { setMessageDraftNotice(''); try { controller.setDraft(profileId, next); resizeNowInputTextarea(element); } catch (failure) { setError(errorMessage(failure)); } }}
       onKeyDown={event => { if (!event.nativeEvent.isComposing && shouldSubmitOnEnter(inputSendMode, event)) { event.preventDefault(); void submit(); } }}
       onPaste={event => {
         const files = clipboardImageFiles(event.clipboardData);
@@ -613,6 +854,13 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
         const operation = target ? controller.reselectFile(profileId, target, selected[0]) : controller.addFiles(profileId, selected);
         void operation.catch(failure => { if (alive.current) setError(errorMessage(failure)); });
       }} />
+      <BetaMessageReferenceDraft
+        value={draft?.text ?? ''}
+        onOpen={reference => { void openMessageReference(reference); }}
+        onRemove={removeDraftReference}
+        sourceLabel={messageReferenceSourceLabel}
+      />
+      {messageDraftNotice && <p role="status" className="mb-2 text-xs text-secondary">{messageDraftNotice}</p>}
       {!!draft?.files?.length && <div className="mb-2 flex max-h-[28dvh] flex-col gap-2 overflow-y-auto overscroll-contain" aria-label="原件队列">
         {draft.files.map(file => <div key={file.id} className="flex items-center gap-2 rounded-2xl border border-[#E7E5E4] bg-white/90 px-3 py-2 shadow-sm dark:border-[#292524] dark:bg-[#1C1917]">
           {file.original && <BetaImagePreview identity={`${deviceId}:${profileId}:${file.id}:${file.original.sha256}`} sourceScope={client} visible={workspaceActive} fileName={file.file_name} mediaType={file.media_type} byteLength={file.byte_length} load={() => controller.previewSource(profileId, file.id)} thumbnail />}
