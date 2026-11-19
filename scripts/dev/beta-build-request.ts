@@ -11,6 +11,7 @@ const BETA_VERSION_PATTERN = /^0\.6\.0-beta[1-9][0-9]*$/;
 const LOCKED_ANDROID_VERSION_CODES: Readonly<Partial<Record<string, number>>> = {
   '0.6.0-beta16': 6016,
   '0.6.0-beta17': 6017,
+  '0.6.0-beta18': 6018,
 };
 
 export type BetaBuildRequestErrorCode =
