@@ -79,3 +79,16 @@ dispatch 冒充另存为成功。自有 Native 实例通过退出命令正常结
 首轮原始证据位于仓库外 `dual-device-beta18-20261119-a`；产物位于
 `G:/exomind-deliverables/0.6.0-beta18/66124154c3f0`。后续 Core10 生命周期红灯／实现
 是另一源码切片，不进入本冻结候选。
+
+### 包体来源核对
+
+同 ABI、同 CI debug profile、同历史 Beta 签名下，ARM64 APK 比 Beta17 增加 241,664
+bytes，x86_64 增加 290,816 bytes。当前 ARM64 包内原生库为 61,840,232 bytes、x86_64
+为 72,268,656 bytes，均以未压缩 ZIP 条目保存；两包未发现独立 `.apk` 条目，不能把
+聊天附件中的 APK 认定为构建捆绑来源。
+
+ELF 节表核对显示两 ABI 均无 `.symtab/.strtab` 和 debug 段。ARM64 的主要节为
+`.text` 39,031,956 bytes、`.eh_frame` 8,675,896 bytes、`.rodata` 6,435,832 bytes；
+因此 Beta09/10 的符号表体积结论不能直接套用到本候选。后续应做同 ABI 优化构建及
+依赖边界对照，不凭节名直接删除异常展开信息或改变 panic 语义。该分析只读构建产物，
+没有测运行内存、CPU 或能耗，也没有修改候选字节。
