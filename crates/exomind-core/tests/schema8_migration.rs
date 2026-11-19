@@ -6,6 +6,8 @@ use rusqlite::{Connection, OpenFlags, types::Value};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, path::Path};
 
+const CORE8_SYNTHETIC_ORIGINAL: &[u8] = b"Core8 synthetic attachment\x00\xff with a verified BLOB";
+
 fn readonly(path: &Path) -> Connection {
     Connection::open_with_flags(
         path,
@@ -289,12 +291,20 @@ fn core8_upgrade_preserves_receipts_origin_positions_and_verified_proofs() {
         "origin_entries",
         "origin_position_proofs",
         "verified_origin_prefixes",
+        "original_chunks",
+        "event_originals",
+        "timeblock_nodes",
     ] {
         assert!(
             !expected[name].is_empty(),
             "synthetic Core8 fixture must exercise {name}"
         );
     }
+    assert!(expected["original_chunks"].iter().any(|row| {
+        matches!(row.get(3), Some(Value::Blob(bytes)) if bytes.as_slice() == CORE8_SYNTHETIC_ORIGINAL)
+    }), "Core8 fixture must contain the verified non-empty original BLOB");
+    assert_eq!(expected["event_originals"].len(), 1);
+    assert_eq!(expected["timeblock_nodes"].len(), 1);
     drop(old);
 
     let core = Core::open(root.path()).unwrap();
@@ -318,7 +328,7 @@ fn core8_upgrade_preserves_receipts_origin_positions_and_verified_proofs() {
         .events(&context, profile)
         .unwrap()
         .into_iter()
-        .find(|event| !event.tags.is_empty())
+        .find(|event| event.text == "Synthetic remote fact" && !event.tags.is_empty())
         .expect("synthetic Core8 fixture includes a tagged capture");
     assert!(
         core.events_page_with_tag(
@@ -383,6 +393,30 @@ fn core8_upgrade_preserves_receipts_origin_positions_and_verified_proofs() {
     let reopened = Core::open(root.path()).unwrap();
     assert_eq!(reopened.device_id(), device_id);
     let context = reopened.local_human(profile).unwrap();
+    let attachment = reopened
+        .events(&context, profile)
+        .unwrap()
+        .into_iter()
+        .find(|event| !event.originals.is_empty())
+        .expect("Core8 local capture keeps its attachment reference after upgrade");
+    assert_eq!(attachment.originals.len(), 1);
+    let original = &attachment.originals[0];
+    assert_eq!(original.byte_length, CORE8_SYNTHETIC_ORIGINAL.len() as u64);
+    let restored = reopened
+        .read_original_range(
+            &context,
+            profile,
+            original.original_id,
+            0,
+            CORE8_SYNTHETIC_ORIGINAL.len(),
+        )
+        .unwrap();
+    assert_eq!(&restored.original, original);
+    assert_eq!(restored.bytes.as_slice(), CORE8_SYNTHETIC_ORIGINAL);
+    let timeblocks = reopened
+        .timeblock_nodes(&context, profile, &EventQuery::default())
+        .unwrap();
+    assert_eq!(timeblocks.items.len(), 1);
     assert_eq!(
         reopened.receipt(&context, correction.command_id).unwrap(),
         Some(correction_receipt)
