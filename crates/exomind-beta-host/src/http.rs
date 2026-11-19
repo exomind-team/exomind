@@ -175,6 +175,16 @@ impl IntoResponse for HostError {
                 "payload_too_large",
                 "Request body exceeds the permitted size",
             ),
+            Self::AgentWaitBusy => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "agent_wait_busy",
+                "Agent wait capacity is full; retry after an active wait ends",
+            ),
+            Self::AgentBundleSerialization => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "agent_bundle_failed",
+                "Agent bundle could not be serialized within its requested budget",
+            ),
             Self::VerificationBusy => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "verification_busy",
@@ -585,6 +595,8 @@ fn router(host: Arc<BetaHost>, address: SocketAddr, frontend_origins: Vec<String
         )
         .route("/beta/v1/profiles/:profile/receipts/:command", get(receipt))
         .merge(crate::agent_access_http::router())
+        .merge(crate::agent_wait_http::router())
+        .merge(crate::agent_export_http::router())
         .merge(crate::external_summaries_http::router())
         .merge(crate::originals_http::router())
         .merge(crate::timeblocks_http::router())

@@ -3,6 +3,10 @@
 mod agent_access;
 mod agent_access_http;
 pub use agent_access::{AgentAccess, AgentAccessCheck, AgentCapability};
+mod agent_export;
+mod agent_export_http;
+mod agent_wait;
+mod agent_wait_http;
 mod grant_management;
 pub use grant_management::{GrantCredential, GrantMetadata, ManagedGrantIssue};
 mod external_summaries;
@@ -111,6 +115,10 @@ pub enum HostError {
     Stopped,
     #[error("invalid request")]
     InvalidRequest,
+    #[error("the bounded Agent wait concurrency limit is reached")]
+    AgentWaitBusy,
+    #[error("the Agent bundle response could not be serialized within its budget")]
+    AgentBundleSerialization,
     #[error("resource was not found")]
     NotFound,
     #[error("host state lock was poisoned")]
@@ -331,6 +339,7 @@ pub struct BetaHost {
     original_reclaim_window_ms: u64,
     services: std::sync::Arc<timeblocks::Services>,
     summary_jobs: std::sync::Arc<summary_jobs::Services>,
+    agent_wait: agent_wait::AgentWaitService,
     #[cfg(test)]
     capture_admitted: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
@@ -404,6 +413,7 @@ impl BetaHost {
             original_reclaim_window_ms,
             services: std::sync::Arc::new(timeblocks::Services::default()),
             summary_jobs: std::sync::Arc::new(summary_jobs::Services::default()),
+            agent_wait: agent_wait::AgentWaitService::default(),
             #[cfg(test)]
             capture_admitted: Mutex::new(None),
             gate: Mutex::new(State {
@@ -438,6 +448,7 @@ impl BetaHost {
         self.services.request_stop();
         self.summary_jobs.request_stop();
         self.peers.request_stop();
+        self.agent_wait.stop();
     }
 
     pub fn status(&self) -> Result<HostStatus, HostError> {
@@ -624,6 +635,7 @@ impl BetaHost {
             return Err(HostError::NotFound);
         }
         self.verifications.cancel_grant(id)?;
+        self.agent_wait.wake();
         Ok(())
     }
 

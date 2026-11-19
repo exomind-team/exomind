@@ -450,6 +450,8 @@ mod tests {
             AgentCapability::OriginalsRead,
             AgentCapability::TimeblocksRead,
             AgentCapability::SummariesRead,
+            AgentCapability::Wait,
+            AgentCapability::ExportBundle,
         ];
         let access = |session: &Session| {
             host.check_agent_access(session, profile, &AgentAccessCheck { required: vec![] })

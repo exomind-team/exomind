@@ -72,6 +72,8 @@ impl BetaHost {
             OriginalsRead,
             TimeblocksRead,
             SummariesRead,
+            Wait,
+            ExportBundle,
         ];
         match authority.kind {
             GrantKind::Observer => {}
@@ -99,7 +101,7 @@ impl BetaHost {
             grant_kind: authority.kind,
             agent_id: authority.agent_id,
             allowed,
-            unsupported: vec![Wait, ExportBundle],
+            unsupported: vec![],
             max_page_items: 100,
             max_original_chunk_bytes: exomind_core::MAX_ORIGINAL_CHUNK_BYTES,
         })

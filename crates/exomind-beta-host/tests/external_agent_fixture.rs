@@ -671,8 +671,8 @@ impl Broker {
                 "source_export": "Read original human captures with fixed highwater, limit<=100, explicit before/through until next_before=null. Export all actual records before your append; no expected ID list is provided.",
                 "source_count": SOURCE_COUNT, "minimum_pages": 3, "minimum_original_chunks": 2,
                 "append": {"text": self.append_text, "tags": ["classification", "external-agent", "synthetic"], "originals": [], "ids": "Generate command/event UUID once, keep exact payload for receipt lookup/replay; never generate another after uncertainty."},
-                "exports": {"markdown": "agent-export.md", "manifest": "agent-export-manifest.json", "original": "exported-original.bin", "protocol": EXPORT_PROTOCOL, "manifest_fields": ["protocol", "run_id", "profile_id", "device_id", "runtime_id", "client_side_export", "server_wait_api", "server_export_bundle_api", "external_summary_append", "source_snapshot", "records", "original", "markdown_relative_path"], "source_snapshot": {"highwater": "actual first page highwater", "complete": true, "pages_read": "actual integer >=3"}, "records": "The actual 250 EventRecord objects, not IDs/counts or re-created expected text.", "original_entry": {"original_id": "actual UUID", "byte_length": ORIGINAL_LENGTH, "sha256": "actual verified SHA", "relative_path": "exported-original.bin", "state": "verified_exported"}, "markdown_relative_path": "agent-export.md", "unsupported_flags": "client_side_export=true; server_wait_api/server_export_bundle_api/external_summary_append=false. This is a bounded client export, no server bundle/wait or external summary."},
-                "ready_file": "ready-to-revoke.json", "ready_fields": ["protocol", "run_id", "phase", "append_command", "append_receipt", "observed_statuses"], "ready_phase": "ready_to_revoke", "observed_statuses": {"observer_write":403,"wrong_profile":403,"wrong_instance":401,"unknown_capability":400,"wait_capability":403,"export_bundle_capability":403,"external_summary_capability":403,"forged_author":400},
+                "exports": {"markdown": "agent-export.md", "manifest": "agent-export-manifest.json", "original": "exported-original.bin", "protocol": EXPORT_PROTOCOL, "manifest_fields": ["protocol", "run_id", "profile_id", "device_id", "runtime_id", "client_side_export", "server_wait_api", "server_export_bundle_api", "external_summary_append", "source_snapshot", "records", "original", "markdown_relative_path"], "source_snapshot": {"highwater": "actual first page highwater", "complete": true, "pages_read": "actual integer >=3"}, "records": "The actual 250 EventRecord objects, not IDs/counts or re-created expected text.", "original_entry": {"original_id": "actual UUID", "byte_length": ORIGINAL_LENGTH, "sha256": "actual verified SHA", "relative_path": "exported-original.bin", "state": "verified_exported"}, "markdown_relative_path": "agent-export.md", "capabilities": "access/check should allow wait and export_bundle for this scoped reader; these two APIs are not used by this client-side export run. external_summary_append remains denied for observer."},
+                "ready_file": "ready-to-revoke.json", "ready_fields": ["protocol", "run_id", "phase", "append_command", "append_receipt", "observed_statuses"], "ready_phase": "ready_to_revoke", "observed_statuses": {"observer_write":403,"wrong_profile":403,"wrong_instance":401,"unknown_capability":400,"wait_capability":200,"export_bundle_capability":200,"external_summary_capability":403,"forged_author":400},
                 "after_ready": "Broker independently validates real facts/files, revokes agent grant, then writes revoked.json. Poll only that local file with a finite deadline; this is not a Beta wait API.",
                 "final_file": "final-result.json", "final_fields": ["protocol", "run_id", "phase", "ok", "revoked_read_status", "revoked_append_status", "observer_read_status"], "final_phase": "after_revocation", "final_statuses": {"revoked_read_status":401,"revoked_append_status":401,"observer_read_status":200},
                 "publication": "Write JSON/export files completely, then publish handshake JSON atomically. No business deletion/cleanup, model calls, Human impersonation or reads outside the granted P.",
@@ -711,16 +711,16 @@ impl Broker {
             [
                 observed.observer_write,
                 observed.wrong_profile,
-                observed.wait_capability,
-                observed.export_bundle_capability,
                 observed.external_summary_capability,
             ]
             .iter()
             .all(|status| *status == 403)
+                && observed.wait_capability == 200
+                && observed.export_bundle_capability == 200
                 && observed.wrong_instance == 401
                 && observed.unknown_capability == 400
                 && observed.forged_author == 400,
-            "Agent negative-boundary report mismatch",
+            "Agent access capability or negative-boundary report mismatch",
         )
     }
     fn validate_export(&self, agent: &Path) -> Result<()> {
@@ -739,7 +739,7 @@ impl Broker {
                 && !manifest.server_wait_api
                 && !manifest.server_export_bundle_api
                 && manifest.external_summary_append == (self.mode == FixtureMode::SummaryProducer),
-            "export falsely advertises an unavailable server capability",
+            "client-side export falsely claims to have used a server API",
         )?;
         require(
             manifest.source_snapshot.complete
@@ -1065,7 +1065,7 @@ impl Broker {
         let scope = value["workflow"]["scope"].clone();
         let mut exports = value["workflow"]["exports"].clone();
         exports["unsupported_flags"] = json!(
-            "client_side_export=true; server_wait_api/server_export_bundle_api=false; external_summary_append=true for this grant. Export verification does not prove original body understanding in a summary."
+            "client_side_export=true; server_wait_api/server_export_bundle_api=false means those supported APIs were not used by this run; external_summary_append=true for this grant. Export verification does not prove original body understanding in a summary."
         );
         value["phase"] = json!("read_typed_summary_export_then_revoke");
         value["grant_kind"] = json!("summary_producer");

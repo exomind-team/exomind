@@ -48,16 +48,17 @@ fn access_snapshot_is_scoped_read_only_and_rechecked_after_revocation_and_restar
         host.check_agent_access(&owner, p, &read),
         Err(HostError::Forbidden)
     ));
-    assert!(matches!(
-        host.check_agent_access(
+    let wait_access = host
+        .check_agent_access(
             &observer,
             p,
             &AgentAccessCheck {
-                required: vec![AgentCapability::Wait]
-            }
-        ),
-        Err(HostError::Forbidden)
-    ));
+                required: vec![AgentCapability::Wait],
+            },
+        )
+        .unwrap();
+    assert!(wait_access.allowed.contains(&AgentCapability::Wait));
+    assert!(wait_access.unsupported.is_empty());
     assert!(matches!(
         host.check_agent_access(
             &observer,
@@ -174,7 +175,13 @@ async fn real_http_access_check_rejects_unknown_fields_capabilities_and_wrong_au
             .contains(&json!("external_summary_append"))
     );
     assert!(
-        value["unsupported"]
+        value["allowed"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("wait"))
+    );
+    assert!(
+        value["allowed"]
             .as_array()
             .unwrap()
             .contains(&json!("export_bundle"))
@@ -192,7 +199,8 @@ async fn real_http_access_check_rejects_unknown_fields_capabilities_and_wrong_au
             json!({"required":["capture_append_agent_note"]}),
             403,
         ),
-        (&observer.token, json!({"required":["export_bundle"]}), 403),
+        (&observer.token, json!({"required":["export_bundle"]}), 200),
+        (&observer.token, json!({"required":["wait"]}), 200),
         (
             &observer.token,
             json!({"required":["unrecognized_capability"]}),
