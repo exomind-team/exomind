@@ -3,6 +3,7 @@
 //! metrics, and bounded reason codes; they have no path or free-form error slot.
 
 pub mod process;
+pub mod scans;
 pub mod storage;
 
 use serde::Serialize;
