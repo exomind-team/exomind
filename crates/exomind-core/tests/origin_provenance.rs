@@ -234,6 +234,61 @@ fn proof_gap_key_change_and_malformed_proof_cannot_advance_even_legacy_history()
 }
 
 #[test]
+fn conflicting_existing_body_cannot_advance_a_proof_prefix() {
+    let rig = Rig::new();
+    let page = rig.page(None, 3);
+    let event_id = page.entries[0].fact.event_id();
+    let local = rig.receiver.local_human(rig.p).unwrap();
+    rig.receiver
+        .submit(
+            &local,
+            &CaptureCommand {
+                command_id: CommandId::new(),
+                event_id,
+                profile_id: rig.p,
+                occurred_at_ms: 5000,
+                text: "receiver's existing canonical body".into(),
+                tags: vec![],
+                originals: vec![],
+            },
+        )
+        .unwrap();
+
+    let data_context = rig
+        .receiver
+        .trusted_replica_context(
+            rig.p,
+            page.origin.device_id,
+            page.origin.restoration_epoch,
+            1,
+        )
+        .unwrap();
+    let starting_cursor = rig.receiver.replication_cursor(&data_context).unwrap();
+    let proof_context = rig.context(&page, key(8));
+    let result = rig
+        .receiver
+        .import_verified_origin_page(&proof_context, &page, &proof(&page));
+
+    assert!(matches!(
+        result,
+        Err(CoreError::ReplicationConflict {
+            event_id: conflict_id,
+            origin_seq: 1
+        }) if conflict_id == event_id
+    ));
+    assert_eq!(
+        rig.receiver.replication_cursor(&data_context).unwrap(),
+        starting_cursor
+    );
+    assert!(rig.state(&page).is_none());
+    assert_eq!(rig.counts(), (1, 0, 0, 1));
+    assert_eq!(
+        rig.receiver.events(&local, rig.p).unwrap()[0].text,
+        "receiver's existing canonical body"
+    );
+}
+
+#[test]
 fn admission_is_lifecycle_and_profile_bound_and_proofs_survive_reopening() {
     let rig = Rig::new();
     let all = rig.page(None, 3);

@@ -1,6 +1,6 @@
 use super::*;
 use crate::{BetaHost, Session};
-use exomind_core::{CaptureCommand, CommandId, EventId, OriginPageQuery, ProfileId};
+use exomind_core::{CaptureCommand, CommandId, EventId, OriginCursor, OriginPageQuery, ProfileId};
 use std::sync::Arc;
 use tempfile::{TempDir, tempdir};
 
@@ -77,6 +77,43 @@ fn each_partial_page_position_is_authenticated_before_a_prefix_can_be_committed(
     forged.page.to.hash = forged.page.entries[0].chain_hash.clone();
     assert!(
         forged
+            .verify_positions(&signed.page.origin, &source.identity.info)
+            .is_err()
+    );
+}
+
+#[test]
+fn a_position_signature_cannot_be_replayed_at_another_sequence() {
+    let source = Source::new();
+    let first = source.page(1);
+    let mut signed = source
+        .host
+        .signed_origin_page(
+            &source.owner,
+            source.profile,
+            &OriginPageQuery {
+                after: Some(first.page.to.clone()),
+                limit: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    // Keep the page structurally valid while reusing the genuine sequence-2
+    // hash/signature at sequence 1. The frozen head remains unchanged.
+    let sequence_one = first.page.from.seq + 1;
+    let wrong_hash = signed.page.entries[0].chain_hash.clone();
+    signed.page.from = first.page.from.clone();
+    signed.page.entries[0].origin_seq = sequence_one;
+    signed.page.to = OriginCursor {
+        seq: sequence_one,
+        hash: wrong_hash,
+    };
+    signed.page.has_more = signed.page.to.seq < signed.page.through.seq;
+
+    assert!(valid_positions(&signed.page));
+    assert!(
+        signed
             .verify_positions(&signed.page.origin, &source.identity.info)
             .is_err()
     );

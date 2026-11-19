@@ -371,7 +371,7 @@ async fn relayed_source_requires_current_carrier_endorsement_fixed_key_and_no_re
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_received_history_backfills_proofs_without_resetting_a_persisted_data_ack() {
-    let r = rig().await;
+    let mut r = rig().await;
     seed(&r.b, r.p, 3, "legacy history", false);
     seed(&r.a, r.p, 1, "own history", false);
     let input = {
@@ -392,6 +392,23 @@ async fn legacy_received_history_backfills_proofs_without_resetting_a_persisted_
             .unwrap();
         core.import_origin_page(&ctx, &input).unwrap();
     }
+    let a_facts_before_repair = facts(&r.a, r.p);
+    let a_receipts_before_repair = receipt_count(&r.a);
+    let data_cursor = |host: &BetaHost| {
+        let state = host.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        let context = core
+            .trusted_replica_context(
+                r.p,
+                input.origin.device_id,
+                input.origin.restoration_epoch,
+                1,
+            )
+            .unwrap();
+        core.replication_cursor(&context).unwrap()
+    };
+    assert_eq!(data_cursor(&r.a), input.to);
+
     let mut listening = listener(&r.b, &r.ob).await;
     let (c, s) = connect(&r.a, &r.oa, &r.b, &r.ob, &mut listening).await;
     let scope = r.b.peer_profile_scope(&s, r.p, r.a.device_id).unwrap();
@@ -414,10 +431,37 @@ async fn legacy_received_history_backfills_proofs_without_resetting_a_persisted_
         1,
         "own text arrives without claiming the unsigned third source arrived"
     );
+
+    // The author keeps its original device identity and signs only its own
+    // existing facts after restart; a relay can carry, but cannot mint, this proof.
+    let original_device = r.b.device_id;
+    let original_pin = r.b.device_identity(&r.ob).unwrap().fingerprint_sha256;
+    stop(r.b.clone()).await;
+    r.b = Arc::new(BetaHost::open(r.rb.path()).unwrap());
+    r.ob = r.b.owner_session().unwrap();
+    assert_eq!(r.b.device_id, original_device);
+    assert_eq!(
+        r.b.device_identity(&r.ob).unwrap().fingerprint_sha256,
+        original_pin
+    );
+
     let (a, b) = exchange(&r, PeerSyncOptions::default()).await;
     assert!(a.events_complete && b.events_complete);
     assert_eq!(a.received_facts, 0);
     assert!(a.replayed_facts >= 3);
+    assert_eq!(data_cursor(&r.a), input.to);
+    assert_eq!(facts(&r.a, r.p), a_facts_before_repair);
+    assert_eq!(receipt_count(&r.a), a_receipts_before_repair);
+    {
+        let state = r.a.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        let verified = core
+            .verified_origin_state(&core.local_human(r.p).unwrap(), &input.origin)
+            .unwrap()
+            .unwrap();
+        assert_eq!(verified.cursor, input.to);
+        assert_eq!(verified.key.fingerprint_sha256, original_pin);
+    }
     let (complete, other) =
         exchange_hosts(&r.a, &r.oa, &third, &owner, r.p, PeerSyncOptions::default()).await;
     assert!(complete.events_complete && other.events_complete);
