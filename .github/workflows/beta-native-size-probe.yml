@@ -6,6 +6,8 @@ on:
       - dev-0.6
     paths:
       - .github/workflows/beta-native-size-probe.yml
+      - scripts/dev/beta-native-size-probe.mjs
+      - tests/unit/scripts/beta-native-size-probe.test.mjs
   workflow_dispatch:
 
 permissions:

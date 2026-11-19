@@ -5,7 +5,7 @@ import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
-const MAX_MAP_BYTES = 128 * 1024 * 1024;
+const MAX_MAP_BYTES = 256 * 1024 * 1024;
 const MAX_MAP_LINE_CHARS = 1024 * 1024;
 const MAX_EVIDENCE_ROWS = 32;
 const RUNTIME_MARKER = /exomind[-_]runtime/i;
@@ -64,7 +64,7 @@ async function* boundedMapLines(file) {
 
 export async function analyzeLinkMap(file) {
   const stats = statSync(file);
-  assert(stats.isFile() && stats.size > 0 && stats.size <= MAX_MAP_BYTES, "Link map must be nonempty and no larger than 128 MiB");
+  assert(stats.isFile() && stats.size > 0 && stats.size <= MAX_MAP_BYTES, "Link map must be nonempty and no larger than 256 MiB");
   const textSegments = new Set();
   const evidenceRows = [];
   let publicTableSeen = false;
@@ -74,7 +74,7 @@ export async function analyzeLinkMap(file) {
   let lineNumber = 0;
   let oversizedLine = false;
   const sectionRow = /^\s*([0-9a-f]{4}):[0-9a-f]+\s+[0-9a-f]+H\s+(\.\S+)\s+CODE\s*$/i;
-  const publicRow = /^\s*([0-9a-f]{4}):[0-9a-f]+\s+(.+?)\s+[0-9a-f]{8,16}\s+[fi]\s+(.+?)\s*$/i;
+  const publicRow = /^\s*([0-9a-f]{4}):[0-9a-f]+\s+(.+?)\s+[0-9a-f]{8,16}\s+(?:[fi]\s+)*(.+?)\s*$/i;
 
   for await (const entry of boundedMapLines(file)) {
     lineNumber += 1;
@@ -163,7 +163,7 @@ async function main() {
   assert(existing.length === 1 && existing[0] === "exomind.map", "Evidence directory must contain only this run's newly generated map");
   assert(statSync(binary).isFile(), "The exact Windows root executable is missing");
   const mapStats = statSync(mapPath);
-  assert(mapStats.isFile() && mapStats.size > 0 && mapStats.size <= MAX_MAP_BYTES, "Link map is missing, empty, or exceeds the 128 MiB scan bound");
+  assert(mapStats.isFile() && mapStats.size > 0, "Link map is missing or empty");
 
   const readobj = need("LLVM_READOBJ");
   const binaryArgument = relative(repoRoot, binary).split(sep).join("/");
@@ -181,7 +181,9 @@ async function main() {
 
   writeFileSync(join(outputDir, "pe-sections.txt"), sections.stdout, { flag: "wx", encoding: "utf8" });
 
-  const mapAnalysis = await analyzeLinkMap(artifactMap);
+  const mapAnalysis = mapStats.size <= MAX_MAP_BYTES
+    ? await analyzeLinkMap(artifactMap)
+    : { status: "unclassified", has_exomind_runtime_text_contribution: null, reason: "map_scan_budget", interpretation: "The raw map is retained; exceeding the scan budget is not evidence of elimination." };
   const workflowPath = ".github/workflows/beta-native-size-probe.yml";
   const analyzerPath = "scripts/dev/beta-native-size-probe.mjs";
   const workflowAbs = join(repoRoot, workflowPath);

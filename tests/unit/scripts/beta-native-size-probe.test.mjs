@@ -25,6 +25,11 @@ test("identifies Runtime public code in a final text segment", async () => {
   assert.equal(result.has_exomind_runtime_text_contribution, true);
   assert.equal(result.status, "detected");
 });
+test("recognizes LLD public rows without MSVC function flags", async () => {
+  const result = await scan(sections + " 0001:001ecfa0 _RNv15exomind_runtime4tick 00000001401edfa0 libexomind_lib:source.rcgu.o\n");
+  assert.equal(result.status, "detected");
+  assert.equal(result.has_exomind_runtime_text_contribution, true);
+});
 test("a Runtime marker outside text is not proof of executable contribution", async () => {
   const result = await scan(sections + publicRow("0001", "main", "exomind.obj") + publicRow("0002", "exomind_runtime_label", "data.obj"));
   assert.equal(result.has_exomind_runtime_text_contribution, false);
