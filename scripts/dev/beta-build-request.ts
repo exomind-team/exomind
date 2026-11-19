@@ -8,8 +8,10 @@ export const BETA_BUILD_REQUEST_PATH = '.github/beta-build-candidate.json';
 const BETA_BUILD_REQUEST_KEYS = ['expected_sha', 'expected_version', 'source_ref'];
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 const BETA_VERSION_PATTERN = /^0\.6\.0-beta[1-9][0-9]*$/;
-const BETA16_VERSION = '0.6.0-beta16';
-const BETA16_ANDROID_VERSION_CODE = 6016;
+const LOCKED_ANDROID_VERSION_CODES: Readonly<Partial<Record<string, number>>> = {
+  '0.6.0-beta16': 6016,
+  '0.6.0-beta17': 6017,
+};
 
 export type BetaBuildRequestErrorCode =
   | 'invalid_event'
@@ -183,8 +185,9 @@ export function validateBetaCandidateIdentity(
   if (!Number.isSafeInteger(versionCode) || Number(versionCode) <= 0) {
     fail('beta_identity_mismatch', 'Candidate must declare a positive Android versionCode.');
   }
-  if (request.expectedVersion === BETA16_VERSION && versionCode !== BETA16_ANDROID_VERSION_CODE) {
-    fail('version_code_mismatch', 'Beta16 must retain Android versionCode 6016.');
+  const lockedVersionCode = LOCKED_ANDROID_VERSION_CODES[request.expectedVersion];
+  if (lockedVersionCode !== undefined && versionCode !== lockedVersionCode) {
+    fail('version_code_mismatch', `${request.expectedVersion} must retain Android versionCode ${lockedVersionCode}.`);
   }
 }
 

@@ -11,11 +11,14 @@ on:
       - 'knowledge/**'
       - 'specs/**'
       - 'scripts/dev/beta-contract-*.ts'
+      - 'scripts/dev/beta-build-request.ts'
       - 'tests/unit/scripts/beta-contract-*.test.ts'
+      - 'tests/unit/scripts/beta-build-request.test.ts'
       - 'crates/exomind-beta-host/**'
       - 'crates/exomind-core/**'
       - 'Cargo.toml'
       - 'src-tauri/src/beta*'
+      - 'src-tauri/tauri.beta.conf.json'
       - 'src/beta/**'
       - 'src/ui/app/components/**'
       - 'src/components/ui/**'
@@ -69,26 +72,29 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Check evidence rejection rules
         run: bun run test:beta:contract-evidence
-      - name: Check on-demand original diagnostics
+      - name: Check original diagnostics and candidate identity
         shell: bash
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import { execFileSync } from 'node:child_process';
-          import { mkdirSync, readFileSync } from 'node:fs';
-          import { join, relative } from 'node:path';
+          import { existsSync, readFileSync } from 'node:fs';
+          import { relative } from 'node:path';
           const files = [
             'tests/unit/beta/original-acquisition.test.ts',
             'tests/unit/beta/original-auto-diagnostics.test.ts',
             'tests/unit/beta/original-transfer-diagnostics-ui.test.tsx',
+            'tests/unit/scripts/beta-build-request.test.ts',
           ];
-          mkdirSync(process.env.CONTRACT_OUT, { recursive: true });
-          const reportPath = join(process.env.CONTRACT_OUT, 'original-diagnostics-unit.json');
+          assert.ok(process.env.CONTRACT_OUT);
+          assert.equal(existsSync(process.env.CONTRACT_OUT), false, 'The source gate owns its new evidence directory');
+          const reportPath = process.env.CONTRACT_OUT + '-originals.json';
           execFileSync(process.execPath, [
             'node_modules/vitest/vitest.mjs', 'run', ...files, '--maxWorkers=1',
             '--reporter=json', `--outputFile=${reportPath}`,
           ], { timeout: 120000, stdio: 'inherit' });
           const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+          assert.equal(existsSync(process.env.CONTRACT_OUT), false, 'Diagnostic tests must not create the source gate evidence directory');
           assert.equal(report.success, true);
           assert.ok(report.numTotalTests > 0);
           assert.equal(report.numFailedTests, 0);
@@ -141,6 +147,8 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: beta-source-contracts-${{ github.sha }}
-          path: ${{ runner.temp }}/exomind-contract-evidence
+          path: |
+            ${{ runner.temp }}/exomind-contract-evidence
+            ${{ runner.temp }}/exomind-contract-evidence-originals.json
           if-no-files-found: warn
           retention-days: 7

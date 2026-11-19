@@ -149,4 +149,14 @@ describe('Beta build request validation', () => {
       ...beta16Config(), identifier: 'com.exomind.app',
     }), 'beta_identity_mismatch');
   });
+  it('accepts Beta17 only with Android versionCode 6017 and rejects reuse of 6016', () => {
+    const request = resolveBetaBuildRequest(dispatchInput({
+      dispatchInputs: { ...candidateRequest, expected_version: '0.6.0-beta17' },
+    }));
+    const config = { ...beta16Config(), version: '0.6.0-beta17', bundle: { android: { versionCode: 6017 } } };
+    expect(validateBetaCandidateIdentity(request, CANDIDATE_SHA, config)).toBeUndefined();
+    expectCode(() => validateBetaCandidateIdentity(request, CANDIDATE_SHA, {
+      ...config, bundle: { android: { versionCode: 6016 } },
+    }), 'version_code_mismatch');
+  });
 });
