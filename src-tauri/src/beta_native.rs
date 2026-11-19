@@ -6,14 +6,20 @@ mod attachments;
 mod deadlines;
 #[path = "beta_native_settings.rs"]
 mod desktop_settings;
+#[path = "beta_native_diagnostics.rs"]
+mod diagnostics;
 #[path = "beta_native_export.rs"]
 mod export;
+#[path = "beta_native_grants.rs"]
+mod grants;
 #[path = "beta_native_sources.rs"]
 mod local_sources;
 #[path = "beta_overlay.rs"]
 mod overlay;
 #[path = "beta_native_peers.rs"]
 mod peer_commands;
+#[path = "beta_native_records.rs"]
+mod records;
 #[path = "beta_native_summaries.rs"]
 mod summary_commands;
 #[path = "beta_window_icon.rs"]
@@ -33,8 +39,8 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::{
-        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
     },
 };
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
@@ -47,6 +53,19 @@ struct Failure {
 
 impl From<HostError> for Failure {
     fn from(error: HostError) -> Self {
+        if let Some(kind) = error.peer_transport_failure() {
+            return Self {
+                code: kind.code(),
+                message: match kind {
+                    exomind_beta_host::PeerTransportFailureKind::PinMismatch => {
+                        "连接地址的证书与预期设备不符，请核对地址；本机记录已保留"
+                    }
+                    exomind_beta_host::PeerTransportFailureKind::TlsHandshakeFailed => {
+                        "安全连接未建立，请检查连接后重试；本机记录已保留"
+                    }
+                },
+            };
+        }
         let (code, message) = match error {
             HostError::PeerNetworkDisabled => (
                 "peer_network_disabled",
@@ -90,15 +109,14 @@ impl From<HostError> for Failure {
                 "clock_unavailable",
                 "本机计时时钟暂不可用，未按未知时钟执行操作",
             ),
-            HostError::Unauthorized | HostError::Forbidden => {
+            HostError::Unauthorized
+            | HostError::Forbidden
+            | HostError::Core(CoreError::CorrectionRequiresHuman) => {
                 ("forbidden", "当前会话无权执行此操作")
             }
             HostError::Stopped => ("stopped", "本机服务已停止"),
             HostError::PeerProtocolMismatch => {
                 ("protocol_mismatch", "两端版本不兼容，请使用同版安装包")
-            }
-            HostError::PeerPinMismatch | HostError::PeerTls => {
-                ("identity_mismatch", "对端身份未通过验证，未发送资料")
             }
             HostError::PeerMembershipDenied => {
                 ("membership_denied", "当前档案的设备授权已变化或被撤销")
@@ -175,6 +193,7 @@ impl From<HostError> for Failure {
             HostError::InvalidRequest
             | HostError::Core(
                 CoreError::InvalidCapture(_)
+                | CoreError::InvalidCorrection(_)
                 | CoreError::InvalidQuery(_)
                 | CoreError::InvalidTimeblock(_)
                 | CoreError::InvalidOriginal(_)
@@ -244,8 +263,10 @@ struct NativeState {
     peers: Arc<exomind_beta_host::PeerNetwork>,
     exports: Arc<export::ExportManager>,
     attachment_jobs: Arc<attachments::AttachmentJobs>,
+    grant_credentials: grants::GrantCredentialVault,
     original_observer: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     deadlines: deadlines::Bridge,
+    diagnostics: diagnostics::DiagnosticsState,
     dev_origin: Option<url::Origin>,
     server: tokio::sync::Mutex<Option<RunningServer>>,
     listener_failed: AtomicBool,
@@ -272,8 +293,10 @@ impl NativeState {
             peers,
             exports: Arc::new(export::ExportManager::default()),
             attachment_jobs: Arc::new(attachments::AttachmentJobs::default()),
+            grant_credentials: grants::GrantCredentialVault::default(),
             original_observer: Mutex::new(None),
             deadlines: deadlines::Bridge::default(),
+            diagnostics: diagnostics::DiagnosticsState::new(),
             dev_origin,
             server: tokio::sync::Mutex::new(None),
             listener_failed: AtomicBool::new(false),
@@ -312,6 +335,10 @@ impl NativeState {
     }
 
     async fn stop(&self) -> Result<(), HostError> {
+        // Fence grant operations before clearing process-local copy material.
+        // This never changes the durable Host grant or revokes its authority.
+        self.grant_credentials.clear();
+        self.diagnostics.request_stop();
         let observer = self
             .original_observer
             .lock()
@@ -1124,7 +1151,16 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             overlay::beta_workspace_profiles,
             beta_status,
             beta_runtime_location,
+            diagnostics::beta_diagnostics_sample,
+            diagnostics::beta_diagnostics_storage,
+            diagnostics::beta_diagnostics_storage_cancel,
             beta_profiles,
+            grants::beta_grant_metadata_list,
+            grants::beta_grant_issue,
+            grants::beta_grant_recover,
+            grants::beta_grant_revoke,
+            grants::beta_grant_copy_credential,
+            grants::beta_grant_release_credential,
             beta_summary_model_configuration,
             beta_configure_summary_model,
             summary_commands::beta_summary_tasks,
@@ -1154,6 +1190,9 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             beta_provision_profile,
             beta_capture,
             beta_events_page,
+            records::beta_events_page_with_tag,
+            records::beta_record_correction,
+            records::beta_corrections_page,
             beta_timeblock_command,
             beta_timeblock_snapshot,
             beta_timeblock_nodes,
@@ -1290,6 +1329,22 @@ mod tests {
             "conflict"
         );
         assert_eq!(Failure::from(HostError::Stopped).code, "stopped");
+        for (error, code) in [
+            (HostError::PeerPinMismatch, "pin_mismatch"),
+            (HostError::PeerTls, "tls_handshake_failed"),
+            (
+                HostError::Core(CoreError::CorrectionRequiresHuman),
+                "forbidden",
+            ),
+            (
+                HostError::Core(CoreError::InvalidCorrection("private input")),
+                "invalid_request",
+            ),
+        ] {
+            let failure = Failure::from(error);
+            assert_eq!(failure.code, code);
+            assert!(!serde_json::to_string(&failure).unwrap().contains("private"));
+        }
         assert_eq!(
             Failure::from(HostError::IntentCacheCorrupt).code,
             "intent_cache_corrupt"
