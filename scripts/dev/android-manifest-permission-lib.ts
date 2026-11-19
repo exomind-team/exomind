@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 
 export const RECORD_AUDIO_PERMISSION = 'android.permission.RECORD_AUDIO';
 export const MODIFY_AUDIO_SETTINGS_PERMISSION = 'android.permission.MODIFY_AUDIO_SETTINGS';
@@ -319,6 +319,19 @@ export function ensureRequiredAudioPermissionsInManifest(manifestXml: string): M
   let changed = false;
 
   for (const permission of [...REQUIRED_AUDIO_PERMISSIONS, ...REQUIRED_NETWORK_DISCOVERY_PERMISSIONS]) {
+    const patchResult = ensurePermissionInManifest(updatedManifest, permission);
+    updatedManifest = patchResult.manifestXml;
+    changed ||= patchResult.changed;
+  }
+
+  return { manifestXml: updatedManifest, changed };
+}
+
+export function ensureWebViewAudioCapturePermissionsInManifest(manifestXml: string): ManifestPatchResult {
+  let updatedManifest = manifestXml;
+  let changed = false;
+
+  for (const permission of REQUIRED_AUDIO_PERMISSIONS) {
     const patchResult = ensurePermissionInManifest(updatedManifest, permission);
     updatedManifest = patchResult.manifestXml;
     changed ||= patchResult.changed;

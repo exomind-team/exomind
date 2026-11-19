@@ -5,10 +5,16 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ensureBetaApplicationIcons,planBetaAndroidBranding,sameGeneratedBytes,type BetaGeneratedChange as FileChange } from './beta-android-branding';
 import {
+  ACCESS_NETWORK_STATE_PERMISSION,
+  ACCESS_WIFI_STATE_PERMISSION,
   ANDROID_CONFIG_CHANGES_VALUE,
+  CHANGE_WIFI_MULTICAST_STATE_PERMISSION,
+  MODIFY_AUDIO_SETTINGS_PERMISSION,
+  RECORD_AUDIO_PERMISSION,
   ensureAndroidSystemBarsInMainActivity,
   ensureConfigChangesInManifest,
   ensureDebugNativeLibsAreStrippedInGradle,
+  ensureWebViewAudioCapturePermissionsInManifest,
   ensureConfiguredNdkVersionInGradle,
   resolveInstalledNdkVersion,
 } from './android-manifest-permission-lib';
@@ -16,6 +22,15 @@ import {
 const BETA_PACKAGE = 'com.exomind.app.v06.beta';
 const ANDROID_APP = ['src-tauri', 'gen', 'android', 'app'];
 const NATIVE_SYMBOLS_PROPERTY = 'exomind.keepNativeSymbols';
+const TAURI_ANDROID_INIT_CONFIG_CHANGES_VALUE = 'orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode';
+const ALLOWED_BETA_ANDROID_PERMISSIONS = new Set([
+  'android.permission.INTERNET',
+  RECORD_AUDIO_PERMISSION,
+  MODIFY_AUDIO_SETTINGS_PERMISSION,
+  ACCESS_NETWORK_STATE_PERMISSION,
+  ACCESS_WIFI_STATE_PERMISSION,
+  CHANGE_WIFI_MULTICAST_STATE_PERMISSION,
+]);
 
 export interface BetaAndroidPreparation {
   projectRoot: string;
@@ -70,21 +85,139 @@ function attribute(tag: string, name: string): string | undefined {
   return tag.match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`))?.[2];
 }
 
-function assertManifest(source: string): void {
+function assertKnownAttributes(tag: string, allowed: readonly string[], label: string): void {
+  const names = [...tag.matchAll(/\s([A-Za-z_][A-Za-z0-9_.:-]*)\s*=/g)].map(match => match[1]);
+  if (names.length !== new Set(names).size || names.some(name => !allowed.includes(name))) {
+    reject(`Unsupported ${label} attributes in the generated Beta Android template`);
+  }
+}
+
+function assertPermissions(xml: string, requireAudio: boolean): void {
+  const permissionOpenings = [...xml.matchAll(/<uses-permission(?=\s|\/?>)/g)];
+  const declarations = [...xml.matchAll(/<uses-permission(?=\s|\/?>)[^>]*\/>/g)];
+  if (permissionOpenings.length !== declarations.length) reject('Unsupported Beta Android permission declaration shape');
+  for (const [tag] of declarations) assertKnownAttributes(tag, ['android:name'], 'uses-permission');
+  const names = declarations.map(([tag]) => attribute(tag, 'android:name'));
+  if (names.some(name => !name || !ALLOWED_BETA_ANDROID_PERMISSIONS.has(name))
+    || names.length !== new Set(names).size
+    || names.filter(name => name === 'android.permission.INTERNET').length !== 1) {
+    reject('Unsupported or duplicate permission in the generated Beta Android template');
+  }
+  if (requireAudio && [RECORD_AUDIO_PERMISSION, MODIFY_AUDIO_SETTINGS_PERMISSION]
+    .some(permission => names.filter(name => name === permission).length !== 1)) {
+    reject('Beta Android template is missing a required audio capture permission');
+  }
+}
+
+function assertLauncherActivity(activity: string): void {
+  const opening = activity.slice(0, activity.indexOf('>') + 1);
+  assertKnownAttributes(opening, ['android:configChanges', 'android:launchMode', 'android:label', 'android:name', 'android:exported'], 'MainActivity');
+  if ((attribute(opening, 'android:name') !== '.MainActivity' && attribute(opening, 'android:name') !== `${BETA_PACKAGE}.MainActivity`)
+    || attribute(opening, 'android:launchMode') !== 'singleTask'
+    || attribute(opening, 'android:label') !== '@string/main_activity_title'
+    || attribute(opening, 'android:exported') !== 'true'
+    || ![TAURI_ANDROID_INIT_CONFIG_CHANGES_VALUE, ANDROID_CONFIG_CHANGES_VALUE]
+      .includes(attribute(opening, 'android:configChanges') ?? '')) {
+    reject('Unsupported Beta MainActivity in the generated Android template');
+  }
+  const filters = [...activity.matchAll(/<intent-filter\b[^>]*>[\s\S]*?<\/intent-filter\s*>/g)];
+  if (filters.length !== 1) reject('Beta MainActivity must own exactly one launcher intent filter');
+  const filterOpening = filters[0][0].slice(0, filters[0][0].indexOf('>') + 1);
+  assertKnownAttributes(filterOpening, [], 'launcher intent filter');
+  const actions = [...filters[0][0].matchAll(/<action\b[^>]*\/>/g)];
+  const categories = [...filters[0][0].matchAll(/<category\b[^>]*\/>/g)];
+  for (const [tag] of actions) assertKnownAttributes(tag, ['android:name'], 'launcher action');
+  for (const [tag] of categories) assertKnownAttributes(tag, ['android:name'], 'launcher category');
+  if (actions.length !== 1 || attribute(actions[0][0], 'android:name') !== 'android.intent.action.MAIN'
+    || categories.length !== 2
+    || !categories.some(([tag]) => attribute(tag, 'android:name') === 'android.intent.category.LAUNCHER')
+    || !categories.some(([tag]) => attribute(tag, 'android:name') === 'android.intent.category.LEANBACK_LAUNCHER')) {
+    reject('Unsupported Beta launcher intent filter in the generated Android template');
+  }
+  const filterBody = filters[0][0].slice(filterOpening.length).replace(/<action\b[^>]*\/>|<category\b[^>]*\/>/g, '');
+  const activityBody = activity.slice(opening.length, activity.lastIndexOf('</activity>')).replace(filters[0][0], '');
+  if (/<[A-Za-z_]/.test(filterBody) || /<[A-Za-z_]/.test(activityBody)) reject('Unsupported Beta MainActivity content in the generated Android template');
+}
+
+function assertFileProvider(provider: string): void {
+  const opening = provider.slice(0, provider.indexOf('>') + 1);
+  assertKnownAttributes(opening, ['android:name', 'android:authorities', 'android:exported', 'android:grantUriPermissions'], 'FileProvider');
+  if (attribute(opening, 'android:name') !== 'androidx.core.content.FileProvider'
+    || attribute(opening, 'android:authorities') !== '${applicationId}.fileprovider'
+    || attribute(opening, 'android:exported') !== 'false'
+    || attribute(opening, 'android:grantUriPermissions') !== 'true') {
+    reject('Unsupported FileProvider in the generated Beta Android template');
+  }
+  const metadata = [...provider.matchAll(/<meta-data\b[^>]*\/>/g)];
+  for (const [tag] of metadata) assertKnownAttributes(tag, ['android:name', 'android:resource'], 'FileProvider metadata');
+  if (metadata.length !== 1 || attribute(metadata[0][0], 'android:name') !== 'android.support.FILE_PROVIDER_PATHS'
+    || attribute(metadata[0][0], 'android:resource') !== '@xml/file_paths') {
+    reject('Unsupported FileProvider metadata in the generated Beta Android template');
+  }
+  const body = provider.slice(opening.length, provider.lastIndexOf('</provider>')).replace(metadata[0]?.[0] ?? '', '');
+  if (/<[A-Za-z_]/.test(body)) reject('Unsupported FileProvider content in the generated Beta Android template');
+}
+
+function assertApplication(xml: string): string {
+  const applications = [...xml.matchAll(/<application\b[^>]*>[\s\S]*?<\/application\s*>/g)];
+  if (applications.length !== 1 || [...xml.matchAll(/<application\b/g)].length !== 1) {
+    reject('Expected one Tauri application in the generated Beta Android template');
+  }
+  const application = applications[0][0];
+  const opening = application.slice(0, application.indexOf('>') + 1);
+  assertKnownAttributes(opening, ['android:icon', 'android:roundIcon', 'android:label', 'android:theme', 'android:usesCleartextTraffic'], 'application');
+  const cleartext = attribute(opening, 'android:usesCleartextTraffic');
+  if (attribute(opening, 'android:icon') !== '@mipmap/ic_launcher'
+    || (attribute(opening, 'android:roundIcon') !== undefined && attribute(opening, 'android:roundIcon') !== '@mipmap/ic_launcher_round')
+    || attribute(opening, 'android:label') !== '@string/app_name'
+    || !attribute(opening, 'android:theme')?.startsWith('@style/Theme.')
+    || (cleartext !== '${usesCleartextTraffic}' && cleartext !== 'true')) {
+    reject('Unsupported application attributes in the generated Beta Android template');
+  }
+
+  const activities = [...application.matchAll(/<activity\b[^>]*>[\s\S]*?<\/activity\s*>/g)];
+  const providers = [...application.matchAll(/<provider\b[^>]*>[\s\S]*?<\/provider\s*>/g)];
+  if (activities.length !== 1 || [...application.matchAll(/<activity\b/g)].length !== 1
+    || providers.length !== 1 || [...application.matchAll(/<provider\b/g)].length !== 1) {
+    reject('Unsupported application children in the generated Beta Android template');
+  }
+  assertLauncherActivity(activities[0][0]);
+  assertFileProvider(providers[0][0]);
+  const body = application.slice(opening.length, application.lastIndexOf('</application>'))
+    .replace(activities[0][0], '').replace(providers[0][0], '');
+  if (/<[A-Za-z_]/.test(body)) reject('Unsupported application content in the generated Beta Android template');
+  return application;
+}
+
+function assertManifest(source: string, requireAudio = false): void {
   const xml = withoutComments(source);
-  const manifest = xml.match(/<manifest\b[^>]*>/)?.[0];
-  if (!manifest || /<!DOCTYPE|<!ENTITY/i.test(xml)) reject('Unsupported Beta Android Manifest');
+  const manifests = [...xml.matchAll(/<manifest\b[^>]*>/g)];
+  const manifestClosings = [...xml.matchAll(/<\/manifest\s*>/g)];
+  if (manifests.length !== 1 || manifestClosings.length !== 1 || /<!DOCTYPE|<!ENTITY/i.test(xml)) {
+    reject('Unsupported Beta Android Manifest template');
+  }
+  const manifest = manifests[0][0];
+  assertKnownAttributes(manifest, ['xmlns:android', 'package'], 'manifest');
+  if (attribute(manifest, 'xmlns:android') !== 'http://schemas.android.com/apk/res/android') {
+    reject('Unsupported Android namespace in the generated Beta Android template');
+  }
   const packageName = attribute(manifest, 'package');
   if (packageName && packageName !== BETA_PACKAGE) reject('Android Manifest package must match Beta');
-  const activities = [...xml.matchAll(/<activity\b[^>]*>[\s\S]*?<\/activity\s*>/g)];
-  if (activities.length !== 1 || /<activity-alias\b/.test(xml)) reject('Expected one explicit Beta launcher Activity');
-  const activity = activities[0][0];
-  const name = attribute(activity.slice(0, activity.indexOf('>') + 1), 'android:name');
-  if (name !== '.MainActivity' && name !== `${BETA_PACKAGE}.MainActivity`) reject('Beta launcher must use its MainActivity');
-  const launcher = [...activity.matchAll(/<intent-filter\b[^>]*>[\s\S]*?<\/intent-filter\s*>/g)].some(([filter]) =>
-    /<action\b[^>]*android:name\s*=\s*["']android\.intent\.action\.MAIN["']/.test(filter)
-    && /<category\b[^>]*android:name\s*=\s*["']android\.intent\.category\.LAUNCHER["']/.test(filter));
-  if (!launcher) reject('Beta MainActivity must own the MAIN/LAUNCHER intent filter');
+  assertPermissions(xml, requireAudio);
+
+  const features = [...xml.matchAll(/<uses-feature\b[^>]*\/>/g)];
+  if ([...xml.matchAll(/<uses-feature\b/g)].length !== features.length || features.length !== 1
+    || attribute(features[0][0], 'android:name') !== 'android.software.leanback'
+    || attribute(features[0][0], 'android:required') !== 'false') {
+    reject('Unsupported uses-feature in the generated Beta Android template');
+  }
+  assertKnownAttributes(features[0][0], ['android:name', 'android:required'], 'uses-feature');
+  const application = assertApplication(xml);
+  const rootBody = xml.slice(manifests[0].index! + manifests[0][0].length, xml.lastIndexOf('</manifest>'))
+    .replace(application, '')
+    .replace(/<uses-permission(?=\s|\/?>)[^>]*\/>/g, '')
+    .replace(/<uses-feature\b[^>]*\/>/g, '');
+  if (/<[A-Za-z_]/.test(rootBody)) reject('Unsupported Android Manifest content in the generated Beta template');
 }
 
 function assertActivity(source: string, integrated: boolean): void {
@@ -219,9 +352,12 @@ export function prepareBetaAndroid(projectRoot: string, options: {ndkVersion?: s
   const ndkVersion = options.ndkVersion === undefined ? resolveInstalledNdkVersion() : options.ndkVersion;
   const nextGradle = ensureConfiguredNdkVersionInGradle(prepareNativeSymbols(gradle),ndkVersion).buildGradleKts;
   assertGradle(nextGradle);
-  const nextManifest = ensureBetaApplicationIcons(ensureConfigChangesInManifest(manifest).manifestXml);
+  const audioManifest = ensureWebViewAudioCapturePermissionsInManifest(
+    ensureConfigChangesInManifest(manifest).manifestXml,
+  ).manifestXml;
+  const nextManifest = ensureBetaApplicationIcons(audioManifest);
   const nextActivity = applyBetaImeInsets(ensureAndroidSystemBarsInMainActivity(activity, { ensureConfigurationChanged: true }).activityKotlin);
-  assertManifest(nextManifest); assertActivity(nextActivity, true);
+  assertManifest(nextManifest, true); assertActivity(nextActivity, true);
   if (attribute(withoutComments(nextManifest).match(/<activity\b[^>]*>/)?.[0] ?? '', 'android:configChanges') !== ANDROID_CONFIG_CHANGES_VALUE) {
     reject('Beta Activity configChanges integration is missing');
   }

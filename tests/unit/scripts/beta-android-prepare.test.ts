@@ -15,6 +15,45 @@ class MainActivity : TauriActivity() {
   }
 }
 `;
+const freshManifest = `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- AndroidTV support -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <application
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.exomind_tauri_init_probe"
+        android:usesCleartextTraffic="\${usesCleartextTraffic}">
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:launchMode="singleTask"
+            android:label="@string/main_activity_title"
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <!-- AndroidTV support -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <provider
+          android:name="androidx.core.content.FileProvider"
+          android:authorities="\${applicationId}.fileprovider"
+          android:exported="false"
+          android:grantUriPermissions="true">
+          <meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>
+`;
+
 function fixture(namespace = beta) {
   const root = mkdtempSync(join(tmpdir(), 'exomind-beta-android-')); roots.push(root);
   const files = {
@@ -26,7 +65,7 @@ function fixture(namespace = beta) {
   const put = (path: string, value: string) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, value); };
   put(files.config, JSON.stringify({ identifier: beta, app: { windows: [{ label: 'main', url: 'beta.html' }] } }));
   put(files.gradle, `android {\n    namespace = "${namespace}"\n    defaultConfig {\n        applicationId = "${beta}"\n    }\n}\n`);
-  put(files.manifest, '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n<uses-permission android:name="android.permission.INTERNET"/>\n<application android:label="ExoMind Beta"><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application>\n</manifest>\n');
+  put(files.manifest, freshManifest);
   put(files.activity, freshActivity);
   cpSync(join(process.cwd(),'src-tauri/icons/android'),join(root,'src-tauri/icons/android'),{recursive:true});
   return { root, files, snapshot: () => Object.fromEntries(Object.entries(files).map(([key,path]) => [key,readFileSync(path,'utf8')])) };
@@ -60,7 +99,7 @@ describe('isolated Beta Android preparation', () => {
     expect(prepared).toContain('exomind.keepNativeSymbols');expect(prepared).toContain('if (keepNativeSymbols)');
     expect(prepareBetaAndroid(work.root,{ndkVersion:null}).changedFiles).toEqual([]);expect(work.snapshot().gradle).toBe(prepared);
   });
-  it('patches fresh Beta display integration, preserves Gradle and permissions, and is idempotent', async () => {
+  it('patches the fresh Tauri Android template with only audio permissions and is idempotent', async () => {
     const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
     const work = fixture(); const before = work.snapshot();
     const result = prepareBetaAndroid(work.root,{ndkVersion:null});
@@ -73,8 +112,82 @@ describe('isolated Beta Android preparation', () => {
     expect(after.activity).toContain('if (exomindFullscreen) cutout else bars or cutout');
     expect(after.activity).not.toMatch(/MulticastLock|WifiManager|WindowInsetsCompat\.CONSUMED/);
     expect(after.manifest).toContain('android:configChanges=');
-    expect(after.manifest).not.toMatch(/RECORD_AUDIO|MODIFY_AUDIO_SETTINGS|ACCESS_WIFI|CHANGE_WIFI|usesCleartextTraffic="true"/);
+    const permissionNames = [...after.manifest.matchAll(/<uses-permission\b[^>]*android:name="([^"]+)"/g)]
+      .map(([, name]) => name);
+    expect(permissionNames).toHaveLength(3);
+    expect(permissionNames).toEqual(expect.arrayContaining([
+      'android.permission.INTERNET',
+      'android.permission.RECORD_AUDIO',
+      'android.permission.MODIFY_AUDIO_SETTINGS',
+    ]));
+    expect(after.manifest.match(/android\.permission\.RECORD_AUDIO/g)).toHaveLength(1);
+    expect(after.manifest.match(/android\.permission\.MODIFY_AUDIO_SETTINGS/g)).toHaveLength(1);
+    expect(after.manifest).not.toMatch(/android\.permission\.(CAMERA|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE)/);
     expect(prepareBetaAndroid(work.root,{ndkVersion:null}).changedFiles).toEqual([]); expect(work.snapshot()).toEqual(after);
+  });
+  it('preserves an existing audio permission without adding a duplicate', async () => {
+    const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
+    const work = fixture();
+    writeFileSync(work.files.manifest, freshManifest.replace(
+      '    <uses-permission android:name="android.permission.INTERNET" />',
+      '    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />',
+    ));
+
+    prepareBetaAndroid(work.root, { ndkVersion: null });
+    const manifest = work.snapshot().manifest;
+    expect(manifest.match(/android\.permission\.RECORD_AUDIO/g)).toHaveLength(1);
+    expect(manifest.match(/android\.permission\.MODIFY_AUDIO_SETTINGS/g)).toHaveLength(1);
+  });
+  it('accepts the CI manifest preparer output without duplicating audio permissions', async () => {
+    const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
+    const {
+      ensureCleartextTrafficInManifest,
+      ensureConfigChangesInManifest,
+      ensureRequiredAudioPermissionsInManifest,
+    } = await import('../../../scripts/dev/android-manifest-permission-lib');
+    const work = fixture();
+    const withCiPermissions = ensureRequiredAudioPermissionsInManifest(freshManifest).manifestXml;
+    const withCiCleartext = ensureCleartextTrafficInManifest(withCiPermissions).manifestXml;
+    const withCiConfigChanges = ensureConfigChangesInManifest(withCiCleartext).manifestXml;
+    writeFileSync(work.files.manifest, withCiConfigChanges);
+
+    prepareBetaAndroid(work.root, { ndkVersion: null });
+    const permissionNames = [...work.snapshot().manifest.matchAll(/<uses-permission\b[^>]*android:name="([^"]+)"/g)]
+      .map(([, name]) => name);
+    expect(permissionNames).toHaveLength(6);
+    expect(permissionNames.filter(name => name === 'android.permission.RECORD_AUDIO')).toHaveLength(1);
+    expect(permissionNames.filter(name => name === 'android.permission.MODIFY_AUDIO_SETTINGS')).toHaveLength(1);
+    expect(work.snapshot().manifest).toContain('android:usesCleartextTraffic="true"');
+  });
+  it.each([
+    'android.permission.CAMERA',
+    'android.permission.READ_EXTERNAL_STORAGE',
+    'android.permission.WRITE_EXTERNAL_STORAGE',
+    'android.permission.MANAGE_EXTERNAL_STORAGE',
+    'android.permission.ACCESS_FINE_LOCATION',
+  ])('fails closed on an unsupported permission in the generated template: %s', async permission => {
+    const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
+    const work = fixture();
+    writeFileSync(work.files.manifest, freshManifest.replace(
+      '    <uses-feature android:name="android.software.leanback" android:required="false" />',
+      `    <uses-permission android:name="${permission}" />\n    <uses-feature android:name="android.software.leanback" android:required="false" />`,
+    ));
+    const before = work.snapshot();
+
+    expect(() => prepareBetaAndroid(work.root, { ndkVersion: null })).toThrow(/unsupported|template|permission/i);
+    expect(work.snapshot()).toEqual(before);
+  });
+  it('fails closed on an unfamiliar Tauri application attribute before writing', async () => {
+    const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
+    const work = fixture();
+    writeFileSync(work.files.manifest, freshManifest.replace(
+      '<application\n',
+      '<application android:screenOrientation="portrait"\n',
+    ));
+    const before = work.snapshot();
+
+    expect(() => prepareBetaAndroid(work.root, { ndkVersion: null })).toThrow(/unsupported|template|application/i);
+    expect(work.snapshot()).toEqual(before);
   });
   it('rejects an Alpha namespace before changing any file', async () => {
     const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');

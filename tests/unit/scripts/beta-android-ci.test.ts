@@ -162,5 +162,11 @@ describe('Beta Android workflow contract', () => {
     expect(workflow).toContain("default: 85f7df92d0eccf1de624ab9220d4d8944797f28b");
     expect(workflow).toContain("default: 0.6.0-beta16");
     expect(workflow).toContain('ndk:ndkVersion');
+    const freshInit = workflow.indexOf('tauri.js android init');
+    const manifestPreparation = workflow.indexOf('bun scripts/dev/android-manifest-permission.ts');
+    const betaPreparation = workflow.indexOf('bun scripts/dev/beta-android-prepare.ts');
+    expect(freshInit).toBeGreaterThanOrEqual(0);
+    expect(manifestPreparation).toBeGreaterThan(freshInit);
+    expect(betaPreparation).toBeGreaterThan(manifestPreparation);
   });
 });
