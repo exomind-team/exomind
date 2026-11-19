@@ -2,7 +2,7 @@ use exomind_beta_host::{
     BetaHost, HostError,
     native_workspace::{NativeWorkspace, WorkspaceAction},
 };
-use exomind_core::{EventQuery, ProfileId, TimeblockCommand};
+use exomind_core::{CaptureCommand, CommandId, EventId, EventQuery, ProfileId, TimeblockCommand};
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -186,5 +186,60 @@ fn a_stale_client_cannot_overwrite_another_clients_new_draft_or_a_corrupt_intent
     );
     let raw = host.read_local_intent(&owner, &key).unwrap().unwrap();
     assert!(!raw.contains("stale client"));
+    host.stop().unwrap();
+}
+
+#[test]
+fn native_capture_keeps_the_shared_drafts_tags() {
+    let directory = tempfile::tempdir().unwrap();
+    let host = Arc::new(BetaHost::open(&directory.path().join("host")).unwrap());
+    let owner = host.owner_session().unwrap();
+    let profile = ProfileId::new();
+    host.provision_profile(&owner, profile, "Synthetic tagged Native capture").unwrap();
+    let workspace = NativeWorkspace::new(host.clone(), owner.clone());
+    let key = workspace.intent_keys(profile).unwrap()[0].clone();
+    let journal = json!({"version":1,"drafts":{profile.to_string():{
+        "text":"Capture through the floating control", "revision":1,
+        "tags":["focus","研究"], "files":[]
+    }},"pending":[],"confirmed":[]});
+    host.compare_local_intent(&owner, &key, None, &journal.to_string()).unwrap();
+
+    workspace.execute(profile, Uuid::new_v4(), Uuid::new_v4(), "", &WorkspaceAction::Capture { draft_revision: 1 }).unwrap();
+    let human = workspace.human_session(profile).unwrap();
+    let page = host.events_page(&human, profile, &EventQuery::default()).unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].tags, vec!["focus", "研究"]);
+    let saved: serde_json::Value = serde_json::from_str(&host.read_local_intent(&owner, &key).unwrap().unwrap()).unwrap();
+    assert_eq!(saved["drafts"][profile.to_string()]["text"], "");
+    assert!(saved["drafts"][profile.to_string()].get("tags").is_none_or(|tags| tags.as_array().is_some_and(Vec::is_empty)));
+    host.stop().unwrap();
+}
+
+#[test]
+fn native_retry_keeps_newer_tags_and_reuses_the_accepted_snapshot() {
+    let directory = tempfile::tempdir().unwrap();
+    let host = Arc::new(BetaHost::open(&directory.path().join("host")).unwrap());
+    let owner = host.owner_session().unwrap();
+    let profile = ProfileId::new();
+    host.provision_profile(&owner, profile, "Synthetic tagged receipt recovery").unwrap();
+    let workspace = NativeWorkspace::new(host.clone(), owner.clone());
+    let human = workspace.human_session(profile).unwrap();
+    let command = CaptureCommand { command_id: CommandId::new(), event_id: EventId::new(), profile_id:profile,
+        occurred_at_ms:1_794_560_000_000, text:"Accepted older input".into(), tags:vec!["old".into()], originals:vec![] };
+    let receipt = host.capture(&human, &command).unwrap();
+    let key = workspace.intent_keys(profile).unwrap()[0].clone();
+    let journal = json!({"version":1,"drafts":{profile.to_string():{
+        "text":"Newer input", "revision":2,"tags":["new"],"files":[]
+    }},"pending":[{"command":command,"draft_revision":1,"state":"unknown","files":[],"capture_attempted":true}],"confirmed":[]});
+    host.compare_local_intent(&owner, &key, None, &journal.to_string()).unwrap();
+
+    let recovered = workspace.execute(profile, Uuid::new_v4(), Uuid::new_v4(), "", &WorkspaceAction::RetryCapture { command_id:command.command_id.to_string().parse().unwrap() }).unwrap().unwrap();
+    assert_eq!(recovered.event_id, receipt.event_id);
+    let saved: serde_json::Value = serde_json::from_str(&host.read_local_intent(&owner, &key).unwrap().unwrap()).unwrap();
+    assert_eq!(saved["drafts"][profile.to_string()]["text"], "Newer input");
+    assert_eq!(saved["drafts"][profile.to_string()]["tags"], json!(["new"]));
+    let page = host.events_page(&human, profile, &EventQuery::default()).unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].tags, vec!["old"]);
     host.stop().unwrap();
 }

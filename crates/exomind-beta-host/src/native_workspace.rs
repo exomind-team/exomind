@@ -328,7 +328,15 @@ impl NativeWorkspace {
                 .as_millis(),
         )
         .map_err(|_| HostError::ClockUnavailable)?;
-        let command:CaptureCommand=serde_json::from_value(json!({"command_id":command_id,"event_id":event_id,"profile_id":profile,"occurred_at_ms":now,"text":draft["text"],"tags":[],"originals":originals})).map_err(|_|WorkspaceError::InvalidIntent)?;
+        let tags: Vec<String> = serde_json::from_value(
+            draft.get("tags").cloned().unwrap_or_else(|| json!([])),
+        )
+        .map_err(|_| WorkspaceError::InvalidIntent)?;
+        let command: CaptureCommand = serde_json::from_value(json!({
+            "command_id":command_id,"event_id":event_id,"profile_id":profile,
+            "occurred_at_ms":now,"text":draft["text"],"tags":tags,"originals":originals
+        }))
+        .map_err(|_| WorkspaceError::InvalidIntent)?;
         let pending = json!({"command":command,"draft_revision":revision,"state":"unknown","files":files,"capture_attempted":true});
         intent.value["pending"]
             .as_array_mut()
