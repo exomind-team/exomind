@@ -66,6 +66,10 @@ impl Default for ExportManager {
 }
 
 impl ExportManager {
+    pub(crate) fn is_stopping(&self) -> bool {
+        self.stopping.load(Ordering::Acquire)
+    }
+
     pub(crate) fn begin(
         self: &Arc<Self>,
         request: Uuid,

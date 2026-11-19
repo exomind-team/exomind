@@ -346,7 +346,7 @@ impl Drop for Temporary {
         }
     }
 }
-fn suggested_name(name: &str) -> String {
+pub(super) fn suggested_name(name: &str) -> String {
     let mut clean = String::new();
     let mut units = 0;
     for character in name.chars() {

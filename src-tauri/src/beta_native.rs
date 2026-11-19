@@ -8,6 +8,10 @@ mod deadlines;
 mod desktop_settings;
 #[path = "beta_native_diagnostics.rs"]
 mod diagnostics;
+#[path = "beta_native_open_cache.rs"]
+mod open_cache;
+#[path = "beta_native_original_lifecycle.rs"]
+mod original_lifecycle;
 #[path = "beta_native_export.rs"]
 mod export;
 #[path = "beta_native_grants.rs"]
@@ -24,6 +28,10 @@ mod records;
 mod summary_commands;
 #[path = "beta_window_icon.rs"]
 mod window_icon;
+
+#[cfg(test)]
+#[path = "beta_native_original_lifecycle_tests.rs"]
+mod original_lifecycle_tests;
 
 use exomind_beta_host::{
     BetaHost, DeadlineEnvelope, HostError, HostStatus, RunningServer, Session,
@@ -1133,6 +1141,11 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            original_lifecycle::beta_original_lifecycle_status,
+            original_lifecycle::beta_original_lifecycle_capabilities,
+            original_lifecycle::beta_apply_original_lifecycle,
+            original_lifecycle::beta_retry_original_cache_cleanup,
+            original_lifecycle::beta_reveal_original_cache,
             export::beta_export_original,
             export::beta_original_export_history,
             export::beta_open_original,
