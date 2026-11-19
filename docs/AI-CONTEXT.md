@@ -50,6 +50,8 @@ Beta 的 Core/Host/Native/UI 边界按上面的当前入口读取，不把下表
 
 ## 当前阶段
 
+2026-11-19内部Beta16冻结来源`85f7df92`、6016：四平台仅构建已齐，Windows精确候选启动/持久化9项、真实独立浮窗11项通过；双ABI APK本机身份/签名/hash检查及历史Beta证书重签完成，Android运行/升级尚待。后续文本预览源码`95c37dc0`已提交推送，前端384项、Edge32场景、生产Web打包和新前端/冻结Native兼容联调9项通过，源码门禁CI成功；这些增量未进入冻结Beta16包。完整需求矩阵已取回，诊断后台/界面、单件附件恢复和来源/路由反例继续按Luna分工推进。当前状态、精确产物和剩余可执行队列以[Beta16与持续完成计划](plans/2026-11-19-beta16-frozen-and-beta-completion.md)为准。默认Alpha配置仍保留Alpha05，不据此否定独立Beta配置或实际Native版本；无物理设备不等于模拟器或实现工作全部阻塞。
+
 2026-11-19追加EasyTier现场修复：Beta13旧路由仍指Wi-Fi，新邀请缺覆盖地址；平板peer TCP可达，缓存过期假设已撤回（现有2秒接口刷新）。Beta15源码`a9553d93`增加保持原邀请/TLS pin的备用拨号路由，网络11项、Web371项/Edge28场景、Native检查通过，固定Windows EXE构建及真实双窗9项通过，含消息自动显示/旧档案保留。物理平板加入未验，Android未构建。Luna调查T3连接/peer-link完成，区分远程环境视图与外心多主本地副本。全量进展见[Beta09以来盘点](plans/2026-11-19-beta09-beta14-work-audit.md)、[覆盖网络记录](plans/2026-11-19-beta15-overlay-network-routes.md)、[T3对照](research/2026-11-19-easytier-t3-connections-and-sync.md)。
 
 2026-11-19 Beta14候选完成本机验证：Windows源码`4c72a0e5`，64MiB真实Native附件流程6项通过（12.601秒、56次UI进度、完整SHA、Ctrl+Enter提交及系统打开），双隔离Windows P2P9项通过；浮窗反馈有效稿输入147帧、零禁用切换。Android源码`b8d15ec6`另补独立FileProvider及显式依赖，APK69,736,066字节/6014/同Beta签名，15张品牌PNG和自适应引用核验通过；未装真机。类型/60文件369项、28个Edge场景及Native/TLS回归保留。旧档案第三来源5个时间块事实在PC有但无签名证明，平板缺失，未自动恢复；小原件错误历史门禁已解耦，设备名当前仅本机备注。平板已拔出，Android升级/剪贴板/系统打开/实际图标、原手机历史及能耗仍待。精确来源、哈希、失败批及后续入口见[Beta14记录](plans/2026-11-18-beta14-attachments-and-field-sync.md)。
