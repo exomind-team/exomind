@@ -3,6 +3,7 @@ import { BetaApiError } from './api-error';
 export interface LocalIntentJournal {
   read(key: string): Promise<string | null>;
   write(key: string, raw: string): Promise<void>;
+  /** Atomic cross-owner update; production journal backends implement this. */
   compareWrite?(key: string, expectedRaw: string | null, raw: string): Promise<void>;
   subscribe?(key: string, changed: () => void): () => void;
   close?(): void;
@@ -62,7 +63,7 @@ export class IndexedDbLocalIntentJournal implements LocalIntentJournal {
     void opening.catch(() => { if (this.database === opening) this.database = undefined; });
     return opening;
   }
-  private async transaction(key: string, raw?: string): Promise<string | null | void> {
+  private async transaction(key: string, raw?: string, expectedRaw?: string | null): Promise<string | null | void> {
     const database = await this.open(); if (this.closed) throw inactive();
     return new Promise((resolve, reject) => {
       let transaction: IDBTransaction | undefined; let value: string | null | void = undefined; let requestSucceeded = false; let settled = false;
@@ -83,21 +84,47 @@ export class IndexedDbLocalIntentJournal implements LocalIntentJournal {
         };
         transaction.onerror = () => rejectOnce(failed()); transaction.onabort = () => rejectOnce(failed());
         const store = transaction.objectStore(STORE);
-        const request = raw === undefined ? store.get(key) : store.put(raw, key);
-        request.onsuccess = () => {
-          if (raw === undefined) {
-            if (request.result !== undefined && typeof request.result !== 'string') {
-              rejectOnce(new BetaApiError('intent_cache_corrupt', '本机草稿内容无法识别，已保留原值')); try { transaction?.abort(); } catch {} return;
+        if (raw !== undefined && expectedRaw !== undefined) {
+          const read = store.get(key);
+          read.onsuccess = () => {
+            if (read.result !== undefined && typeof read.result !== 'string') {
+              rejectOnce(new BetaApiError('intent_cache_corrupt', '本机草稿内容无法识别，已保留原值'));
+              try { transaction?.abort(); } catch {}
+              return;
             }
-            value = request.result ?? null;
-          }
-          requestSucceeded = true;
-        };
+            if ((read.result ?? null) !== expectedRaw) {
+              rejectOnce(new BetaApiError('intent_cache_conflict', '另一界面已更新本机草稿，未覆盖新内容'));
+              try { transaction?.abort(); } catch {}
+              return;
+            }
+            try {
+              const write = store.put(raw, key);
+              write.onsuccess = () => { requestSucceeded = true; };
+              write.onerror = () => rejectOnce(failed());
+            } catch { rejectOnce(failed()); try { transaction?.abort(); } catch {} }
+          };
+          read.onerror = () => rejectOnce(failed());
+        } else {
+          const request = raw === undefined ? store.get(key) : store.put(raw, key);
+          request.onsuccess = () => {
+            if (raw === undefined) {
+              if (request.result !== undefined && typeof request.result !== 'string') {
+                rejectOnce(new BetaApiError('intent_cache_corrupt', '本机草稿内容无法识别，已保留原值')); try { transaction?.abort(); } catch {} return;
+              }
+              value = request.result ?? null;
+            }
+            requestSucceeded = true;
+          };
+          request.onerror = () => rejectOnce(failed());
+        }
       } catch (error) { rejectOnce(error instanceof BetaApiError ? error : failed()); try { transaction?.abort(); } catch {} }
     });
   }
   async read(key: string): Promise<string | null> { return await this.transaction(key) as string | null; }
   async write(key: string, raw: string): Promise<void> { await this.transaction(key, raw); }
+  async compareWrite(key: string, expectedRaw: string | null, raw: string): Promise<void> {
+    await this.transaction(key, raw, expectedRaw);
+  }
   close(): void { this.closed = true; void this.database?.then(database => database.close()).catch(() => {}); }
 }
 
@@ -225,6 +252,33 @@ class JournalStorage implements DurableIntentStorage {
   close(): void { this.closed = true;++this.externalRead;this.unsubscribeExternal?.(); this.listeners.clear(); this.closeJournalIfIdle(); }
 }
 
+/** Seed only an absent key. If a concurrent writer wins after the initial
+ * read, adopt its validated value instead of replacing it with an older import. */
+async function seedIntentIfAbsent(
+  journal: LocalIntentJournal,
+  key: string,
+  candidate: string,
+  validate: (raw: string) => void,
+): Promise<string> {
+  try {
+    if (journal.compareWrite) await journal.compareWrite(key, null, candidate);
+    else await journal.write(key, candidate);
+    return candidate;
+  } catch (writeError) {
+    let current: string | null;
+    try { current = await journal.read(key); }
+    catch {
+      throw new BetaApiError('intent_commit_unknown', '本机草稿初始化结果未确认，当前内容也无法读取；已停止恢复和发送');
+    }
+    if (current === null) throw writeError;
+    if (typeof current !== 'string') {
+      throw new BetaApiError('intent_cache_corrupt', '本机草稿初始化结果无法识别，已停止恢复');
+    }
+    validate(current);
+    return current;
+  }
+}
+
 export async function openDurableIntentStorage(options: {
   key: string; journal?: LocalIntentJournal; predecessor?: IntentPredecessor; legacy?: Pick<Storage, 'getItem'>; allowLegacyImport?: boolean; validate(raw: string): void;
 }): Promise<DurableIntentStorage> {
@@ -250,8 +304,7 @@ export async function openDurableIntentStorage(options: {
       }
       if(predecessor!==null){
         validate(predecessor);
-        try{await journal.write(options.key,predecessor);}catch(error){if(error instanceof BetaApiError)throw error;throw new BetaApiError('intent_migration_failed','旧本机草稿迁移尚未确认，已保留原缓存并停止发送');}
-        raw=predecessor;
+        try{raw=await seedIntentIfAbsent(journal,options.key,predecessor,validate);}catch(error){if(error instanceof BetaApiError)throw error;throw new BetaApiError('intent_migration_failed','旧本机草稿迁移尚未确认，已保留原缓存并停止发送');}
       }else{
       let legacy: string | null;
       try { legacy = options.legacy?.getItem(options.key) ?? null; }
@@ -259,9 +312,8 @@ export async function openDurableIntentStorage(options: {
       if (legacy !== null) {
         if(options.allowLegacyImport!==true)throw new BetaApiError('intent_recovery_required','可靠草稿库中未找到此缓存；旧缓存可能缺少最近输入，需要明确选择后才能恢复');
         validate(legacy);
-        try { await journal.write(options.key, legacy); }
+        try { raw = await seedIntentIfAbsent(journal, options.key, legacy, validate); }
         catch(error) { if(error instanceof BetaApiError)throw error;throw new BetaApiError('intent_migration_failed', '旧草稿迁移尚未确认，已保留原缓存并停止发送'); }
-        raw = legacy;
       }
       }
     }

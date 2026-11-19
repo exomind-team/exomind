@@ -1,4 +1,5 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
+import {BetaApiError} from '@/beta/api-error';
 import {deferred,memoryStorage} from './fixtures';
 afterEach(()=>vi.unstubAllGlobals());
 
@@ -35,6 +36,35 @@ describe('durable local intent bridge',()=>{
     gate.reject(new Error('quota'));await expect(opened).rejects.toBeDefined();expect(legacy.getItem(key)).toBe('legacy raw');
     journal.read.mockRejectedValueOnce(new Error('read unavailable'));
     await expect(openDurableIntentStorage({key,journal,legacy,validate:()=>{}})).rejects.toBeDefined();
+  });
+  it('adopts a concurrently written capture intent instead of overwriting it with an older legacy import',async()=>{
+    const {openDurableIntentStorage}=await import('@/beta/local-intent-journal');
+    const key='exomind:beta:drafts:device';
+    const latest='newer capture/timeblock intent';
+    const imported='older legacy capture draft';
+    const values=new Map<string,string>();
+    const journal={
+      read:vi.fn(async()=>values.get(key)??null),
+      write:vi.fn(async(_key:string,raw:string)=>{values.set(key,raw);}),
+      compareWrite:vi.fn(async(_key:string,expectedRaw:string|null,raw:string)=>{
+        values.set(key,latest);
+        if(values.get(key)!==expectedRaw)throw new BetaApiError('intent_cache_conflict','synthetic competing writer');
+        values.set(key,raw);
+      }),
+    };
+    const legacy=memoryStorage();legacy.setItem(key,imported);
+    const storage=await openDurableIntentStorage({
+      key,journal,legacy,allowLegacyImport:true,
+      validate:raw=>{if(raw!==latest&&raw!==imported)throw new Error('invalid synthetic intent');},
+    });
+
+    expect(storage.getItem(key)).toBe(latest);
+    expect(values.get(key)).toBe(latest);
+    expect(legacy.getItem(key)).toBe(imported);
+    expect(journal.compareWrite).toHaveBeenCalledTimes(1);
+    expect(journal.compareWrite).toHaveBeenCalledWith(key,null,imported);
+    expect(journal.write).not.toHaveBeenCalled();
+    storage.close();
   });
   it('serializes at most one in-flight write and coalesces the next snapshot without stale overwrite',async()=>{
     const {openDurableIntentStorage}=await import('@/beta/local-intent-journal');const key='exomind:beta:drafts:device';
@@ -79,5 +109,38 @@ describe('strict IndexedDB acknowledgement boundary',()=>{
     const writing=journal.write('capture/device','{}');unsupported.opening.onsuccess!();await expect(writing).rejects.toMatchObject({code:'intent_durability_unavailable'});expect(unsupported.transaction.abort).toHaveBeenCalled();journal.close();
     const fake=controlled();const next=new IndexedDbLocalIntentJournal();const aborted=next.write('capture/device','{}');fake.opening.onsuccess!();await Promise.resolve();fake.request.onsuccess!();fake.transaction.onabort!();
     await expect(aborted).rejects.toMatchObject({code:'intent_commit_failed'});next.close();
+  });
+  it('compares and replaces an IndexedDB intent inside one strict transaction',async()=>{
+    const {IndexedDbLocalIntentJournal}=await import('@/beta/local-intent-journal');
+    const readRequest:{result?:unknown;onsuccess?:()=>void}={result:'committed'};
+    const writeRequest:{onsuccess?:()=>void}={};
+    const transaction={durability:'strict',oncomplete:undefined as undefined|(()=>void),onabort:undefined as undefined|(()=>void),onerror:undefined as undefined|(()=>void),abort:vi.fn(),
+      objectStore:()=>({get:vi.fn(()=>readRequest),put:vi.fn(()=>writeRequest)})};
+    const database={objectStoreNames:{contains:()=>true},transaction:vi.fn(()=>transaction),close:vi.fn()};
+    const opening:{result:typeof database;onsuccess?:()=>void;onerror?:()=>void;onblocked?:()=>void}={result:database};
+    vi.stubGlobal('indexedDB',{open:()=>opening});
+    const journal=new IndexedDbLocalIntentJournal();
+    const writing=journal.compareWrite('corrections/device/service','committed','next');
+    opening.onsuccess!();await Promise.resolve();
+    readRequest.onsuccess!();await Promise.resolve();
+    writeRequest.onsuccess!();await Promise.resolve();expect(transaction.oncomplete).toBeTypeOf('function');
+    transaction.oncomplete!();await writing;
+    expect(database.transaction).toHaveBeenCalledWith('intents','readwrite',{durability:'strict'});
+    journal.close();
+  });
+  it('rejects an IndexedDB compare conflict without overwriting the newer intent',async()=>{
+    const {IndexedDbLocalIntentJournal}=await import('@/beta/local-intent-journal');
+    const readRequest:{result?:unknown;onsuccess?:()=>void}={result:'newer'};
+    const write=vi.fn(()=>({}));
+    const transaction={durability:'strict',oncomplete:undefined as undefined|(()=>void),onabort:undefined as undefined|(()=>void),onerror:undefined as undefined|(()=>void),abort:vi.fn(),
+      objectStore:()=>({get:()=>readRequest,put:write})};
+    const database={objectStoreNames:{contains:()=>true},transaction:vi.fn(()=>transaction),close:vi.fn()};
+    const opening:{result:typeof database;onsuccess?:()=>void;onerror?:()=>void;onblocked?:()=>void}={result:database};
+    vi.stubGlobal('indexedDB',{open:()=>opening});
+    const journal=new IndexedDbLocalIntentJournal();
+    const writing=journal.compareWrite('corrections/device/service','stale','must not overwrite');
+    opening.onsuccess!();await Promise.resolve();readRequest.onsuccess!();
+    await expect(writing).rejects.toMatchObject({code:'intent_cache_conflict'});
+    expect(write).not.toHaveBeenCalled();expect(transaction.abort).toHaveBeenCalled();journal.close();
   });
 });
