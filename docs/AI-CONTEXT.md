@@ -55,8 +55,10 @@ Beta 的 Core/Host/Native/UI 边界按上面的当前入口读取，不把下表
 选择器前记录任务，重启后可查证／重新选址；源码 591 项 Beta 回归、完整类型及 Windows
 Native 检查通过。精确 Windows 候选已验证身份、既有记录／原件保值、真实 Ctrl+Enter
 输入与正常退出；系统保存框受 Computer Use 原生管道不可用阻塞。双 ABI APK 的历史
-Beta 签名、6018 与非签名包内容已核验，模拟器继续验收；物理平板已离场，真机恢复与
-EasyTier 端点仍待。工作区 Core10 生命周期及部分前端／授权增量不在该冻结候选中。
+Beta 签名、6018 与非签名包内容已核验；API35 x86_64 已验证保数据升级、8 KiB 正常导出、
+选择器内进程回收后的中断／重新选址及重启保留，两个成功文件独立 SHA-256 一致。
+物理平板已离场，真机恢复、真实能耗与 EasyTier 端点仍待。工作区 Core10 生命周期及
+部分前端／授权增量不在该冻结候选中。
 先读 [Beta18 结果](plans/2026-11-19-beta18-export-recovery-candidate.md)、
 [导出恢复合同](development/beta-original-export-recovery.md)，完整剩余任务仍按
 [持续完成计划](plans/2026-11-19-beta16-frozen-and-beta-completion.md)核对。
