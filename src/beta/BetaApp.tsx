@@ -260,7 +260,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     {onDisconnect&&<Button variant="ghost" size="sm" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}</>;
   return <><BetaAppShell section={section} onSectionChange={setSection} profileName={profileName} onProfileClick={()=>setProfileDialog(true)}
     sync={<BetaPeersPage peers={peers} visible={section==='sync'} profileId={profileId} profileName={profileName} runtimeId={status?.runtime_id??''} deviceId={status?.device_id??''} onJoined={joined} onEventsChanged={changed=>{if(changed===profileId)setEventRevision(value=>value+1);}}/>}
-    settings={<BetaSettingsPage profileName={profileName} profileId={profileId} deviceId={status?.device_id??''} endpoint={endpoint} onManageProfile={()=>setProfileDialog(true)} summaryModel={client.summaryModel} onDisconnect={persistenceBusy?undefined:onDisconnect}/>}
+    settings={<BetaSettingsPage profileName={profileName} profileId={profileId} deviceId={status?.device_id??''} endpoint={endpoint} onManageProfile={()=>setProfileDialog(true)} summaryModel={client.summaryModel} onDisconnect={persistenceBusy?undefined:onDisconnect} visible={section==='settings'}/>}
     now={<PageShell title="当下" hideHeader={!!status&&!!profileId} className="min-h-0 overflow-hidden" headerClassName="shrink-0" contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
     headerAction={<div className="flex max-w-[15rem] items-center gap-1">{status&&profileId&&<>
       <label className="sr-only" htmlFor="beta-profile">当前档案</label>

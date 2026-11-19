@@ -20,8 +20,10 @@ import { BetaRuntimeLocation } from './BetaRuntimeLocation';
 import { betaDesktopPreferences } from './desktop-preferences';
 import { BetaSettingsPanels, createBetaSettingsRegistry } from './settings-registry';
 import { useBetaDesktopAdaptiveEnabled } from './preferences';
+import { BetaDiagnosticsEntry } from './BetaDiagnosticsPanel';
+import { createBetaDiagnosticsClient, type BetaDiagnosticsClient } from './diagnostics-client';
 
-export function BetaSettingsPage({ profileName, profileId='', deviceId='', summaryModel, onDisconnect, onManageProfile, endpoint, deadlineAlerts }: { profileName: string; profileId?:string; deviceId?:string; summaryModel?:SummaryModelConfigurationService|null; onDisconnect?: () => void; onManageProfile?: () => void; endpoint?: string; deadlineAlerts?: BetaDeadlineAlertsClient | null }) {
+export function BetaSettingsPage({ profileName, profileId='', deviceId='', summaryModel, onDisconnect, onManageProfile, endpoint, deadlineAlerts, visible=true, diagnosticsClient }: { profileName: string; profileId?:string; deviceId?:string; summaryModel?:SummaryModelConfigurationService|null; onDisconnect?: () => void; onManageProfile?: () => void; endpoint?: string; deadlineAlerts?: BetaDeadlineAlertsClient | null; visible?:boolean; diagnosticsClient?:BetaDiagnosticsClient|null }) {
   const wide = useIsDesktop();
   const desktopLayout = useBetaDesktopAdaptiveEnabled() && wide;
   const native = isTauri();
@@ -37,6 +39,10 @@ export function BetaSettingsPage({ profileName, profileId='', deviceId='', summa
   const fullscreenQueue = useRef<Promise<unknown>>(Promise.resolve());
   const [nativeAlerts] = useState(() => isTauri() ? nativeBetaDeadlineAlertsClient() : null);
   const [modelHost] = useState(() => document.createElement('div'));
+  const [diagnosticsHost] = useState(() => document.createElement('div'));
+  const [nativeDiagnostics] = useState(() => createBetaDiagnosticsClient());
+  const [diagnosticsMounted,setDiagnosticsMounted] = useState(false);
+  const diagnostics = diagnosticsClient === undefined ? nativeDiagnostics : diagnosticsClient;
   const alerts = deadlineAlerts === undefined ? nativeAlerts : deadlineAlerts;
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   function refreshDesktop(): Promise<void> {
@@ -83,10 +89,13 @@ export function BetaSettingsPage({ profileName, profileId='', deviceId='', summa
         model: modelHost,
         alerts: <DeadlineAlertSettings client={alerts}/>,
         location: <BetaRuntimeLocation endpoint={endpoint}/>,
+        diagnostics: diagnosticsHost,
+        onDiagnosticsMount: setDiagnosticsMounted,
       }}>
         {desktopLayout ? <DesktopSettingsLayout items={items} ctx={ctx}/> : <MobileSettingsLayout items={items} ctx={ctx}/>}
       </BetaSettingsPanels.Provider>
       {createPortal(<SummaryModelSettings service={summaryModel??null} deviceId={deviceId} profileId={profileId} profileName={profileName}/>, modelHost, 'beta-settings-model')}
+      {createPortal(<BetaDiagnosticsEntry client={diagnostics} visible={visible&&diagnosticsMounted}/>, diagnosticsHost, 'beta-settings-diagnostics')}
     </div>
   </PageShell>;
 }

@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, type ReactNode } from 'react';
-import { Copy, FolderOpen, Keyboard, MapPin, Monitor, RefreshCw } from 'lucide-react';
+import { createContext, useCallback, useContext, useEffect, type ReactNode } from 'react';
+import { Activity, Copy, FolderOpen, Keyboard, MapPin, Monitor, RefreshCw } from 'lucide-react';
 import type { SettingsItem } from '@/ui/app/config/settings/settings-types';
 import { DATE_DISPLAY_SETTING_OPTIONS, INPUT_SEND_SETTING_OPTIONS, PORTABLE_SETTINGS, THEME_SETTING_OPTIONS } from '@/ui/app/config/settings/portable-settings';
 import { getBetaDateDisplayMode, getBetaDesktopAdaptiveEnabled, getBetaOverlayEnabled, getBetaTheme, setBetaDateDisplayMode, setBetaDesktopAdaptiveEnabled, setBetaOverlayEnabled, setBetaTheme, subscribeBetaDisplayPreference } from './preferences';
@@ -9,12 +9,18 @@ import { betaDesktopPreferences } from './desktop-preferences';
 /** Stable custom slots preserve the model editor's component lifetime while
  * registry values change. They contain existing multi-field stateful editors,
  * not alternate renderers for ordinary boolean/enum/string settings. */
-export const BetaSettingsPanels = createContext<{ model: HTMLElement | null; alerts: ReactNode; location: ReactNode }>({ model: null, alerts: null, location: null });
+export const BetaSettingsPanels = createContext<{ model: HTMLElement | null; alerts: ReactNode; location: ReactNode; diagnostics?: HTMLElement | null; onDiagnosticsMount?: (active: boolean) => void }>({ model: null, alerts: null, location: null });
+function PanelMount({host,onActive}:{host:HTMLElement|null;onActive?:(active:boolean)=>void}) {
+  const mount = useCallback((node: HTMLDivElement | null) => { if (node && host) node.append(host); }, [host]);
+  useEffect(()=>{if(!host)return;onActive?.(true);return()=>onActive?.(false);},[host,onActive]);
+  return <div className="p-4" ref={mount}/>;
+}
 function ModelPanel() {
   const { model } = useContext(BetaSettingsPanels);
   const mount = useCallback((node: HTMLDivElement | null) => { if (node && model) node.append(model); }, [model]);
   return <div className="p-4" ref={mount}/>;
 }
+function DiagnosticsPanel() { const panels=useContext(BetaSettingsPanels);return <PanelMount host={panels.diagnostics??null} onActive={panels.onDiagnosticsMount}/>; }
 function AlertsPanel() { return <div className="p-4">{useContext(BetaSettingsPanels).alerts}</div>; }
 function LocationPanel() { return <div className="px-4 py-4">{useContext(BetaSettingsPanels).location}</div>; }
 
@@ -127,6 +133,8 @@ export function createBetaSettingsRegistry(bindings: BetaSettingsBindings): Sett
   }, {
     id: 'beta-profile-id', label: '档案标识', category: 'data', type: 'action', icon: Copy, hideChevron: true,
     rightText: bindings.profileId ? bindings.profileId.slice(0, 8) : '尚未选择', copyValue: bindings.profileId, onAction: () => {},
+  }, {
+    id: 'beta-runtime-diagnostics', label: '运行诊断', description: 'CPU、内存与本机存储的按需观察', category: 'about', icon: Activity, type: 'custom', component: DiagnosticsPanel,
   }, {
     id: 'about-version', label: '应用版本', category: 'about', type: 'action', icon: Monitor, hideChevron: true,
     rightText: bindings.appVersion, copyValue: bindings.appVersion, onAction: () => {},
