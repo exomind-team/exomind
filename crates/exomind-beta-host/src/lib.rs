@@ -3,6 +3,8 @@
 mod agent_access;
 mod agent_access_http;
 pub use agent_access::{AgentAccess, AgentAccessCheck, AgentCapability};
+mod grant_management;
+pub use grant_management::{GrantCredential, GrantMetadata, ManagedGrantIssue};
 mod external_summaries;
 mod external_summaries_http;
 mod http;
