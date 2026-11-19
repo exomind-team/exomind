@@ -1041,6 +1041,9 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                     return Err(error.into());
                 }
             };
+            if let Err(error) = export::initialize_journal(app.handle(), &state.data_directory) {
+                log::warn!("Beta export task recovery unavailable: {}", error.code);
+            }
             app.manage(state.clone());
             let mut changes = state.peers.subscribe_original_changes();
             let originals_app = app.handle().clone();
@@ -1129,6 +1132,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
         })
         .invoke_handler(tauri::generate_handler![
             export::beta_export_original,
+            export::beta_original_export_history,
             export::beta_open_original,
             export::beta_cancel_original_export,
             peer_commands::beta_peer_status,

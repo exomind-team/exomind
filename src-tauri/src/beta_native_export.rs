@@ -3,6 +3,12 @@
 use super::{Failure, NativeState, trusted_window};
 use exomind_beta_host::{BetaHost, HostError, Session};
 use exomind_core::{MAX_ORIGINAL_CHUNK_BYTES, OriginalId, OriginalRef, ProfileId};
+#[path = "beta_export_journal.rs"]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod journal;
+#[cfg(target_os = "android")]
+use journal::{ExportJournal, ExportTaskPhase};
+use journal::{ExportTaskRecord, JournalError};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -38,6 +44,153 @@ fn incomplete() -> Failure {
         "export_incomplete",
         "导出未完成，保存位置可能保留未完成的新文档；原件保持不变",
     )
+}
+fn interrupted() -> Failure {
+    failure(
+        "export_interrupted",
+        "导出已中断；原件保持不变，所选位置可能为空或未完成，请检查后重新选择位置",
+    )
+}
+#[cfg(target_os = "android")]
+fn receipt_unconfirmed() -> Failure {
+    failure(
+        "export_receipt_unconfirmed",
+        "所选位置可能已写入完整文件，但完成回执未确认；原件保持不变，请先检查位置，不会自动重试",
+    )
+}
+
+fn journal_failure(error: JournalError) -> Failure {
+    match error {
+        JournalError::Corrupt => failure(
+            "export_journal_corrupt",
+            "原件导出历史损坏，原文件已保留；请保留本机资料并检查日志",
+        ),
+        JournalError::Unavailable => failure(
+            "export_journal_unavailable",
+            "本机导出任务记录无法确认；原件已保留，可能存在的目标文件不会被修改或清理",
+        ),
+        JournalError::CommitUnconfirmed => failure(
+            "export_journal_commit_unconfirmed",
+            "本机导出回执已尝试替换但目录持久化未确认；任务结果不视为完成，请保留原件并检查历史",
+        ),
+        JournalError::InvalidTask => failure(
+            "export_journal_invalid",
+            "原件导出任务元数据无效，未打开系统保存对话框",
+        ),
+        JournalError::DuplicateRequest => {
+            failure("export_request_reused", "此导出请求已使用，请重新发起导出")
+        }
+        JournalError::StaleTask => {
+            failure("export_task_stale", "导出回执已过期，没有覆盖当前任务状态")
+        }
+        JournalError::InvalidTransition => failure(
+            "export_task_transition_invalid",
+            "导出任务状态变化无效，未确认本次结果",
+        ),
+    }
+}
+
+#[cfg(target_os = "android")]
+fn start_journal_failure(error: JournalError) -> Failure {
+    match error {
+        JournalError::Unavailable => failure(
+            "export_journal_unavailable",
+            "导出任务未能持久保存，未打开系统保存对话框；原件保持不变",
+        ),
+        JournalError::CommitUnconfirmed => failure(
+            "export_journal_commit_unconfirmed",
+            "导出任务记录提交结果未确认，未打开系统保存对话框；原件保持不变，请先检查导出历史",
+        ),
+        other => journal_failure(other),
+    }
+}
+
+#[cfg(target_os = "android")]
+fn persist_failure(
+    journal: &ExportJournal,
+    request_id: Uuid,
+    phase: ExportTaskPhase,
+    error: &Failure,
+    partial_output: bool,
+) -> Failure {
+    let next = if error.code == "export_interrupted" {
+        ExportTaskPhase::Interrupted
+    } else if error.code == "export_cancelled" {
+        ExportTaskPhase::Cancelled
+    } else {
+        ExportTaskPhase::Failed
+    };
+    journal
+        .transition(
+            request_id,
+            phase,
+            next,
+            Some(error.code.to_owned()),
+            partial_output,
+        )
+        .map_or_else(
+            |_| receipt_unconfirmed(),
+            |_| Failure {
+                code: error.code,
+                message: error.message,
+            },
+        )
+}
+
+#[cfg(target_os = "android")]
+fn export_journal_root(app: &AppHandle, host_root: &Path) -> Result<PathBuf, JournalError> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| JournalError::Unavailable)?
+        .canonicalize()
+        .map_err(|_| JournalError::Unavailable)?;
+    let host_root = host_root
+        .canonicalize()
+        .map_err(|_| JournalError::Unavailable)?;
+    let root = base.join("beta-native-export-recovery");
+
+    // Native recovery is a sibling of beta-host. Refuse a custom Host root
+    // that would make this file part of Host's strict ownership inventory.
+    if root.starts_with(&host_root) {
+        return Err(JournalError::Unavailable);
+    }
+    match std::fs::symlink_metadata(&root) {
+        Ok(metadata) => {
+            if !metadata.file_type().is_dir() {
+                return Err(JournalError::Unavailable);
+            }
+            if root
+                .canonicalize()
+                .map_err(|_| JournalError::Unavailable)?
+                .starts_with(&host_root)
+            {
+                return Err(JournalError::Unavailable);
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(JournalError::Unavailable),
+    }
+    Ok(root)
+}
+
+/// Called from Native setup after the Host root is known. Setup reports any
+/// error without failing Beta startup; history re-reads the manifest read-only
+/// so a later recovered storage location can still project interrupted work.
+pub(super) fn initialize_journal(app: &AppHandle, host_root: &Path) -> Result<(), Failure> {
+    #[cfg(target_os = "android")]
+    {
+        export_journal_root(app, host_root)
+            .and_then(|root| {
+                ExportJournal::new(root, journal::current_process_generation()).initialize()
+            })
+            .map_err(journal_failure)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, host_root);
+        Ok(())
+    }
 }
 fn io_failure() -> Failure {
     failure(
@@ -147,6 +300,11 @@ impl ExportManager {
         }
         Ok(accepted)
     }
+    #[cfg(target_os = "android")]
+    fn active_request(&self) -> Result<Option<Uuid>, Failure> {
+        let jobs = self.jobs.lock().map_err(|_| io_failure())?;
+        Ok(jobs.active.as_ref().map(|job| job.id))
+    }
 }
 struct ExportLease {
     manager: Arc<ExportManager>,
@@ -166,6 +324,14 @@ impl ExportLease {
         } else {
             Ok(())
         }
+    }
+    fn explicitly_cancelled(&self) -> bool {
+        self.job.phase.load(Ordering::Acquire) == CANCELLED
+    }
+    fn stopped_without_explicit_cancel(&self) -> bool {
+        !self.explicitly_cancelled()
+            && (self.manager.stopping.load(Ordering::Acquire)
+                || self.started.elapsed() >= MAX_COPY_TIME)
     }
     async fn cancellation(&self) {
         loop {
@@ -430,12 +596,18 @@ fn suggested_name(name: &str) -> String {
         clean.into()
     }
 }
+enum PickerOutcome {
+    Selected(FilePath),
+    Cancelled { partial_output: bool },
+    Interrupted,
+}
+
 async fn choose_destination(
     app: &AppHandle,
     window: &WebviewWindow,
     original: &OriginalRef,
     lease: &ExportLease,
-) -> Result<Option<FilePath>, Failure> {
+) -> Result<PickerOutcome, Failure> {
     lease.check()?;
     let (send, receive) = tokio::sync::oneshot::channel();
     let dialog = app
@@ -449,7 +621,22 @@ async fn choose_destination(
     dialog.save_file(move |path| {
         let _ = send.send(path);
     });
-    tokio::select! {biased;_=lease.cancellation()=>Ok(None),path=receive=>path.map_err(|_|io_failure())}
+    tokio::select! {
+        biased;
+        _ = lease.cancellation() => {
+            if lease.explicitly_cancelled() {
+                // A save may have been confirmed by DocumentsUI just before
+                // the exact-request cancellation reached this Native task.
+                Ok(PickerOutcome::Cancelled { partial_output: true })
+            } else {
+                Ok(PickerOutcome::Interrupted)
+            }
+        }
+        path = receive => match path.map_err(|_| io_failure())? {
+            Some(path) => Ok(PickerOutcome::Selected(path)),
+            None => Ok(PickerOutcome::Cancelled { partial_output: false }),
+        }
+    }
 }
 
 #[cfg(not(target_os = "android"))]
@@ -515,21 +702,39 @@ fn prepare_android(
     Ok(temporary)
 }
 #[cfg(target_os = "android")]
+struct AndroidExportAttempt {
+    result: Result<ExportResult, Failure>,
+    phase: ExportTaskPhase,
+    partial_output: bool,
+}
+
+#[cfg(target_os = "android")]
 fn export_document(
     app: &AppHandle,
     source: &Source,
     prepared: &mut Temporary,
     destination: FilePath,
+    journal: &ExportJournal,
+    request_id: Uuid,
     lease: &ExportLease,
-) -> Result<ExportResult, Failure> {
+) -> AndroidExportAttempt {
     use tauri_plugin_fs::FsExt;
     let FilePath::Url(uri) = destination else {
-        return Err(incomplete());
+        return AndroidExportAttempt {
+            result: Err(incomplete()),
+            phase: ExportTaskPhase::Writing,
+            partial_output: true,
+        };
     };
     if uri.scheme() != "content" {
-        return Err(incomplete());
+        return AndroidExportAttempt {
+            result: Err(incomplete()),
+            phase: ExportTaskPhase::Writing,
+            partial_output: true,
+        };
     }
     let destination = FilePath::Url(uri);
+    let mut phase = ExportTaskPhase::Writing;
     let write_result = (|| -> Result<(), Failure> {
         lease.check()?;
         let mut options = tauri_plugin_fs::OpenOptions::new();
@@ -568,6 +773,16 @@ fn export_document(
         output.flush().map_err(|_| incomplete())?;
         output.sync_all().map_err(|_| incomplete())?;
         drop(output);
+        journal
+            .transition(
+                request_id,
+                ExportTaskPhase::Writing,
+                ExportTaskPhase::Verifying,
+                None,
+                true,
+            )
+            .map_err(|_| receipt_unconfirmed())?;
+        phase = ExportTaskPhase::Verifying;
         let mut options = tauri_plugin_fs::OpenOptions::new();
         options.read(true);
         let mut check = app
@@ -581,10 +796,18 @@ fn export_document(
         lease.admit_publish()?;
         Ok(())
     })();
-    match write_result {
-        Ok(()) => Ok(ExportResult::saved(&source.original)),
-        Err(_) if lease.is_cancelled() => Ok(ExportResult::cancelled(true)),
-        Err(error) => Err(error),
+    let (result, partial_output) = match write_result {
+        Ok(()) => (Ok(ExportResult::saved(&source.original)), false),
+        Err(error) if error.code == "export_exists" => (Err(error), false),
+        Err(error) if error.code == "export_receipt_unconfirmed" => (Err(error), true),
+        Err(_) if lease.explicitly_cancelled() => (Ok(ExportResult::cancelled(true)), true),
+        Err(_) if lease.stopped_without_explicit_cancel() => (Err(interrupted()), true),
+        Err(error) => (Err(error), true),
+    };
+    AndroidExportAttempt {
+        result,
+        phase,
+        partial_output,
     }
 }
 
@@ -601,6 +824,11 @@ pub(super) async fn beta_export_original(
     if state.closing.load(Ordering::Acquire) {
         return Err(Failure::from(HostError::Stopped));
     }
+    #[cfg(target_os = "android")]
+    let record_profile_id = profile_id
+        .to_string()
+        .parse::<Uuid>()
+        .map_err(|_| failure("invalid_profile", "档案身份无效，无法记录导出任务"))?;
     let lease = state.exports.begin(request_id)?;
     let native = state.inner().clone();
     let (source, lease) = tauri::async_runtime::spawn_blocking(move || {
@@ -624,40 +852,220 @@ pub(super) async fn beta_export_original(
     .await
     .map_err(|_| io_failure())??;
     #[cfg(target_os = "android")]
+    let journal = {
+        let root =
+            export_journal_root(&app, &state.data_directory).map_err(start_journal_failure)?;
+        let original_id = source
+            .original
+            .original_id
+            .to_string()
+            .parse::<Uuid>()
+            .map_err(|_| failure("invalid_original", "原件身份无效，无法记录导出任务"))?;
+        let record = ExportTaskRecord {
+            request_id,
+            profile_id: record_profile_id,
+            original_id,
+            file_name: source.original.file_name.clone(),
+            byte_length: source.original.byte_length,
+            sha256: source.original.sha256.clone(),
+            phase: ExportTaskPhase::Preparing,
+            failure_code: None,
+            partial_output: false,
+        };
+        let journal = ExportJournal::new(root, journal::current_process_generation());
+        let (journal, start_result) = tauri::async_runtime::spawn_blocking(move || {
+            let result = journal.begin(record, Some(request_id));
+            (journal, result)
+        })
+        .await
+        .map_err(|_| start_journal_failure(JournalError::Unavailable))?;
+        start_result.map_err(start_journal_failure)?;
+        journal
+    };
+    #[cfg(target_os = "android")]
     let (mut prepared, source, lease) = {
         let cache = app
             .path()
             .app_cache_dir()
-            .map_err(|_| io_failure())?
+            .map_err(|_| {
+                let error = io_failure();
+                persist_failure(
+                    &journal,
+                    request_id,
+                    ExportTaskPhase::Preparing,
+                    &error,
+                    false,
+                )
+            })?
             .join("beta-exports");
-        tauri::async_runtime::spawn_blocking(move || {
-            let prepared = prepare_android(&source, &cache, &lease)?;
-            Ok::<_, Failure>((prepared, source, lease))
+        let preparation = tauri::async_runtime::spawn_blocking(move || {
+            let prepared = prepare_android(&source, &cache, &lease);
+            (prepared, source, lease)
         })
         .await
-        .map_err(|_| io_failure())??
+        .map_err(|_| interrupted())?;
+        let (preparation, source, lease) = preparation;
+        match preparation {
+            Ok(prepared) => (prepared, source, lease),
+            Err(raw_error) => {
+                let error = if lease.explicitly_cancelled() {
+                    cancelled()
+                } else if lease.stopped_without_explicit_cancel() {
+                    interrupted()
+                } else {
+                    raw_error
+                };
+                let final_error = persist_failure(
+                    &journal,
+                    request_id,
+                    ExportTaskPhase::Preparing,
+                    &error,
+                    false,
+                );
+                if error.code == "export_cancelled"
+                    && final_error.code != "export_receipt_unconfirmed"
+                {
+                    return Ok(ExportResult::cancelled(false));
+                }
+                return Err(final_error);
+            }
+        }
     };
-    let destination = choose_destination(&app, &window, &source.original, &lease).await?;
-    let Some(destination) = destination else {
-        return Ok(ExportResult::cancelled(false));
-    };
+
     #[cfg(target_os = "android")]
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        export_document(&app, &source, &mut prepared, destination, &lease)
-    })
-    .await
-    .map_err(|_| incomplete())?;
+    journal
+        .transition(
+            request_id,
+            ExportTaskPhase::Preparing,
+            ExportTaskPhase::AwaitingDestination,
+            None,
+            false,
+        )
+        .map_err(start_journal_failure)?;
+
+    let picker_outcome = match choose_destination(&app, &window, &source.original, &lease).await {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            #[cfg(target_os = "android")]
+            return Err(persist_failure(
+                &journal,
+                request_id,
+                ExportTaskPhase::AwaitingDestination,
+                &error,
+                true,
+            ));
+            #[cfg(not(target_os = "android"))]
+            return Err(error);
+        }
+    };
+    let destination = match picker_outcome {
+        PickerOutcome::Selected(destination) => destination,
+        PickerOutcome::Cancelled { partial_output } => {
+            #[cfg(target_os = "android")]
+            {
+                let error = cancelled();
+                let final_error = persist_failure(
+                    &journal,
+                    request_id,
+                    ExportTaskPhase::AwaitingDestination,
+                    &error,
+                    partial_output,
+                );
+                if final_error.code == "export_receipt_unconfirmed" {
+                    return Err(final_error);
+                }
+            }
+            return Ok(ExportResult::cancelled(partial_output));
+        }
+        PickerOutcome::Interrupted => {
+            #[cfg(target_os = "android")]
+            return Err(persist_failure(
+                &journal,
+                request_id,
+                ExportTaskPhase::AwaitingDestination,
+                &interrupted(),
+                true,
+            ));
+            #[cfg(not(target_os = "android"))]
+            return Err(interrupted());
+        }
+    };
+
+    #[cfg(target_os = "android")]
+    {
+        journal
+            .transition(
+                request_id,
+                ExportTaskPhase::AwaitingDestination,
+                ExportTaskPhase::Writing,
+                None,
+                true,
+            )
+            .map_err(journal_failure)?;
+        let worker_journal = journal.clone();
+        let attempt = tauri::async_runtime::spawn_blocking(move || {
+            export_document(
+                &app,
+                &source,
+                &mut prepared,
+                destination,
+                &worker_journal,
+                request_id,
+                &lease,
+            )
+        })
+        .await
+        .map_err(|_| interrupted())?;
+        return match attempt.result {
+            Ok(saved @ ExportResult::Saved { .. }) => {
+                journal
+                    .transition(
+                        request_id,
+                        ExportTaskPhase::Verifying,
+                        ExportTaskPhase::Succeeded,
+                        None,
+                        false,
+                    )
+                    .map_err(|_| receipt_unconfirmed())?;
+                Ok(saved)
+            }
+            Ok(cancelled_result @ ExportResult::Cancelled { .. }) => {
+                let error = cancelled();
+                let final_error = persist_failure(
+                    &journal,
+                    request_id,
+                    attempt.phase,
+                    &error,
+                    attempt.partial_output,
+                );
+                if final_error.code == "export_receipt_unconfirmed" {
+                    Err(final_error)
+                } else {
+                    Ok(cancelled_result)
+                }
+            }
+            Err(error) if error.code == "export_receipt_unconfirmed" => Err(error),
+            Err(error) => Err(persist_failure(
+                &journal,
+                request_id,
+                attempt.phase,
+                &error,
+                attempt.partial_output,
+            )),
+        };
+    }
+
     #[cfg(not(target_os = "android"))]
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || {
         let result = export_path(&source, destination, &lease);
         match result {
-            Err(_) if lease.is_cancelled() => Ok(ExportResult::cancelled(false)),
+            Err(_) if lease.explicitly_cancelled() => Ok(ExportResult::cancelled(false)),
+            Err(_) if lease.stopped_without_explicit_cancel() => Err(interrupted()),
             other => other,
         }
     })
     .await
-    .map_err(|_| io_failure())?;
-    result
+    .map_err(|_| io_failure())?
 }
 #[tauri::command]
 pub(super) async fn beta_open_original(
@@ -772,6 +1180,65 @@ pub(super) fn beta_cancel_original_export(
 ) -> Result<bool, Failure> {
     trusted_window(&window, state.inner())?;
     state.exports.cancel(request_id)
+}
+
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn authorized_history_profile(
+    profile_id: ProfileId,
+    authorize: impl FnOnce(ProfileId) -> Result<(), Failure>,
+) -> Result<Uuid, Failure> {
+    authorize(profile_id.clone())?;
+    profile_id
+        .to_string()
+        .parse::<Uuid>()
+        .map_err(|_| failure("invalid_profile", "档案身份无效，无法读取导出历史"))
+}
+
+#[tauri::command]
+pub(super) async fn beta_original_export_history(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+) -> Result<Vec<ExportTaskRecord>, Failure> {
+    trusted_window(&window, state.inner())?;
+    if state.closing.load(Ordering::Acquire) {
+        return Err(Failure::from(HostError::Stopped));
+    }
+    let native = state.inner().clone();
+    let history_profile_id = tauri::async_runtime::spawn_blocking(move || {
+        authorized_history_profile(profile_id, |profile| {
+            native.human(profile).map(|_| ()).map_err(Failure::from)
+        })
+    })
+    .await
+    .map_err(|_| {
+        failure(
+            "export_scope_unavailable",
+            "档案授权暂不可用，无法读取导出历史",
+        )
+    })??;
+    #[cfg(target_os = "android")]
+    {
+        let root = export_journal_root(&app, &state.data_directory).map_err(journal_failure)?;
+        let process_generation = journal::current_process_generation();
+        let active_request = state.exports.active_request()?;
+        let store = ExportJournal::new(root, process_generation);
+        tauri::async_runtime::spawn_blocking(move || {
+            store
+                .history(history_profile_id, active_request)
+                .map_err(journal_failure)
+        })
+        .await
+        .map_err(|_| journal_failure(JournalError::Unavailable))?
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, state, history_profile_id);
+        // Desktop callers keep the same public API while recovery remains an
+        // Android-only capability; no desktop profile or Host root is written.
+        Ok(Vec::new())
+    }
 }
 
 #[cfg(test)]
@@ -946,5 +1413,22 @@ mod tests {
         assert_eq!(suggested_name("CON.txt"), "原件");
         assert!(!suggested_name("../bad\\file\n.exe").contains('/'));
         assert!(suggested_name(&"中文".repeat(500)).encode_utf16().count() <= 240);
+    }
+
+    #[test]
+    fn export_history_profile_must_pass_native_human_authorization() {
+        let profile: ProfileId = "00000000-0000-4000-8000-000000000090".parse().unwrap();
+        let mut authorized = false;
+        let result = authorized_history_profile(profile, |_| {
+            authorized = true;
+            Err(failure("profile_denied", "profile is not authorized"))
+        });
+
+        assert!(authorized);
+        assert_eq!(result.unwrap_err().code, "profile_denied");
+
+        let profile: ProfileId = "00000000-0000-4000-8000-000000000091".parse().unwrap();
+        let id = authorized_history_profile(profile, |_| Ok(())).unwrap();
+        assert_eq!(id.to_string(), "00000000-0000-4000-8000-000000000091");
     }
 }

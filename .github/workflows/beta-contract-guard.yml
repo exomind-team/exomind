@@ -84,6 +84,7 @@ jobs:
             'tests/unit/beta/original-acquisition.test.ts',
             'tests/unit/beta/original-auto-diagnostics.test.ts',
             'tests/unit/beta/original-transfer-diagnostics-ui.test.tsx',
+            'tests/unit/beta/original-export-recovery.test.tsx',
             'tests/unit/scripts/beta-build-request.test.ts',
           ];
           assert.ok(process.env.CONTRACT_OUT);
@@ -118,6 +119,7 @@ jobs:
           const cases = [
             ['-p', 'exomind-beta-host', '--lib', 'diagnostics::'],
             ['-p', 'exomind-beta-host', '--lib', 'original_auto_queue_status_reads_without_changing_policy_or_transfer_state'],
+            ['-p', 'exomind-beta-host', '--test', 'native_export_journal'],
             ['-p', 'exomind-core', '--test', 'origin_provenance', 'conflicting_existing_body_cannot_advance_a_proof_prefix'],
             ['-p', 'exomind-beta-host', '--lib', 'a_position_signature_cannot_be_replayed_at_another_sequence'],
             ['-p', 'exomind-beta-host', '--lib', 'legacy_received_history_backfills_proofs_without_resetting_a_persisted_data_ack'],

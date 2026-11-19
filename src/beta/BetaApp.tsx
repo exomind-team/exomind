@@ -251,7 +251,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   }
   const handoff=useBetaDeadlineHandoff(handoffs,status?`${status.device_id}:${status.runtime_id??''}:${generation.current}`:'',!!status&&!!prepareSwitch.current&&!switching&&!creating,openDeadlineHandoff);
   useEffect(()=>{if(handoff.pending||handoff.failed)setSection('now');},[handoff.pending?.handoff_id,handoff.failed]);
-  const workspaceTools = <>{client.originalExports&&<BetaOriginalExportCenter client={client} profileId={profileId}/>}<BetaRuntimeLocation endpoint={endpoint} compact/>
+  const workspaceTools = <>{client.originalExports&&<BetaOriginalExportCenter client={client} profileId={profileId} visible={section==='now'}/>}<BetaRuntimeLocation endpoint={endpoint} compact/>
     {isTauri()&&!/Android|iPhone|iPad/i.test(navigator.userAgent)&&<Button size="icon" variant="ghost" aria-label="专注浮窗" title="在浮窗打开当前档案" onClick={()=>{void invoke('beta_workspace_bind',{profileId}).then(()=>setBetaOverlayEnabled(true)).catch(failure=>setError(errorMessage(failure)));}}><PanelsTopLeft size={16}/></Button>}
     <FieldSelect id="beta-profile" label="当前档案" title="当前档案" className="max-w-28" value={profileId} disabled={!prepareSwitch.current||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profile.display_name}))}/>
     <Button variant="ghost" size="icon" aria-label="管理档案" title={`档案：${profileName || '未选择'}`} onClick={()=>setProfileDialog(true)}><FolderOpen size={16}/></Button>
