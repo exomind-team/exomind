@@ -63,16 +63,11 @@ function current(options: LocateBetaMessageReferenceOptions): boolean {
   return options.signal?.aborted !== true && (options.isCurrent?.() ?? true);
 }
 
-function isCapture(item: BetaTimelineItem): item is Extract<BetaTimelineItem, { kind: 'capture' }> {
-  return item.kind === 'capture';
-}
-
-function matchingCapture(
+function matchingItem(
   item: BetaTimelineItem,
   reference: BetaMessageReferenceIdentity,
 ): BetaTimelineItem | null {
-  if (item.record.event_id !== reference.eventId) return null;
-  if (!isCapture(item) || item.record.profile_id !== reference.profileId) return null;
+  if (item.record.event_id !== reference.eventId || item.record.profile_id !== reference.profileId) return null;
   return item;
 }
 
@@ -82,7 +77,7 @@ function findLoadedItem(
 ): { item: BetaTimelineItem | null; conflict: boolean } {
   for (const item of items ?? []) {
     if (item.record.event_id !== reference.eventId) continue;
-    const match = matchingCapture(item, reference);
+    const match = matchingItem(item, reference);
     return match ? { item: match, conflict: false } : { item: null, conflict: true };
   }
   return { item: null, conflict: false };
@@ -178,7 +173,7 @@ export async function locateBetaMessageReference(
       const item = await client.timelineEvent(reference.profileId, reference.eventId);
       if (!current(options)) return { kind: 'cancelled' };
       if (item) {
-        const match = matchingCapture(item, reference);
+        const match = matchingItem(item, reference);
         if (!match) return failed('inconsistent_source', '精确来源与档案或消息身份不一致；草稿和阅读位置已保留。');
         return {
           kind: 'found',
@@ -223,7 +218,7 @@ export async function locateBetaMessageReference(
 
     for (const item of page.items) {
       if (item.record.event_id !== reference.eventId) continue;
-      const match = matchingCapture(item, reference);
+      const match = matchingItem(item, reference);
       if (!match) return failed('inconsistent_source', '历史页中的来源与引用档案或消息身份不一致。', true);
       return {
         kind: 'found',

@@ -7,12 +7,15 @@ export interface BetaMessageReferenceIdentity {
 
 export interface BetaMessageReferenceSource extends BetaMessageReferenceIdentity {
   text: string;
+  label?: string;
+  metadata?: string;
 }
 
 export interface BetaMessageReference extends BetaMessageReferenceIdentity {
   uri: string;
   label: string;
   excerpt?: string;
+  metadata?: string;
   lineIndex: number;
   isQuoteLine: boolean;
   start: number;
@@ -48,6 +51,7 @@ const RAW_URI_PATTERN = /exomind-beta:\/\/event\/[^\s<>()\]]+/giu;
 const DEFAULT_REFERENCE_LABEL = '消息引用';
 const SUMMARY_MAX_LENGTH = 48;
 const EXCERPT_MAX_LENGTH = 72;
+const REFERENCE_METADATA_MAX_LENGTH = 240;
 
 function checkedIdentity(identity: BetaMessageReferenceIdentity): BetaMessageReferenceIdentity {
   return {
@@ -93,6 +97,21 @@ function safeMarkdownLabel(value: string): string {
     .replace(/\\/gu, '／')
     .replace(/\[/gu, '［')
     .replace(/\]/gu, '］');
+}
+
+function safeReferenceMetadata(value: string): string {
+  return truncate(value.replace(/\s+/gu, ' ').trim(), REFERENCE_METADATA_MAX_LENGTH)
+    .replace(/\\/gu, '／')
+    .replace(/\|/gu, '｜')
+    .replace(/`/gu, '｀')
+    .replace(/\*/gu, '＊')
+    .replace(/_/gu, '＿')
+    .replace(/~/gu, '～')
+    .replace(/\[/gu, '［')
+    .replace(/\]/gu, '］')
+    .replace(/</gu, '＜')
+    .replace(/>/gu, '＞')
+    .replace(/ · 元数据：/gu, ' · 元数据 ：');
 }
 
 function textLines(value: string): TextLine[] {
@@ -142,8 +161,15 @@ export function buildBetaMessageReferenceLine(source: BetaMessageReferenceSource
   const identity = checkedIdentity(source);
   const summary = summarizeSource(source.text);
   const uri = buildBetaMessageReferenceUri(identity);
-  const label = safeMarkdownLabel(summary.label);
-  return '> 引用：[' + label + '](' + uri + ')' + (summary.excerpt ? ' | ' + summary.excerpt : '');
+  const labelText = source.label?.trim()
+    ? truncate(normalizeInlineText(source.label), SUMMARY_MAX_LENGTH)
+    : summary.label;
+  const label = safeMarkdownLabel(labelText || DEFAULT_REFERENCE_LABEL);
+  const excerpt = summary.excerpt?.replace(/ · 元数据：/gu, ' · 元数据 ：');
+  const metadata = source.metadata?.trim() ? safeReferenceMetadata(source.metadata) : '';
+  return '> 引用：[' + label + '](' + uri + ')'
+    + (excerpt ? ' | ' + excerpt : '')
+    + (metadata ? ' · 元数据：' + metadata : '');
 }
 
 export function insertBetaMessageReference(
@@ -151,7 +177,7 @@ export function insertBetaMessageReference(
   source: BetaMessageReferenceSource,
 ): BetaMessageReferenceInsertion {
   const identity = checkedIdentity(source);
-  const referenceLine = buildBetaMessageReferenceLine({ ...identity, text: source.text });
+  const referenceLine = buildBetaMessageReferenceLine(source);
   const exists = extractBetaMessageReferences(draftText)
     .some(reference => identityKey(reference) === identityKey(identity));
   if (exists) {
@@ -182,7 +208,11 @@ function locateReferencesOnLine(line: TextLine): LocatedReference[] {
     if (!identity || match.index === undefined) continue;
     matchedUris.add(uri);
     const suffix = line.text.slice(match.index + match[0].length);
-    const excerpt = isQuoteLine && suffix.startsWith(' | ') ? suffix.slice(3).trim() : undefined;
+    const metadataMarker = ' · 元数据：';
+    const metadataIndex = isQuoteLine ? suffix.lastIndexOf(metadataMarker) : -1;
+    const metadata = metadataIndex >= 0 ? suffix.slice(metadataIndex + metadataMarker.length).trim() : undefined;
+    const excerptSuffix = metadataIndex >= 0 ? suffix.slice(0, metadataIndex) : suffix;
+    const excerpt = isQuoteLine && excerptSuffix.startsWith(' | ') ? excerptSuffix.slice(3).trim() : undefined;
     const start = line.start + match.index;
     const end = start + match[0].length;
     references.push({
@@ -190,6 +220,7 @@ function locateReferencesOnLine(line: TextLine): LocatedReference[] {
       uri,
       label: match[1].trim() || DEFAULT_REFERENCE_LABEL,
       ...(excerpt ? { excerpt } : {}),
+      ...(metadata ? { metadata } : {}),
       lineIndex: line.index,
       isQuoteLine,
       start,

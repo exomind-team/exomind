@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { Sparkles } from 'lucide-react';
 import { Avatar,AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -9,7 +10,7 @@ import type { SummarySourceRef } from './summary-types';
 import type { ExternalSummaryRecord } from './external-summary';
 import { BetaSummaryBody } from './BetaSummaryBody';
 
-export function BetaExternalSummaryHistoryRow({record,now,dateMode,onOpenSource}:{record:ExternalSummaryRecord;now:number;dateMode:EventDateDisplayMode;onOpenSource?:(source:SummarySourceRef)=>void}){
+export function BetaExternalSummaryHistoryRow({record,now,dateMode,onOpenSource,messageActions}:{record:ExternalSummaryRecord;now:number;dateMode:EventDateDisplayMode;onOpenSource?:(source:SummarySourceRef)=>void;messageActions?:ReactNode}){
   const [shown,setShown]=useState(25);const sources=new Map(record.snapshot.sources.map(source=>[source.event_id,source]));
   return<ChatMessageRowView eventId={record.event_id} timelineKind="agent_summary/1" tone="agent-feedback"
     avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className="bg-violet-600 text-white"><Sparkles size={16}/></AvatarFallback></Avatar>}
@@ -20,5 +21,5 @@ export function BetaExternalSummaryHistoryRow({record,now,dateMode,onOpenSource}
         {shown<record.evidence.length&&<Button variant="ghost" size="sm" onClick={()=>setShown(value=>value+25)}>继续显示引用（尚有 {record.evidence.length-shown} 项）</Button>}
       </details>}
     </div>}
-    afterBubble={<details className="mt-2 space-y-2 text-xs text-muted"><summary className="cursor-pointer">生成依据与覆盖</summary><p>这份回顾引用了明确列出的 {record.snapshot.sources.length} 项来源，不代表全部资料。来源由提交设备核对；未证明外部推理前已实际读取。</p><p>其他设备资料的完整性未知。本条是外部提交的独立回顾，不取得内部模型任务的当前结果资格。</p><p>附带 {record.snapshot.materials.length} 份原件引用，均未声明读取正文。</p></details>}/>;
+    afterBubble={<details className="mt-2 space-y-2 text-xs text-muted"><summary className="cursor-pointer">生成依据与覆盖</summary><p>这份回顾引用了明确列出的 {record.snapshot.sources.length} 项来源，不代表全部资料。来源由提交设备核对；未证明外部推理前已实际读取。</p><p>其他设备资料的完整性未知。本条是外部提交的独立回顾，不取得内部模型任务的当前结果资格。</p><p>附带 {record.snapshot.materials.length} 份原件引用，均未声明读取正文。</p></details>} actions={messageActions}/>;
 }

@@ -15,10 +15,13 @@
 不读取或切换其他档案，不让旧请求覆盖新档案/新查询，原阅读位置与布局保持可恢复。
 达到工作上限后明确告知并提供加载更早记录后重试；上限不冒充「不存在」。
 
-本切片先连接 `capture` 记录；timeblock/summary/agent_summary 的等价动作与定位另接，
-不能因 URI 中写了 event 就声称所有 typed facts 均已支持。系统打开 URI 也不属于此切片。
+动作与定位覆盖 `capture`、`timeblock`、`summary/1` 和 `agent_summary/1`。历史与定位预览
+复用 `BetaTimelineItemRow`；总结复制存储的 narrative，时间块复制现有事件文案，不能把
+待执行的模型任务当作已保存结果。纯附件记录没有正文可复制，仍可按附件名引用，不虚构正文。
+引用解析按记录不可变正文缓存，时钟刷新不重复解析整段文本。系统打开 URI 不属于此切片。
 
 验证入口是 `message-actions`、`message-references`、`beta-message-locator` 和
-`message-integration` 四组测试，44 项通过。以旧 HEAD 的 BetaApp 作受控对照时，
+`message-integration` 四组测试。初始 capture 切片 44 项通过；类型扩展后 56 项通过，
+其中包含三类非 capture 的复制、引用与相同预览路径。以旧 HEAD 的 BetaApp 作受控对照时，
 复制/引用用户路径在缺少「更多消息操作」处失败；切片 BetaApp 与相同依赖下 44 项通过。
 这不代替真实 Native 剪贴板、触摸和最终候选用户叙事验收。

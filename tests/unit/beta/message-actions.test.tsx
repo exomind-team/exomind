@@ -49,7 +49,7 @@ describe('Beta message actions', () => {
     />);
 
     fireEvent.click(screen.getByRole('button', { name: '更多消息操作' }));
-    fireEvent.click(screen.getByRole('button', { name: '复制消息链接' }));
+    fireEvent.click(screen.getByRole('button', { name: '复制外心档案内定位链接' }));
 
     await waitFor(() => expect(writeClipboardText).toHaveBeenCalledWith(buildBetaMessageReferenceUri({ profileId: PROFILE, eventId: EVENT })));
     const copied = writeClipboardText.mock.calls[0][0];
@@ -73,9 +73,9 @@ describe('Beta message actions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '更多消息操作' }));
     fireEvent.click(screen.getByRole('button', { name: '复制消息正文' }));
-    fireEvent.click(screen.getByRole('button', { name: '复制消息链接' }));
+    fireEvent.click(screen.getByRole('button', { name: '复制外心档案内定位链接' }));
     await act(async () => { resolveFirst?.(); });
-    expect(screen.getByRole('status')).toHaveTextContent('正在复制消息链接');
+    expect(screen.getByRole('status')).toHaveTextContent('正在复制外心档案内定位链接');
     await act(async () => { rejectSecond?.(new Error('permission denied')); });
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/复制.*失败/));
     expect(screen.getByRole('alert')).not.toHaveTextContent('已复制');
@@ -98,6 +98,7 @@ describe('Beta message actions', () => {
 
     const toggle = screen.getByRole('button', { name: '更多消息操作' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).not.toHaveAttribute('title');
     expect(toggle.className).toContain('[@media(pointer:coarse)]:min-h-11');
     expect(toggle.className).toContain('[@media(pointer:coarse)]:opacity-100');
     const user = userEvent.setup();
@@ -121,6 +122,22 @@ describe('Beta message actions', () => {
     expect(onQuote).toHaveBeenNthCalledWith(2, { profileId: PROFILE, eventId: EVENT, text: PRIVATE_BODY });
   });
 
+  it('keeps attachment-only citation metadata separate from an empty body', () => {
+    const onQuote = vi.fn();
+    render(<BetaMessageActions profileId={PROFILE} eventId={EVENT} content="" align="start"
+      referenceLabel="附件记录" referenceMetadata="附件名：receipt.pdf" onQuote={onQuote}/>);
+
+    fireEvent.click(screen.getByRole('button', { name: '更多消息操作' }));
+    expect(screen.getByRole('button', { name: '复制消息正文' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '复制外心档案内定位链接' })).toBeEnabled();
+    const quote = screen.getByRole('button', { name: '引用消息' });
+    expect(quote).toBeEnabled();
+    fireEvent.click(quote);
+    expect(onQuote).toHaveBeenCalledWith({
+      profileId: PROFILE, eventId: EVENT, text: '', label: '附件记录', metadata: '附件名：receipt.pdf',
+    });
+  });
+
   it('shows user-visible draft references and exposes separate open and remove actions', () => {
     const onOpen = vi.fn();
     const onRemove = vi.fn();
@@ -132,13 +149,13 @@ describe('Beta message actions', () => {
       sourceLabel={() => '工作站'}
     />);
 
-    expect(screen.getByRole('region', { name: '草稿中的消息引用' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '引用如何保存' }));
-    expect(screen.getByText(/可见 Markdown 行.*不会变成消息元数据/)).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '草稿中的外心档案内引用' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '档案内引用如何保存' }));
+    expect(screen.getByText(/可见 Markdown 行.*只用于外心档案内定位/)).toBeInTheDocument();
     expect(screen.getByText('Readable source sentence')).toBeInTheDocument();
     expect(screen.getByText('来自 工作站')).toBeInTheDocument();
     expect(screen.queryByText(PROFILE)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /打开引用原文/ }));
+    fireEvent.click(screen.getByRole('button', { name: /在外心档案内回看原文/ }));
     fireEvent.click(screen.getByRole('button', { name: /移除引用/ }));
     expect(onOpen).toHaveBeenCalledWith({ profileId: PROFILE, eventId: EVENT });
     expect(onRemove).toHaveBeenCalledWith({ profileId: PROFILE, eventId: EVENT });
@@ -149,10 +166,10 @@ describe('Beta message actions', () => {
     const line = buildBetaMessageReferenceLine({ profileId: PROFILE, eventId: EVENT, text: 'Readable source sentence' });
     render(<BetaMessageReferenceLinks value={line} onOpen={onOpen} />);
 
-    expect(screen.getByRole('region', { name: '消息中的引用原文' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '引用原文说明' }));
+    expect(screen.getByRole('region', { name: '消息中的外心档案内引用原文' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '档案内引用说明' }));
     expect(screen.getByText(/来自记录正文中的 Markdown 行/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /打开引用原文/ }));
+    fireEvent.click(screen.getByRole('button', { name: /在外心档案内回看原文/ }));
     expect(onOpen).toHaveBeenCalledWith({ profileId: PROFILE, eventId: EVENT });
   });
 
@@ -165,8 +182,8 @@ describe('Beta message actions', () => {
       onReturnToLatest={onReturnToLatest}
     />);
 
-    const result = screen.getByRole('region', { name: '引用原文定位结果' });
-    expect(result).toHaveTextContent('已找到引用原文');
+    const result = screen.getByRole('region', { name: '外心档案内引用定位结果' });
+    expect(result).toHaveTextContent('已在当前外心档案内找到引用原文');
     expect(result).toHaveTextContent('原来的阅读位置仍可恢复');
     expect(screen.getByRole('button', { name: '查看查找范围' })).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(screen.getByRole('button', { name: '查看查找范围' }));

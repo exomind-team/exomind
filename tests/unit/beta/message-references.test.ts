@@ -48,6 +48,15 @@ describe('Beta message reference protocol', () => {
     expect(original).toBe('A sentence to remember\nThe supporting detail.');
   });
 
+  it('stores an explicit attachment label and metadata without inventing a body excerpt', () => {
+    const source = { profileId: PROFILE, eventId: EVENT, text: '', label: '附件记录', metadata: '附件名：receipt.pdf' };
+    const line = buildBetaMessageReferenceLine(source);
+    expect(line).toBe('> 引用：[附件记录](' + buildBetaMessageReferenceUri(source) + ') · 元数据：附件名：receipt.pdf');
+    const [reference] = extractBetaMessageReferences(line);
+    expect(reference).toMatchObject({ label: '附件记录', metadata: '附件名：receipt.pdf', isQuoteLine: true });
+    expect(reference).not.toHaveProperty('excerpt');
+  });
+
   it('inserts into the latest supplied draft without replacing existing text and avoids duplicate references', () => {
     const originalDraft = '我先记下一句话\n继续写的新内容';
     const source = { profileId: PROFILE, eventId: EVENT, text: '原消息第一行\n原消息补充' };

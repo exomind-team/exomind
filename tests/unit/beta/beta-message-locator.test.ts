@@ -26,6 +26,25 @@ function capture(localSeq: number, eventId = EVENT, profileId = PROFILE): BetaTi
   };
 }
 
+function typedFact(kind: 'timeblock' | 'summary/1' | 'agent_summary/1', localSeq = 23): BetaTimelineItem {
+  return {
+    kind,
+    record: {
+      event_id: EVENT,
+      profile_id: PROFILE,
+      device_id: DEVICE,
+      local_seq: localSeq,
+      source: { kind: 'human', author_id: DEVICE, owner_generation: null },
+      parents: [],
+      occurred_at_ms: localSeq,
+      effective_at_ms: localSeq,
+      clock: { epoch_id: DEVICE, elapsed_ms: 0 },
+      payload: { kind: 'action', action: { kind: 'pause', block_id: DEVICE } },
+      digest: 'a'.repeat(64),
+    },
+  } as unknown as BetaTimelineItem;
+}
+
 function fakeClient() {
   const eventsPage = vi.fn(async (_profileId: string, _query: BetaQuery): Promise<BetaPage> => ({
     items: [],
@@ -57,6 +76,48 @@ describe('Beta message location', () => {
     expect(result).toMatchObject({ kind: 'found', item: target, source: 'event-id', pagesRead: 0, highwater: 30 });
     expect(client.timelineEvent).toHaveBeenCalledWith(PROFILE, EVENT);
     expect(client.timelinePage).not.toHaveBeenCalled();
+  });
+
+  it.each(['timeblock', 'summary/1', 'agent_summary/1'] as const)('matches %s through the existing profile/event identity', async kind => {
+    const exactClient = fakeClient();
+    const exactTarget = typedFact(kind);
+    exactClient.timelineEvent.mockResolvedValueOnce(exactTarget);
+    const exact = await locateBetaMessageReference({
+      client: exactClient,
+      currentProfileId: PROFILE,
+      reference: { profileId: PROFILE, eventId: EVENT },
+      highwater: 30,
+    });
+    expect(exact).toMatchObject({ kind: 'found', item: exactTarget, source: 'event-id', pagesRead: 0, highwater: 30 });
+
+    const loadedClient = fakeClient();
+    const loadedTarget = typedFact(kind);
+    const loaded = await locateBetaMessageReference({
+      client: loadedClient,
+      currentProfileId: PROFILE,
+      reference: { profileId: PROFILE, eventId: EVENT },
+      highwater: 30,
+      loadedItems: [loadedTarget],
+    });
+    expect(loaded).toMatchObject({ kind: 'found', item: loadedTarget, source: 'loaded', pagesRead: 0, highwater: 30 });
+    expect(loadedClient.timelineEvent).not.toHaveBeenCalled();
+  });
+
+  it.each(['timeblock', 'summary/1', 'agent_summary/1'] as const)('finds %s through the existing bounded timeline pages', async kind => {
+    const client = fakeClient();
+    const target = typedFact(kind, 8);
+    client.timelineEvent.mockResolvedValueOnce(null);
+    client.timelinePage.mockResolvedValueOnce({ items: [target], next_before: null, highwater: 8 });
+
+    const result = await locateBetaMessageReference({
+      client,
+      currentProfileId: PROFILE,
+      reference: { profileId: PROFILE, eventId: EVENT },
+      highwater: 8,
+    });
+
+    expect(result).toMatchObject({ kind: 'found', item: target, source: 'pages', pagesRead: 1, highwater: 8 });
+    expect(client.timelinePage).toHaveBeenCalledWith(PROFILE, { limit: 100, through: 8 });
   });
 
   it('returns a loaded record without opening a second reader or shifting the snapshot', async () => {

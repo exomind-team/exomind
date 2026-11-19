@@ -1,4 +1,5 @@
 import { useEffect,useRef,useState } from 'react';
+import type { ReactNode } from 'react';
 import { Sparkles } from 'lucide-react';
 import { Avatar,AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -10,7 +11,7 @@ import { sameSummaryArtifact,summaryFailure } from './summary-ui';
 import type { SummaryArtifactRecord,SummaryArtifactView,SummaryClient,SummarySourceRef,SummaryTaskView } from './summary-types';
 import { BetaSummaryBody } from './BetaSummaryBody';
 
-export function BetaSummaryHistoryRow({record,api,revision,now,dateMode,onInspect,onOpenSource}:{record:SummaryArtifactRecord;api?:SummaryClient;revision:number;now:number;dateMode:EventDateDisplayMode;onInspect:(record:SummaryArtifactRecord)=>void;onOpenSource?:(source:SummarySourceRef)=>void}){
+export function BetaSummaryHistoryRow({record,api,revision,now,dateMode,onInspect,onOpenSource,messageActions}:{record:SummaryArtifactRecord;api?:SummaryClient;revision:number;now:number;dateMode:EventDateDisplayMode;onInspect:(record:SummaryArtifactRecord)=>void;onOpenSource?:(source:SummarySourceRef)=>void;messageActions?:ReactNode}){
   const host=useRef<HTMLDivElement>(null);const [visible,setVisible]=useState(()=>typeof IntersectionObserver==='undefined');
   const [reload,setReload]=useState(0);const [qualification,setQualification]=useState<{api:SummaryClient;revision:number;task:SummaryTaskView;artifact:SummaryArtifactView}|null>(null);
   const [loading,setLoading]=useState(false);const [error,setError]=useState('');
@@ -43,5 +44,5 @@ export function BetaSummaryHistoryRow({record,api,revision,now,dateMode,onInspec
       <p>{loading?'正在核对这条结果的当前资格；原文保持不变。':valid&&qualified?qualified.artifact.current?'此版本当前有效；资格来自本次任务查询。':'保留的历史或未获当前资格版本。':api?'此版本当前资格尚未确认，不能仅凭历史记录宣称生成成功。':'此连接未提供资格读取，以下只呈现原始结果。'}</p>
       {valid&&qualified&&qualified.task.latest_artifact_id!==record.event_id&&qualified.task.latest_artifact_id&&<p>任务已有其他版本，本条正文与依据不会被替换。</p>}
     </>}/>}
-    actions={<div className="mt-2 flex gap-1"><Button variant="outline" size="sm" onClick={()=>onInspect(record)}>查看回顾任务</Button>{api&&<Button variant="ghost" size="sm" disabled={loading} onClick={()=>{setVisible(true);setReload(value=>value+1);}}>核对此版本资格</Button>}</div>}/></div>;
+    actions={<div className="mt-2 flex flex-wrap items-center gap-1">{messageActions}<Button variant="outline" size="sm" onClick={()=>onInspect(record)}>查看回顾任务</Button>{api&&<Button variant="ghost" size="sm" disabled={loading} onClick={()=>{setVisible(true);setReload(value=>value+1);}}>核对此版本资格</Button>}</div>}/></div>;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ChevronDown, Copy, Link2, MoreHorizontal, PencilLine, Quote, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -51,6 +51,8 @@ export interface BetaMessageActionsProps {
   eventId: string;
   align: 'start' | 'end';
   onQuote?: (source: BetaMessageReferenceSource) => void;
+  referenceLabel?: string;
+  referenceMetadata?: string;
   onCorrect?: () => void;
   writeClipboardText?: (value: string) => void | Promise<void>;
 }
@@ -58,14 +60,14 @@ export interface BetaMessageActionsProps {
 function feedbackText(feedback: ClipboardFeedback): string {
   if (!feedback) return '';
   if (feedback.state === 'pending') {
-    return feedback.action === 'body' ? '正在复制消息正文' : '正在复制消息链接';
+    return feedback.action === 'body' ? '正在复制消息正文' : '正在复制外心档案内定位链接';
   }
   if (feedback.state === 'success') {
-    return feedback.action === 'body' ? '已复制消息正文' : '已复制消息链接';
+    return feedback.action === 'body' ? '已复制消息正文' : '已复制外心档案内定位链接';
   }
   return feedback.action === 'body'
     ? '复制消息正文失败；请检查剪贴板权限后重试'
-    : '复制消息链接失败；请检查剪贴板权限后重试';
+    : '复制外心档案内定位链接失败；请检查剪贴板权限后重试';
 }
 
 function referenceKey(reference: BetaMessageReferenceIdentity): string {
@@ -86,6 +88,7 @@ function MessageReferenceSummary({
       <div className="text-[10px] font-semibold text-brand-accent">引用</div>
       <div className="truncate text-xs font-medium text-strong">{label}</div>
       {humanSource ? <div className="truncate text-[10px] text-muted">来自 {humanSource}</div> : null}
+      {reference.metadata ? <div className="truncate text-[10px] text-secondary">引用元数据：{reference.metadata}</div> : null}
       {reference.excerpt ? <div className="truncate text-[10px] text-secondary">{reference.excerpt}</div> : null}
     </div>
   );
@@ -97,6 +100,8 @@ export function BetaMessageActions({
   eventId,
   align,
   onQuote,
+  referenceLabel,
+  referenceMetadata,
   onCorrect,
   writeClipboardText = writeBetaMessageClipboard,
 }: BetaMessageActionsProps) {
@@ -191,7 +196,7 @@ export function BetaMessageActions({
           variant="ghost"
           className={ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
           aria-label="复制消息正文"
-          disabled={content.length === 0}
+          disabled={content.trim().length === 0}
           onClick={() => { void copy('body', content); }}
           data-testid="beta-message-copy-body"
         >
@@ -202,24 +207,29 @@ export function BetaMessageActions({
           type="button"
           variant="ghost"
           className={ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
-          aria-label="复制消息链接"
+          aria-label="复制外心档案内定位链接"
           disabled={!referenceUri}
           onClick={() => { if (referenceUri) void copy('link', referenceUri); }}
           data-testid="beta-message-copy-link"
         >
           <Link2 aria-hidden="true" />
-          <span>复制链接</span>
+          <span>复制档案内链接</span>
         </Button>
-        {onQuote && referenceUri ? (
+        {onQuote && referenceUri && (content.trim().length > 0 || referenceLabel?.trim() || referenceMetadata?.trim()) ? (
           <Button
             type="button"
             variant="ghost"
             className={ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
             aria-label="引用消息"
-            disabled={content.trim().length === 0}
             onClick={() => {
               setExpanded(false);
-              onQuote({ profileId, eventId, text: content });
+              onQuote({
+                profileId,
+                eventId,
+                text: content,
+                ...(referenceLabel?.trim() ? { label: referenceLabel.trim() } : {}),
+                ...(referenceMetadata?.trim() ? { metadata: referenceMetadata.trim() } : {}),
+              });
             }}
             data-testid="beta-message-quote"
           >
@@ -269,17 +279,17 @@ export function BetaMessageReferenceDraft({
   onRemove,
   sourceLabel,
 }: BetaMessageReferenceDraftProps) {
-  const references = extractBetaMessageReferences(value);
+  const references = useMemo(() => extractBetaMessageReferences(value), [value]);
   if (references.length === 0) return null;
 
   return (
     <section
       className="mb-2 flex flex-col gap-2"
-      aria-label="草稿中的消息引用"
+      aria-label="草稿中的外心档案内引用"
       data-testid="beta-message-reference-draft"
     >
-      <OnDemandExplanation label="引用如何保存">
-        引用以可见 Markdown 行保存在记录正文中，不会变成消息元数据；移除引用只改当前草稿。
+      <OnDemandExplanation label="档案内引用如何保存">
+        引用以可见 Markdown 行保存在记录正文中，只用于外心档案内定位；移除引用只改当前草稿。
       </OnDemandExplanation>
       {references.map(reference => {
         const label = reference.label || '消息引用';
@@ -294,11 +304,11 @@ export function BetaMessageReferenceDraft({
               type="button"
               variant="ghost"
               className={ACTION_BUTTON_CLASS}
-              aria-label={'打开引用原文：' + label}
+              aria-label={'在外心档案内回看原文：' + label}
               onClick={() => onOpen({ profileId: reference.profileId, eventId: reference.eventId })}
               data-testid="beta-message-reference-open"
             >
-              回看原文
+              档案内回看
             </Button>
             <Button
               type="button"
@@ -329,17 +339,17 @@ export function BetaMessageReferenceLinks({
   onOpen,
   sourceLabel,
 }: BetaMessageReferenceLinksProps) {
-  const references = extractBetaMessageReferences(value);
+  const references = useMemo(() => extractBetaMessageReferences(value), [value]);
   if (references.length === 0) return null;
 
   return (
     <section
       className="mt-2 flex flex-col gap-2"
-      aria-label="消息中的引用原文"
+      aria-label="消息中的外心档案内引用原文"
       data-testid="beta-message-reference-links"
     >
-      <OnDemandExplanation label="引用原文说明">
-        这些链接来自记录正文中的 Markdown 行，不属于独立消息元数据。
+      <OnDemandExplanation label="档案内引用说明">
+        这些链接来自记录正文中的 Markdown 行，只在当前外心档案内定位。
       </OnDemandExplanation>
       {references.map(reference => (
         <div
@@ -352,11 +362,11 @@ export function BetaMessageReferenceLinks({
             type="button"
             variant="ghost"
             className={ACTION_BUTTON_CLASS}
-            aria-label={'打开引用原文：' + reference.label}
+            aria-label={'在外心档案内回看原文：' + reference.label}
             onClick={() => onOpen({ profileId: reference.profileId, eventId: reference.eventId })}
             data-testid="beta-message-reference-link-open"
           >
-            回看原文
+            档案内回看
           </Button>
         </div>
       ))}
@@ -408,16 +418,16 @@ export function BetaMessageLocationBoundary({
     const range = state.source === 'pages'
       ? `本次在固定历史快照 highwater ${state.highwater ?? '未知'} 下读取了 ${state.pagesRead} 页。`
       : state.source === 'event-id'
-        ? '按引用档案与事件身份精确读取，未翻页。'
+        ? '按当前外心档案内的事件身份精确读取，未翻页。'
         : '目标已在本次页面已经读取的记录中，无需额外翻页。';
     return (
       <section
         className="space-y-2 rounded-xl border border-card bg-card px-4 py-3"
         role="region"
-        aria-label="引用原文定位结果"
+        aria-label="外心档案内引用定位结果"
         data-testid="beta-message-location-boundary"
       >
-        <p className="text-sm font-medium text-strong">已找到引用原文</p>
+        <p className="text-sm font-medium text-strong">已在当前外心档案内找到引用原文</p>
         <p className="text-xs text-secondary">原来的阅读位置仍可恢复。</p>
         <OnDemandExplanation label="查看查找范围">{range}</OnDemandExplanation>
         {children ? <div className="rounded-xl border border-card p-3">{children}</div> : null}
@@ -448,7 +458,7 @@ export function BetaMessageLocationBoundary({
         aria-live="polite"
         data-testid="beta-message-location-boundary"
       >
-        <p className="text-sm text-secondary">此引用属于另一个档案。请切换到相应档案后重试；当前草稿保持不变。</p>
+        <p className="text-sm text-secondary">此引用属于另一个外心档案。请切换到相应档案后重试；当前草稿保持不变。</p>
         {renderReturnActions()}
       </section>
     );

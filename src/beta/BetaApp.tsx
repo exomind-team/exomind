@@ -1,8 +1,8 @@
+import { BetaTimelineItemRow } from './BetaTimelineItemRow';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type MutableRefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
-import { Bot, FileText, FolderOpen, PanelsTopLeft, X } from 'lucide-react';
+import { FileText, FolderOpen, PanelsTopLeft, X } from 'lucide-react';
 import { PageShell } from '@/ui/app/components/PageShell';
-import { EventTimestamp } from '@/ui/app/components/EventTimestamp';
 import { NowInputRowView, resizeNowInputTextarea } from '@/ui/app/components/NowInputRowView';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,15 +12,11 @@ import { BetaDraftController, errorMessage } from './drafts';
 import { betaUuid } from './initialization';
 import { useBetaNow } from './date-clock';
 import type { FileSourceStore } from './file-source-store';
-import { OriginalDownloads } from './OriginalDownloads';
 import type { LocalIntentJournal,IntentPredecessor } from './local-intent-journal';
-import type { BetaTimelinePage } from './timeblocks-types';
+import type { BetaTimelineItem, BetaTimelinePage } from './timeblocks-types';
 import type { SummaryArtifactRecord,SummarySourceRef } from './summary-types';
-import { BetaSummaryHistoryRow } from './BetaSummaryHistoryRow';
-import { BetaExternalSummaryHistoryRow } from './BetaExternalSummaryHistoryRow';
 import { BetaSummaryTasksPanel } from './BetaSummaryTasksPanel';
 import { BetaSummarySourceDialog } from './BetaSummarySourceDialog';
-import { betaTimeblockLabel } from './timeblock-label';
 import type { SummaryTasksController } from './summary-tasks-controller';
 import { BetaTimeblockController } from './timeblocks-controller';
 import { BetaFocusTimer } from './BetaFocusTimer';
@@ -34,8 +30,6 @@ import { BetaSettingsPage } from './BetaSettingsPage';
 import { BetaPeersPage } from './BetaPeersPage';
 import { nativeBetaPeersClient, type BetaPeersClient } from './peers-client';
 import { setBetaDateDisplayMode, setBetaOverlayEnabled, useBetaDateDisplayMode, useBetaThemePresentation } from './preferences';
-import { ChatMessageRowView } from '@/ui/app/components/ChatMessageRowView';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { mergeTimelineItems, refreshTimelineWindow } from './timeline-refresh';
 import { BetaProfileDialog } from './BetaProfileDialog';
 import { rememberLastBetaProfile, restoreLastBetaProfile } from './last-profile';
@@ -52,7 +46,6 @@ import { betaDesktopPreferences } from './desktop-preferences';
 import { inputSendShortcutLabel, shouldSubmitOnEnter, useBetaInputSendMode } from './input-preferences';
 import { BetaCaptureStatus } from './BetaCaptureStatus';
 import { BetaOriginalExportCenter } from './BetaOriginalExportCenter';
-import { BetaTimeblockAvatar } from './BetaTimeblockAvatar';
 import { BetaAttachmentProgress } from './BetaAttachmentProgress';
 import { FieldSelect } from '@/components/ui/field-select';
 import { pickNativeFiles } from './native-attachments';
@@ -60,10 +53,8 @@ import { useNativeAttachmentDrop } from './native-attachment-drop';
 import type { AttachmentSelection } from './native-attachment-types';
 import { useBetaDeviceNames } from './device-names';
 import {
-  BetaMessageActions,
   BetaMessageLocationBoundary,
   BetaMessageReferenceDraft,
-  BetaMessageReferenceLinks,
   type BetaMessageLocationNotice,
 } from './BetaMessageActions';
 import { locateBetaMessageReference } from './beta-message-locator';
@@ -71,7 +62,6 @@ import {
   buildBetaMessageReferenceUri,
   insertBetaMessageReference,
   removeBetaMessageReference,
-  stripBetaMessageReferencesForDisplay,
 } from './message-references';
 import type {
   BetaMessageReference,
@@ -581,10 +571,6 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       if(!isCurrent())return;
       messageLocationFlight.current=null;
       if(result.kind==='found'){
-        if(result.item.kind!=='capture'){
-          setMessageLocation({reference,state:{kind:'failed',message:'引用解析返回了非消息记录；当前草稿和阅读位置已保留。'}});
-          return;
-        }
         setMessageLocation({reference,state:{kind:'found',pagesRead:result.pagesRead,source:result.source,highwater:result.highwater},item:result.item});
       }else if(result.kind==='profile-mismatch'){
         setMessageLocation({reference,state:{kind:'profile-mismatch'}});
@@ -670,11 +656,13 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
   }
   function messageReferenceSourceLabel(reference:BetaMessageReference):string|undefined{
     if(reference.profileId!==profileId)return undefined;
-    const loaded=pageRef.current?.items.find(item=>item.kind==='capture'&&item.record.profile_id===reference.profileId&&item.record.event_id===reference.eventId);
-    if(loaded?.kind==='capture')return deviceNames.label(loaded.record.device_id);
-    const located=messageLocation?.item;
-    if(located?.kind==='capture'&&located.record.profile_id===reference.profileId&&located.record.event_id===reference.eventId)return deviceNames.label(located.record.device_id);
-    return undefined;
+    const matches=(item:BetaTimelineItem)=>item.record.profile_id===reference.profileId&&item.record.event_id===reference.eventId;
+    const source=pageRef.current?.items.find(matches)??(messageLocation?.item&&matches(messageLocation.item)?messageLocation.item:undefined);
+    if(!source)return undefined;
+    if(source.kind==='capture')return deviceNames.label(source.record.device_id);
+    if(source.kind==='timeblock')return '外心档案内系统时间块';
+    if(source.kind==='summary/1')return '外心档案内 AI 总结';
+    return '外心档案内外部 Agent 回顾';
   }
   const fileInput = useRef<HTMLInputElement>(null);
   const reselectTarget = useRef<string | null>(null);
@@ -742,14 +730,16 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       catch(failure){if(alive.current)setError(errorMessage(failure));}
     }else if(fileInput.current){fileInput.current.multiple=target===null;fileInput.current.click();}
   }
-  const locatedMessage=messageLocation?.item?.kind==='capture'?messageLocation.item.record:null;
-  const locatedMessageText=locatedMessage?stripBetaMessageReferencesForDisplay(locatedMessage.text):'';
-  const locatedMessageContent=locatedMessage?<ChatMessageRowView eventId={locatedMessage.event_id} timelineKind="capture" tone={locatedMessage.author_kind==='human'?'user':'agent-feedback'} className="group"
-    avatar={<Avatar className={`${locatedMessage.author_kind==='human'?'':'mt-0.5 '}h-8 w-8 shrink-0`}><AvatarFallback className={locatedMessage.author_kind==='human'?'rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100':'bg-violet-600 text-white'}>{locatedMessage.author_kind==='human'?'我':<Bot size={16}/>}</AvatarFallback></Avatar>}
-    metadata={<><span className="text-muted">{deviceNames.label(locatedMessage.device_id)}</span><EventTimestamp timestamp={locatedMessage.occurred_at_ms} now={now} mode={mode}/><span className="text-xs font-semibold text-strong">{locatedMessage.author_kind==='human'?'我':'Agent 记录'}</span></>}
-    content={locatedMessageText?<p className="select-text whitespace-pre-wrap break-words">{locatedMessageText}</p>:null}
-    afterBubble={!!locatedMessage.originals?.length&&<OriginalDownloads client={client} deviceId={deviceId} profileId={profileId} originals={locatedMessage.originals} visible={recordsActive}/>}
-    actions={<><BetaMessageActions content={locatedMessage.text} profileId={profileId} eventId={locatedMessage.event_id} align={locatedMessage.author_kind==='human'?'end':'start'} onQuote={locatedMessage.text.trim()?quoteMessage:undefined}/><BetaMessageReferenceLinks value={locatedMessage.text} onOpen={openMessageReference} sourceLabel={messageReferenceSourceLabel}/></>}/>:undefined;
+  function renderTimelineItem(item: BetaTimelineItem, revision: number) {
+    return <BetaTimelineItemRow key={item.record.event_id} item={item} client={client}
+      deviceId={deviceId} revision={revision} now={now} dateMode={mode} recordsActive={recordsActive}
+      deviceLabel={deviceNames.label} onQuote={quoteMessage} onOpenReference={openMessageReference}
+      sourceLabel={messageReferenceSourceLabel} onInspectSummary={record=>{setReviewTarget(record);setReviewsOpen(true);}}
+      onOpenSource={sourceReader?source=>setSummarySource(source):undefined} />;
+  }
+  const locatedMessageContent=messageLocation?.item
+    ? renderTimelineItem(messageLocation.item, messageLocation.state.kind==='found' ? messageLocation.state.highwater??page?.highwater??0 : page?.highwater??0)
+    : undefined;
   const messageLocationBoundary=messageLocation?<BetaMessageLocationBoundary
     state={messageLocation.state}
     onCancel={messageLocation.state.kind==='loading'?cancelMessageLocation:undefined}
@@ -804,18 +794,7 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       {page?.next_before !== null && page && <div className="mb-4 text-center"><Button variant="ghost" disabled={loading} onClick={() => void older()}>加载更早记录</Button></div>}
       {loading && !page && <p role="status" className="text-center text-sm text-muted">正在读取…</p>}
       {page?.items.length === 0 && <p className="py-8 text-center text-sm text-muted">{query ? '没有匹配记录' : '还没有记录'}</p>}
-      <div ref={historyContent} className="space-y-4">{page && [...page.items].reverse().map(item => item.kind==='timeblock'?<ChatMessageRowView key={item.record.event_id} eventId={item.record.event_id} timelineKind="timeblock" tone="system"
-        avatar={<BetaTimeblockAvatar node={item.record}/>}
-        metadata={<><span className="text-xs font-semibold text-strong">{item.record.source.kind==='scheduler'?'计时服务':'我 · 时间块'}</span><EventTimestamp timestamp={item.record.occurred_at_ms} now={now} mode={mode}/></>}
-        content={<p className="whitespace-pre-wrap break-words">{betaTimeblockLabel(item.record)}</p>}/>
-      :item.kind==='summary/1'?<BetaSummaryHistoryRow key={item.record.event_id} record={item.record} api={client.summaries} revision={page.highwater} now={now} dateMode={mode} onInspect={record=>{setReviewTarget(record);setReviewsOpen(true);}} onOpenSource={sourceReader?source=>setSummarySource(source):undefined}/>
-      :item.kind==='agent_summary/1'?<BetaExternalSummaryHistoryRow key={item.record.event_id} record={item.record} now={now} dateMode={mode} onOpenSource={sourceReader?source=>setSummarySource(source):undefined}/>
-      :(()=>{const event=item.record;const displayText=stripBetaMessageReferencesForDisplay(event.text);return <ChatMessageRowView key={event.event_id} eventId={event.event_id} timelineKind="capture" tone={event.author_kind==='human'?'user':'agent-feedback'} className="group"
-        avatar={<Avatar className={`${event.author_kind==='human'?'':'mt-0.5 '}h-8 w-8 shrink-0`}><AvatarFallback className={event.author_kind==='human'?'rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100':'bg-violet-600 text-white'}>{event.author_kind==='human'?'我':<Bot size={16}/>}</AvatarFallback></Avatar>}
-        metadata={<><span className="text-muted">{deviceNames.label(event.device_id)}</span><EventTimestamp timestamp={event.occurred_at_ms} now={now} mode={mode}/><span className="text-xs font-semibold text-strong">{event.author_kind==='human'?'我':'Agent 记录'}</span></>}
-        content={displayText?<p className="select-text whitespace-pre-wrap break-words">{displayText}</p>:null}
-        afterBubble={!!event.originals?.length&&<OriginalDownloads client={client} deviceId={deviceId} profileId={profileId} originals={event.originals} visible={recordsActive}/>}
-        actions={<><BetaMessageActions content={event.text} profileId={profileId} eventId={event.event_id} align={event.author_kind==='human'?'end':'start'} onQuote={event.text.trim()?quoteMessage:undefined}/><BetaMessageReferenceLinks value={event.text} onOpen={openMessageReference} sourceLabel={messageReferenceSourceLabel}/></>}/>;})())}</div>
+      <div ref={historyContent} className="space-y-4">{page && [...page.items].reverse().map(item=>renderTimelineItem(item,page.highwater))}</div>
     </div>
     </BetaWorkspacePane>
     {!layout.minimal&&layout.records!=='expanded'&&<div className="flex min-h-0 flex-1 items-center justify-center px-5 py-6">{layout.records==='hidden'&&(!focus||layout.focus==='hidden')&&<p className="text-center text-sm text-muted">工作区已收起，仍可记录想法。上方可恢复视图。</p>}</div>}
