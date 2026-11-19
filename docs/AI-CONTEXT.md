@@ -50,6 +50,17 @@ Beta 的 Core/Host/Native/UI 边界按上面的当前入口读取，不把下表
 
 ## 当前阶段
 
+2026-11-19 最新内部候选为 **Beta18／6018／Core9**，冻结 payload `66124154`、recipe
+`b8d896e9`；四平台仅构建与该 payload 的 Source Contracts 已通过。导出中断恢复在系统
+选择器前记录任务，重启后可查证／重新选址；源码 591 项 Beta 回归、完整类型及 Windows
+Native 检查通过。精确 Windows 候选已验证身份、既有记录／原件保值、真实 Ctrl+Enter
+输入与正常退出；系统保存框受 Computer Use 原生管道不可用阻塞。双 ABI APK 的历史
+Beta 签名、6018 与非签名包内容已核验，模拟器继续验收；物理平板已离场，真机恢复与
+EasyTier 端点仍待。工作区 Core10 生命周期及部分前端／授权增量不在该冻结候选中。
+先读 [Beta18 结果](plans/2026-11-19-beta18-export-recovery-candidate.md)、
+[导出恢复合同](development/beta-original-export-recovery.md)，完整剩余任务仍按
+[持续完成计划](plans/2026-11-19-beta16-frozen-and-beta-completion.md)核对。
+
 2026-11-19内部Beta16冻结来源`85f7df92`、6016：四平台仅构建已齐，Windows精确候选启动/持久化9项、真实独立浮窗11项通过；双ABI APK本机身份/签名/hash检查及历史Beta证书重签完成，Android运行/升级尚待。后续文本预览源码`95c37dc0`已提交推送，前端384项、Edge32场景、生产Web打包和新前端/冻结Native兼容联调9项通过，源码门禁CI成功；这些增量未进入冻结Beta16包。完整需求矩阵已取回，诊断后台/界面、单件附件恢复和来源/路由反例继续按Luna分工推进。当前状态、精确产物和剩余可执行队列以[Beta16与持续完成计划](plans/2026-11-19-beta16-frozen-and-beta-completion.md)为准。默认Alpha配置仍保留Alpha05，不据此否定独立Beta配置或实际Native版本；无物理设备不等于模拟器或实现工作全部阻塞。
 
 2026-11-19追加EasyTier现场修复：Beta13旧路由仍指Wi-Fi，新邀请缺覆盖地址；平板peer TCP可达，缓存过期假设已撤回（现有2秒接口刷新）。Beta15源码`a9553d93`增加保持原邀请/TLS pin的备用拨号路由，网络11项、Web371项/Edge28场景、Native检查通过，固定Windows EXE构建及真实双窗9项通过，含消息自动显示/旧档案保留。物理平板加入未验，Android未构建。Luna调查T3连接/peer-link完成，区分远程环境视图与外心多主本地副本。全量进展见[Beta09以来盘点](plans/2026-11-19-beta09-beta14-work-audit.md)、[覆盖网络记录](plans/2026-11-19-beta15-overlay-network-routes.md)、[T3对照](research/2026-11-19-easytier-t3-connections-and-sync.md)。
