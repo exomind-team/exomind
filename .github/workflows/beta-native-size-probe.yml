@@ -1,0 +1,143 @@
+name: Beta Windows Native Size Probe
+
+on:
+  push:
+    branches:
+      - dev-0.6
+    paths:
+      - .github/workflows/beta-native-size-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta-native-size-probe-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  BUN_VERSION: '1.3.8'
+  CARGO_BUILD_JOBS: '1'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_DEV_INCREMENTAL: 'false'
+  CARGO_PROFILE_DEV_CODEGEN_UNITS: '16'
+  RUSTFLAGS: '-C linker-flavor=lld-link -C link-arg=/threads:1 -C link-arg=/DEBUG:NONE'
+
+jobs:
+  windows-native-size-probe:
+    name: Windows source Native link map
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      SOURCE_SHA: ${{ github.sha }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/beta-native-size-probe
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: llvm-tools-preview
+
+      - name: Verify exact source and current Beta Native config
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -ne $env:SOURCE_SHA) { throw 'Checkout HEAD differs from the triggering source SHA' }
+          $dirty = git status --porcelain=v1 --untracked-files=all
+          if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Source checkout must be clean before the probe' }
+
+          $config = Get-Content -LiteralPath 'src-tauri/tauri.beta.conf.json' -Raw | ConvertFrom-Json
+          if ($config.identifier -ne 'com.exomind.app.v06.beta' -or $config.productName -ne 'ExoMind Beta') { throw 'Current source Beta Native identity mismatch' }
+          if ($config.version -notmatch '^0\.6\.0-beta[1-9][0-9]*$') { throw 'Current source Beta Native version is missing or invalid' }
+          if ($config.build.beforeBuildCommand -ne 'bun run build:web') { throw 'Beta beforeBuildCommand must remain bun run build:web' }
+          $main = @($config.app.windows | Where-Object { $_.label -eq 'main' })
+          if ($main.Count -ne 1 -or $main[0].url -ne 'beta.html') { throw 'Beta main window must use beta.html' }
+          $capabilities = @($config.app.security.capabilities)
+          if ($capabilities.Count -ne 2 -or $capabilities[0] -ne 'beta' -or $capabilities[1] -ne 'beta-overlay') { throw 'Beta capability boundary differs from the source config contract' }
+          if ([int]$config.bundle.android.versionCode -lt 1) { throw 'Current source Beta config must retain a positive Android version code' }
+
+          $sysroot = (rustc --print sysroot).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'rustc sysroot lookup failed' }
+          $toolBin = Join-Path $sysroot 'lib/rustlib/x86_64-pc-windows-msvc/bin'
+          $linker = Join-Path $toolBin 'rust-lld.exe'
+          $readobj = Join-Path $toolBin 'llvm-readobj.exe'
+          if (-not (Test-Path -LiteralPath $linker -PathType Leaf)) { throw 'Owned Rust toolchain rust-lld.exe is missing' }
+          if (-not (Test-Path -LiteralPath $readobj -PathType Leaf)) { throw 'Rust llvm-tools-preview llvm-readobj.exe is missing' }
+
+          $evidenceDir = Join-Path $env:RUNNER_TEMP "exomind-beta-native-size-probe-source-$($env:GITHUB_RUN_ID)-attempt-$($env:GITHUB_RUN_ATTEMPT)"
+          if (Test-Path -LiteralPath $evidenceDir) { throw 'Probe artifact directory already exists' }
+          New-Item -ItemType Directory -Path $evidenceDir | Out-Null
+          $targetDir = Join-Path $env:GITHUB_WORKSPACE 'target/beta-native-size-probe'
+          "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$linker" >> $env:GITHUB_ENV
+          "CARGO_TARGET_DIR=$targetDir" >> $env:GITHUB_ENV
+          "LLVM_READOBJ=$readobj" >> $env:GITHUB_ENV
+          "PROBE_VERSION=$($config.version)" >> $env:GITHUB_ENV
+          "PROBE_MAP_PATH=$(Join-Path $evidenceDir 'exomind.map')" >> $env:GITHUB_ENV
+          "PROBE_BINARY_PATH=$(Join-Path $targetDir 'x86_64-pc-windows-msvc/debug/exomind.exe')" >> $env:GITHUB_ENV
+          "PROBE_OUTPUT_DIR=$evidenceDir" >> $env:GITHUB_ENV
+
+      - name: Install frozen frontend dependencies without lifecycle scripts
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Run the configured Beta beforeBuild command
+        shell: pwsh
+        run: |
+          $configText = Get-Content -LiteralPath 'src-tauri/tauri.beta.conf.json' -Raw
+          $config = $configText | ConvertFrom-Json
+          if ($config.build.beforeBuildCommand -ne 'bun run build:web') { throw 'Refusing to bypass the current Beta beforeBuildCommand' }
+          $env:VITE_APP_VERSION = $config.version
+          $env:VITE_BUILD_HASH = $env:SOURCE_SHA
+          bun run build:web
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath 'dist/beta.html' -PathType Leaf)) { throw 'Beta frontend entry was not produced' }
+
+      - name: Check bounded map classification
+        run: node --test tests/unit/scripts/beta-native-size-probe.test.mjs
+
+      - name: Build only the Windows Native debug root binary with a link map
+        shell: pwsh
+        run: |
+          $configText = Get-Content -LiteralPath 'src-tauri/tauri.beta.conf.json' -Raw
+          $config = $configText | ConvertFrom-Json
+          if ($config.build.beforeBuildCommand -ne 'bun run build:web') { throw 'Beta beforeBuildCommand changed after frontend build' }
+          $env:TAURI_CONFIG = $configText
+          $overlay = $env:TAURI_CONFIG | ConvertFrom-Json
+          if ($overlay.identifier -ne $config.identifier -or $overlay.version -ne $config.version) { throw 'TAURI_CONFIG must carry the exact current Beta Native identity and version' }
+          cargo rustc --locked --manifest-path src-tauri/Cargo.toml --package exomind --target x86_64-pc-windows-msvc --bin exomind -- -C "link-arg=/MAP:$env:PROBE_MAP_PATH"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath $env:PROBE_BINARY_PATH -PathType Leaf)) { throw 'Expected Windows root executable was not produced' }
+          if (-not (Test-Path -LiteralPath $env:PROBE_MAP_PATH -PathType Leaf)) { throw 'Windows linker did not produce the requested root executable map' }
+
+      - name: Verify actual PE Beta version resource
+        shell: pwsh
+        run: |
+          $identity = (Get-Item -LiteralPath $env:PROBE_BINARY_PATH).VersionInfo
+          if ($identity.ProductName -ne 'ExoMind Beta') { throw 'Built PE is not the current source Beta Native identity' }
+          if ($identity.ProductVersion -ne $env:PROBE_VERSION -or $identity.FileVersion -ne $env:PROBE_VERSION) { throw 'Built PE version resource differs from the current Beta Native config' }
+          "PROBE_PE_PRODUCT_NAME=$($identity.ProductName)" >> $env:GITHUB_ENV
+          "PROBE_PE_PRODUCT_VERSION=$($identity.ProductVersion)" >> $env:GITHUB_ENV
+          "PROBE_PE_FILE_VERSION=$($identity.FileVersion)" >> $env:GITHUB_ENV
+
+      - name: Capture map, PE sections, byte length, SHA and source-probe identity
+        shell: pwsh
+        run: node scripts/dev/beta-native-size-probe.mjs
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: beta-native-size-probe-source-${{ github.sha }}-run${{ github.run_id }}-attempt${{ github.run_attempt }}
+          path: ${{ runner.temp }}/exomind-beta-native-size-probe-source-${{ github.run_id }}-attempt-${{ github.run_attempt }}/
+          if-no-files-found: ignore
+          retention-days: 7
