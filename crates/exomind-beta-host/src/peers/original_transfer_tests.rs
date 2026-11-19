@@ -932,10 +932,16 @@ async fn automatic_runtime_rearms_saved_backoff_before_any_byte_session() {
         first.saturating_duration_since(returned) >= Duration::from_millis(7500),
         "restoration skipped/rearmed from an overdue wall timestamp"
     );
-    wait_auto("backoff-delayed verified bytes", || {
+    wait_auto("backoff-delayed settled original transfer", || {
         target
             .original_status(r.p, r.original.original_id)
-            .is_ok_and(|s| s.availability == "complete")
+            // Bytes may become complete while the automatic owner is still
+            // confirming its durable retry bookkeeping. Idle has no request.
+            .is_ok_and(|s| {
+                s.availability == "complete"
+                    && s.transfer_state == "idle"
+                    && s.request_id.is_none()
+            })
     })
     .await;
     assert_eq!(
