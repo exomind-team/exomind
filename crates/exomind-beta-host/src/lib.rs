@@ -25,8 +25,11 @@ pub use model_config::{
     SummaryModelConfiguration, SummaryModelConfigurationCommand, SummaryModelSecretUpdate,
 };
 pub use summary_jobs::SummaryServiceStatus;
+pub use originals::HostOriginalReadPermit;
 #[cfg(test)]
 mod original_tests;
+#[cfg(test)]
+mod original_read_permit_tests;
 mod originals;
 pub(crate) mod original_lifecycle;
 mod originals_http;

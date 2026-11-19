@@ -1,7 +1,7 @@
 use crate::{Authority, BetaHost, HostError, Session, context, resources};
 use exomind_core::{
-    BeginStageCommand, MAX_ORIGINAL_CHUNK_BYTES, OriginalChunk, OriginalId, ProfileId, StageId,
-    StageState, StageStatus,
+    BeginStageCommand, MAX_ORIGINAL_CHUNK_BYTES, OriginalChunk, OriginalId, OriginalReadPermit,
+    ProfileId, StageId, StageState, StageStatus,
 };
 use std::{
     collections::HashMap,
@@ -12,6 +12,16 @@ use std::{
     time::{Duration, Instant},
 };
 use uuid::Uuid;
+
+/// Opaque, in-process continuation for one profile-scoped original read.
+///
+/// The Core permit and profile binding stay private so callers cannot
+/// manufacture or serialize read authority. Every operation rechecks its
+/// session's current profile grant.
+pub struct HostOriginalReadPermit {
+    profile_id: ProfileId,
+    core: OriginalReadPermit,
+}
 
 const MAX_CONCURRENT_VERIFICATIONS: usize = 4;
 
@@ -280,5 +290,64 @@ impl BetaHost {
             offset,
             length,
         )?)
+    }
+    /// Begin an opaque read permit after checking the caller's current profile grant.
+    ///
+    /// The Host retains the profile scope that Core keeps private. Each later
+    /// operation revalidates this Session and delegates generation checks to Core.
+    pub fn begin_original_read(
+        &self,
+        session: &Session,
+        profile: ProfileId,
+        original: OriginalId,
+    ) -> Result<HostOriginalReadPermit, HostError> {
+        let state = self.active_state()?;
+        let resources = resources(&state)?;
+        let authority = self.profile_authority(resources, session, profile, false)?;
+        let context = context(&resources.core, &authority)?;
+        let core = resources
+            .core
+            .begin_original_read(&context, profile, original)?;
+        Ok(HostOriginalReadPermit {
+            profile_id: profile,
+            core,
+        })
+    }
+
+    /// Read one bounded range after rechecking the grant and Core generation.
+    pub fn read_original_range_with_permit(
+        &self,
+        session: &Session,
+        permit: &HostOriginalReadPermit,
+        offset: u64,
+        length: usize,
+    ) -> Result<OriginalChunk, HostError> {
+        valid_range(length)?;
+        let state = self.active_state()?;
+        let resources = resources(&state)?;
+        let authority = self.profile_authority(resources, session, permit.profile_id, false)?;
+        let context = context(&resources.core, &authority)?;
+        Ok(resources.core.read_original_range_with_permit(
+            &context,
+            &permit.core,
+            offset,
+            length,
+        )?)
+    }
+
+    /// Recheck the grant and Core generation before a multi-range read is complete.
+    pub fn finish_original_read(
+        &self,
+        session: &Session,
+        permit: &HostOriginalReadPermit,
+    ) -> Result<(), HostError> {
+        let state = self.active_state()?;
+        let resources = resources(&state)?;
+        let authority = self.profile_authority(resources, session, permit.profile_id, false)?;
+        let context = context(&resources.core, &authority)?;
+        resources
+            .core
+            .finish_original_read(&context, &permit.core)?;
+        Ok(())
     }
 }
