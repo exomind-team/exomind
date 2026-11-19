@@ -8,6 +8,18 @@ setTimeout(() => process.exit(99), 6500).unref();
 
 if (mode === 'success') { console.log('finite-success'); process.exit(0); }
 if (mode === 'failure') { console.error('finite-failure'); process.exit(7); }
+if (mode === 'log-burst') {
+  process.stdout.write(Buffer.alloc(1024 * 1024, 120), () => process.exit(0));
+  return;
+}
+if (mode === 'log-flood') {
+  let chunks = 0;
+  const timer = setInterval(() => {
+    process.stdout.write(Buffer.alloc(64 * 1024, 120));
+    if (++chunks === 16) { clearInterval(timer); process.exit(0); }
+  }, 5);
+  return;
+}
 if (mode === 'read-no-delete' || mode === 'readonly-status') {
   const helper=join(__dirname,'supervised-command-status-replacement.ps1');
   const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-File',helper,'-Directory',dir,'-Mode',mode==='read-no-delete'?'read-no-delete':'readonly'],{stdio:'inherit',windowsHide:true,timeout:3500});

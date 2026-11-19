@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 
-const LIMITS = { bootstrapMs: 10000, heartbeatMs: 1500, pollMs: 100, cleanupMs: 3000, maxDurationMs: 86400000, readRetryMs: 100, readRetryPauseMs: 5 } as const;
+const LIMITS = { bootstrapMs: 10000, heartbeatMs: 1500, pollMs: 100, cleanupMs: 3000, maxDurationMs: 86400000, defaultOutputBytes: 32*1024*1024, maxOutputBytes: 1024*1024*1024, readRetryMs: 100, readRetryPauseMs: 5 } as const;
 const READ_RETRY_SIGNAL = new Int32Array(new SharedArrayBuffer(4));
 class BootstrapFailure extends Error {
   constructor(message: string, readonly cleanupConfirmed: boolean) { super(message); }
@@ -14,6 +14,7 @@ export interface SupervisedCommandConfig {
   version: 1; artifactDir: string; executable: string; args: string[]; cwd: string;
   timeoutMs: number; noProgressTimeoutMs: number; bootstrapTimeoutMs?: number; heartbeatTimeoutMs?: number;
   environment?: Record<string, string>;
+  maxOutputBytes?: number;
 }
 export interface ProcessIdentity { pid: number; createdFileTime: string; executablePath: string }
 export interface LaunchReceipt {
@@ -47,7 +48,10 @@ function normalize(input: SupervisedCommandConfig) {
   if (!Array.isArray(input.args) || input.args.some(arg => typeof arg !== 'string' || arg.includes('\0'))) throw new Error('args must be literal strings');
   noLinks(input.artifactDir);
   if (input.environment && Object.entries(input.environment).some(([key, value]) => !key || /[=\0]/.test(key) || typeof value !== 'string' || value.includes('\0'))) throw new Error('Invalid explicit environment override');
+  const maxOutputBytes=input.maxOutputBytes??LIMITS.defaultOutputBytes;
+  if(!Number.isSafeInteger(maxOutputBytes)||maxOutputBytes<1024||maxOutputBytes>LIMITS.maxOutputBytes)throw new Error('maxOutputBytes must be between 1024 bytes and 1 GiB');
   return { ...input, runId: randomUUID(), timeoutMs: milliseconds(input.timeoutMs, 'timeoutMs'),
+    maxOutputBytes,
     noProgressTimeoutMs: milliseconds(input.noProgressTimeoutMs, 'noProgressTimeoutMs'),
     bootstrapTimeoutMs: milliseconds(input.bootstrapTimeoutMs ?? LIMITS.bootstrapMs, 'bootstrapTimeoutMs'),
     heartbeatTimeoutMs: milliseconds(input.heartbeatTimeoutMs ?? LIMITS.heartbeatMs, 'heartbeatTimeoutMs'),

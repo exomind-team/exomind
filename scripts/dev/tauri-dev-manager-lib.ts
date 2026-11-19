@@ -161,7 +161,7 @@ function collectListeningPortLabels(
 }
 
 function uniquePositivePids(values: Array<number | undefined>): number[] {
-  return [...new Set(values.filter((value): value is number => Number.isInteger(value) && value > 0))];
+  return [...new Set(values.filter((value): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0))];
 }
 
 const WINDOWS_TOOL_PROCESS_NAMES = new Set(['bun.exe', 'cargo.exe', 'node.exe', 'vite.exe']);

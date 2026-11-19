@@ -26,6 +26,7 @@ public static class SupervisedCommandNative {
   public class Config {
     public int version; public string runId,artifactDir,executable,cwd;
     public string[] args; public Dictionary<string,string> environment;
+    public long maxOutputBytes;
     public int timeoutMs,noProgressTimeoutMs,bootstrapTimeoutMs,heartbeatTimeoutMs,pollIntervalMs,cleanupTimeoutMs;
   }
   public class Identity { public int pid; public string createdFileTime,executablePath; }
@@ -207,10 +208,14 @@ public static class SupervisedCommandNative {
       Check(ResumeThread(command.thread)!=0xffffffff);Close(ref command.thread);
       var elapsed=Stopwatch.StartNew();long lastProgress=0,lastCpu=0,lastOut=0,lastErr=0;
       while(true) {
+        long output=Length(FileAt(dir,"stdout.log")),error=Length(FileAt(dir,"stderr.log"));
+        long outputLimit=config.maxOutputBytes>0?config.maxOutputBytes:32L*1024*1024;
+        // A fast successful root can exceed the budget before the next observation.
+        if(output>outputLimit||error>outputLimit-output) {state.stdoutBytes=output;state.stderrBytes=error;pulse();reason="output_limit";break;}
         if(WaitForSingleObject(command.process,0)==0) {uint code;Check(GetExitCodeProcess(command.process,out code));exitCode=unchecked((int)code);reason=code==0?"completed":"exit_nonzero";break;}
         if(WaitForSingleObject(watchdog.process,0)==0) {reason="watchdog_failed";break;}
         if(Cancelled(dir,config.runId)) {reason="cancelled";break;}
-        Accounting counts=Count(job);long cpu=counts.user+counts.kernel,output=Length(FileAt(dir,"stdout.log")),error=Length(FileAt(dir,"stderr.log"));
+        Accounting counts=Count(job);long cpu=counts.user+counts.kernel;
         if(cpu>lastCpu||output>lastOut||error>lastErr) {lastProgress=elapsed.ElapsedMilliseconds;state.lastProgressAt=Now();}
         lastCpu=cpu;lastOut=output;lastErr=error;state.cpu100ns=cpu.ToString();state.stdoutBytes=output;state.stderrBytes=error;pulse();
         if(elapsed.ElapsedMilliseconds>=config.timeoutMs||DateTime.UtcNow>=DateTime.Parse(state.commandStartedAt).ToUniversalTime().AddMilliseconds(config.timeoutMs)) {reason="total_timeout";break;}

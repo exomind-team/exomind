@@ -1,6 +1,6 @@
 # Windows finite-command supervision
 
-Status: implemented; 15 real short-process regressions passed on Windows (20.33 seconds), including exclusive/no-delete-sharing status readers and an explicit permanent read-only failure. A background CLI invocation also supervised an actual Cargo test through its expected nonzero exit and confirmed Job cleanup after the launcher returned. This runner is for finite cargo/node/Gradle commands, not unbounded services. It bounds external execution and exposes a separately readable result; it cannot repair or certify Codex's UI/API result delivery.
+Status: implemented; 17 real short-process regressions passed on Windows (20.18 seconds), including output-limit failures, exclusive/no-delete-sharing status readers and an explicit permanent read-only failure. Six bounded-log observation checks also passed. A background CLI invocation supervised an actual Cargo test through its expected nonzero exit and confirmed Job cleanup after the launcher returned. This runner is for finite cargo/node/Gradle commands, not unbounded services. It bounds external execution and exposes a separately readable result; it cannot repair or certify Codex's UI/API result delivery.
 
 ```text
 bun scripts/dev/supervised-command.ts start --config <absolute JSON path>
@@ -23,6 +23,8 @@ bun scripts/dev/supervised-command.ts cancel --dir <absolute owned artifact dir>
 ```
 
 All paths explicit/absolute; artifactDir must be newly owned, never reuse another run's directory. No shell interpolation. Both total and no-progress limits mandatory; bootstrap and watchdog-ready waits independently bounded. Do not serialize the inherited environment, command argv or tokens into public receipt/status output. Raw task logs stay in the explicit owned artifact dir and are not automatically published. A command can itself print secrets: this runner cannot claim arbitrary log redaction.
+
+Captured stdout and stderr share a default 32 MiB output budget. `maxOutputBytes` may explicitly set 1 KiB–1 GiB; exceeding it yields `output_limit` and closes only the owned Job. The output limit is checked before accepting root exit, including fast successful writers. Polling may allow a bounded observation overshoot. SDK helpers should inherit these captured handles; files redirected elsewhere need their own producer budget and are outside this limit. Inspect live output with `bun scripts/dev/bounded-log.ts <absolute-file> [max-bytes]` (4 KiB default, 64 KiB maximum), which reads one fixed byte snapshot. A byte limit does not redact secrets. Avoid streaming `Get-Content -Tail` over a rapidly growing file.
 
 TS API: `startSupervisedCommand(config): Promise<LaunchReceipt>`, `readSupervisedCommand(dir): RunObservation`, `cancelSupervisedCommand(dir): CancelReceipt`. Importing the module has no side effects. Start waits only for bounded bootstrap/watchdog readiness, never for command completion or pipe EOF. Returns paths and process identity, with no live pipe keeping a tool call open. Status/cancel are short local file operations.
 

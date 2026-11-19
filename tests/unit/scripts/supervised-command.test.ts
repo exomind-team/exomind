@@ -23,7 +23,7 @@ function safeDiagnostics(dir: string) {
 function config(mode: string, overrides: Record<string, unknown> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'exomind-supervised-')); roots.push(root);
   const artifactDir = join(root, 'run');
-  return { version: 1, artifactDir, executable: process.execPath, args: [fixture, mode, artifactDir], cwd: process.cwd(),
+  return { version: 1 as const, artifactDir, executable: process.execPath, args: [fixture, mode, artifactDir], cwd: process.cwd(),
     timeoutMs: 5000, noProgressTimeoutMs: 1200, bootstrapTimeoutMs: 10000, heartbeatTimeoutMs: 1300, ...overrides };
 }
 async function waitFor<T>(read: () => T | undefined, timeoutMs = 8500): Promise<T> {
@@ -62,6 +62,13 @@ afterEach(async (context) => {
 });
 
 describe.runIf(process.platform === 'win32')('finite supervised Windows commands', () => {
+  it.each(['log-burst','log-flood'])('enforces an output budget for %s before accepting completion', async mode => {
+    const api = await import('../../../scripts/dev/supervised-command');
+    const task = config(mode, { maxOutputBytes: 16 * 1024 });
+    await api.startSupervisedCommand(task);
+    const result = await waitFor(() => api.readSupervisedCommand(task.artifactDir).result ?? undefined);
+    expect(result).toMatchObject({ reason: 'output_limit', cleanup: { confirmed: true, jobClosed: true } });
+  },18000);
   it.each([['success','completed',0],['failure','exit_nonzero',7]] as const)('records %s only after owned cleanup', async (mode,reason,exitCode) => {
     const api = await import('../../../scripts/dev/supervised-command'); const task = config(mode);
     const receipt = await api.startSupervisedCommand(task);
