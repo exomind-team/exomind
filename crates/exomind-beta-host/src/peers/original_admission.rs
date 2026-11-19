@@ -62,6 +62,16 @@ impl OriginalAdmission {
             OriginalAvailability::Missing { original } => original,
             OriginalAvailability::Local { stage } => stage.original,
         };
+        if matches!(
+            r.core
+                .original_lifecycle_status(&r.core.local_human(p)?, p, id)?
+                .bytes_state,
+            exomind_core::OriginalBytesState::Released | exomind_core::OriginalBytesState::Purged
+        ) {
+            return Err(HostError::Core(
+                exomind_core::CoreError::OriginalLifecycleRestoreRequired,
+            ));
+        }
         let intent = original_auto_store::intent(&r.persistence.auth, p, id)?;
         Ok(Arc::new(Self {
             runtime_id: host.runtime_id,
@@ -106,6 +116,16 @@ impl OriginalAdmission {
         }
         if self.managed.is_some() && !super::network_store::settings(&r.persistence.auth)?.enabled {
             return Err(HostError::PeerNetworkDisabled);
+        }
+        if matches!(
+            r.core
+                .original_lifecycle_status(&r.core.local_human(p)?, p, id)?
+                .bytes_state,
+            exomind_core::OriginalBytesState::Released | exomind_core::OriginalBytesState::Purged
+        ) {
+            return Err(HostError::Core(
+                exomind_core::CoreError::OriginalLifecycleRestoreRequired,
+            ));
         }
         if let OriginalFetchMode::Automatic { policy_revision } = self.mode {
             if !original_auto_store::eligible(

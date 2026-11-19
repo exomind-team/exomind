@@ -11,6 +11,7 @@ mod identity;
 mod manifests;
 mod migrations;
 mod original_query;
+pub(crate) mod original_lifecycle;
 mod originals;
 mod record_organization;
 mod replication;
@@ -25,9 +26,15 @@ pub use identity::{
 };
 pub use manifests::OriginalAvailability;
 pub use original_query::MissingOriginalsPage;
+pub use original_lifecycle::{
+    OriginalBytesState, OriginalLifecycleAction, OriginalLifecycleCommand,
+    OriginalLifecycleFollowup, OriginalLifecycleFollowupPage,
+    OriginalLifecycleFollowupResolution, OriginalLifecycleClock, OriginalLifecycleRecord, OriginalLifecycleStatus,
+    OriginalReadPermit, DEFAULT_ORIGINAL_RECLAIM_WINDOW_MS, ORIGINAL_LIFECYCLE_FACT_TYPE,
+};
 pub use originals::{
     BeginStageCommand, MAX_CAPTURE_ORIGINALS, MAX_ORIGINAL_CHUNK_BYTES, OriginalChunk, OriginalRef,
-    StageState, StageStatus, VerificationProof, VerificationTicket,
+    OriginalRestoreRetry, StageState, StageStatus, VerificationProof, VerificationTicket,
 };
 pub use record_organization::{
     CorrectionEntry, CorrectionPage, CorrectionRecord, CorrectionTargetState, MAX_EVENT_TAG_BYTES,
@@ -41,7 +48,7 @@ pub use replication::{
 };
 use serde::{Deserialize, Serialize};
 pub use store::Core;
-pub const CORE_SCHEMA_VERSION: i64 = 9;
+pub const CORE_SCHEMA_VERSION: i64 = 10;
 /// Durable UTF-8 JSON fact encoding, independent of the smaller wire-page
 /// budget. Includes worst-case escaping of all existing capture input limits.
 pub const MAX_FACT_BYTES: usize = 2 * 1024 * 1024;
@@ -131,6 +138,20 @@ pub enum CoreError {
     NilAuthorIdentity,
     #[error("invalid original: {0}")]
     InvalidOriginal(&'static str),
+    #[error("invalid original lifecycle command")]
+    InvalidOriginalLifecycleCommand,
+    #[error("invalid replicated original lifecycle fact")]
+    InvalidOriginalLifecycleFact,
+    #[error("original lifecycle command conflicts with current local state")]
+    OriginalLifecycleConflict,
+    #[error("permanent local cleanup requires an explicit confirmation")]
+    OriginalLifecycleCleanupConfirmationRequired,
+    #[error("released bytes require an explicit restore request before writing")]
+    OriginalLifecycleRestoreRequired,
+    #[error("original lifecycle actions require a local human writer")]
+    OriginalLifecycleHumanOnly,
+    #[error("original read or export permit became stale")]
+    StaleOriginalRead,
     #[error("original stage does not exist")]
     UnknownStage,
     #[error("original does not exist")]

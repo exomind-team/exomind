@@ -14,6 +14,7 @@ const CORRECTION_FACT_TYPE: &str = "correction/1";
 
 const EVENTS8: &str = "CREATE TABLE events(local_seq INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT UNIQUE NOT NULL,profile_id TEXT NOT NULL REFERENCES profiles(id),digest TEXT NOT NULL,body TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'capture' CHECK(kind IN ('capture','timeblock/1','summary_job/1','summary/1','agent_summary/1')))";
 const EVENTS9: &str = "CREATE TABLE events(local_seq INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT UNIQUE NOT NULL,profile_id TEXT NOT NULL REFERENCES profiles(id),digest TEXT NOT NULL,body TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'capture' CHECK(kind IN ('capture','timeblock/1','summary_job/1','summary/1','agent_summary/1','correction/1')))";
+const EVENTS10: &str = "CREATE TABLE events(local_seq INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT UNIQUE NOT NULL,profile_id TEXT NOT NULL REFERENCES profiles(id),digest TEXT NOT NULL,body TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'capture' CHECK(kind IN ('capture','timeblock/1','summary_job/1','summary/1','agent_summary/1','correction/1','orig_lifecycle/1')))";
 const EVENTS_PROFILE_SEQUENCE: &str =
     "CREATE INDEX events_profile_sequence ON events(profile_id,local_seq)";
 const EVENTS_PROFILE_KIND_SEQUENCE: &str =
@@ -658,6 +659,68 @@ pub(crate) fn migrate_schema(tx: &rusqlite::Transaction<'_>) -> Result<(), CoreE
     tx.execute_batch(EVENT_TAGS_PROFILE_TAG_SEQUENCE)?;
     tx.execute_batch(EVENT_TAG_INSERT_GUARD)?;
     backfill_capture_tags(tx)?;
+    validate_schema_v9(tx)
+}
+
+/// Core9 validator retained for the schema-9-to-10 upgrade precondition.
+pub(crate) fn validate_schema_v9(connection: &rusqlite::Connection) -> Result<(), CoreError> {
+    crate::replication::validate_objects(
+        connection,
+        &[
+            ("table", "events", EVENTS9),
+            ("index", "events_profile_sequence", EVENTS_PROFILE_SEQUENCE),
+            (
+                "index",
+                "events_profile_kind_sequence",
+                EVENTS_PROFILE_KIND_SEQUENCE,
+            ),
+            ("table", "event_tags", EVENT_TAGS),
+            (
+                "index",
+                "event_tags_profile_tag_sequence",
+                EVENT_TAGS_PROFILE_TAG_SEQUENCE,
+            ),
+            ("trigger", "event_tag_insert_guard", EVENT_TAG_INSERT_GUARD),
+        ],
+    )
+}
+
+/// Schema10 widens only the event-kind check. Event IDs, bodies, digests,
+/// local sequence, child foreign keys and tag indexes are preserved.
+pub(crate) fn migrate_original_lifecycle_kind(
+    tx: &rusqlite::Transaction<'_>,
+) -> Result<(), CoreError> {
+    validate_schema_v9(tx)?;
+    if tx.pragma_query_value::<bool, _>(None, "foreign_keys", |row| row.get(0))? {
+        return Err(CoreError::RecoveryRequired);
+    }
+    let sequence: Option<(i64, i64)> = tx
+        .query_row(
+            "SELECT rowid,seq FROM sqlite_sequence WHERE name='events'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let legacy: bool = tx.pragma_query_value(None, "legacy_alter_table", |row| row.get(0))?;
+    tx.pragma_update(None, "legacy_alter_table", true)?;
+    tx.execute_batch("ALTER TABLE events RENAME TO events_schema9;")?;
+    tx.execute_batch(EVENTS10)?;
+    tx.execute_batch("INSERT INTO events(local_seq,event_id,profile_id,digest,body,kind) SELECT local_seq,event_id,profile_id,digest,body,kind FROM events_schema9 ORDER BY local_seq; DROP TABLE events_schema9;")?;
+    tx.execute_batch(EVENTS_PROFILE_SEQUENCE)?;
+    tx.execute_batch(EVENTS_PROFILE_KIND_SEQUENCE)?;
+    match sequence {
+        Some((rowid, seq)) => {
+            tx.execute("DELETE FROM sqlite_sequence WHERE name='events'", [])?;
+            tx.execute(
+                "INSERT INTO sqlite_sequence(rowid,name,seq) VALUES(?1,'events',?2)",
+                params![rowid, seq],
+            )?;
+        }
+        None => {
+            tx.execute("DELETE FROM sqlite_sequence WHERE name='events'", [])?;
+        }
+    };
+    tx.pragma_update(None, "legacy_alter_table", legacy)?;
     validate_schema(tx)
 }
 
@@ -665,7 +728,7 @@ pub(crate) fn validate_schema(connection: &rusqlite::Connection) -> Result<(), C
     crate::replication::validate_objects(
         connection,
         &[
-            ("table", "events", EVENTS9),
+            ("table", "events", EVENTS10),
             ("index", "events_profile_sequence", EVENTS_PROFILE_SEQUENCE),
             (
                 "index",

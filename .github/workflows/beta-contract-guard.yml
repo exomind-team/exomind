@@ -68,6 +68,13 @@ jobs:
         run: |
           echo "CARGO_TARGET_DIR=$RUNNER_TEMP/exomind-contract-cache" >> "$GITHUB_ENV"
           echo "CONTRACT_OUT=$RUNNER_TEMP/exomind-contract-evidence" >> "$GITHUB_ENV"
+          CORE10_EVIDENCE="$RUNNER_TEMP/exomind-core10-lifecycle-evidence"
+          if [[ -e "$CORE10_EVIDENCE" ]]; then
+            echo "Core10 evidence directory already exists: $CORE10_EVIDENCE" >&2
+            exit 1
+          fi
+          mkdir -p "$CORE10_EVIDENCE"
+          echo "CORE10_EVIDENCE=$CORE10_EVIDENCE" >> "$GITHUB_ENV"
       - name: Install frozen frontend dependencies
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Check evidence rejection rules
@@ -88,6 +95,7 @@ jobs:
             'tests/unit/beta/original-transfer-diagnostics-ui.test.tsx',
             'tests/unit/beta/original-export-recovery.test.tsx',
             'tests/unit/scripts/beta-build-request.test.ts',
+            'tests/unit/scripts/beta-core8-fixture.test.ts',
           ];
           assert.ok(process.env.CONTRACT_OUT);
           assert.equal(existsSync(process.env.CONTRACT_OUT), false, 'The source gate owns its new evidence directory');
@@ -138,6 +146,173 @@ jobs:
             assert.ok(results.some(match => Number(match[1]) > 0 && Number(match[2]) === 0), `No passing tests ran for ${args.at(-1)}`);
           }
           NODE
+      - name: Generate fixture from pinned Core8 history
+        shell: bash
+        run: |
+          if git cat-file -e 85f7df92d0eccf1de624ab9220d4d8944797f28b^{commit} > "$CORE10_EVIDENCE/source-commit-check.stdout" 2> "$CORE10_EVIDENCE/source-commit-check.stderr"; then
+            echo '{"sourceSha":"85f7df92d0eccf1de624ab9220d4d8944797f28b","status":"source-available"}' > "$CORE10_EVIDENCE/fixture-generation.json"
+          else
+            echo '{"sourceSha":"85f7df92d0eccf1de624ab9220d4d8944797f28b","status":"failed"}' > "$CORE10_EVIDENCE/fixture-generation.json"
+            echo "Checkout is missing pinned Core8 source commit 85f7df92d0eccf1de624ab9220d4d8944797f28b" >&2
+            exit 1
+          fi
+          if bun scripts/dev/beta-core8-fixture.ts --out "$CORE10_EVIDENCE/fixture" > "$CORE10_EVIDENCE/generate.stdout" 2> "$CORE10_EVIDENCE/generate.stderr"; then
+            cat "$CORE10_EVIDENCE/generate.stdout"
+            echo '{"sourceSha":"85f7df92d0eccf1de624ab9220d4d8944797f28b","status":"passed"}' > "$CORE10_EVIDENCE/fixture-generation.json"
+          else
+            cat "$CORE10_EVIDENCE/generate.stdout"
+            cat "$CORE10_EVIDENCE/generate.stderr" >&2
+            echo '{"sourceSha":"85f7df92d0eccf1de624ab9220d4d8944797f28b","status":"failed"}' > "$CORE10_EVIDENCE/fixture-generation.json"
+            exit 1
+          fi
+      - name: Select current sources after archived fixture compilation
+        shell: bash
+        run: |
+          # Archived and current local packages can share Cargo artifact paths.
+          # Refresh the current entrypoints before validating this checkout.
+          touch crates/exomind-core/src/lib.rs crates/exomind-beta-host/src/lib.rs
+      - name: Run Core10 lifecycle and pinned Core8 migration regressions
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { spawnSync } from 'node:child_process';
+          import { writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const evidence = process.env.CORE10_EVIDENCE;
+          const fixture = join(evidence, 'fixture/synthetic/archive');
+          const cases = [
+            {
+              name: 'core-lifecycle-lib',
+              args: ['test', '--locked', '-p', 'exomind-core', '--lib', 'original_lifecycle', '--', '--test-threads=1'],
+              expected: [
+                'release_local_replay_after_chunk_deletion_preserves_capture_and_action_receipts',
+                'purge_reclaimed_replay_after_chunk_deletion_preserves_capture_and_action_receipts',
+                'purge_reclaimed_waits_for_deadline_and_confirmation',
+              ],
+            },
+            {
+              name: 'core-public-lifecycle',
+              args: ['test', '--locked', '-p', 'exomind-core', '--test', 'original_lifecycle', '--', '--test-threads=1'],
+              expected: ['local_release_is_idempotent_and_leaves_another_profile_copy_and_fact_history_intact'],
+            },
+            {
+              name: 'host-lifecycle-lib',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'original_lifecycle', '--', '--test-threads=1'],
+              expected: [
+                'stale_automatic_queue_pages_cannot_reanimate_released_or_retained_bytes',
+                'reclaim_deadline_uses_host_clock_and_expiry_never_deletes_automatically',
+                'replication_negotiates_the_current_core10_schema',
+              ],
+            },
+            {
+              name: 'host-original-transfer-lib',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'original_transfer', '--', '--test-threads=1'],
+              expected: [
+                'local_intent_is_rechecked_at_prepare_write_freeze_and_seal_without_erasing_suppression',
+                'source_revocation_between_chunks_prevents_any_verified_receipt',
+              ],
+            },
+            {
+              name: 'host-peer-network-module',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'peers::network::tests', '--', '--test-threads=1'],
+              expected: [
+                'peer_network_stop_cancels_probe_after_remote_receives_probe_frame',
+                'stop_and_restart_retain_incoming_scope_until_its_blocking_work_drains',
+              ],
+            },
+            {
+              name: 'host-core8-core9-hello-rejection',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'sync_hello_is_rejected_before_core10_fact_exchange', '--', '--test-threads=1'],
+              expected: [
+                'core8_sync_hello_is_rejected_before_core10_fact_exchange',
+                'core9_sync_hello_is_rejected_before_core10_fact_exchange',
+              ],
+            },
+            {
+              name: 'core-replication',
+              args: ['test', '--locked', '-p', 'exomind-core', '--test', 'replication', '--', '--test-threads=1'],
+              expected: [
+                'replay_rechecks_the_range_body_and_chain_instead_of_trusting_an_advanced_cursor',
+                'typed_child_before_parent_is_explicitly_incomplete_and_later_rebuilds_without_a_scheduler',
+              ],
+            },
+            {
+              name: 'core-replication-local-intent',
+              args: ['test', '--locked', '-p', 'exomind-core', '--test', 'replication_local_intent', '--', '--test-threads=1'],
+              expected: [
+                'incomplete_then_complete_keeps_accepted_local_hard_due_and_does_not_block_other_profile',
+                'concurrent_generation_shift_keeps_the_same_local_resume_deadline_ids_and_due',
+                'remote_import_does_not_revive_explicitly_revoked_local_scheduler_owner',
+              ],
+            },
+            {
+              name: 'core-schema4-manifest-origin',
+              args: ['test', '--locked', '-p', 'exomind-core', '--test', 'schema4_manifest_origin', '--', '--test-threads=1'],
+              expected: [
+                'remote_manifest_is_metadata_without_a_stage_fact_receipt_or_read_credential',
+                'local_origin_positions_are_per_profile_durable_and_atomic_with_the_existing_receipt',
+              ],
+            },
+            {
+              name: 'core8-schema8-migration-upgrade',
+              args: [
+                'test', '--locked', '-p', 'exomind-core', '--test', 'schema8_migration',
+                'core8_upgrade_preserves_receipts_origin_positions_and_verified_proofs',
+                '--', '--ignored', '--exact', '--test-threads=1',
+              ],
+              expected: ['core8_upgrade_preserves_receipts_origin_positions_and_verified_proofs'],
+              fixture: true,
+            },
+          ];
+          const summary = [];
+          process.on('exit', () => {
+            writeFileSync(join(evidence, 'cargo-regressions.json'), JSON.stringify(summary, null, 2) + '\n');
+          });
+          const compileArgs = ['test', '--locked', '-p', 'exomind-core', '--tests', '--no-run'];
+          const compile = spawnSync('cargo', compileArgs, {
+            cwd: process.cwd(), env: { ...process.env, CARGO_TERM_COLOR: 'never' },
+            encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024, windowsHide: true,
+          });
+          writeFileSync(join(evidence, 'core-integration-tests-compile-only.stdout'), compile.stdout ?? '', { flag: 'wx' });
+          writeFileSync(join(evidence, 'core-integration-tests-compile-only.stderr'), [
+            compile.stderr ?? '',
+            compile.error ? compile.error.name + ': ' + compile.error.message + '\n' : '',
+          ].join(''), { flag: 'wx' });
+          summary.push({
+            name: 'core-integration-tests-compile-only',
+            status: compile.status,
+            error: compile.error ? compile.error.message : null,
+          });
+          assert.equal(compile.error, undefined, 'Core integration compile-only command did not start or timed out');
+          assert.equal(compile.status, 0, 'Core integration compile-only gate failed');
+          for (const item of cases) {
+            const env = { ...process.env, CARGO_TERM_COLOR: 'never' };
+            if (item.fixture) env.EXOMIND_CORE_SCHEMA8_FIXTURE = fixture;
+            const result = spawnSync('cargo', item.args, {
+              cwd: process.cwd(), env, encoding: 'utf8', timeout: 600000,
+              maxBuffer: 32 * 1024 * 1024, windowsHide: true,
+            });
+            const stdout = result.stdout ?? '';
+            const stderr = [result.stderr ?? '', result.error ? `${result.error.name}: ${result.error.message}\n` : ''].join('');
+            writeFileSync(join(evidence, `${item.name}.stdout`), stdout, { flag: 'wx' });
+            writeFileSync(join(evidence, `${item.name}.stderr`), stderr, { flag: 'wx' });
+            assert.equal(result.error, undefined, `${item.name} did not start or timed out; see external evidence`);
+            assert.equal(result.status, 0, `${item.name} failed; see external evidence`);
+            const results = [...stdout.matchAll(/^test result: ok\. (\d+) passed; (\d+) failed; (\d+) ignored; .*$/gm)];
+            assert.equal(results.length, 1, `${item.name} did not produce one test result`);
+            assert.ok(Number(results[0][1]) > 0, `${item.name} ran zero tests`);
+            assert.equal(Number(results[0][2]), 0, `${item.name} reported failed tests`);
+            assert.equal(Number(results[0][3]), 0, `${item.name} left selected tests ignored`);
+            const passedNames = stdout.split(/\r?\n/).filter(line => line.startsWith('test ') && line.endsWith(' ... ok'));
+            for (const expected of item.expected) assert.ok(passedNames.some(line => line.includes(expected)), `${item.name} did not run its named contract: ${expected}`);
+            assert.ok(Number(results[0][1]) >= item.expected.length, `${item.name} ran fewer tests than its explicit contract set`);
+            summary.push({ name: item.name, passed: Number(results[0][1]), expected: item.expected });
+          }
+          writeFileSync(join(evidence, 'cargo-regressions.json'), JSON.stringify(summary, null, 2), { flag: 'wx' });
+          process.stdout.write(`${summary.map(item => item.passed === undefined ? `${item.name}: compiled` : `${item.name}: ${item.passed} passed`).join('\n')}\n`);
+          NODE
       - name: Install pinned Agent-spec CLI
         run: cargo install agent-spec --version 1.4.0 --locked
       - name: Run source contracts and explicit UI regressions
@@ -156,5 +331,6 @@ jobs:
           path: |
             ${{ runner.temp }}/exomind-contract-evidence
             ${{ runner.temp }}/exomind-contract-evidence-originals.json
+            ${{ runner.temp }}/exomind-core10-lifecycle-evidence
           if-no-files-found: warn
           retention-days: 7

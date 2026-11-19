@@ -196,7 +196,14 @@ impl AutoQueue {
                     profile,
                     original.original_id,
                 )?;
-                let blocked = matches!(r.core.original_availability(&r.core.local_human(profile)?,profile,original.original_id)?,OriginalAvailability::Local{stage}if stage.state==StageState::HashMismatch);
+                let lifecycle = r.core.original_lifecycle_status(
+                    &r.core.local_human(profile)?,
+                    profile,
+                    original.original_id,
+                )?;
+                let blocked = !crate::original_lifecycle::automatic_fetch_allowed(
+                    lifecycle.bytes_state,
+                ) || matches!(r.core.original_availability(&r.core.local_human(profile)?,profile,original.original_id)?,OriginalAvailability::Local{stage}if stage.state==StageState::HashMismatch);
                 (intent, backoff, blocked)
             };
             if intent.suppression.is_some() || blocked {

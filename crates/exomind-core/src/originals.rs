@@ -1,4 +1,4 @@
-use crate::{AuthorKind, Core, CoreError, OriginalId, ProfileId, StageId, WriterContext};
+use crate::{AuthorKind, CommandId, Core, CoreError, EventId, OriginalId, ProfileId, StageId, WriterContext};
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
 };
@@ -70,6 +70,14 @@ pub struct StageStatus {
     pub state: StageState,
     pub next_offset: u64,
     pub generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OriginalRestoreRetry {
+    pub stage: StageStatus,
+    pub restore_request_event_id: EventId,
+    pub restore_command_id: CommandId,
 }
 
 /// A stage preview carries expected metadata, not a verification claim. The
@@ -370,6 +378,73 @@ impl Core {
         Ok(status)
     }
 
+    /// Resets only a HashMismatch stage while its original restore request is
+    /// still pending. The request and command IDs stay durable and unchanged.
+    pub fn retry_failed_original_restore(
+        &self,
+        context: &WriterContext,
+        profile: ProfileId,
+        original: OriginalId,
+    ) -> Result<OriginalRestoreRetry, CoreError> {
+        self.check_scope(context, profile)?;
+        if context.author_kind != AuthorKind::Human {
+            return Err(CoreError::OriginalLifecycleHumanOnly);
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (request_event, restore_command, restore_author, lifecycle_generation) =
+            crate::original_lifecycle::pending_restore_identity(&transaction, profile, original)?;
+        if restore_author != context.author_id {
+            return Err(CoreError::OriginalLifecycleHumanOnly);
+        }
+        let stage_id: String = transaction.query_row(
+            "SELECT stage_id FROM original_stages WHERE profile_id=?1 AND original_id=?2",
+            params![profile.to_string(), original.to_string()],
+            |row| row.get(0),
+        )?;
+        let stage_id: StageId = stage_id.parse()?;
+        let stage = load_stage(&transaction, stage_id)?;
+        creator(&stage, context)?;
+        if stage.status.profile_id != profile
+            || stage.status.original.original_id != original
+            || stage.status.state != StageState::HashMismatch
+        {
+            return Err(CoreError::OriginalLifecycleConflict);
+        }
+        let next_stage_generation = stage
+            .status
+            .generation
+            .checked_add(1)
+            .filter(|generation| *generation <= i64::MAX as u64)
+            .ok_or(CoreError::OriginalLifecycleConflict)?;
+        transaction.execute(
+            "INSERT INTO original_lifecycle_restore_retry_gate(stage_id,profile_id,original_id,generation,request_event_id,restore_command_id) VALUES(?1,?2,?3,?4,?5,?6)",
+            params![stage_id.to_string(), profile.to_string(), original.to_string(), lifecycle_generation, request_event.to_string(), restore_command.to_string()],
+        )?;
+        transaction.execute(
+            "DELETE FROM original_chunks WHERE stage_id=?1",
+            [stage_id.to_string()],
+        )?;
+        transaction.execute(
+            "UPDATE original_stages SET state='uploading',next_offset=0,generation=?2 WHERE stage_id=?1 AND profile_id=?3 AND original_id=?4 AND state='hash_mismatch' AND generation=?5",
+            params![stage_id.to_string(), next_stage_generation, profile.to_string(), original.to_string(), stage.status.generation],
+        )?;
+        if transaction.changes() != 1 {
+            return Err(CoreError::OriginalLifecycleConflict);
+        }
+        transaction.execute(
+            "DELETE FROM original_lifecycle_restore_retry_gate WHERE stage_id=?1 AND request_event_id=?2",
+            params![stage_id.to_string(), request_event.to_string()],
+        )?;
+        let reset = load_stage(&transaction, stage_id)?.status;
+        transaction.commit()?;
+        Ok(OriginalRestoreRetry {
+            stage: reset,
+            restore_request_event_id: request_event,
+            restore_command_id: restore_command,
+        })
+    }
+
     pub fn stage_status(
         &self,
         context: &WriterContext,
@@ -400,6 +475,16 @@ impl Core {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let stage = load_stage(&transaction, id)?;
         creator(&stage, context)?;
+        if matches!(
+            crate::original_lifecycle::bytes_state_in_connection(
+                &transaction,
+                stage.status.profile_id,
+                stage.status.original.original_id,
+            )?,
+            crate::OriginalBytesState::Released | crate::OriginalBytesState::Purged
+        ) {
+            return Err(CoreError::OriginalLifecycleRestoreRequired);
+        }
         if stage.status.state != StageState::Uploading {
             return Err(CoreError::StageNotUploading);
         }
@@ -609,6 +694,13 @@ impl Core {
             "UPDATE original_stages SET state=?2 WHERE stage_id=?1",
             params![stage.status.stage_id.to_string(), state.label()],
         )?;
+        if valid {
+            crate::original_lifecycle::complete_restore(
+                &transaction,
+                context,
+                stage.status.original.original_id,
+            )?;
+        }
         let status = load_stage(&transaction, stage.status.stage_id)?.status;
         transaction.commit()?;
         if valid {
@@ -654,6 +746,13 @@ impl Core {
         if !referenced(&connection, id, profile)? {
             return Err(CoreError::OriginalAccessDenied);
         }
+        let (read_state, read_generation) =
+            crate::original_lifecycle::bytes_state_generation_in_connection(
+                &connection, profile, id,
+            )?;
+        if matches!(read_state, crate::OriginalBytesState::Released | crate::OriginalBytesState::Purged) {
+            return Err(CoreError::OriginalNotReady);
+        }
         let stage = match stage_for_original(&connection, id) {
             Ok(stage) => stage,
             Err(CoreError::UnknownOriginal) => return Err(CoreError::OriginalNotReady),
@@ -666,6 +765,15 @@ impl Core {
             return Err(CoreError::OriginalNotReady);
         }
         let bytes = read_bytes(&connection, &stage, offset, length)?;
+        let (after_state, after_generation) =
+            crate::original_lifecycle::bytes_state_generation_in_connection(
+                &connection, profile, id,
+            )?;
+        if after_generation != read_generation
+            || matches!(after_state, crate::OriginalBytesState::Released | crate::OriginalBytesState::Purged)
+        {
+            return Err(CoreError::StaleOriginalRead);
+        }
         Ok(OriginalChunk {
             original: stage.status.original,
             offset,
@@ -689,6 +797,12 @@ impl Core {
         }
         if !referenced(&connection, id, profile)? {
             return Err(CoreError::OriginalAccessDenied);
+        }
+        if matches!(
+            crate::original_lifecycle::bytes_state_in_connection(&connection, profile, id)?,
+            crate::OriginalBytesState::Released | crate::OriginalBytesState::Purged
+        ) {
+            return Ok(crate::OriginalAvailability::Missing { original });
         }
         match stage_for_original(&connection, id) {
             Ok(stage) => {

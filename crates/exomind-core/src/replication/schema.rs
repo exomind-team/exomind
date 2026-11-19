@@ -242,6 +242,22 @@ fn correction_objects() -> Vec<(&'static str, &'static str, String)> {
         })
         .collect()
 }
+fn original_lifecycle_objects() -> Vec<(&'static str, &'static str, String)> {
+    correction_objects()
+        .into_iter()
+        .map(|(kind, name, sql)| {
+            let sql = if name == "origin_entries" {
+                sql.replace(
+                    "'agent_summary/1','correction/1'",
+                    "'agent_summary/1','correction/1','orig_lifecycle/1'",
+                )
+            } else {
+                sql
+            };
+            (kind, name, sql)
+        })
+        .collect()
+}
 pub(crate) fn migrate_agent_summary_facts(tx: &Transaction<'_>) -> Result<(), CoreError> {
     validate_summary_schema(tx)?;
     tx.execute_batch("ALTER TABLE origin_entries RENAME TO origin_entries_schema6;")?;
@@ -318,6 +334,55 @@ pub(crate) fn migrate_correction_fact_type(tx: &Transaction<'_>) -> Result<(), C
 
 pub(crate) fn validate_correction_fact_schema(tx: &Transaction<'_>) -> Result<(), CoreError> {
     let objects = correction_objects();
+    let refs = objects
+        .iter()
+        .map(|(kind, name, sql)| (*kind, *name, sql.as_str()))
+        .collect::<Vec<_>>();
+    validate_objects(tx, &refs)?;
+    let valid: bool = tx.query_row(
+        "SELECT count(*)=1 AND COALESCE(sum(singleton=1 AND layout_revision=1),0)=1 FROM replication_layout",
+        [],
+        |row| row.get(0),
+    )?;
+    if !valid {
+        return Err(CoreError::RecoveryRequired);
+    }
+    Ok(())
+}
+
+/// Core10 widens the origin kind domain after preserving the complete Core9
+/// correction schema. Existing source positions and chain hashes are copied
+/// byte-for-byte; old Core9 peers are rejected by the schema handshake.
+pub(crate) fn migrate_original_lifecycle_fact_type(
+    tx: &Transaction<'_>,
+) -> Result<(), CoreError> {
+    let previous = correction_objects();
+    let old = previous
+        .iter()
+        .find(|(_, name, _)| *name == "origin_entries")
+        .ok_or(CoreError::RecoveryRequired)?;
+    validate_objects(tx, &[(old.0, old.1, old.2.as_str())])?;
+    if tx.pragma_query_value::<bool, _>(None, "foreign_keys", |row| row.get(0))? {
+        return Err(CoreError::RecoveryRequired);
+    }
+    let legacy: bool = tx.pragma_query_value(None, "legacy_alter_table", |row| row.get(0))?;
+    tx.pragma_update(None, "legacy_alter_table", true)?;
+    tx.execute_batch("ALTER TABLE origin_entries RENAME TO origin_entries_schema9;")?;
+    let current = original_lifecycle_objects();
+    let definition = current
+        .iter()
+        .find(|(_, name, _)| *name == "origin_entries")
+        .ok_or(CoreError::RecoveryRequired)?;
+    tx.execute_batch(&definition.2)?;
+    tx.execute_batch("INSERT INTO origin_entries(rowid,profile_id,origin_device,restoration_epoch,origin_seq,event_id,fact_type,digest,chain_hash) SELECT rowid,profile_id,origin_device,restoration_epoch,origin_seq,event_id,fact_type,digest,chain_hash FROM origin_entries_schema9; DROP TABLE origin_entries_schema9;")?;
+    tx.pragma_update(None, "legacy_alter_table", legacy)?;
+    validate_original_lifecycle_fact_schema(tx)
+}
+
+pub(crate) fn validate_original_lifecycle_fact_schema(
+    tx: &Transaction<'_>,
+) -> Result<(), CoreError> {
+    let objects = original_lifecycle_objects();
     let refs = objects
         .iter()
         .map(|(kind, name, sql)| (*kind, *name, sql.as_str()))

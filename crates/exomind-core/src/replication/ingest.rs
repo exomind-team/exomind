@@ -279,6 +279,7 @@ fn apply_page(
                 ReplicatedFact::Summary(_) => "summary/1",
                 ReplicatedFact::AgentSummary(_) => "agent_summary/1",
                 ReplicatedFact::Correction(_) => "correction/1",
+                ReplicatedFact::OriginalLifecycle(_) => "orig_lifecycle/1",
             };
             transaction.execute(
                 "INSERT INTO events(event_id,profile_id,digest,body,kind) VALUES(?1,?2,?3,?4,?5)",
@@ -328,6 +329,9 @@ fn apply_page(
                     v.task_id,
                     "summary/1",
                 )?,
+                ReplicatedFact::OriginalLifecycle(v) => {
+                    crate::original_lifecycle::index_imported_fact(transaction, v)?
+                }
                 // Derived external attestations do not create model work,
                 // internal task qualification, or attachment read authority.
                 ReplicatedFact::AgentSummary(_) | ReplicatedFact::Correction(_) => {}

@@ -1,0 +1,90 @@
+# Beta 原件生命周期：Core10 基础切片
+
+本文定义 Core10 原件生命周期的 Core/Host/peer 基础合同和当前验收边界。它是开发合同，
+不代表功能已经进入 Beta UI、Native 或已发布候选。对应基础切片以 Core schema 10 为目标。
+
+## 所有者与数据范围
+
+- Core 持有不可变生命周期事实、命令回执和本机原件字节状态投影。状态键是本机档案内的
+  `profile_id + original_id`；每次有效状态变化推进 generation。
+- Host 持有本机 Human 命令边界、可信 `HostClock` 样本、peer 成员资格和原件传输边界。
+  Host 的 Rust API 已有基础接线，用户界面和 Native 生命周期入口尚未接线。
+- `orig_lifecycle/1` 事实描述作者设备上的动作。复制到另一设备后只是不可变历史；远端
+  `release_local` 事实不会删除接收端字节，也不代替接收端 Human 的本机命令。
+- 本机字节删除受 Core 事务中的事实、状态代际、receipt 与窄 SQL gate 约束。成功 receipt
+  表示该本机事务已提交；它不表示其他设备或进程外缓存已删除。
+
+## 动作合同
+
+| 决定 | Core 状态与效果 | 硬约束 |
+|---|---|---|
+| Q04 `Reclaim` | 本机字节仍在，进入可恢复的 reclaimed 状态并记录恢复期限 | 到期本身不删除字节 |
+| `Restore` | reclaimed 可直接恢复可用；released/purged/missing 会进入待恢复状态 | 新字节经完整校验后才完成恢复；失败 hash 可在原请求身份下显式重试 |
+| Q04 `PurgeReclaimed` | 删除本机已验证原件的 chunk 字节 | 必须已 reclaimed、期限已过并由 Human 显式确认；没有自动到期清理 |
+| Q24 `ReleaseLocal` | 直接释放此档案/设备的本机 chunk 字节 | 可从 available 或 reclaimed 直接执行，不要求先回收；是独立显式动作 |
+| Q24 远端跟进 | 仅为明确选择的 peer 记录 follow-up 请求 | 请求和可达/可探测状态都不授权删除；对端需本机 Human 确认并执行自己的动作 |
+
+回收期限的工程默认值为 30 天，可通过 Host 配置调整；每次 reclaim 固定保存实际期限，后续
+配置变化不改写旧 deadline。成功的 Release/Purge 保留 manifest、capture/source facts、命令与
+action receipts、origin/replication 历史以及派生事实（Q25）。它只清理相应本机 Core chunk；
+不得描述为释放所有设备字节、清理导出副本，或完成了用户功能。
+
+## 时钟与幂等
+
+Host 在 reclaim 时保存 `wall_ms`、`epoch_id`、`elapsed_ms` 和所选期限。处于同一 epoch 时用
+单调 elapsed 时间判断期限；Host 重启/epoch 改变后使用已经固定的 wall deadline。此合同不承诺
+抵抗操作系统调钟或跨 epoch 的恶意时间修改。Unix wall time `0` 是合法样本，不能被替换成
+“现在”。采样错误被替换成零值的问题已在独立提交中修复，真实 Unix 起点仍是合法样本。
+
+命令 ID 的相同 payload 重放同一持久 receipt，并在返回值标记 `replayed=true`；相同 ID 携带
+不同 payload 必须冲突。Release/Purge 重放时，即使 chunks 已删除，原 receipt 的事件、序号、
+摘要与持久记录仍保持；capture receipt 和 lifecycle receipt 均继续保留。
+
+## 读取代际与导出边界
+
+`OriginalReadPermit` 是绑定 Core 生命周期、档案、原件及 generation 的 freshness 检查凭证，
+不是排他锁，也不持有或固定字节。每段读取前后都会核对状态代际；多段读取完成后，调用方必须
+在发布输出文件前调用 `finish_original_read`。generation 改变时读取/finish 失败；permit 不会
+阻止并发释放，也不能单独证明 Native 缓存或目的文件的处置状态。
+
+Native beta-open/private export cache 尚未与 Core lifecycle 协调，UI lifecycle 也尚未接线。完成
+这些边界前，不把 Core 的本机 chunk 状态推断为导出缓存状态，不从 UI 文案、Agent/模型输出或
+一次 peer 探测推断操作成功。peer probe 仅确认候选端点声称有可用副本；实际 fetch 仍须传输并
+通过完整原件 SHA-256 校验。
+
+## Core10 schema 与复制
+
+Core10 将 `orig_lifecycle/1` 纳入 event kind、replicated fact 和 origin schema。Core9→10 迁移
+应保留原 event IDs/bodies/digests/local sequence、manifest/reference、origin positions/hash chain、
+receipt 和已验证原件。Core10 还校验 F7 的 correction target/sequence expression index；本切片
+只包含这个 schema index，不包含 correction target 查询 API、search 行为或 HTTP/UI 接线。
+
+同步 Hello 必须在事实交换前拒绝旧 Core schema。Core8 与 Core9 两项拒绝回归均已通过。
+迁移合同与复制合同分开记账：真实 Core8
+fixture 与 schema4 manifest/origin 已有结果；复制 helper 已补齐新事实的显式 digest 分支，
+复制组 17 项重跑通过。
+
+## 已知证据与未覆盖项
+
+当前共享 worktree 的生命周期回归记录为 Core lifecycle unit 19、Core public 1、Host lifecycle
+4、original transfer 19、peer network 14、Core8 Hello strict rejection 1，共 58/58。另有 F5
+worker caller-token 回归由红转绿。Core8 真实旧版 CLI fixture（`85f7df92`，1 manifest、1 个
+49-byte chunk）升级 Core10 为 1/1；`schema4_manifest_origin` 为 6/6。真实 fixture 不是手工
+DDL。`tests/replication.rs` 的 `rechain` helper 补入显式
+`ReplicatedFact::OriginalLifecycle` 分支后，复制行为 17 项通过。Core5 红基线各层证据
+见外部 `parent-runtime-verification.md`，不作为 Core10 通过证据。
+
+以下依赖仍未覆盖，不能据本切片声称完整 Beta 可编译/可用：
+
+- Native beta-open、私有导出缓存和 Core lifecycle 的一致性/发布前 finish 接线。
+- UI 上 reclaim、restore、release、purge、远端 follow-up 的动作、确认和 receipt 展示。
+- 共享 CI 中新增生命周期及真实旧版 fixture 的持续检查。
+- 跨设备字节处置、Native 缓存字节处置、系统文件导出结果和用户侧完整流程验收。
+
+事实 receipt、字节校验、复制 ACK、UI 展示和模型输出是不同证据层；任一层通过都不能代替其余
+层。Beta18/Core9 冻结 payload `66124154` 不因 Core10 worktree 增量而改变；升级与 8 KiB 导出/
+进程回收/重新选址/重启链路属于 Beta18 证据，不计作 Core10 生命周期验收。
+
+提交前另用暂存索引的独立源码快照核对依赖闭包：Core 默认测试 164 项通过、13 个原标记入口
+跳过。Host 首轮触及整批时限后，保留完整结束的组并按剩余测试文件续跑；合计 272 项通过，
+7 个原标记入口跳过。跳过项不计为通过，实模型、专用历史夹具与平台验证继续分别记账。

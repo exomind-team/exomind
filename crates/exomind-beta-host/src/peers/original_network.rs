@@ -7,7 +7,7 @@ use crate::peers::original_auto_store::{
 };
 use crate::peers::original_transfer::TransferCompletion;
 use crate::peers::{OriginalTransferOptions, OriginalTransferResult};
-use exomind_core::{OriginalAvailability, OriginalId, OriginalRef, StageState};
+use exomind_core::{CoreError, OriginalAvailability, OriginalId, OriginalRef, StageState};
 use tokio::sync::Notify;
 #[path = "original_auto_queue.rs"]
 pub(super) mod auto_queue;
@@ -395,6 +395,54 @@ impl PeerNetwork {
         self.fetch_original_mode(profile, peer, original, request, OriginalFetchMode::Manual)
             .await
     }
+    /// Authenticated, zero-byte probe of one peer's verified local copy.
+    /// A `true` response is still followed by whole-file SHA-256 validation
+    /// during an explicit fetch.
+    pub async fn probe_original_source(
+        self: &Arc<Self>,
+        profile: ProfileId,
+        peer: DeviceId,
+        original: OriginalId,
+    ) -> Result<bool, HostError> {
+        let _lease = self.host.peers.register(false)?;
+        self.host.owner(&self.owner)?;
+        if !self.host.peer_network_settings(&self.owner)?.enabled {
+            return Err(HostError::PeerNetworkDisabled);
+        }
+        let expected = {
+            let state = self.host.active_state()?;
+            let core = &crate::resources(&state)?.core;
+            core.original_lifecycle_status(&core.local_human(profile)?, profile, original)?
+                .original
+        };
+        self.ensure_started().await?;
+        let cancel = self
+            .lifecycle
+            .lock()
+            .await
+            .as_ref()
+            .ok_or(HostError::PeerTransportUnavailable)?
+            .cancel
+            .clone();
+        let generation = self
+            .shared
+            .lock()
+            .map_err(|_| HostError::StatePoisoned)?
+            .generation;
+        let result = self
+            .worker()
+            .probe_sessions(profile, peer, expected, cancel.clone())
+            .await;
+        let current_generation = self
+            .shared
+            .lock()
+            .map_err(|_| HostError::StatePoisoned)?
+            .generation;
+        if cancel.is_cancelled() || current_generation != generation {
+            return Err(HostError::PeerCancelled);
+        }
+        result
+    }
     async fn fetch_original_mode(
         self: &Arc<Self>,
         profile: ProfileId,
@@ -425,6 +473,16 @@ impl PeerNetwork {
                     OriginalAvailability::Missing { original } => original,
                     OriginalAvailability::Local { stage } => stage.original,
                 };
+                if matches!(
+                    r.core
+                        .original_lifecycle_status(&r.core.local_human(profile)?, profile, original)?
+                        .bytes_state,
+                    exomind_core::OriginalBytesState::Released | exomind_core::OriginalBytesState::Purged
+                ) {
+                    return Err(HostError::Core(
+                        CoreError::OriginalLifecycleRestoreRequired,
+                    ));
+                }
                 let intent = original_auto_store::intent(&r.persistence.auth, profile, original)?;
                 if let OriginalFetchMode::Automatic { policy_revision } = mode {
                     if !original_auto_store::eligible(
@@ -535,6 +593,87 @@ impl PeerNetwork {
 }
 
 impl Worker {
+    async fn probe_sessions(
+        &self,
+        profile: ProfileId,
+        peer: DeviceId,
+        expected: OriginalRef,
+        cancel: PeerCancellation,
+    ) -> Result<bool, HostError> {
+        let member = self
+            .host
+            .peer_members(&self.owner, profile)?
+            .into_iter()
+            .find(|member| {
+                member.device_id == peer
+                    && !member.revoked
+                    && member.state == PeerJoinState::Ready
+                    && member.capabilities.read_originals
+            })
+            .ok_or(HostError::PeerMembershipDenied)?;
+        let route = self
+            .routes()?
+            .into_iter()
+            .find(|route| route.profile == profile && route.device == peer)
+            .ok_or(HostError::PeerTransportUnavailable)?;
+        let port = self
+            .local_addresses()?
+            .first()
+            .ok_or(HostError::PeerTransportUnavailable)?
+            .port();
+        let pin = PeerPin::from_sha256(&member.pin)?;
+        let mut last = HostError::PeerTransportUnavailable;
+        for endpoint in route.endpoints.into_iter().take(8) {
+            if cancel.is_cancelled() {
+                return Err(HostError::PeerCancelled);
+            }
+            let channel = match self
+                .host
+                .connect_peer_transport(
+                    &self.owner,
+                    endpoint,
+                    pin,
+                    transport_options(),
+                    cancel.clone(),
+                )
+                .await
+            {
+                Ok(channel) => channel,
+                Err(error @ (HostError::PeerTransportUnavailable | HostError::PeerTimeout)) => {
+                    last = error;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                self.host.select_peer_service(
+                    &self.owner,
+                    &channel,
+                    PeerServiceKind::Originals,
+                    Some(profile),
+                    Some(peer),
+                    port,
+                ),
+            )
+            .await
+            .map_err(|_| HostError::PeerTimeout)??;
+            return self
+                .host
+                .probe_peer_original_over_transport(
+                    &self.owner,
+                    profile,
+                    peer,
+                    expected,
+                    channel,
+                    OriginalTransferOptions::default(),
+                    cancel.clone(),
+                )
+                .await;
+        }
+        Err(last)
+    }
+
     async fn fetch_sessions(
         &self,
         profile: ProfileId,

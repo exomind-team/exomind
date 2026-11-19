@@ -1632,3 +1632,6 @@ async fn empty_original_is_actually_verified_and_source_private_or_wrong_profile
     stop(r.a).await;
     stop(r.b).await;
 }
+
+#[path = "original_transfer_lifecycle_red_tests.rs"]
+mod lifecycle_red_tests;

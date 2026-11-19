@@ -62,6 +62,16 @@ pub struct OriginalTransferResult {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 enum Control {
+    Probe {
+        protocol: String,
+        schema: i64,
+        profile_id: ProfileId,
+        expected: OriginalRef,
+    },
+    Probed {
+        original: OriginalRef,
+        available: bool,
+    },
     Start {
         protocol: String,
         schema: i64,
@@ -128,11 +138,18 @@ impl Rejection {
             HostError::Core(
                 CoreError::UnknownOriginal | CoreError::UnknownStage | CoreError::UnknownProfile,
             ) => Self::Missing,
-            HostError::Core(CoreError::OriginalNotReady | CoreError::StageIncomplete) => {
+            HostError::Core(
+                CoreError::OriginalNotReady
+                    | CoreError::StageIncomplete
+                    | CoreError::OriginalLifecycleRestoreRequired,
+            ) => {
                 Self::NotReady
             }
             HostError::Core(
-                CoreError::OriginalConflict | CoreError::StageConflict | CoreError::ChunkConflict,
+                CoreError::OriginalConflict
+                | CoreError::StageConflict
+                | CoreError::ChunkConflict
+                | CoreError::OriginalLifecycleConflict,
             ) => Self::Conflict,
             HostError::Core(
                 CoreError::OriginalHashMismatch | CoreError::OriginalIntegrityMismatch,
@@ -587,6 +604,40 @@ impl BetaHost {
             },
         )
     }
+    fn peer_original_bytes_available(
+        &self,
+        channel: &PeerChannel,
+        scope: &PeerProfileScope,
+        profile: ProfileId,
+        original: OriginalId,
+    ) -> Result<bool, HostError> {
+        self.with_peer_scope(
+            channel,
+            scope,
+            PeerOperation::ReadOriginals,
+            |core, member| {
+                if member.profile_id != profile {
+                    return Err(HostError::PeerMembershipDenied);
+                }
+                let human = core.local_human(profile)?;
+                let lifecycle =
+                    core.original_lifecycle_status(&human, profile, original)?;
+                if !matches!(
+                    lifecycle.bytes_state,
+                    exomind_core::OriginalBytesState::Available
+                        | exomind_core::OriginalBytesState::Reclaimed
+                ) {
+                    return Ok(false);
+                }
+                Ok(matches!(
+                    core.original_availability(&human, profile, original)?,
+                    OriginalAvailability::Local { stage }
+                        if stage.state == StageState::Verified
+                            && stage.next_offset == stage.original.byte_length
+                ))
+            },
+        )
+    }
     pub async fn download_peer_original_over_transport(
         self: &Arc<Self>,
         owner: &Session,
@@ -600,6 +651,62 @@ impl BetaHost {
             owner, profile, peer, original, channel, options, None, None,
         )
         .await
+    }
+    pub(super) async fn probe_peer_original_over_transport(
+        self: &Arc<Self>,
+        owner: &Session,
+        profile: ProfileId,
+        peer: DeviceId,
+        expected: OriginalRef,
+        channel: PeerChannel,
+        options: OriginalTransferOptions,
+        cancelled: PeerCancellation,
+    ) -> Result<bool, HostError> {
+        options.validate()?;
+        self.qualify_transport(owner)?;
+        channel.binding_pin(self)?;
+        let lease = self.peers.register(false)?;
+        let host = self.clone();
+        let runtime = tokio::runtime::Handle::current();
+        let global_cancel = self.peers.cancel.clone();
+        let cancel = PeerCancellation::new();
+        let _cancel = CancelOnDrop(cancel.clone());
+        tokio::task::spawn_blocking(move || {
+            let _lease = lease;
+            runtime.block_on(async move {
+                let mut io = Io {
+                    channel,
+                    cancel,
+                    end: Instant::now() + options.session_timeout,
+                    options,
+                };
+                let scope = host.peer_profile_scope(&io.channel, profile, peer)?;
+                let probe = async {
+                    io.send(&Control::Probe {
+                        protocol: PROTOCOL.into(),
+                        schema: exomind_core::CORE_SCHEMA_VERSION,
+                        profile_id: profile,
+                        expected: expected.clone(),
+                    })
+                    .await?;
+                    match io.read().await? {
+                        Control::Probed { original, available } if original == expected => {
+                            Ok(available)
+                        }
+                        Control::Probed { .. } => Err(HostError::Core(CoreError::OriginalConflict)),
+                        _ => Err(HostError::InvalidRequest),
+                    }
+                };
+                tokio::select! {
+                    biased;
+                    _ = cancelled.cancelled() => Err(HostError::PeerCancelled),
+                    _ = global_cancel.cancelled() => Err(HostError::Stopped),
+                    result = probe => result,
+                }
+            })
+        })
+        .await
+        .map_err(|_| HostError::StatePoisoned)?
     }
     pub(super) async fn download_peer_original_owned(
         self: &Arc<Self>,
@@ -845,7 +952,54 @@ async fn serve(
     io: &mut Io,
     scope: &PeerProfileScope,
 ) -> Result<OriginalTransferResult, HostError> {
-    let (profile, expected, start) = match io.read().await? {
+    let first = io.read().await?;
+    let first = match first {
+        Control::Probe {
+            protocol,
+            schema,
+            profile_id,
+            expected,
+        } => {
+            if protocol != PROTOCOL || schema != exomind_core::CORE_SCHEMA_VERSION {
+                return Err(HostError::PeerProtocolMismatch);
+            }
+            let original =
+                host.original_description(&io.channel, scope, expected.original_id)?;
+            if original != expected {
+                return Err(HostError::Core(CoreError::OriginalConflict));
+            }
+            host.with_peer_scope(
+                &io.channel,
+                scope,
+                PeerOperation::ReadOriginals,
+                |_, member| {
+                    if member.profile_id != profile_id {
+                        return Err(HostError::PeerMembershipDenied);
+                    }
+                    Ok(())
+                },
+            )?;
+            let available = host.peer_original_bytes_available(
+                &io.channel,
+                scope,
+                profile_id,
+                original.original_id,
+            )?;
+            io.send(&Control::Probed {
+                original: original.clone(),
+                available,
+            })
+            .await?;
+            return Ok(OriginalTransferResult {
+                original,
+                verified: available,
+                resumed_from: 0,
+                transferred_bytes: 0,
+            });
+        }
+        value => value,
+    };
+    let (profile, expected, start) = match first {
         Control::Start {
             protocol,
             schema,

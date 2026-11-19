@@ -88,6 +88,7 @@ fn rechain(page: &mut OriginPage) {
             ReplicatedFact::Summary(v) => v.digest = v.computed_digest().unwrap(),
             ReplicatedFact::AgentSummary(v) => v.digest = v.computed_digest().unwrap(),
             ReplicatedFact::Correction(v) => v.digest = v.computed_digest().unwrap(),
+            ReplicatedFact::OriginalLifecycle(v) => v.digest = v.computed_digest().unwrap(),
         }
         entry.origin_seq = previous.seq + 1;
         entry.chain_hash = format!(

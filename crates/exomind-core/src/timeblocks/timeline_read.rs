@@ -26,6 +26,7 @@ pub(super) fn decode(profile: ProfileId, row: TimelineRow) -> Result<TimelineIte
         "timeblock/1" => ReplicatedFact::Timeblock(serde_json::from_str(&body)?),
         "summary/1" => ReplicatedFact::Summary(serde_json::from_str(&body)?),
         "agent_summary/1" => ReplicatedFact::AgentSummary(serde_json::from_str(&body)?),
+        "orig_lifecycle/1" => ReplicatedFact::OriginalLifecycle(serde_json::from_str(&body)?),
         _ => return Err(CoreError::RecoveryRequired),
     };
     if fact.event_id() != id || fact.profile_id() != profile || fact.digest() != digest {
@@ -49,7 +50,9 @@ pub(super) fn decode(profile: ProfileId, row: TimelineRow) -> Result<TimelineIte
             value.local_seq = seq;
             TimelineItem::AgentSummary(value)
         }
-        ReplicatedFact::SummaryJob(_) | ReplicatedFact::Correction(_) => {
+        ReplicatedFact::SummaryJob(_)
+        | ReplicatedFact::Correction(_)
+        | ReplicatedFact::OriginalLifecycle(_) => {
             return Err(CoreError::RecoveryRequired);
         }
     })

@@ -79,6 +79,8 @@ pub(crate) fn validate_backup_directory(path: &Path) -> Result<(), CoreError> {
             .or_else(|| name.strip_prefix("schema-6-"))
             .or_else(|| name.strip_prefix("schema-7-"))
             .or_else(|| name.strip_prefix("schema-8-"))
+            .or_else(|| name.strip_prefix("schema-9-"))
+            .or_else(|| name.strip_prefix("schema-10-"))
             .and_then(|name| name.strip_suffix(".sqlite3"))
             .ok_or(CoreError::ForeignRoot)?;
         if Uuid::parse_str(id)
@@ -289,7 +291,7 @@ fn initialize_transaction(
     let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
     let application: i64 =
         transaction.pragma_query_value(None, "application_id", |row| row.get(0))?;
-    if ![0, 1, 2, 3, 4, 5, 6, 7, 8, SCHEMA_VERSION].contains(&version) {
+    if ![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, SCHEMA_VERSION].contains(&version) {
         return Err(CoreError::UnsupportedSchema(version));
     }
     if application != 0 && application != APPLICATION_ID {
@@ -358,7 +360,9 @@ fn initialize_transaction(
     else if transaction.prepare("SELECT e.kind,s.revision,n.request_digest FROM events e LEFT JOIN timeblock_state s ON s.profile_id=e.profile_id LEFT JOIN timeblock_nodes n ON n.event_id=e.event_id LIMIT 0").is_err(){return Err(CoreError::RecoveryRequired);}
     if version < 4 {
         crate::replication::migrate(&transaction)?;
-    } else if version >= 9 {
+    } else if version >= 10 {
+        crate::replication::validate_original_lifecycle_fact_schema(&transaction)?;
+    } else if version == 9 {
         crate::replication::validate_correction_fact_schema(&transaction)?;
     } else if version >= 7 {
         crate::replication::validate_agent_summary_schema(&transaction)?;
@@ -381,6 +385,8 @@ fn initialize_transaction(
             crate::summaries::validate_events(&transaction)?;
         } else if version < 9 {
             crate::external_summaries::validate_schema(&transaction)?;
+        } else if version == 9 {
+            crate::record_organization::validate_schema_v9(&transaction)?;
         } else {
             crate::record_organization::validate_schema(&transaction)?;
         }
@@ -401,6 +407,13 @@ fn initialize_transaction(
     if version < 9 {
         crate::record_organization::migrate_schema(&transaction)?;
         crate::replication::migrate_correction_fact_type(&transaction)?;
+    }
+    if version < 10 {
+        crate::record_organization::migrate_original_lifecycle_kind(&transaction)?;
+        crate::replication::migrate_original_lifecycle_fact_type(&transaction)?;
+        crate::original_lifecycle::migrate_schema(&transaction)?;
+    } else {
+        crate::original_lifecycle::validate_schema(&transaction)?;
     }
     if transaction
         .prepare("PRAGMA foreign_key_check")?

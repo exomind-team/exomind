@@ -1,5 +1,6 @@
 use crate::{
-    CoreError, CorrectionRecord, DeviceId, EventId, EventRecord, OriginalRef, ProfileId,
+    CoreError, CorrectionRecord, DeviceId, EventId, EventRecord, OriginalLifecycleRecord,
+    OriginalRef, ProfileId,
     TimeblockNodeRecord,
 };
 use rusqlite::{Connection, OptionalExtension};
@@ -20,6 +21,8 @@ pub enum ReplicatedFact {
     AgentSummary(crate::ExternalSummaryRecord),
     #[serde(rename = "correction/1")]
     Correction(CorrectionRecord),
+    #[serde(rename = "orig_lifecycle/1")]
+    OriginalLifecycle(OriginalLifecycleRecord),
 }
 impl ReplicatedFact {
     pub fn event_id(&self) -> EventId {
@@ -30,6 +33,7 @@ impl ReplicatedFact {
             Self::Summary(v) => v.event_id,
             Self::AgentSummary(v) => v.event_id,
             Self::Correction(v) => v.event_id,
+            Self::OriginalLifecycle(v) => v.event_id,
         }
     }
     pub fn profile_id(&self) -> ProfileId {
@@ -40,6 +44,7 @@ impl ReplicatedFact {
             Self::Summary(v) => v.profile_id,
             Self::AgentSummary(v) => v.profile_id,
             Self::Correction(v) => v.profile_id,
+            Self::OriginalLifecycle(v) => v.profile_id,
         }
     }
     pub fn device_id(&self) -> DeviceId {
@@ -50,6 +55,7 @@ impl ReplicatedFact {
             Self::Summary(v) => v.device_id,
             Self::AgentSummary(v) => v.device_id,
             Self::Correction(v) => v.device_id,
+            Self::OriginalLifecycle(v) => v.device_id,
         }
     }
     pub fn digest(&self) -> &str {
@@ -60,6 +66,7 @@ impl ReplicatedFact {
             Self::Summary(v) => &v.digest,
             Self::AgentSummary(v) => &v.digest,
             Self::Correction(v) => &v.digest,
+            Self::OriginalLifecycle(v) => &v.digest,
         }
     }
     pub fn fact_type(&self) -> &'static str {
@@ -71,6 +78,7 @@ impl ReplicatedFact {
             Self::Summary(_) => "summary/1",
             Self::AgentSummary(_) => "agent_summary/1",
             Self::Correction(_) => "correction/1",
+            Self::OriginalLifecycle(_) => "orig_lifecycle/1",
         }
     }
     pub fn canonical_fact_bytes(&self) -> Result<Vec<u8>, CoreError> {
@@ -81,6 +89,7 @@ impl ReplicatedFact {
             Self::Summary(v) => v.canonical_fact_bytes(),
             Self::AgentSummary(v) => v.canonical_fact_bytes(),
             Self::Correction(v) => v.canonical_fact_bytes(),
+            Self::OriginalLifecycle(v) => crate::fact_encoding::encode_fact(v).map(String::into_bytes),
         }
     }
     pub(super) fn originals(&self) -> &[OriginalRef] {
@@ -91,6 +100,7 @@ impl ReplicatedFact {
             | Self::Summary(_)
             | Self::AgentSummary(_)
             | Self::Correction(_) => &[],
+            Self::OriginalLifecycle(_) => &[],
         }
     }
     pub(super) fn portable(&self) -> Self {
@@ -102,6 +112,7 @@ impl ReplicatedFact {
             Self::Summary(v) => v.local_seq = 0,
             Self::AgentSummary(v) => v.local_seq = 0,
             Self::Correction(v) => v.local_seq = 0,
+            Self::OriginalLifecycle(v) => v.local_seq = 0,
         };
         value
     }
@@ -113,6 +124,7 @@ impl ReplicatedFact {
             Self::Summary(v) => crate::fact_encoding::encode_fact(v),
             Self::AgentSummary(v) => crate::fact_encoding::encode_fact(v),
             Self::Correction(v) => crate::fact_encoding::encode_fact(v),
+            Self::OriginalLifecycle(v) => crate::fact_encoding::encode_fact(v),
         }
     }
     pub(crate) fn validate(&self) -> Result<(), CoreError> {
@@ -151,6 +163,7 @@ impl ReplicatedFact {
             Self::Summary(v) => v.validate()?,
             Self::AgentSummary(v) => v.validate()?,
             Self::Correction(v) => v.validate()?,
+            Self::OriginalLifecycle(v) => v.validate()?,
         }
         self.body()?;
         Ok(())
@@ -171,6 +184,7 @@ pub(super) fn load_fact(
             "summary/1" => ReplicatedFact::Summary(serde_json::from_str(&body)?),
             "agent_summary/1" => ReplicatedFact::AgentSummary(serde_json::from_str(&body)?),
             "correction/1" => ReplicatedFact::Correction(serde_json::from_str(&body)?),
+            "orig_lifecycle/1" => ReplicatedFact::OriginalLifecycle(serde_json::from_str(&body)?),
             _ => return Err(CoreError::RecoveryRequired),
         };
         if fact.event_id() != event

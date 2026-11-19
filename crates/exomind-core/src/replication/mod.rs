@@ -16,6 +16,9 @@ pub(crate) use provenance::{migrate as migrate_provenance, validate as validate_
 pub(crate) use schema::{migrate, validate_objects, validate_schema};
 pub(crate) use schema::{migrate_agent_summary_facts, validate_agent_summary_schema};
 pub(crate) use schema::{migrate_correction_fact_type, validate_correction_fact_schema};
+pub(crate) use schema::{
+    migrate_original_lifecycle_fact_type, validate_original_lifecycle_fact_schema,
+};
 pub(crate) use schema::{migrate_summary_facts, validate_summary_schema};
 use serde::{Deserialize, Serialize};
 pub use transfer::{ImportAck, OriginEntry, OriginPage, OriginPageQuery};

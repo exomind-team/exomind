@@ -28,6 +28,7 @@ pub use summary_jobs::SummaryServiceStatus;
 #[cfg(test)]
 mod original_tests;
 mod originals;
+pub(crate) mod original_lifecycle;
 mod originals_http;
 mod record_organization;
 mod peers;
@@ -52,6 +53,10 @@ mod storage;
 mod timeblocks;
 mod timeblocks_http;
 pub use timeblocks::{DeadlineEnvelope, HostClock, HostClockSample, ServiceStatus};
+pub use original_lifecycle::{
+    DEFAULT_ORIGINAL_RECLAIM_WINDOW, OriginalLifecycleHostStatus,
+    OriginalLifecycleRemoteSource, RemoteOriginalProbeState,
+};
 
 use exomind_core::{
     AgentId, CaptureCommand, CommandId, Core, CoreError, DeviceId, EventPage, EventQuery,
@@ -62,6 +67,7 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,
+    time::Duration,
     sync::{
         Mutex, MutexGuard,
         atomic::{AtomicBool, Ordering},
@@ -83,6 +89,7 @@ pub fn desktop_preferences_temporary_file(id: Uuid) -> String {
 pub enum HostError {
     #[error("host clock sample is unavailable or invalid")]
     ClockUnavailable,
+
     #[error("an absolute independent root is required")]
     InvalidRoot,
     #[error("the root belongs to another application")]
@@ -318,6 +325,7 @@ pub struct BetaHost {
     source_jobs: local_sources::Jobs,
     peers: std::sync::Arc<peers::Runtime>,
     clock: std::sync::Arc<dyn HostClock>,
+    original_reclaim_window_ms: u64,
     services: std::sync::Arc<timeblocks::Services>,
     summary_jobs: std::sync::Arc<summary_jobs::Services>,
     #[cfg(test)]
@@ -341,6 +349,24 @@ impl BetaHost {
         root: &Path,
         clock: std::sync::Arc<dyn HostClock>,
     ) -> Result<Self, HostError> {
+        Self::open_with_clock_and_recovery_window(
+            root,
+            clock,
+            DEFAULT_ORIGINAL_RECLAIM_WINDOW,
+        )
+    }
+
+    /// Opens a Host with an adjustable engineering default. Each reclaim stores
+    /// its chosen deadline, so later configuration changes do not rewrite it.
+    pub fn open_with_clock_and_recovery_window(
+        root: &Path,
+        clock: std::sync::Arc<dyn HostClock>,
+        recovery_window: Duration,
+    ) -> Result<Self, HostError> {
+        let original_reclaim_window_ms = u64::try_from(recovery_window.as_millis())
+            .ok()
+            .filter(|value| *value <= i64::MAX as u64)
+            .ok_or(HostError::InvalidRequest)?;
         let mut persistence = Persistence::open(root)?;
         let core_root = persistence.root.join("core");
         let main_database = core_root.join("beta-core.sqlite3");
@@ -372,6 +398,7 @@ impl BetaHost {
             source_jobs: local_sources::Jobs::default(),
             peers: std::sync::Arc::new(peers::Runtime::default()),
             clock,
+            original_reclaim_window_ms,
             services: std::sync::Arc::new(timeblocks::Services::default()),
             summary_jobs: std::sync::Arc::new(summary_jobs::Services::default()),
             #[cfg(test)]

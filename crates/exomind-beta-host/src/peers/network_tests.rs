@@ -1314,3 +1314,6 @@ async fn tcp_eof_keeps_original_listener_generation_and_signed_join_available() 
     assert_eq!(joined.state, PeerJoinState::Ready);
     assert!(joined.remote_ready_observed && member_ready);
 }
+
+#[path = "f5_peer_network_probe_tests.rs"]
+mod f5_peer_network_probe_tests;
