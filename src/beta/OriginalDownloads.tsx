@@ -10,12 +10,14 @@ import type { BetaOriginal } from './original-types';
 import { originalAcquisitionError, originalTransferActive, sameOriginal, type BetaOriginalSources, type BetaOriginalTransferStatus } from './original-acquisition';
 import { collectOriginalDownload } from './original-download';
 import { BetaImagePreview } from './BetaImagePreview';
+import { BetaMediaPreview } from './BetaMediaPreview';
 import { originalExportTasks } from './original-export-tasks';
 import { FieldSelect } from '@/components/ui/field-select';
 import { Progress } from '@/components/ui/progress';
 import { useBetaDeviceNames } from './device-names';
 import { BetaTextPreview } from './BetaTextPreview';
 import { isTextPreviewCandidate } from './text-preview';
+import { resolveMediaPreviewFormat } from './media-preview';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -153,10 +155,31 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
   const label=statusError?'本机原件状态待重新确认':!status?'正在检查本机原件…':status.availability==='complete'?'本机原件已完整校验':status.availability==='hash_mismatch'?'原件校验失败，尚不可用':status.availability==='missing'?'本机缺少原件，仅有记录信息':`已收到 ${formatBytes(status.next_offset)} / ${formatBytes(status.byte_length)}，尚未完整校验`;
   const transferLabel=status?.transfer_state==='verifying'?'正在校验原件…':status?.transfer_state==='confirming'?'本机已校验，正在确认传输…':'正在获取原件…';
   const statusFailure=!running&&status?.last_error_code?originalAcquisitionError(status.last_error_code):'';
+  const mediaFormat = resolveMediaPreviewFormat(original.file_name, original.media_type);
+  const canDownloadOriginal = !!client.originalExports || original.byte_length <= MAX_BASIC_DOWNLOAD_BYTES;
+  const fallbackActionMessage = client.originalOpener
+    ? canDownloadOriginal
+      ? '关闭后可使用系统打开或下载原件'
+      : '关闭后可使用系统打开原件'
+    : canDownloadOriginal
+      ? '关闭后可下载原件'
+      : '当前环境没有可用的系统打开或网页下载入口';
   return <div className="space-y-2 rounded-2xl border border-border-page bg-surface px-3 py-2">
     {readable && <BetaImagePreview identity={`${deviceId}:${profileId}:${original.original_id}:${original.sha256}`} sourceScope={client} visible={visible} inline fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={() => collectOriginalDownload(client, profileId, original)} />}
     <div className="flex items-center gap-2"><Button size="icon" variant="ghost" className="shrink-0" aria-label={`打开 ${original.file_name}`} title={client.originalOpener?readable?'使用系统打开':'自动获取原件后用系统打开':'系统打开需要独立应用；仍可下载原件'} disabled={!client.originalOpener||!readable&&!acquisition?.fetchAny||opening||running} onClick={()=>{void(readable?openOriginal():findOriginal(true));}}><FileText size={16} className="text-brand-accent" aria-hidden="true" /></Button>
       {readable&&isTextPreviewCandidate(original.file_name,original.media_type)&&<BetaTextPreview identity={JSON.stringify([deviceId,profileId,original.original_id,original.sha256,original.byte_length])} sourceScope={client} visible={visible} fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={()=>collectOriginalDownload(client,profileId,original)}/>}
+      {readable && mediaFormat && <div className="min-w-0 flex-[0_1_auto] space-y-1">
+        <BetaMediaPreview
+          identity={JSON.stringify([deviceId, profileId, original.original_id, original.sha256, original.byte_length, original.file_name, original.media_type])}
+          sourceScope={client}
+          visible={visible}
+          fileName={original.file_name}
+          mediaType={original.media_type}
+          byteLength={original.byte_length}
+          fallbackActionMessage={fallbackActionMessage}
+          load={() => collectOriginalDownload(client, profileId, original)}
+        />
+      </div>}
       <div className="min-w-0 flex-1"><p className="break-all text-xs font-medium">{original.file_name}</p><p className="text-[10px] text-muted">{formatBytes(original.byte_length)}</p></div>
       <Button variant="ghost" size="icon" aria-label={`下载 ${original.file_name}`} disabled={exporting||!readable||!client.originalExports&&original.byte_length>MAX_BASIC_DOWNLOAD_BYTES} onClick={onDownload}><Download size={14}/></Button>
     </div>
