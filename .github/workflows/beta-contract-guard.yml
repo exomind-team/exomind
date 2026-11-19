@@ -81,6 +81,8 @@ jobs:
           import { existsSync, readFileSync } from 'node:fs';
           import { relative } from 'node:path';
           const files = [
+            'tests/unit/beta/profile-switch-guard.test.ts',
+            'tests/unit/beta/last-profile-ui.test.tsx',
             'tests/unit/beta/original-acquisition.test.ts',
             'tests/unit/beta/original-auto-diagnostics.test.ts',
             'tests/unit/beta/original-transfer-diagnostics-ui.test.tsx',

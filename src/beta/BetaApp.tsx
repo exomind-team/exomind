@@ -40,6 +40,7 @@ import { mergeTimelineItems, refreshTimelineWindow } from './timeline-refresh';
 import { BetaProfileDialog } from './BetaProfileDialog';
 import { rememberLastBetaProfile, restoreLastBetaProfile } from './last-profile';
 import { BetaApiError } from './api-error';
+import { ProfileSwitchGuardGate } from './profile-switch-guard';
 import { nativeBetaDeadlineHandoffsClient, type BetaDeadlineHandoff, type BetaDeadlineHandoffsClient } from './deadline-handoff-client';
 import { describeDeadlineHandoff, useBetaDeadlineHandoff } from './deadline-handoff';
 import { clipboardImageFiles, readBetaClipboard } from './clipboard-images';
@@ -148,7 +149,8 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   }, [inputFocusRequest, section]);
   const [eventRevision,setEventRevision]=useState(0);
   const [profileDialog,setProfileDialog]=useState(false);
-  const prepareSwitch=useRef<(()=>Promise<void>)|null>(null);
+  const prepareSwitch=useMemo(()=>new ProfileSwitchGuardGate(),[]);
+  const switchGuardReady=useSyncExternalStore(prepareSwitch.subscribe,prepareSwitch.snapshot,prepareSwitch.snapshot)!==null;
   const switchFlight=useRef(false);
   const creation = useRef<{ name: string; id: string; client: BetaClient } | null>(null);
   const generation = useRef(0);
@@ -249,11 +251,11 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
       return hint||message;
     }finally{if(current===generation.current&&selectionScope.current===scope)setDeadlineLocation(previous=>previous?.handoffId===target.handoff_id?null:previous);}
   }
-  const handoff=useBetaDeadlineHandoff(handoffs,status?`${status.device_id}:${status.runtime_id??''}:${generation.current}`:'',!!status&&!!prepareSwitch.current&&!switching&&!creating,openDeadlineHandoff);
+  const handoff=useBetaDeadlineHandoff(handoffs,status?`${status.device_id}:${status.runtime_id??''}:${generation.current}`:'',!!status&&switchGuardReady&&!switching&&!creating,openDeadlineHandoff);
   useEffect(()=>{if(handoff.pending||handoff.failed)setSection('now');},[handoff.pending?.handoff_id,handoff.failed]);
   const workspaceTools = <>{client.originalExports&&<BetaOriginalExportCenter client={client} profileId={profileId} visible={section==='now'}/>}<BetaRuntimeLocation endpoint={endpoint} compact/>
     {isTauri()&&!/Android|iPhone|iPad/i.test(navigator.userAgent)&&<Button size="icon" variant="ghost" aria-label="专注浮窗" title="在浮窗打开当前档案" onClick={()=>{void invoke('beta_workspace_bind',{profileId}).then(()=>setBetaOverlayEnabled(true)).catch(failure=>setError(errorMessage(failure)));}}><PanelsTopLeft size={16}/></Button>}
-    <FieldSelect id="beta-profile" label="当前档案" title="当前档案" className="max-w-28" value={profileId} disabled={!prepareSwitch.current||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profile.display_name}))}/>
+    <FieldSelect id="beta-profile" label="当前档案" title="当前档案" className="max-w-28" value={profileId} disabled={!switchGuardReady||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profile.display_name}))}/>
     <Button variant="ghost" size="icon" aria-label="管理档案" title={`档案：${profileName || '未选择'}`} onClick={()=>setProfileDialog(true)}><FolderOpen size={16}/></Button>
     {onDisconnect&&<Button variant="ghost" size="sm" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}</>;
   return <><BetaAppShell section={section} onSectionChange={setSection} profileName={profileName} onProfileClick={()=>setProfileDialog(true)}
@@ -262,7 +264,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     now={<PageShell title="当下" hideHeader={!!status&&!!profileId} className="min-h-0 overflow-hidden" headerClassName="shrink-0" contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
     headerAction={<div className="flex max-w-[15rem] items-center gap-1">{status&&profileId&&<>
       <label className="sr-only" htmlFor="beta-profile">当前档案</label>
-      <FieldSelect id="beta-profile" label="当前档案" className="max-w-36" value={profileId} disabled={!prepareSwitch.current||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profile.display_name}))}/>
+      <FieldSelect id="beta-profile" label="当前档案" className="max-w-36" value={profileId} disabled={!switchGuardReady||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profile.display_name}))}/>
       </>}
       <Button variant="ghost" size="sm" aria-label="管理档案" onClick={()=>setProfileDialog(true)}>档案</Button>
       {onDisconnect&&<Button variant="ghost" size="sm" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}
@@ -280,10 +282,10 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     {error && <div role="alert" className="flex items-center gap-2 px-5 py-3 text-sm text-destructive">{error}
       {!status && <Button variant="outline" onClick={() => setReload(value => value + 1)}>重新连接</Button>}</div>}
     {status && <DeviceWorkspace key={`${status.device_id}`} workspace={workspace} active={section==='now'} eventRevision={eventRevision} client={client} deviceId={status.device_id} profileId={profileId} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} deadlineLocation={deadlineLocation} onDeadlineLocated={(id,hint,attempt)=>{const waiter=locationWaiter.current;if(waiter?.id===id&&waiter.attempt===attempt)waiter.finish(undefined,hint);}} onConfigureSummary={()=>setSection('settings')} onOpenSync={peers?()=>setSection('sync'):undefined} />}
-  </PageShell>}/><BetaProfileDialog open={profileDialog} onOpenChange={setProfileDialog} profiles={profiles} profileId={profileId} loading={loading} disabled={persistenceBusy||switching||!prepareSwitch.current} creating={creating} name={name} onNameChange={setName} onCreate={create} onSelect={changeProfile} error={error}/></>;
+  </PageShell>}/><BetaProfileDialog open={profileDialog} onOpenChange={setProfileDialog} profiles={profiles} profileId={profileId} loading={loading} disabled={persistenceBusy||switching||!switchGuardReady} creating={creating} name={name} onNameChange={setName} onCreate={create} onSelect={changeProfile} error={error}/></>;
 }
 
-function DeviceWorkspace({ workspace, client, deviceId, profileId, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync }: { workspace: BetaWorkspacePresentation; client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?:LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:MutableRefObject<(()=>Promise<void>)|null>; active:boolean;eventRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void }) {
+function DeviceWorkspace({ workspace, client, deviceId, profileId, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync }: { workspace: BetaWorkspacePresentation; client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?:LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:ProfileSwitchGuardGate; active:boolean;eventRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void }) {
   const summaryOwner=useRef<SummaryTasksController|null>(null);
   type Owners={capture:BetaDraftController;focus:BetaTimeblockController|null;profileId:string};
   const [owners, setOwners] = useState<Owners | null>(null);
@@ -295,7 +297,7 @@ function DeviceWorkspace({ workspace, client, deviceId, profileId, sourceStore, 
   const lockRequest = useRef<Promise<void> | null>(null);
   useEffect(() => {
     let capture:BetaDraftController|undefined;let focus:BetaTimeblockController|undefined;
-    let cancelled=false;let release:(()=>void)|undefined;let switchGuard:(()=>Promise<void>)|undefined;const unsubscribers:Array<()=>void>=[];
+    let cancelled=false;let release:(()=>void)|undefined;let releaseSwitchGuard:(()=>void)|undefined;const unsubscribers:Array<()=>void>=[];
     onPersistenceBusy(true);setOwners(null);setRecoveryRequired(false);
     // Web Locks prevent two tabs overwriting this device's durable draft cache.
     const locks = navigator.locks;
@@ -315,7 +317,7 @@ function DeviceWorkspace({ workspace, client, deviceId, profileId, sourceStore, 
             if(cancelled)return;
             if(profileId&&client.timeblocks)focus=await BetaTimeblockController.open(client,deviceId,profileId,{journal:intentJournal,predecessor:intentPredecessor,allowLegacyImport});
             if(cancelled)return;
-            switchGuard=async()=>{
+            const switchGuard=async()=>{
               summaryOwner.current?.fenceDispatch();
               for(let attempt=0;attempt<8;attempt++){
                 if(cancelled)throw new Error('当前草稿窗口已关闭');
@@ -325,13 +327,13 @@ function DeviceWorkspace({ workspace, client, deviceId, profileId, sourceStore, 
               }
               throw new Error('草稿仍在变化，请停止输入后重试');
             };
-            prepareSwitch.current=switchGuard;
+            releaseSwitchGuard=prepareSwitch.bind(switchGuard);
             const update=()=>{if(!cancelled)onPersistenceBusy(capture!.snapshot().persistenceState!=='idle'||!!focus&&focus.snapshot().persistenceState!=='idle');};
             unsubscribers.push(capture.subscribe(update));if(focus)unsubscribers.push(focus.subscribe(update));
             setOwners({capture,focus:focus??null,profileId});setError('');update();
             await new Promise<void>(resolve=>{release=resolve;});
           } finally {
-            for(const unsubscribe of unsubscribers)unsubscribe();capture?.dispose();focus?.dispose();const summary=summaryOwner.current;summary?.dispose();
+            releaseSwitchGuard?.();for(const unsubscribe of unsubscribers)unsubscribe();capture?.dispose();focus?.dispose();const summary=summaryOwner.current;summary?.dispose();
             // The Web Lock callback does not settle while an accepted local
             // transaction is still draining, including StrictMode late opens.
             await Promise.all([capture?.close(),focus?.close(),summary?.close()]);
@@ -342,7 +344,7 @@ function DeviceWorkspace({ workspace, client, deviceId, profileId, sourceStore, 
       void operation.catch(failure => { if (!cancelled) {setError(errorMessage(failure));setRecoveryRequired(!!failure&&typeof failure==='object'&&'code'in failure&&failure.code==='intent_recovery_required');onPersistenceBusy(false);} });
     }
     else {setError('当前浏览器不支持安全的草稿窗口锁，请使用支持 Web Locks 的浏览器');onPersistenceBusy(false);}
-    return () => { cancelled = true;if(prepareSwitch.current===switchGuard)prepareSwitch.current=null;capture?.dispose();focus?.dispose();summaryOwner.current?.dispose();release?.();setOwners(null); };
+    return () => { cancelled = true;releaseSwitchGuard?.();capture?.dispose();focus?.dispose();summaryOwner.current?.dispose();release?.();setOwners(null); };
   }, [client, deviceId, profileId, lockAttempt, sourceStore, intentJournal, intentPredecessor, allowLegacyImport, onPersistenceBusy, prepareSwitch]);
   if (error) return <div className="space-y-3 p-5">
     <p role="alert" className="text-sm text-destructive">{error}</p>

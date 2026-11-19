@@ -2,6 +2,7 @@ import { selectField } from './select-field';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
+import { BetaDraftController } from '@/beta/drafts';
 import { rememberLastBetaProfile, restoreLastBetaProfile } from '@/beta/last-profile';
 import type { BetaPeersClient } from '@/beta/peers-client';
 import { asyncDraftLocks, fakeClient } from './fixtures';
@@ -14,9 +15,32 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); resetLocks(); }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); if (locks) Object.defineProperty(navigator, 'locks', locks); else Reflect.deleteProperty(navigator, 'locks'); });
 
 describe('Beta reopens the last successfully opened local profile', () => {
+  it('enables profile selection when the writer becomes ready without a persistence state change', async () => {
+    const originalOpen = BetaDraftController.open.bind(BetaDraftController);
+    vi.spyOn(BetaDraftController, 'open').mockImplementation(async (...args) => {
+      const controller = await originalOpen(...args);
+      const snapshot = controller.snapshot;
+      let observed = snapshot();
+      let pending = { ...observed, persistenceState: 'pending' as const };
+      vi.spyOn(controller, 'snapshot').mockImplementation(() => {
+        const next = snapshot();
+        if (next !== observed) {
+          observed = next;
+          pending = { ...next, persistenceState: 'pending' as const };
+        }
+        return pending;
+      });
+      return controller;
+    });
+    const client = fakeClient(); client.profiles.mockResolvedValue(profiles);
+    render(<BetaApp client={client} intentJournal={memoryIntentJournal()}/>);
+    await screen.findByRole('textbox', { name: '记录当下' });
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '当前档案' })).toBeEnabled());
+  });
   it('restores Q after a successful selection and process-style restart, retaining the Q draft and P/Q separation', async () => {
     const client = fakeClient(); client.profiles.mockResolvedValue(profiles); const journal = memoryIntentJournal();
     const first = render(<BetaApp client={client} intentJournal={journal}/>); await screen.findByRole('textbox', { name: '记录当下' });
+    await waitFor(() => expect(screen.getByRole('combobox', { name:'当前档案' })).toBeEnabled());
     const select = screen.getByRole('combobox', { name: '当前档案' }); await selectField(select,'q'); await waitFor(() => expect(select).toHaveValue('q'));
     fireEvent.change(await screen.findByRole('textbox', { name: '记录当下' }), { target: { value: 'Q unsent after restart' } });
     await waitFor(() => expect(JSON.parse(journal.values.get('exomind:beta:drafts:device-a')!).drafts.q.text).toBe('Q unsent after restart'));
