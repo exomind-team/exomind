@@ -1,7 +1,7 @@
 use crate::capture_fact::CaptureFact;
 use crate::{
     AgentId, AuthorKind, CaptureCommand, CommandId, CoreError, DeviceId, Durability, EventPage,
-    EventQuery, EventRecord, MAX_EVENT_PAGE_SIZE, ProfileId, ProfileInfo, Receipt, WriterContext,
+    EventQuery, EventRecord, ProfileId, ProfileInfo, Receipt, WriterContext,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::{
@@ -15,7 +15,7 @@ use uuid::Uuid;
 const DATABASE_NAME: &str = "beta-core.sqlite3";
 const MAX_TEXT_BYTES: usize = 128 * 1024;
 const MAX_TAGS: usize = 64;
-const MAX_TAG_BYTES: usize = 128;
+const MAX_TAG_BYTES: usize = crate::MAX_EVENT_TAG_BYTES;
 
 /// One explicit Beta database; no discovery, legacy import, environment
 /// overrides, or fallback backend. The mutex protects this connection only;
@@ -341,6 +341,13 @@ impl Core {
                 ],
             )?;
             let event_sequence = transaction.last_insert_rowid();
+            crate::record_organization::index_capture_tags(
+                &transaction,
+                input.profile_id,
+                input.event_id,
+                event_sequence as u64,
+                &event.tags,
+            )?;
             crate::summaries::note_capture(&transaction, &event)?;
             for (ordinal, original) in input.originals.iter().enumerate() {
                 transaction.execute(
@@ -413,68 +420,7 @@ impl Core {
         profile: ProfileId,
         query: &EventQuery,
     ) -> Result<EventPage, CoreError> {
-        self.check_scope(context, profile)?;
-        if !(1..=MAX_EVENT_PAGE_SIZE).contains(&query.limit) {
-            return Err(CoreError::InvalidQuery("limit must be between 1 and 100"));
-        }
-        let connection = self.connection()?;
-        let current: i64 = connection.query_row(
-            "SELECT coalesce(max(local_seq),0) FROM events WHERE profile_id=?1",
-            [profile.to_string()],
-            |row| row.get(0),
-        )?;
-        let current = u64::try_from(current)
-            .map_err(|_| CoreError::InvalidQuery("invalid stored sequence"))?;
-        let highwater = query.through.unwrap_or(current);
-        if highwater > current {
-            return Err(CoreError::InvalidQuery(
-                "snapshot is ahead of available history",
-            ));
-        }
-        if let Some(before) = query.before {
-            if before == 0 || before > highwater + 1 {
-                return Err(CoreError::InvalidQuery(
-                    "before must be positive and within the snapshot",
-                ));
-            }
-        }
-        // SQLite sequences are signed; highwater+1 is still a valid exclusive
-        // upper boundary at i64::MAX, represented by no additional predicate.
-        let before = query.before.and_then(|value| i64::try_from(value).ok());
-        let through = i64::try_from(highwater)
-            .map_err(|_| CoreError::InvalidQuery("snapshot exceeds the SQLite sequence range"))?;
-        let mut statement = connection.prepare(
-            "SELECT local_seq,body FROM events WHERE profile_id=?1 AND kind='capture' AND local_seq<=?2 AND (?3 IS NULL OR local_seq<?3) AND (?4 IS NULL OR instr(json_extract(body,'$.text'),?4)>0) ORDER BY local_seq DESC LIMIT ?5"
-        )?;
-        let rows = statement.query_map(
-            params![
-                profile.to_string(),
-                through,
-                before,
-                query.search.as_deref(),
-                (query.limit + 1) as i64
-            ],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
-        )?;
-        let mut items = Vec::new();
-        for row in rows {
-            let (sequence, body) = row?;
-            let mut event: EventRecord = serde_json::from_str(&body)?;
-            event.local_seq = sequence as u64;
-            items.push(event);
-        }
-        let has_more = items.len() > query.limit;
-        items.truncate(query.limit);
-        let next_before = if has_more {
-            items.last().map(|event| event.local_seq)
-        } else {
-            None
-        };
-        Ok(EventPage {
-            items,
-            next_before,
-            highwater,
-        })
+        self.events_page_with_tag(context, profile, query, None)
     }
 
     pub fn receipt(

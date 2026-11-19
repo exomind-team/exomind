@@ -11,7 +11,8 @@ use axum::{
     routing::{delete, get, post, put},
 };
 use exomind_core::{
-    CaptureCommand, CommandId, CoreError, EventPage, EventQuery, ProfileId, ProfileInfo, Receipt,
+    CaptureCommand, CommandId, CoreError, CorrectionPage, EventPage, EventQuery,
+    MAX_EVENT_TAG_BYTES, ProfileId, ProfileInfo, Receipt, RecordCorrectionCommand,
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -120,6 +121,16 @@ impl IntoResponse for HostError {
                 "forbidden",
                 "Timeblock control requires human authority",
             ),
+            Self::Core(CoreError::CorrectionRequiresHuman) => (
+                StatusCode::FORBIDDEN,
+                "correction_requires_human",
+                "A correction requires a human profile writer",
+            ),
+            Self::Core(CoreError::CorrectionTargetConflict) => (
+                StatusCode::CONFLICT,
+                "correction_target_conflict",
+                "The target capture does not match this profile, event ID or digest",
+            ),
             Self::Core(CoreError::TimeblockConflict) => (
                 StatusCode::CONFLICT,
                 "timeblock_conflict",
@@ -148,6 +159,7 @@ impl IntoResponse for HostError {
             Self::InvalidRequest
             | Self::Core(
                 CoreError::InvalidCapture(_)
+                | CoreError::InvalidCorrection(_)
                 | CoreError::InvalidQuery(_)
                 | CoreError::InvalidOriginal(_)
                 | CoreError::InvalidOriginalOffset
@@ -437,6 +449,7 @@ struct QueryParameters {
     through: Option<u64>,
     limit: Option<usize>,
     q: Option<String>,
+    tag: Option<String>,
 }
 
 async fn events(
@@ -448,6 +461,12 @@ async fn events(
     let token = bearer(&headers)?;
     let Path(profile) = profile.map_err(|_| HostError::InvalidRequest)?;
     let Query(query) = query.map_err(|_| HostError::InvalidRequest)?;
+    if let Some(tag) = query.tag.as_deref()
+        && (tag.trim().is_empty() || tag.len() > MAX_EVENT_TAG_BYTES)
+    {
+        return Err(HostError::InvalidRequest);
+    }
+    let tag = query.tag;
     let query = EventQuery {
         before: query.before,
         through: query.through,
@@ -456,7 +475,76 @@ async fn events(
     };
     Ok(Json(
         work(host, move |host| {
-            host.events_page(&host.authenticate(&token)?, profile, &query)
+            host.events_page_with_tag(&host.authenticate(&token)?, profile, &query, tag.as_deref())
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CorrectionBody {
+    command_id: CommandId,
+    event_id: exomind_core::EventId,
+    occurred_at_ms: i64,
+    target_event_id: exomind_core::EventId,
+    target_digest: String,
+    corrected_text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CorrectionQuery {
+    before: Option<u64>,
+    through: Option<u64>,
+    limit: Option<usize>,
+    q: Option<String>,
+}
+
+async fn correct(
+    State(host): State<Arc<BetaHost>>,
+    headers: HeaderMap,
+    profile: Result<Path<ProfileId>, PathRejection>,
+    body: Result<Json<CorrectionBody>, JsonRejection>,
+) -> Result<Json<Receipt>, HostError> {
+    let token = bearer(&headers)?;
+    let Path(profile) = profile.map_err(|_| HostError::InvalidRequest)?;
+    let Json(body) = body.map_err(|_| HostError::InvalidRequest)?;
+    let command = RecordCorrectionCommand {
+        command_id: body.command_id,
+        event_id: body.event_id,
+        profile_id: profile,
+        occurred_at_ms: body.occurred_at_ms,
+        target_event_id: body.target_event_id,
+        target_digest: body.target_digest,
+        corrected_text: body.corrected_text,
+    };
+    Ok(Json(
+        work(host, move |host| {
+            host.record_correction(&host.authenticate(&token)?, &command)
+        })
+        .await?,
+    ))
+}
+
+async fn corrections(
+    State(host): State<Arc<BetaHost>>,
+    headers: HeaderMap,
+    profile: Result<Path<ProfileId>, PathRejection>,
+    query: Result<Query<CorrectionQuery>, QueryRejection>,
+) -> Result<Json<CorrectionPage>, HostError> {
+    let token = bearer(&headers)?;
+    let Path(profile) = profile.map_err(|_| HostError::InvalidRequest)?;
+    let Query(query) = query.map_err(|_| HostError::InvalidRequest)?;
+    let query = EventQuery {
+        before: query.before,
+        through: query.through,
+        limit: query.limit.unwrap_or(100),
+        search: query.q,
+    };
+    Ok(Json(
+        work(host, move |host| {
+            host.corrections_page(&host.authenticate(&token)?, profile, &query)
         })
         .await?,
     ))
@@ -491,6 +579,10 @@ fn router(host: Arc<BetaHost>, address: SocketAddr, frontend_origins: Vec<String
         .route("/beta/v1/grants/:id", delete(revoke))
         .route("/beta/v1/capture", post(capture))
         .route("/beta/v1/profiles/:profile/events", get(events))
+        .route(
+            "/beta/v1/profiles/:profile/corrections",
+            get(corrections).post(correct),
+        )
         .route("/beta/v1/profiles/:profile/receipts/:command", get(receipt))
         .merge(crate::agent_access_http::router())
         .merge(crate::external_summaries_http::router())

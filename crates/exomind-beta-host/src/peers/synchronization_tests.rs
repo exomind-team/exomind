@@ -1353,3 +1353,54 @@ async fn dropping_the_public_sync_future_cancels_and_drains_its_blocking_session
     drop(listening);
     stop(r.b).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn core8_sync_hello_is_rejected_before_core9_fact_exchange() {
+    let r = rig().await;
+    assert_eq!(CORE_SCHEMA_VERSION, 9);
+    let mut listening = listener(&r.b, &r.ob).await;
+    let (client, server) = connect(&r.a, &r.oa, &r.b, &r.ob, &mut listening).await;
+    let target = r.b.clone();
+    let options = PeerSyncOptions::default();
+    let serving = tokio::spawn(async move {
+        target
+            .accept_peer_profile_sync_over_transport(server, options)
+            .await
+    });
+    let mut io = SessionIo {
+        framed: FramedPeerChannel::new(client),
+        cancel: PeerCancellation::new(),
+        end: Instant::now() + options.session_timeout,
+        options,
+    };
+
+    // Core8 understands the existing fact variants, but not correction/1.
+    // The real sync Hello schema gate must reject it before any facts can flow.
+    io.send(&Message::Hello {
+        runtime_id: r.a.runtime_id,
+        protocol: PROTOCOL.into(),
+        schema: 8,
+        profile_id: r.p,
+        device_id: r.a.device_id,
+        origin: None,
+        permissions: PeerSyncPermissions {
+            send: true,
+            receive: true,
+        },
+    })
+    .await
+    .unwrap();
+
+    assert!(matches!(
+        io.read().await,
+        Err(HostError::PeerProtocolMismatch)
+    ));
+    assert!(matches!(
+        serving.await.unwrap(),
+        Err(HostError::PeerProtocolMismatch)
+    ));
+    drop(io);
+    drop(listening);
+    stop(r.a).await;
+    stop(r.b).await;
+}

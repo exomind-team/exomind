@@ -1,5 +1,6 @@
 use crate::{
-    CoreError, DeviceId, EventId, EventRecord, OriginalRef, ProfileId, TimeblockNodeRecord,
+    CoreError, CorrectionRecord, DeviceId, EventId, EventRecord, OriginalRef, ProfileId,
+    TimeblockNodeRecord,
 };
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,8 @@ pub enum ReplicatedFact {
     Summary(crate::SummaryArtifactRecord),
     #[serde(rename = "agent_summary/1")]
     AgentSummary(crate::ExternalSummaryRecord),
+    #[serde(rename = "correction/1")]
+    Correction(CorrectionRecord),
 }
 impl ReplicatedFact {
     pub fn event_id(&self) -> EventId {
@@ -26,6 +29,7 @@ impl ReplicatedFact {
             Self::SummaryJob(v) => v.event_id,
             Self::Summary(v) => v.event_id,
             Self::AgentSummary(v) => v.event_id,
+            Self::Correction(v) => v.event_id,
         }
     }
     pub fn profile_id(&self) -> ProfileId {
@@ -35,6 +39,7 @@ impl ReplicatedFact {
             Self::SummaryJob(v) => v.profile_id,
             Self::Summary(v) => v.profile_id,
             Self::AgentSummary(v) => v.profile_id,
+            Self::Correction(v) => v.profile_id,
         }
     }
     pub fn device_id(&self) -> DeviceId {
@@ -44,6 +49,7 @@ impl ReplicatedFact {
             Self::SummaryJob(v) => v.device_id,
             Self::Summary(v) => v.device_id,
             Self::AgentSummary(v) => v.device_id,
+            Self::Correction(v) => v.device_id,
         }
     }
     pub fn digest(&self) -> &str {
@@ -53,6 +59,7 @@ impl ReplicatedFact {
             Self::SummaryJob(v) => &v.digest,
             Self::Summary(v) => &v.digest,
             Self::AgentSummary(v) => &v.digest,
+            Self::Correction(v) => &v.digest,
         }
     }
     pub fn fact_type(&self) -> &'static str {
@@ -63,6 +70,7 @@ impl ReplicatedFact {
             Self::SummaryJob(_) => "summary_job/1",
             Self::Summary(_) => "summary/1",
             Self::AgentSummary(_) => "agent_summary/1",
+            Self::Correction(_) => "correction/1",
         }
     }
     pub fn canonical_fact_bytes(&self) -> Result<Vec<u8>, CoreError> {
@@ -72,14 +80,17 @@ impl ReplicatedFact {
             Self::SummaryJob(v) => v.canonical_fact_bytes(),
             Self::Summary(v) => v.canonical_fact_bytes(),
             Self::AgentSummary(v) => v.canonical_fact_bytes(),
+            Self::Correction(v) => v.canonical_fact_bytes(),
         }
     }
     pub(super) fn originals(&self) -> &[OriginalRef] {
         match self {
             Self::Capture(v) => &v.originals,
-            Self::Timeblock(_) | Self::SummaryJob(_) | Self::Summary(_) | Self::AgentSummary(_) => {
-                &[]
-            }
+            Self::Timeblock(_)
+            | Self::SummaryJob(_)
+            | Self::Summary(_)
+            | Self::AgentSummary(_)
+            | Self::Correction(_) => &[],
         }
     }
     pub(super) fn portable(&self) -> Self {
@@ -90,6 +101,7 @@ impl ReplicatedFact {
             Self::SummaryJob(v) => v.local_seq = 0,
             Self::Summary(v) => v.local_seq = 0,
             Self::AgentSummary(v) => v.local_seq = 0,
+            Self::Correction(v) => v.local_seq = 0,
         };
         value
     }
@@ -100,6 +112,7 @@ impl ReplicatedFact {
             Self::SummaryJob(v) => crate::fact_encoding::encode_fact(v),
             Self::Summary(v) => crate::fact_encoding::encode_fact(v),
             Self::AgentSummary(v) => crate::fact_encoding::encode_fact(v),
+            Self::Correction(v) => crate::fact_encoding::encode_fact(v),
         }
     }
     pub(crate) fn validate(&self) -> Result<(), CoreError> {
@@ -137,6 +150,7 @@ impl ReplicatedFact {
             Self::SummaryJob(v) => v.validate()?,
             Self::Summary(v) => v.validate()?,
             Self::AgentSummary(v) => v.validate()?,
+            Self::Correction(v) => v.validate()?,
         }
         self.body()?;
         Ok(())
@@ -156,6 +170,7 @@ pub(super) fn load_fact(
             "summary_job/1" => ReplicatedFact::SummaryJob(serde_json::from_str(&body)?),
             "summary/1" => ReplicatedFact::Summary(serde_json::from_str(&body)?),
             "agent_summary/1" => ReplicatedFact::AgentSummary(serde_json::from_str(&body)?),
+            "correction/1" => ReplicatedFact::Correction(serde_json::from_str(&body)?),
             _ => return Err(CoreError::RecoveryRequired),
         };
         if fact.event_id() != event

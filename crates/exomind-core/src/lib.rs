@@ -12,6 +12,7 @@ mod manifests;
 mod migrations;
 mod original_query;
 mod originals;
+mod record_organization;
 mod replication;
 mod store;
 mod summaries;
@@ -28,6 +29,10 @@ pub use originals::{
     BeginStageCommand, MAX_CAPTURE_ORIGINALS, MAX_ORIGINAL_CHUNK_BYTES, OriginalChunk, OriginalRef,
     StageState, StageStatus, VerificationProof, VerificationTicket,
 };
+pub use record_organization::{
+    CorrectionEntry, CorrectionPage, CorrectionRecord, CorrectionTargetState, MAX_EVENT_TAG_BYTES,
+    RecordCorrectionCommand,
+};
 pub use replication::{
     DEFAULT_ORIGIN_PAGE_BYTES, ImportAck, MAX_ORIGIN_PAGE_BYTES, OriginCursor, OriginEntry,
     OriginIdentity, OriginPage, OriginPageProof, OriginPageQuery, OriginProvenanceKey,
@@ -36,7 +41,7 @@ pub use replication::{
 };
 use serde::{Deserialize, Serialize};
 pub use store::Core;
-pub const CORE_SCHEMA_VERSION: i64 = 8;
+pub const CORE_SCHEMA_VERSION: i64 = 9;
 /// Durable UTF-8 JSON fact encoding, independent of the smaller wire-page
 /// budget. Includes worst-case escaping of all existing capture input limits.
 pub const MAX_FACT_BYTES: usize = 2 * 1024 * 1024;
@@ -104,6 +109,12 @@ pub enum CoreError {
     EventConflict,
     #[error("invalid capture: {0}")]
     InvalidCapture(&'static str),
+    #[error("invalid correction: {0}")]
+    InvalidCorrection(&'static str),
+    #[error("correction can only be authored by a human profile writer")]
+    CorrectionRequiresHuman,
+    #[error("correction target does not match the stated profile, capture ID and digest")]
+    CorrectionTargetConflict,
     #[error("core connection lock was poisoned")]
     ConnectionPoisoned,
     #[error("filesystem operation failed: {0}")]

@@ -278,6 +278,7 @@ fn apply_page(
                 ReplicatedFact::SummaryJob(_) => "summary_job/1",
                 ReplicatedFact::Summary(_) => "summary/1",
                 ReplicatedFact::AgentSummary(_) => "agent_summary/1",
+                ReplicatedFact::Correction(_) => "correction/1",
             };
             transaction.execute(
                 "INSERT INTO events(event_id,profile_id,digest,body,kind) VALUES(?1,?2,?3,?4,?5)",
@@ -289,6 +290,16 @@ fn apply_page(
                     kind
                 ],
             )?;
+            let local_seq = transaction.last_insert_rowid();
+            if let ReplicatedFact::Capture(record) = &received {
+                crate::record_organization::index_capture_tags(
+                    transaction,
+                    record.profile_id,
+                    record.event_id,
+                    u64::try_from(local_seq).map_err(|_| CoreError::RecoveryRequired)?,
+                    &record.tags,
+                )?;
+            }
             for (ordinal, original) in received.originals().iter().enumerate() {
                 transaction.execute(
                     "INSERT INTO event_originals VALUES(?1,?2,?3)",
@@ -319,7 +330,7 @@ fn apply_page(
                 )?,
                 // Derived external attestations do not create model work,
                 // internal task qualification, or attachment read authority.
-                ReplicatedFact::AgentSummary(_) => {}
+                ReplicatedFact::AgentSummary(_) | ReplicatedFact::Correction(_) => {}
             }
             inserted += 1;
         }

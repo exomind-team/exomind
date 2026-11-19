@@ -197,6 +197,14 @@ pub(super) fn verify_endpoint(
                 && fact.device_id == identity.device_id
                 && fact.digest == digest
         }
+        "correction/1" => {
+            let fact: crate::CorrectionRecord = serde_json::from_str(&body)?;
+            fact.validate()?;
+            fact.event_id == event
+                && fact.profile_id == identity.profile_id
+                && fact.device_id == identity.device_id
+                && fact.digest == digest
+        }
         _ => false,
     };
     let previous = if seq == 1 {

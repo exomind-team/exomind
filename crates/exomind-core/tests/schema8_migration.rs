@@ -1,5 +1,6 @@
-//! Retained Core7 is produced by a genuine old executable, never downgraded
-//! from Core8. Only copies are opened; source hashes must remain unchanged.
+//! Synthetic retained Beta08/Core7 is produced by its old executable, never
+//! downgraded from a newer Core. Only independent copies are opened; source
+//! hashes must remain unchanged.
 use exomind_core::*;
 use rusqlite::{Connection, OpenFlags, types::Value};
 use sha2::{Digest, Sha256};
@@ -80,10 +81,11 @@ fn copy_fixture(source: &Path) -> tempfile::TempDir {
 }
 
 #[test]
-#[ignore = "explicit immutable actual Core7 via EXOMIND_CORE_SCHEMA7_FIXTURE"]
-fn actual_core7_migration_preserves_every_old_row_and_backs_up_before_proof_storage() {
+#[ignore = "explicit immutable synthetic Beta08/Core7 via EXOMIND_CORE_SCHEMA7_FIXTURE"]
+fn beta08_core7_archive_upgrade_preserves_facts_receipts_and_reopen_identity() {
     let source = std::path::PathBuf::from(
-        std::env::var_os("EXOMIND_CORE_SCHEMA7_FIXTURE").expect("explicit immutable actual Core7"),
+        std::env::var_os("EXOMIND_CORE_SCHEMA7_FIXTURE")
+            .expect("explicit immutable synthetic Beta08/Core7"),
     );
     assert!(source.is_absolute());
     let original_hashes = hashes(&source);
@@ -151,6 +153,41 @@ fn actual_core7_migration_preserves_every_old_row_and_backs_up_before_proof_stor
             }
         }
     }
+    let mut retained_record = None;
+    for profile in core.profiles().unwrap() {
+        let context = core.local_human(profile.profile_id).unwrap();
+        retained_record = core
+            .events(&context, profile.profile_id)
+            .unwrap()
+            .into_iter()
+            .find(|event| !event.tags.is_empty());
+        if retained_record.is_some() {
+            break;
+        }
+    }
+    let retained_record = retained_record.expect("Beta08 fixture includes a tagged capture");
+    let profile = retained_record.profile_id;
+    let context = core.local_human(profile).unwrap();
+    let tag = retained_record.tags[0].clone();
+    assert!(
+        core.events_page_with_tag(&context, profile, &EventQuery::default(), Some(&tag))
+            .unwrap()
+            .items
+            .iter()
+            .any(|event| event.event_id == retained_record.event_id)
+    );
+    let correction = RecordCorrectionCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: profile,
+        occurred_at_ms: retained_record.occurred_at_ms.saturating_add(1),
+        target_event_id: retained_record.event_id,
+        target_digest: retained_record.digest.clone(),
+        corrected_text: "synthetic post-upgrade correction".into(),
+    };
+    let correction_receipt = core.record_correction(&context, &correction).unwrap();
+    let device_id = core.device_id();
+
     let backups = fs::read_dir(root.path().join("backups"))
         .unwrap()
         .map(|e| e.unwrap().path())
@@ -176,6 +213,29 @@ fn actual_core7_migration_preserves_every_old_row_and_backs_up_before_proof_stor
     drop(db);
     drop(core);
     let reopened = Core::open(root.path()).unwrap();
+    assert_eq!(reopened.device_id(), device_id);
+    let reopened_context = reopened.local_human(profile).unwrap();
+    assert!(
+        reopened
+            .origin_checkpoint(&reopened_context, profile)
+            .unwrap()
+            .seq
+            > 0
+    );
+    assert_eq!(
+        reopened
+            .receipt(&reopened_context, correction.command_id)
+            .unwrap()
+            .unwrap(),
+        correction_receipt
+    );
+    let reopened_corrections = reopened
+        .corrections_page(&reopened_context, profile, &EventQuery::default())
+        .unwrap();
+    assert!(reopened_corrections.items.iter().any(|item| {
+        item.record.event_id == correction.event_id
+            && item.target_state == CorrectionTargetState::DigestMatches
+    }));
     drop(reopened);
     assert_eq!(
         fs::read_dir(root.path().join("backups")).unwrap().count(),
@@ -202,6 +262,145 @@ fn actual_core7_migration_preserves_every_old_row_and_backs_up_before_proof_stor
         7
     );
     assert_eq!(snapshot(&db), before);
+    assert_eq!(hashes(&source), original_hashes);
+}
+
+#[test]
+#[ignore = "explicit immutable synthetic Core8 provenance archive via EXOMIND_CORE_SCHEMA8_FIXTURE"]
+fn core8_upgrade_preserves_receipts_origin_positions_and_verified_proofs() {
+    let source = std::path::PathBuf::from(
+        std::env::var_os("EXOMIND_CORE_SCHEMA8_FIXTURE")
+            .expect("explicit immutable synthetic Core8 provenance archive"),
+    );
+    assert!(source.is_absolute());
+    let original_hashes = hashes(&source);
+    let root = copy_fixture(&source);
+    let path = root.path().join("beta-core.sqlite3");
+    let old = readonly(&path);
+    assert_eq!(
+        old.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
+            .unwrap(),
+        8
+    );
+    let expected = snapshot(&old);
+    for name in [
+        "events",
+        "command_receipts",
+        "origin_entries",
+        "origin_position_proofs",
+        "verified_origin_prefixes",
+    ] {
+        assert!(
+            !expected[name].is_empty(),
+            "synthetic Core8 fixture must exercise {name}"
+        );
+    }
+    drop(old);
+
+    let core = Core::open(root.path()).unwrap();
+    let database = readonly(core.database_path());
+    assert_eq!(
+        database
+            .pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
+            .unwrap(),
+        CORE_SCHEMA_VERSION
+    );
+    for (table, values) in &expected {
+        assert_eq!(
+            &rows(&database, table),
+            values,
+            "Core8 values, rowids, receipts and proofs must remain byte-for-byte stable in {table}"
+        );
+    }
+    let profile = core.profiles().unwrap()[0].profile_id;
+    let context = core.local_human(profile).unwrap();
+    let target = core
+        .events(&context, profile)
+        .unwrap()
+        .into_iter()
+        .find(|event| !event.tags.is_empty())
+        .expect("synthetic Core8 fixture includes a tagged capture");
+    assert!(
+        core.events_page_with_tag(
+            &context,
+            profile,
+            &EventQuery::default(),
+            Some(&target.tags[0]),
+        )
+        .unwrap()
+        .items
+        .iter()
+        .any(|event| event.event_id == target.event_id)
+    );
+    let correction = RecordCorrectionCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: profile,
+        occurred_at_ms: target.occurred_at_ms.saturating_add(1),
+        target_event_id: target.event_id,
+        target_digest: target.digest.clone(),
+        corrected_text: "synthetic Core8 post-upgrade correction".into(),
+    };
+    let correction_receipt = core.record_correction(&context, &correction).unwrap();
+    assert_eq!(
+        serde_json::to_value(
+            core.events(&context, profile)
+                .unwrap()
+                .into_iter()
+                .find(|event| event.event_id == target.event_id)
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_value(&target).unwrap()
+    );
+    let device_id = core.device_id();
+    assert!(
+        database
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .query([])
+            .unwrap()
+            .next()
+            .unwrap()
+            .is_none()
+    );
+    let backup = fs::read_dir(root.path().join("backups"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(backup.len(), 1);
+    assert!(
+        backup[0]
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("schema-8-")
+    );
+    drop(database);
+    drop(core);
+
+    let reopened = Core::open(root.path()).unwrap();
+    assert_eq!(reopened.device_id(), device_id);
+    let context = reopened.local_human(profile).unwrap();
+    assert_eq!(
+        reopened.receipt(&context, correction.command_id).unwrap(),
+        Some(correction_receipt)
+    );
+    assert!(
+        reopened
+            .corrections_page(&context, profile, &EventQuery::default())
+            .unwrap()
+            .items
+            .iter()
+            .any(|item| item.record.event_id == correction.event_id
+                && item.target_state == CorrectionTargetState::DigestMatches)
+    );
+    drop(reopened);
+    assert_eq!(
+        fs::read_dir(root.path().join("backups")).unwrap().count(),
+        1
+    );
     assert_eq!(hashes(&source), original_hashes);
 }
 

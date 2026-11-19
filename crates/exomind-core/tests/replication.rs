@@ -16,6 +16,21 @@ fn capture(core: &Core, p: ProfileId, text: &str, originals: Vec<OriginalRef>) -
         .unwrap();
     command
 }
+fn correction(
+    p: ProfileId,
+    target_event_id: EventId,
+    target_digest: &str,
+) -> RecordCorrectionCommand {
+    RecordCorrectionCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: p,
+        occurred_at_ms: 2000,
+        target_event_id,
+        target_digest: target_digest.to_owned(),
+        corrected_text: "corrected by its human author".into(),
+    }
+}
 fn peer(core: &Core, p: ProfileId, source: &Core) -> ReplicaContext {
     let origin = source
         .replication_identity(&source.local_human(p).unwrap(), p)
@@ -79,6 +94,166 @@ fn original(bytes: &[u8]) -> OriginalRef {
         file_name: "opaque.bin".into(),
         media_type: "application/octet-stream".into(),
     }
+}
+
+#[test]
+fn correction_imports_before_its_source_and_resolves_when_the_source_arrives() {
+    let source_a_root = tempfile::tempdir().unwrap();
+    let source_b_root = tempfile::tempdir().unwrap();
+    let receiver_root = tempfile::tempdir().unwrap();
+    let source_a = Core::open(source_a_root.path()).unwrap();
+    let source_b = Core::open(source_b_root.path()).unwrap();
+    let receiver = Core::open(receiver_root.path()).unwrap();
+    let profile = ProfileId::new();
+    for core in [&source_a, &source_b, &receiver] {
+        core.provision_profile(profile, "synthetic shared profile")
+            .unwrap();
+    }
+
+    let source_b_context = source_b.local_human(profile).unwrap();
+    let target = capture(&source_b, profile, "arrives after its correction", vec![]);
+    let target_digest = source_b
+        .events(&source_b_context, profile)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.event_id == target.event_id)
+        .unwrap()
+        .digest;
+    let command = correction(profile, target.event_id, &target_digest);
+    let source_a_context = source_a.local_human(profile).unwrap();
+    let receipt = source_a
+        .record_correction(&source_a_context, &command)
+        .unwrap();
+    let correction_page = page(&source_a, profile);
+    let source_canonical = correction_page.entries[0]
+        .fact
+        .canonical_fact_bytes()
+        .unwrap();
+
+    let first_ack = receiver
+        .import_origin_page(&peer(&receiver, profile, &source_a), &correction_page)
+        .unwrap();
+    let pending = receiver
+        .corrections_page(
+            &receiver.local_human(profile).unwrap(),
+            profile,
+            &EventQuery::default(),
+        )
+        .unwrap();
+    let target_page = page(&source_b, profile);
+    let target_ack = receiver
+        .import_origin_page(&peer(&receiver, profile, &source_b), &target_page)
+        .unwrap();
+    let resolved = receiver
+        .corrections_page(
+            &receiver.local_human(profile).unwrap(),
+            profile,
+            &EventQuery::default(),
+        )
+        .unwrap();
+    let replicated_tag_page = receiver
+        .events_page_with_tag(
+            &receiver.local_human(profile).unwrap(),
+            profile,
+            &EventQuery::default(),
+            Some("tag"),
+        )
+        .unwrap();
+
+    assert_eq!(first_ack.inserted, 1);
+    assert_eq!(first_ack.cursor, correction_page.to);
+    assert_eq!(
+        pending.items[0].target_state,
+        CorrectionTargetState::Unresolved
+    );
+    assert_eq!(target_ack.inserted, 1);
+    assert_eq!(
+        resolved.items[0].target_state,
+        CorrectionTargetState::DigestMatches
+    );
+    assert_eq!(resolved.items[0].record.target_event_id, target.event_id);
+    assert_eq!(resolved.items[0].record.target_digest, target_digest);
+    assert_eq!(
+        resolved.items[0].record.canonical_fact_bytes().unwrap(),
+        source_canonical
+    );
+    assert!(
+        replicated_tag_page
+            .items
+            .iter()
+            .any(|event| event.event_id == target.event_id)
+    );
+    assert_eq!(
+        receiver
+            .receipt(&receiver.local_human(profile).unwrap(), command.command_id,)
+            .unwrap(),
+        None,
+        "replication must not invent a receiver-local human receipt"
+    );
+    assert_eq!(receipt.event_id, command.event_id);
+}
+
+#[test]
+fn late_target_with_a_different_digest_leaves_correction_explicitly_conflicted() {
+    let source_a_root = tempfile::tempdir().unwrap();
+    let source_b_root = tempfile::tempdir().unwrap();
+    let receiver_root = tempfile::tempdir().unwrap();
+    let source_a = Core::open(source_a_root.path()).unwrap();
+    let source_b = Core::open(source_b_root.path()).unwrap();
+    let receiver = Core::open(receiver_root.path()).unwrap();
+    let profile = ProfileId::new();
+    for core in [&source_a, &source_b, &receiver] {
+        core.provision_profile(profile, "synthetic shared profile")
+            .unwrap();
+    }
+    let target = capture(&source_b, profile, "actual source content", vec![]);
+    let actual_digest = source_b
+        .events(&source_b.local_human(profile).unwrap(), profile)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.event_id == target.event_id)
+        .unwrap()
+        .digest;
+    let wrong_digest = format!(
+        "{}{}",
+        if actual_digest.starts_with('0') {
+            "1"
+        } else {
+            "0"
+        },
+        &actual_digest[1..]
+    );
+    let command = correction(profile, target.event_id, &wrong_digest);
+    source_a
+        .record_correction(&source_a.local_human(profile).unwrap(), &command)
+        .unwrap();
+    receiver
+        .import_origin_page(
+            &peer(&receiver, profile, &source_a),
+            &page(&source_a, profile),
+        )
+        .unwrap();
+    receiver
+        .import_origin_page(
+            &peer(&receiver, profile, &source_b),
+            &page(&source_b, profile),
+        )
+        .unwrap();
+
+    let result = receiver
+        .corrections_page(
+            &receiver.local_human(profile).unwrap(),
+            profile,
+            &EventQuery::default(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        result.items[0].target_state,
+        CorrectionTargetState::DigestConflict
+    );
+    assert_eq!(result.items[0].record.target_digest, wrong_digest);
+    assert_eq!(result.items[0].record.target_event_id, target.event_id);
 }
 
 #[test]
@@ -423,6 +598,7 @@ fn rechain(page: &mut OriginPage) {
             ReplicatedFact::SummaryJob(v) => v.digest = v.computed_digest().unwrap(),
             ReplicatedFact::Summary(v) => v.digest = v.computed_digest().unwrap(),
             ReplicatedFact::AgentSummary(v) => v.digest = v.computed_digest().unwrap(),
+            ReplicatedFact::Correction(v) => v.digest = v.computed_digest().unwrap(),
         }
         entry.origin_seq = previous.seq + 1;
         entry.chain_hash = format!(

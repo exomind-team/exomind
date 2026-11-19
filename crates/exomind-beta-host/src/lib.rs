@@ -29,6 +29,7 @@ pub use summary_jobs::SummaryServiceStatus;
 mod original_tests;
 mod originals;
 mod originals_http;
+mod record_organization;
 mod peers;
 pub use peers::{
     ApprovePeerInvitationReplacement, CreatePeerInvitation, DEFAULT_ORIGINAL_AUTO_BYTES,

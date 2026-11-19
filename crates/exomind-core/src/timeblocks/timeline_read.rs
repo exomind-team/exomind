@@ -49,7 +49,9 @@ pub(super) fn decode(profile: ProfileId, row: TimelineRow) -> Result<TimelineIte
             value.local_seq = seq;
             TimelineItem::AgentSummary(value)
         }
-        ReplicatedFact::SummaryJob(_) => return Err(CoreError::RecoveryRequired),
+        ReplicatedFact::SummaryJob(_) | ReplicatedFact::Correction(_) => {
+            return Err(CoreError::RecoveryRequired);
+        }
     })
 }
 impl Core {

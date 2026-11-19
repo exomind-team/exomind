@@ -78,6 +78,7 @@ pub(crate) fn validate_backup_directory(path: &Path) -> Result<(), CoreError> {
             .or_else(|| name.strip_prefix("schema-5-"))
             .or_else(|| name.strip_prefix("schema-6-"))
             .or_else(|| name.strip_prefix("schema-7-"))
+            .or_else(|| name.strip_prefix("schema-8-"))
             .and_then(|name| name.strip_suffix(".sqlite3"))
             .ok_or(CoreError::ForeignRoot)?;
         if Uuid::parse_str(id)
@@ -263,7 +264,7 @@ pub(crate) fn initialize(
     expected_device: Option<crate::DeviceId>,
 ) -> Result<(), CoreError> {
     // The only writer is the unopened Core's migration transaction. Replacing
-    // events with its schema7 CHECK must not rename its existing child FKs.
+    // events with its widened fact-kind CHECK must not rename child FKs.
     // Restore enforcement on EVERY return path, after the transaction drops.
     connection.pragma_update(None, "foreign_keys", false)?;
     let result = initialize_transaction(
@@ -288,7 +289,7 @@ fn initialize_transaction(
     let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
     let application: i64 =
         transaction.pragma_query_value(None, "application_id", |row| row.get(0))?;
-    if ![0, 1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION].contains(&version) {
+    if ![0, 1, 2, 3, 4, 5, 6, 7, 8, SCHEMA_VERSION].contains(&version) {
         return Err(CoreError::UnsupportedSchema(version));
     }
     if application != 0 && application != APPLICATION_ID {
@@ -357,6 +358,8 @@ fn initialize_transaction(
     else if transaction.prepare("SELECT e.kind,s.revision,n.request_digest FROM events e LEFT JOIN timeblock_state s ON s.profile_id=e.profile_id LEFT JOIN timeblock_nodes n ON n.event_id=e.event_id LIMIT 0").is_err(){return Err(CoreError::RecoveryRequired);}
     if version < 4 {
         crate::replication::migrate(&transaction)?;
+    } else if version >= 9 {
+        crate::replication::validate_correction_fact_schema(&transaction)?;
     } else if version >= 7 {
         crate::replication::validate_agent_summary_schema(&transaction)?;
     } else if version >= 6 {
@@ -376,15 +379,17 @@ fn initialize_transaction(
     } else {
         if version == 6 {
             crate::summaries::validate_events(&transaction)?;
-        } else {
+        } else if version < 9 {
             crate::external_summaries::validate_schema(&transaction)?;
+        } else {
+            crate::record_organization::validate_schema(&transaction)?;
         }
         crate::summaries::validate_schema(&transaction)?;
     }
     if version < 7 {
         crate::external_summaries::migrate_schema(&transaction)?;
         crate::replication::migrate_agent_summary_facts(&transaction)?;
-    } else {
+    } else if version < 9 {
         crate::external_summaries::validate_schema(&transaction)?;
         crate::replication::validate_agent_summary_schema(&transaction)?;
     }
@@ -392,6 +397,10 @@ fn initialize_transaction(
         crate::replication::migrate_provenance(&transaction)?;
     } else {
         crate::replication::validate_provenance(&transaction)?;
+    }
+    if version < 9 {
+        crate::record_organization::migrate_schema(&transaction)?;
+        crate::replication::migrate_correction_fact_type(&transaction)?;
     }
     if transaction
         .prepare("PRAGMA foreign_key_check")?
