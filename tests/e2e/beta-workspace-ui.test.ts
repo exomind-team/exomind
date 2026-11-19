@@ -10,6 +10,38 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByLabel('记录历史')).toHaveAttribute('aria-busy', 'false');
 });
 
+test('text preview stays literal, wraps long lines and returns to the same draft',async({page},info)=>{
+  const input=page.getByRole('textbox',{name:'记录当下'}),draft='文本预览期间继续保留这份草稿。';
+  await input.fill(draft);const editor=await input.elementHandle();
+  const trigger=page.getByRole('button',{name:'预览文本 合成说明.md'});
+  await expect(trigger).toBeVisible();expect((await counters(page)).textReads).toBe(0);
+  await activate(page,trigger);
+  const dialog=page.getByRole('dialog'),body=dialog.getByTestId('beta-text-preview-body');
+  await expect(dialog).toBeInViewport({ratio:1});await expect(body).toContainText('BEGIN_TEXT');
+  await expect(body).toContainText('<script>');await expect(dialog.locator('script')).toHaveCount(0);
+  expect(await page.evaluate(()=>(window as unknown as {__betaTextExecuted?:boolean}).__betaTextExecuted)).toBeUndefined();
+  const layout=await body.evaluate(element=>({width:element.clientWidth,scrollWidth:element.scrollWidth,scrollbar:getComputedStyle(element).getPropertyValue('scrollbar-width')}));
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width+1);expect(layout.scrollbar).toBe('none');
+  if(info.project.use.hasTouch){
+    await body.evaluate(element=>{element.scrollTop=element.scrollHeight;});
+  }else{
+    await expect(dialog.getByRole('button',{name:'Close'})).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(body).toBeFocused();
+    await page.keyboard.press('End');
+    await expect.poll(()=>body.evaluate(element=>element.scrollTop)).toBeGreaterThan(0);
+  }
+  const reads=(await counters(page)).textReads;
+  await activate(page,dialog.getByRole('button',{name:'下一段'}));
+  await expect(body).toContainText('END_TEXT');expect(await body.evaluate(element=>element.scrollTop)).toBe(0);
+  expect((await counters(page)).textReads).toBe(reads);
+  await page.screenshot({path:info.outputPath('text-preview.png'),fullPage:true});
+  if(info.project.use.hasTouch)await activate(page,dialog.getByRole('button',{name:'Close'}));else await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();await expect(trigger).toBeFocused();
+  expect(await input.evaluate((element,previous)=>element===previous,editor)).toBe(true);await expect(input).toHaveValue(draft);
+  expect((await counters(page)).captures).toBe(0);expect((await counters(page)).timerCommands).toBe(0);
+});
+
 test('one editor survives image preview, reading, independent panes, navigation and reload', async ({ page }, info) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const input = page.getByRole('textbox', { name: '记录当下' });

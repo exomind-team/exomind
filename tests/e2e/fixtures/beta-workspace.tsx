@@ -15,9 +15,10 @@ document.documentElement.classList.add('beta-ui');
 const P = '11111111-1111-4111-8111-111111111111';
 const Q = '22222222-2222-4222-8222-222222222222';
 const D = '33333333-3333-4333-8333-333333333333';
-const counters = { snapshots: 0, timeline: 0, imageReads: 0, captures: 0, timerCommands: 0 };
+const counters = { snapshots: 0, timeline: 0, imageReads: 0, textReads: 0, captures: 0, timerCommands: 0 };
 const digest = (bytes: Uint8Array) => Array.from(sha256(bytes), byte => byte.toString(16).padStart(2, '0')).join('');
 const originals = new Map<string, Uint8Array>();
+let textOriginalId = '';
 const stages = new Map<string, { stage: BetaStage; bytes: Uint8Array }>();
 const receipts = new Map<string, BetaReceipt>();
 const profiles = [{ profile_id: P, display_name: '日常 · 合成档案' }, { profile_id: Q, display_name: '另一份 · 合成档案' }];
@@ -96,13 +97,15 @@ const client: BetaClient = {
     write: async (_profile, id, offset, bytes) => { const current = stages.get(id)!; current.bytes.set(bytes, offset); current.stage.next_offset = offset + bytes.length; return structuredClone(current.stage); },
     verify: async (profile, id) => { const current = stages.get(id)!; current.stage.state = digest(current.bytes) === current.stage.original.sha256 ? 'verified' : 'hash_mismatch'; originals.set(`${profile}:${current.stage.original.original_id}`, current.bytes); return structuredClone(current.stage); },
     readStage: async (_profile, id, offset, length) => stages.get(id)!.bytes.slice(offset, offset + length),
-    readOriginal: async (profile, id, offset, length) => { counters.imageReads++; const bytes = originals.get(`${profile}:${id}`); if (!bytes) throw new Error('本机没有该合成原件'); return bytes.slice(offset, offset + length); },
+    readOriginal: async (profile, id, offset, length) => { if(id===textOriginalId)counters.textReads++;else counters.imageReads++; const bytes = originals.get(`${profile}:${id}`); if (!bytes) throw new Error('本机没有该合成原件'); return bytes.slice(offset, offset + length); },
   },
 };
 const journal = { read: async (key: string) => localStorage.getItem(`ui-fixture:${key}`), write: async (key: string, raw: string) => localStorage.setItem(`ui-fixture:${key}`, raw) };
 Object.assign(window, { __betaUiFixture: { counters } });
 async function main() {
-  events[events.length - 1].originals = [await picture()];
+  const text = new TextEncoder().encode(`BEGIN_TEXT\n<script>globalThis.__betaTextExecuted = true</script>\n${'长行'.repeat(10000)}\nEND_TEXT`);
+  textOriginalId=crypto.randomUUID();originals.set(`${P}:${textOriginalId}`,text);
+  events[events.length - 1].originals = [await picture(),{original_id:textOriginalId,sha256:digest(text),byte_length:text.length,file_name:'合成说明.md',media_type:'text/markdown'}];
   createRoot(document.getElementById('root')!).render(<React.StrictMode><div style={{ height: '100dvh' }} className="flex flex-col overflow-hidden"><p className="shrink-0 bg-surface px-3 py-1 text-center text-[11px] text-muted">交互验收 · 合成档案 · 无真实设备</p><div className="min-h-0 flex-1"><BetaApp client={client} intentJournal={journal} /></div></div></React.StrictMode>);
 }
 void main();
