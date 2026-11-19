@@ -47,8 +47,15 @@ Host 在 reclaim 时保存 `wall_ms`、`epoch_id`、`elapsed_ms` 和所选期限
 在发布输出文件前调用 `finish_original_read`。generation 改变时读取/finish 失败；permit 不会
 阻止并发释放，也不能单独证明 Native 缓存或目的文件的处置状态。
 
-Native beta-open/private export cache 尚未与 Core lifecycle 协调，UI lifecycle 也尚未接线。完成
-这些边界前，不把 Core 的本机 chunk 状态推断为导出缓存状态，不从 UI 文案、Agent/模型输出或
+Native 导出与系统打开共用 permit-backed Source，每段读取及发布/handoff 前重新检查。
+单段 Native range 命令也执行 begin/read/finish。读取器与 ExportManager 是无窗口模块，
+Host 测试直接包含同一份生产代码；不复制一份测试实现。manager 按档案和原件标识区分
+占用，释放 reservation 与同一原件的导出/打开互斥，停止后拒绝新任务并等待已有 guard。
+permit 检查仍不是跨整个系统的排他锁，外部程序取得的句柄/副本不会被撤回。
+
+Native beta-open 缓存清理、lifecycle IPC 和用户动作尚未接线。桌面打开副本可能被外部
+编辑器修改，不能把其路径归应用所有当成删除修改内容的资格。完成这些边界前，不把 Core
+的本机 chunk 状态推断为缓存状态，不从 UI 文案、Agent/模型输出或
 一次 peer 探测推断操作成功。peer probe 仅确认候选端点声称有可用副本；实际 fetch 仍须传输并
 通过完整原件 SHA-256 校验。
 
@@ -76,10 +83,17 @@ DDL。`tests/replication.rs` 的 `rechain` helper 补入显式
 
 以下依赖仍未覆盖，不能据本切片声称完整 Beta 可编译/可用：
 
-- Native beta-open、私有导出缓存和 Core lifecycle 的一致性/发布前 finish 接线。
+- Native beta-open 缓存清理、lifecycle 命令和 Core receipt 分层回报。
 - UI 上 reclaim、restore、release、purge、远端 follow-up 的动作、确认和 receipt 展示。
-- 共享 CI 中新增生命周期及真实旧版 fixture 的持续检查。
+- Native lifecycle 命令与缓存处置接通后的完整候选 CI。
 - 跨设备字节处置、Native 缓存字节处置、系统文件导出结果和用户侧完整流程验收。
+
+阶段二的 Native 原件读取/任务占用已有 Windows 本机证据：manager 3 项、原始 Native
+export 组 8 项通过；将无窗口 Source 原样移入独立模块后，Host lane 同时运行 manager
+与真实 Host/Core 的失效代际行为，共 4 项通过，调整后的 Native export 组 7 项通过。
+系统选择器、打开方式与跨端处置仍另验。Source/manager 组加入现有源码 CI，拒绝零测试结果。
+Core10 生命周期与真实 Core8 fixture 的 CI 已在 `0cc5091a`、`a7d5a191` 通过；本轮新增
+Source/manager 门禁的远端结果单独回读，不以本机结果代替。
 
 事实 receipt、字节校验、复制 ACK、UI 展示和模型输出是不同证据层；任一层通过都不能代替其余
 层。Beta18/Core9 冻结 payload `66124154` 不因 Core10 worktree 增量而改变；升级与 8 KiB 导出/

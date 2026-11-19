@@ -833,13 +833,15 @@ async fn beta_read_original_range(
 ) -> Result<OriginalChunk, Failure> {
     trusted_window(&window, state.inner())?;
     work(state.inner(), move |state| {
-        state.host.read_original_range(
-            &state.human(profile_id)?,
-            profile_id,
-            original_id,
-            offset,
-            length,
-        )
+        let human = state.human(profile_id)?;
+        let permit = state
+            .host
+            .begin_original_read(&human, profile_id, original_id)?;
+        let chunk = state
+            .host
+            .read_original_range_with_permit(&human, &permit, offset, length)?;
+        state.host.finish_original_read(&human, &permit)?;
+        Ok(chunk)
     })
     .await
 }

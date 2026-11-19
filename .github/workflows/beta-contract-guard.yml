@@ -139,6 +139,7 @@ jobs:
             ['-p', 'exomind-beta-host', '--lib', 'unix_epoch_is_a_valid_zero_wall_sample'],
             ['-p', 'exomind-beta-host', '--lib', 'original_auto_queue_status_reads_without_changing_policy_or_transfer_state'],
             ['-p', 'exomind-beta-host', '--test', 'native_export_journal'],
+            ['-p', 'exomind-beta-host', '--test', 'native_export_manager'],
             ['-p', 'exomind-beta-host', '--test', 'agent_wait_http'],
             ['-p', 'exomind-beta-host', '--test', 'agent_export_http'],
             ['-p', 'exomind-beta-host', '--test', 'agent_access'],

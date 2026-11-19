@@ -1,7 +1,7 @@
 //! Main-window, one-original export. The save picker owns destination choice;
 //! frontend arguments contain only source IDs and a cancellation request ID.
 use super::{Failure, NativeState, trusted_window};
-use exomind_beta_host::{BetaHost, HostError, Session};
+use exomind_beta_host::HostError;
 use exomind_core::{MAX_ORIGINAL_CHUNK_BYTES, OriginalId, OriginalRef, ProfileId};
 #[path = "beta_export_journal.rs"]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -12,26 +12,22 @@ use journal::{ExportTaskRecord, JournalError};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    sync::{
-        Arc, Condvar, Mutex,
-        atomic::{AtomicBool, AtomicU8, Ordering},
-    },
-    time::{Duration, Instant},
+    sync::{Arc, atomic::Ordering},
 };
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, FilePath};
-use tokio::sync::Notify;
 use uuid::Uuid;
 
-const RUNNING: u8 = 0;
-const CANCELLED: u8 = 1;
-const PUBLISHING: u8 = 2;
-const MAX_REQUEST_IDS: usize = 4096;
-const MAX_COPY_TIME: Duration = Duration::from_secs(60 * 60);
+#[path = "beta_native_export_manager.rs"]
+mod manager;
+pub(super) use manager::ExportManager;
+use manager::ExportLease;
+#[path = "beta_native_original_source.rs"]
+mod source;
+use source::Source;
 
 fn failure(code: &'static str, message: &'static str) -> Failure {
     Failure { code, message }
@@ -199,178 +195,6 @@ fn io_failure() -> Failure {
     )
 }
 
-struct Job {
-    id: Uuid,
-    phase: AtomicU8,
-    wake: Notify,
-}
-#[derive(Default)]
-struct Jobs {
-    active: Option<Arc<Job>>,
-    used: HashSet<Uuid>,
-}
-pub(super) struct ExportManager {
-    stopping: AtomicBool,
-    jobs: Mutex<Jobs>,
-    idle: Condvar,
-    wake: Notify,
-}
-impl Default for ExportManager {
-    fn default() -> Self {
-        Self {
-            stopping: AtomicBool::new(false),
-            jobs: Mutex::new(Jobs::default()),
-            idle: Condvar::new(),
-            wake: Notify::new(),
-        }
-    }
-}
-impl ExportManager {
-    fn begin(self: &Arc<Self>, request: Uuid) -> Result<ExportLease, Failure> {
-        if request.is_nil() {
-            return Err(failure("invalid_request", "导出请求身份无效"));
-        }
-        let mut jobs = self.jobs.lock().map_err(|_| io_failure())?;
-        if self.stopping.load(Ordering::Acquire) {
-            return Err(cancelled());
-        }
-        if jobs.active.is_some() {
-            return Err(failure(
-                "export_busy",
-                "已有原件正在导出，请完成或取消后重试",
-            ));
-        }
-        if jobs.used.contains(&request) {
-            return Err(failure(
-                "export_request_reused",
-                "此导出请求已使用，请重新发起导出",
-            ));
-        }
-        if jobs.used.len() >= MAX_REQUEST_IDS {
-            return Err(failure(
-                "export_busy",
-                "本次运行的导出请求过多，请重启应用后继续",
-            ));
-        }
-        let job = Arc::new(Job {
-            id: request,
-            phase: AtomicU8::new(RUNNING),
-            wake: Notify::new(),
-        });
-        jobs.used.insert(request);
-        jobs.active = Some(job.clone());
-        Ok(ExportLease {
-            manager: self.clone(),
-            job,
-            started: Instant::now(),
-        })
-    }
-    pub(super) fn request_stop(&self) {
-        self.stopping.store(true, Ordering::Release);
-        self.wake.notify_one();
-    }
-    pub(super) fn wait_empty(&self, timeout: Duration) -> Result<(), HostError> {
-        let end = Instant::now() + timeout;
-        let mut jobs = self.jobs.lock().map_err(|_| HostError::StatePoisoned)?;
-        while jobs.active.is_some() {
-            let remaining = end.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err(HostError::Shutdown);
-            }
-            jobs = self
-                .idle
-                .wait_timeout(jobs, remaining)
-                .map_err(|_| HostError::StatePoisoned)?
-                .0;
-        }
-        Ok(())
-    }
-    fn cancel(&self, request: Uuid) -> Result<bool, Failure> {
-        let jobs = self.jobs.lock().map_err(|_| io_failure())?;
-        let Some(job) = jobs.active.as_ref().filter(|job| job.id == request) else {
-            return Ok(false);
-        };
-        let accepted = job.phase.load(Ordering::Acquire) == CANCELLED
-            || job
-                .phase
-                .compare_exchange(RUNNING, CANCELLED, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok();
-        if accepted {
-            job.wake.notify_one();
-        }
-        Ok(accepted)
-    }
-    #[cfg(target_os = "android")]
-    fn active_request(&self) -> Result<Option<Uuid>, Failure> {
-        let jobs = self.jobs.lock().map_err(|_| io_failure())?;
-        Ok(jobs.active.as_ref().map(|job| job.id))
-    }
-}
-struct ExportLease {
-    manager: Arc<ExportManager>,
-    job: Arc<Job>,
-    started: Instant,
-}
-impl ExportLease {
-    fn is_cancelled(&self) -> bool {
-        self.job.phase.load(Ordering::Acquire) != PUBLISHING
-            && (self.manager.stopping.load(Ordering::Acquire)
-                || self.job.phase.load(Ordering::Acquire) == CANCELLED
-                || self.started.elapsed() >= MAX_COPY_TIME)
-    }
-    fn check(&self) -> Result<(), Failure> {
-        if self.is_cancelled() {
-            Err(cancelled())
-        } else {
-            Ok(())
-        }
-    }
-    fn explicitly_cancelled(&self) -> bool {
-        self.job.phase.load(Ordering::Acquire) == CANCELLED
-    }
-    fn stopped_without_explicit_cancel(&self) -> bool {
-        !self.explicitly_cancelled()
-            && (self.manager.stopping.load(Ordering::Acquire)
-                || self.started.elapsed() >= MAX_COPY_TIME)
-    }
-    async fn cancellation(&self) {
-        loop {
-            if self.is_cancelled() {
-                return;
-            }
-            let remaining = MAX_COPY_TIME.saturating_sub(self.started.elapsed());
-            tokio::select! {_=self.manager.wake.notified()=>{},_=self.job.wake.notified()=>{},_=tokio::time::sleep(remaining)=>{}}
-        }
-    }
-    fn admit_publish(&self) -> Result<(), Failure> {
-        self.check()?;
-        // Cancellation wins until publication admission. Once admitted, the
-        // atomic no-clobber publication may finish; shutdown drains this lease.
-        self.job
-            .phase
-            .compare_exchange(RUNNING, PUBLISHING, Ordering::AcqRel, Ordering::Acquire)
-            .map_err(|_| cancelled())?;
-        Ok(())
-    }
-}
-impl Drop for ExportLease {
-    fn drop(&mut self) {
-        let mut jobs = self
-            .manager
-            .jobs
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if jobs
-            .active
-            .as_ref()
-            .is_some_and(|job| Arc::ptr_eq(job, &self.job))
-        {
-            jobs.active = None;
-        }
-        self.manager.idle.notify_all();
-    }
-}
-
 #[derive(Serialize)]
 #[serde(untagged)]
 pub(super) enum ExportResult {
@@ -397,30 +221,6 @@ impl ExportResult {
             byte_length: original.byte_length,
             sha256: original.sha256.clone(),
         }
-    }
-}
-struct Source {
-    host: Arc<BetaHost>,
-    session: Session,
-    profile: ProfileId,
-    original: OriginalRef,
-}
-impl Source {
-    fn read(&self, offset: u64, length: usize) -> Result<Vec<u8>, Failure> {
-        let chunk = self
-            .host
-            .read_original_range(
-                &self.session,
-                self.profile,
-                self.original.original_id,
-                offset,
-                length,
-            )
-            .map_err(Failure::from)?;
-        if chunk.offset != offset || chunk.original != self.original {
-            return Err(failure("original_integrity", "原件描述已变化，未完成导出"));
-        }
-        Ok(chunk.bytes)
     }
 }
 fn stream_source(
@@ -672,7 +472,7 @@ fn export_path(
         .seek(SeekFrom::Start(0))
         .map_err(|_| io_failure())?;
     verify_reader(temporary.file()?, &source.original, lease)?;
-    source.read(0, 1)?;
+    source.finish()?;
     lease.admit_publish()?;
     // Same-directory no-clobber publication. A file appearing after the picker
     // also wins over this export; the caller never overwrites it on retry.
@@ -737,6 +537,7 @@ fn export_document(
     let mut phase = ExportTaskPhase::Writing;
     let write_result = (|| -> Result<(), Failure> {
         lease.check()?;
+        source.finish()?;
         let mut options = tauri_plugin_fs::OpenOptions::new();
         options.read(true).write(true);
         let mut output = app
@@ -790,9 +591,7 @@ fn export_document(
             .open(destination, options)
             .map_err(|_| incomplete())?;
         verify_reader(&mut check, &source.original, lease)?;
-        if source.read(0, 1)?.len() > 1 {
-            return Err(incomplete());
-        }
+        source.finish()?;
         lease.admit_publish()?;
         Ok(())
     })();
@@ -829,25 +628,14 @@ pub(super) async fn beta_export_original(
         .to_string()
         .parse::<Uuid>()
         .map_err(|_| failure("invalid_profile", "档案身份无效，无法记录导出任务"))?;
-    let lease = state.exports.begin(request_id)?;
+    let lease = state.exports.begin(request_id, profile_id, original_id)?;
     let native = state.inner().clone();
     let (source, lease) = tauri::async_runtime::spawn_blocking(move || {
         lease.check()?;
         let session = native.human(profile_id)?;
-        // Probe through the committed-original route before showing a picker.
-        // Missing metadata/bytes never becomes an empty exported file.
-        let first = native
-            .host
-            .read_original_range(&session, profile_id, original_id, 0, 1)?;
-        Ok::<_, Failure>((
-            Source {
-                host: native.host.clone(),
-                session,
-                profile: profile_id,
-                original: first.original,
-            },
-            lease,
-        ))
+        // Source metadata and all later ranges use one profile-scoped permit.
+        let source = Source::begin(native.host.clone(), session, profile_id, original_id)?;
+        Ok::<_, Failure>((source, lease))
     })
     .await
     .map_err(|_| io_failure())??;
@@ -1077,7 +865,7 @@ pub(super) async fn beta_open_original(
     request_id: Uuid,
 ) -> Result<(), Failure> {
     trusted_window(&window, state.inner())?;
-    let lease = state.exports.begin(request_id)?;
+    let lease = state.exports.begin(request_id, profile_id, original_id)?;
     let cache = app
         .path()
         .app_cache_dir()
@@ -1089,16 +877,7 @@ pub(super) async fn beta_open_original(
     let (path, media_type, lease) = tauri::async_runtime::spawn_blocking(move || {
         lease.check()?;
         let session = native.human(profile_id)?;
-        let original = native
-            .host
-            .read_original_range(&session, profile_id, original_id, 0, 1)?
-            .original;
-        let source = Source {
-            host: native.host.clone(),
-            session,
-            profile: profile_id,
-            original,
-        };
+        let source = Source::begin(native.host.clone(), session, profile_id, original_id)?;
         let path = prepare_open_copy(
             &cache,
             &source.original,
@@ -1106,7 +885,7 @@ pub(super) async fn beta_open_original(
             &lease,
         )?;
         // A cached copy never substitutes for current archive authorization.
-        source.read(0, 1)?;
+        source.finish()?;
         Ok::<_, Failure>((path, source.original.media_type.clone(), lease))
     })
     .await
@@ -1244,6 +1023,11 @@ pub(super) async fn beta_original_export_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{sync::Arc, time::Duration};
+
+    fn test_lease(manager: &Arc<ExportManager>, request: Uuid) -> Result<ExportLease, Failure> {
+        manager.begin(request, ProfileId::new(), OriginalId::new())
+    }
     #[test]
     fn system_open_copy_requires_a_complete_digest_and_never_overwrites_a_changed_cache() {
         let cache = tempfile::tempdir().unwrap();
@@ -1251,7 +1035,7 @@ mod tests {
         let mut descriptor = original(bytes.len() as u64, format!("{:x}", Sha256::digest(bytes)));
         descriptor.file_name = "../../synthetic-open.txt".into();
         let manager = Arc::new(ExportManager::default());
-        let lease = manager.begin(Uuid::new_v4()).unwrap();
+        let lease = test_lease(&manager, Uuid::new_v4()).unwrap();
         let path = prepare_open_copy(
             cache.path(),
             &descriptor,
@@ -1312,7 +1096,7 @@ mod tests {
         expected.update(&chunk[..(length % MAX_ORIGINAL_CHUNK_BYTES as u64) as usize]);
         let metadata = original(length, format!("{:x}", expected.finalize()));
         let manager = Arc::new(ExportManager::default());
-        let lease = manager.begin(Uuid::new_v4()).unwrap();
+        let lease = test_lease(&manager, Uuid::new_v4()).unwrap();
         let mut offset = 0;
         let mut calls = 0;
         stream_original(
@@ -1353,7 +1137,7 @@ mod tests {
     fn cancellation_prevents_next_read_and_publication_admission_rejects_late_cancel() {
         let manager = Arc::new(ExportManager::default());
         let id = Uuid::new_v4();
-        let lease = manager.begin(id).unwrap();
+        let lease = test_lease(&manager, id).unwrap();
         assert!(manager.cancel(id).unwrap());
         let metadata = original(1, "0".repeat(64));
         assert_eq!(
@@ -1369,7 +1153,7 @@ mod tests {
         );
         drop(lease);
         let id = Uuid::new_v4();
-        let lease = manager.begin(id).unwrap();
+        let lease = test_lease(&manager, id).unwrap();
         lease.admit_publish().unwrap();
         assert!(!manager.cancel(id).unwrap());
         manager.request_stop();
@@ -1379,13 +1163,13 @@ mod tests {
     fn cancel_is_bound_to_one_runtime_request_and_never_poisons_the_next() {
         let manager = Arc::new(ExportManager::default());
         let first = Uuid::new_v4();
-        let lease = manager.begin(first).unwrap();
+        let lease = test_lease(&manager, first).unwrap();
         assert!(!manager.cancel(Uuid::new_v4()).unwrap());
         assert!(!lease.is_cancelled());
         assert!(manager.cancel(first).unwrap());
         assert!(lease.is_cancelled());
         drop(lease);
-        let next = manager.begin(Uuid::new_v4()).unwrap();
+        let next = test_lease(&manager, Uuid::new_v4()).unwrap();
         assert!(!manager.cancel(first).unwrap());
         assert!(!next.is_cancelled());
         manager.request_stop();
