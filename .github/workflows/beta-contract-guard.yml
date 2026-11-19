@@ -44,6 +44,7 @@ jobs:
       CARGO_BUILD_JOBS: '1'
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_DEV_INCREMENTAL: 'false'
+      CARGO_PROFILE_DEV_CODEGEN_UNITS: '16'
       # Env values are passed as argv, never interpolated into a shell program.
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
     steps:
@@ -68,6 +69,28 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Check evidence rejection rules
         run: bun run test:beta:contract-evidence
+      - name: Check diagnostic bounds and signed-origin recovery
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          const cases = [
+            ['-p', 'exomind-beta-host', '--lib', 'diagnostics::'],
+            ['-p', 'exomind-core', '--test', 'origin_provenance', 'conflicting_existing_body_cannot_advance_a_proof_prefix'],
+            ['-p', 'exomind-beta-host', '--lib', 'a_position_signature_cannot_be_replayed_at_another_sequence'],
+            ['-p', 'exomind-beta-host', '--lib', 'legacy_received_history_backfills_proofs_without_resetting_a_persisted_data_ack'],
+            ['-p', 'exomind-beta-host', '--lib', 'relayed_source_requires_current_carrier_endorsement_fixed_key_and_no_revoked_source'],
+          ];
+          for (const [index, args] of cases.entries()) {
+            const output = execFileSync('cargo', ['test', '--locked', ...args, '--', '--test-threads=1'], {
+              encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: index === 0 ? 600000 : 120000,
+            });
+            process.stdout.write(output);
+            const results = [...output.matchAll(/test result: ok\. (\d+) passed; (\d+) failed;/g)];
+            assert.ok(results.some(match => Number(match[1]) > 0 && Number(match[2]) === 0), `No passing tests ran for ${args.at(-1)}`);
+          }
+          NODE
       - name: Install pinned Agent-spec CLI
         run: cargo install agent-spec --version 1.4.0 --locked
       - name: Run source contracts and explicit UI regressions

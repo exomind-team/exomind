@@ -47,6 +47,7 @@ mod stop_tests;
 mod storage;
 mod timeblocks;
 mod timeblocks_http;
+pub mod diagnostics;
 pub use timeblocks::{DeadlineEnvelope, HostClock, HostClockSample, ServiceStatus};
 
 use exomind_core::{
