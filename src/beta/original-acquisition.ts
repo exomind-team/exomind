@@ -74,6 +74,8 @@ export function nativeOriginalAcquisition(call:Call):BetaOriginalAcquisitionClie
 }
 export function originalAcquisitionError(value:unknown):string{
   const code=typeof value==='string'?value:value&&typeof value==='object'&&'code'in value?String(value.code):'';
+  if(code==='peer_timeout')return'连接超时，请确认来源设备在线后重试；已收到的部分会保留';
+  if(['tls_handshake_failed','peer_tls'].includes(code))return'连接握手失败，请检查网络与两端版本后重试；本机资料保持不变';
   if(['network_disabled','peer_network_disabled'].includes(code))return'设备同步已关闭，请先在同步页开启后重试；本机资料保持不变';
   if(['peer_busy','original_busy','attachment_busy'].includes(code))return'已有任务正在处理，请查看当前进度，或完成/取消后重试';
   if(['unreachable','peer_transport_unavailable','transport_unavailable'].includes(code))return'来源设备离线或连接中断，已收到的部分会保留，请连接后重试';
@@ -81,7 +83,7 @@ export function originalAcquisitionError(value:unknown):string{
   if(['original_hash_mismatch','original_integrity_mismatch'].includes(code))return'原件校验失败，未作为可用原件；请检查来源后重试';
   if(['original_not_ready','original_missing','unknown_original','not_found','no_original_source'].includes(code))return'尚未找到可用的原件副本，请让持有原件的已授权设备上线后重试';
   if(['cancelled','peer_cancelled','attachment_cancelled'].includes(code))return'获取已取消，已收到的部分会保留';
-  if(['identity_mismatch','peer_tls','peer_pin_mismatch'].includes(code))return'来源设备身份与已确认授权不符；未放宽身份检查，请在同步页核对连接';
+  if(['identity_mismatch','pin_mismatch','peer_pin_mismatch'].includes(code))return'来源设备身份与已确认授权不符；未放宽身份检查，请在同步页核对连接';
   if(['protocol_mismatch','incompatible'].includes(code))return'两端版本不兼容，请更新为同版应用后重试';
   return'原件获取尚未完成，请检查设备连接和授权后重试';
 }

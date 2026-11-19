@@ -69,6 +69,40 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Check evidence rejection rules
         run: bun run test:beta:contract-evidence
+      - name: Check on-demand original diagnostics
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          import { mkdirSync, readFileSync } from 'node:fs';
+          import { join, relative } from 'node:path';
+          const files = [
+            'tests/unit/beta/original-acquisition.test.ts',
+            'tests/unit/beta/original-auto-diagnostics.test.ts',
+            'tests/unit/beta/original-transfer-diagnostics-ui.test.tsx',
+          ];
+          mkdirSync(process.env.CONTRACT_OUT, { recursive: true });
+          const reportPath = join(process.env.CONTRACT_OUT, 'original-diagnostics-unit.json');
+          execFileSync(process.execPath, [
+            'node_modules/vitest/vitest.mjs', 'run', ...files, '--maxWorkers=1',
+            '--reporter=json', `--outputFile=${reportPath}`,
+          ], { timeout: 120000, stdio: 'inherit' });
+          const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+          assert.equal(report.success, true);
+          assert.ok(report.numTotalTests > 0);
+          assert.equal(report.numFailedTests, 0);
+          assert.equal(report.numPendingTests, 0);
+          assert.equal(report.numTodoTests, 0);
+          assert.equal(report.numPassedTests, report.numTotalTests);
+          assert.equal(report.testResults.length, files.length);
+          assert.deepEqual(report.testResults.map(result => relative(process.cwd(), result.name).replaceAll('\\', '/')).sort(), [...files].sort());
+          for (const result of report.testResults) {
+            assert.equal(result.status, 'passed');
+            assert.ok(result.assertionResults.length > 0);
+            assert.ok(result.assertionResults.every(test => test.status === 'passed'));
+          }
+          NODE
       - name: Check diagnostic bounds and signed-origin recovery
         shell: bash
         run: |
@@ -77,6 +111,7 @@ jobs:
           import { execFileSync } from 'node:child_process';
           const cases = [
             ['-p', 'exomind-beta-host', '--lib', 'diagnostics::'],
+            ['-p', 'exomind-beta-host', '--lib', 'original_auto_queue_status_reads_without_changing_policy_or_transfer_state'],
             ['-p', 'exomind-core', '--test', 'origin_provenance', 'conflicting_existing_body_cannot_advance_a_proof_prefix'],
             ['-p', 'exomind-beta-host', '--lib', 'a_position_signature_cannot_be_replayed_at_another_sequence'],
             ['-p', 'exomind-beta-host', '--lib', 'legacy_received_history_backfills_proofs_without_resetting_a_persisted_data_ack'],

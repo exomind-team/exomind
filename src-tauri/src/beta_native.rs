@@ -1139,6 +1139,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             peer_commands::beta_peer_sync,
             peer_commands::beta_peer_revoke,
             peer_commands::beta_peer_original_status,
+            peer_commands::beta_peer_original_auto_status,
             peer_commands::beta_peer_original_fetch,
             peer_commands::beta_peer_original_fetch_any,
             peer_commands::beta_peer_original_cancel,

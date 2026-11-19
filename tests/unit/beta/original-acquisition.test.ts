@@ -32,4 +32,19 @@ describe('Native on-demand original transport boundary',()=>{
     expect(originalAcquisitionError('unreachable')).toContain('离线');expect(originalAcquisitionError({code:'membership_denied'})).toContain('授权');
     expect(originalAcquisitionError('original_hash_mismatch')).toContain('校验失败');expect(originalAcquisitionError('original_integrity_mismatch')).toContain('未作为可用原件');
   });
+
+  it('keeps a peer timeout distinct from a peer identity failure',()=>{
+    const message=originalAcquisitionError('peer_timeout');
+    expect(message).toContain('连接超时');
+    expect(message).toContain('已收到的部分会保留');
+    expect(message).not.toContain('身份');
+  });
+  it('recognizes the normalized pin mismatch code as an identity failure',()=>{
+    expect(originalAcquisitionError('pin_mismatch')).toContain('身份');
+  });
+  it.each(['tls_handshake_failed','peer_tls'])('reports %s without claiming a changed identity',code=>{
+    const message=originalAcquisitionError(code);
+    expect(message).toContain('握手');
+    expect(message).not.toContain('身份');
+  });
 });

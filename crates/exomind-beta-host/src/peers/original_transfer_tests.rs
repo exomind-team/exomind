@@ -210,6 +210,45 @@ fn stage_status(r: &Rig) -> exomind_core::StageStatus {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn original_auto_queue_status_reads_without_changing_policy_or_transfer_state() {
+    let r = rig(b"synthetic read-only original diagnostics").await;
+    let peers = crate::PeerNetwork::new(r.b.clone(), r.ob.clone()).unwrap();
+    let policy_before = r.b.original_auto_policy(&r.ob).unwrap();
+    let intent_before =
+        r.b.original_local_intent(&r.ob, r.p, r.original.original_id)
+            .unwrap();
+    let backoff_before =
+        r.b.original_auto_backoff(&r.ob, r.p, r.original.original_id)
+            .unwrap();
+
+    for _ in 0..3 {
+        let status = peers.original_auto_queue_status().unwrap();
+        assert!(!status.network_enabled);
+        assert_eq!(status.policy_enabled, policy_before.enabled);
+        assert_eq!(status.active_outbound, 0);
+        assert!(!status.deferred);
+        assert!(status.last_error_code.is_none());
+    }
+
+    assert_eq!(r.b.original_auto_policy(&r.ob).unwrap(), policy_before);
+    assert_eq!(
+        r.b.original_local_intent(&r.ob, r.p, r.original.original_id)
+            .unwrap(),
+        intent_before
+    );
+    assert_eq!(
+        r.b.original_auto_backoff(&r.ob, r.p, r.original.original_id)
+            .unwrap(),
+        backoff_before
+    );
+    assert!(matches!(
+        availability(&r.b, r.p, r.original.original_id),
+        OriginalAvailability::Missing { .. }
+    ));
+    stop(r.a).await;
+    stop(r.b).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn local_intent_is_rechecked_at_prepare_write_freeze_and_seal_without_erasing_suppression() {
     let bytes = b"synthetic frozen bytes\0\xff";
     let r = rig(bytes).await;

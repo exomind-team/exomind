@@ -18,6 +18,7 @@ import { useBetaDeviceNames } from './device-names';
 import { BetaTextPreview } from './BetaTextPreview';
 import { isTextPreviewCandidate } from './text-preview';
 import { resolveMediaPreviewFormat } from './media-preview';
+import { OriginalTransferDiagnostics } from './OriginalTransferDiagnostics';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -164,6 +165,9 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
     : canDownloadOriginal
       ? '关闭后可下载原件'
       : '当前环境没有可用的系统打开或网页下载入口';
+  const diagnostics = (client.originalAcquisition||client.originalAutoDiagnostics)
+    ? <OriginalTransferDiagnostics client={client} profileId={profileId} original={original} visible={visible} />
+    : null;
   return <div className="space-y-2 rounded-2xl border border-border-page bg-surface px-3 py-2">
     {readable && <BetaImagePreview identity={`${deviceId}:${profileId}:${original.original_id}:${original.sha256}`} sourceScope={client} visible={visible} inline fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={() => collectOriginalDownload(client, profileId, original)} />}
     <div className="flex items-center gap-2"><Button size="icon" variant="ghost" className="shrink-0" aria-label={`打开 ${original.file_name}`} title={client.originalOpener?readable?'使用系统打开':'自动获取原件后用系统打开':'系统打开需要独立应用；仍可下载原件'} disabled={!client.originalOpener||!readable&&!acquisition?.fetchAny||opening||running} onClick={()=>{void(readable?openOriginal():findOriginal(true));}}><FileText size={16} className="text-brand-accent" aria-hidden="true" /></Button>
@@ -185,15 +189,19 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
     </div>
     {opening&&<p role="status" className="text-xs text-muted">正在准备系统打开…</p>}
     {acquisition&&<div className="mt-1 space-y-1 text-xs text-muted"><p role="status">{label}</p>
-      {running?<><p role="status">{transferLabel}</p>{status&&<Progress className="h-1 w-full" aria-label={`原件获取进度 ${original.file_name}`} value={status.next_offset} max={Math.max(1,status.byte_length)}/>}
-        <Button variant="ghost" size="sm" disabled={cancelling} onClick={()=>{void cancelFetch();}}>{cancelling?'正在取消…':'取消获取'}</Button></>
-        :<div className="flex flex-wrap gap-1">{status?.availability!=='complete'&&<><Button variant="outline" size="sm" disabled={sourcesBusy||exporting} onClick={()=>{void findOriginal();}}>{sourcesBusy?'正在查找授权来源…':'获取原件'}</Button>{acquisition.fetchAny&&<Button variant="ghost" size="sm" onClick={()=>{void chooseSource();}}>选择来源…</Button>}</>}
-          <Button variant="ghost" size="sm" aria-label={`检查原件 ${original.file_name}`} onClick={()=>{setError('');void inspect(life.current);}}><RefreshCw size={12} className="mr-1"/>检查状态</Button></div>}
+      {running&&<><p role="status">{transferLabel}</p>{status&&<Progress className="h-1 w-full" aria-label={`原件获取进度 ${original.file_name}`} value={status.next_offset} max={Math.max(1,status.byte_length)}/>}</>}
+      <div className="flex flex-wrap items-center gap-1">
+        {running?<Button variant="ghost" size="sm" disabled={cancelling} onClick={()=>{void cancelFetch();}}>{cancelling?'正在取消…':'取消获取'}</Button>:<>
+          {status?.availability!=='complete'&&<><Button variant="outline" size="sm" disabled={sourcesBusy||exporting} onClick={()=>{void findOriginal();}}>{sourcesBusy?'正在查找授权来源…':'获取原件'}</Button>{acquisition.fetchAny&&<Button variant="ghost" size="sm" onClick={()=>{void chooseSource();}}>选择来源…</Button>}</>}
+          <Button variant="ghost" size="sm" aria-label={`检查原件 ${original.file_name}`} onClick={()=>{setError('');void inspect(life.current);}}><RefreshCw size={12} className="mr-1"/>检查状态</Button></>}
+        {diagnostics}
+      </div>
       {expanded&&!running&&<div className="space-y-2">{sources&&!sources.network_enabled&&<p>设备同步已关闭，请先在设备页开启</p>}{sources?.network_enabled&&!sources.devices.length&&<p>尚无已授权的来源设备，请先在设备页完成加入确认</p>}
         {!!sources?.devices.length&&<><label className="block space-y-1"><span>原件来源</span><FieldSelect label={`原件来源 ${original.file_name}`} className="w-full" value={source} disabled={!sources.network_enabled} onValueChange={setSource} options={sources.devices.map(id=>({value:id,label:deviceNames.label(id)}))}/></label>
           <p>来源设备需在线并持有此原件；只获取已授权内容</p><Button variant="outline" size="sm" disabled={!source||!sources.network_enabled||exporting} onClick={()=>{void fetchOriginal();}}>开始获取</Button></>}
       </div>}
     </div>}
+    {!acquisition&&diagnostics&&<div className="flex flex-wrap items-center gap-1">{diagnostics}</div>}
     {(error||statusFailure)&&<p role="alert" className="text-xs text-destructive">{error||statusFailure}</p>}{notice&&<p role="status" className="text-xs text-secondary">{notice}</p>}
     {!client.originalExports&&original.byte_length>MAX_BASIC_DOWNLOAD_BYTES&&<p className="text-xs text-muted">网页下载支持 64 MiB 以内；更大原件请在独立应用中导出</p>}
   </div>;

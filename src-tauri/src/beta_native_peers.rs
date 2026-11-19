@@ -11,6 +11,16 @@ use std::sync::Arc;
 use tauri::{State, WebviewWindow};
 use uuid::Uuid;
 
+#[derive(Serialize)]
+pub(super) struct OriginalAutoDiagnostics {
+    network_enabled: bool,
+    policy_enabled: bool,
+    max_bytes: u64,
+    active_outbound: usize,
+    deferred: bool,
+    last_error_code: Option<&'static str>,
+}
+
 fn invitation(raw: &str) -> Result<PeerInvitation, HostError> {
     if raw.len() > 16384 {
         return Err(HostError::PayloadTooLarge);
@@ -271,6 +281,26 @@ pub(super) async fn beta_peer_original_status(
     trusted_window(&window, state.inner())?;
     work(state.inner(), move |state| {
         state.peers.original_status(profile_id, original_id)
+    })
+    .await
+}
+#[tauri::command]
+pub(super) async fn beta_peer_original_auto_status(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+) -> Result<OriginalAutoDiagnostics, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), |state| {
+        let queue = state.peers.original_auto_queue_status()?;
+        let policy = state.host.original_auto_policy(&state.owner)?;
+        Ok(OriginalAutoDiagnostics {
+            network_enabled: queue.network_enabled,
+            policy_enabled: policy.enabled,
+            max_bytes: policy.max_bytes,
+            active_outbound: queue.active_outbound,
+            deferred: queue.deferred,
+            last_error_code: queue.last_error_code,
+        })
     })
     .await
 }

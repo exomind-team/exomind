@@ -12,6 +12,7 @@ import type {SummaryModelConfigurationService} from './summary-model-config';
 import {nativeSummaryClient,webSummaryClient} from './summary-client';
 import type {SummaryClient} from './summary-types';
 import {nativeTimelineEventReader,webTimelineEventReader} from './timeline-event-client';
+import { nativeOriginalAutoDiagnostics, type BetaOriginalAutoDiagnosticsClient } from './original-auto-diagnostics';
 export { BetaApiError } from './api-error';
 
 export interface BetaStatus { protocol: string; device_id: string; runtime_id?: string; running: boolean; capabilities?: { originals?: boolean; max_original_chunk_bytes?: number; timeblocks?: boolean; typed_timeline?: boolean; summary_jobs?:boolean } }
@@ -38,6 +39,7 @@ export interface BetaClient {
   summaries?:SummaryClient;
   timelineEvent?(profileId:string,eventId:string):Promise<import('./timeblocks-types').BetaTimelineItem|null>;
   originalAcquisition?: BetaOriginalAcquisitionClient;
+  originalAutoDiagnostics?: BetaOriginalAutoDiagnosticsClient;
   originalExports?: BetaOriginalExportsClient;
   originalOpener?: BetaOriginalOpener;
   originals?: BetaOriginalClient;
@@ -139,6 +141,7 @@ export function nativeBetaClient(call: NativeInvoke = invoke): BetaClient {
       if(current.capabilities?.originals!==true)throw new BetaApiError('unsupported_originals','本机服务尚不支持原件获取，请更新后重试');
       return call<T>(name,args);
     }),
+    originalAutoDiagnostics: nativeOriginalAutoDiagnostics(checked),
     originalExports: nativeOriginalExports(async <T>(name:string,args?:Record<string,unknown>) => {
       const current=check(await call('beta_status'));
       if(current.capabilities?.originals!==true) throw new BetaApiError('unsupported_originals','本机服务尚不支持原件导出，请更新后重试');
