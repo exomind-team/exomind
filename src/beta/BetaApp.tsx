@@ -622,7 +622,9 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
             <BetaAttachmentProgress name={file.file_name} progress={drafts.fileProgress[file.id]} now={attachmentNow} active={workspaceActive&&(file.state==='preparing'||file.state==='uploading')}/>
           </div>
           {(file.state === 'failed' || file.state === 'source_missing') && <>
-            {file.original && <Button size="sm" variant="ghost" onClick={() => { void controller.resumeFiles(profileId); }}>恢复暂存</Button>}
+            {file.original && <Button size="sm" variant="ghost" onClick={() => {
+              void controller.resumeFile(profileId, file.id).catch(failure => { if (alive.current) setError(errorMessage(failure)); });
+            }}>恢复暂存</Button>}
             <Button size="sm" variant="ghost" onClick={() => {void chooseFiles(file.id);}}>重新选择</Button>
           </>}
           <Button type="button" size="icon" variant="ghost" className="h-9 w-9 shrink-0 rounded-full text-muted [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"

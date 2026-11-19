@@ -314,16 +314,27 @@ export class BetaDraftController {
     if (this.needed(profileId, file.id)) void this.ensureUploaded(profileId, prepared).catch(() => {});
   }
 
+  private async resumeDraftFile(profileId: string, file: DraftFile): Promise<void> {
+    try {
+      if (!file.original) await this.prepareSource(profileId, file);
+      else await this.ensureUploaded(profileId, file);
+    } catch (error) {
+      if (!this.disposed) this.patchFile(profileId, file.id, { state: errorCode(error) === 'source_missing' ? 'source_missing' : 'failed', message: errorMessage(error) });
+    }
+  }
+
+  async resumeFile(profileId: string, id: string): Promise<void> {
+    this.active();
+    const file = this.state.drafts[profileId]?.files?.find(item => item.id === id);
+    if (!file) throw new BetaApiError('source_missing', '当前草稿中找不到该原件');
+    await this.resumeDraftFile(profileId, file);
+  }
+
   async resumeFiles(profileId: string): Promise<void> {
     const files = this.state.drafts[profileId]?.files ?? [];
     for (const file of files) {
       if (this.disposed) return;
-      try {
-        if (!file.original) await this.prepareSource(profileId, file);
-        else await this.ensureUploaded(profileId, file);
-      } catch (error) {
-        if (!this.disposed) this.patchFile(profileId, file.id, { state: errorCode(error) === 'source_missing' ? 'source_missing' : 'failed', message: errorMessage(error) });
-      }
+      await this.resumeDraftFile(profileId, file);
     }
   }
 

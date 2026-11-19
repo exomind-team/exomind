@@ -6,6 +6,7 @@ export const UI_REGRESSIONS = [
   'tests/unit/beta/main-workspace-client.test.tsx',
   'tests/unit/beta/overlay-surface.test.tsx',
   'tests/unit/beta/original-export-ui.test.tsx',
+  'tests/unit/beta/original-composer.test.tsx',
 ] as const;
 
 export interface NativeBindings {

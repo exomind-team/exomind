@@ -1,10 +1,10 @@
 import { memoryIntentJournal } from './timeblock-ui-fixtures';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
 import type { FileSourceStore } from '@/beta/file-source-store';
 import type { BetaBeginStage, BetaOriginalClient, BetaStage } from '@/beta/original-types';
-import { asyncDraftLocks, fakeClient } from './fixtures';
+import { asyncDraftLocks, deferred, fakeClient } from './fixtures';
 
 const locks=Object.getOwnPropertyDescriptor(navigator,'locks');
 afterEach(()=>{if(locks)Object.defineProperty(navigator,'locks',locks);else Reflect.deleteProperty(navigator,'locks');localStorage.clear();});
@@ -51,5 +51,70 @@ describe('Beta original composer uses the shared Alpha input',()=>{
     expect(client.capture.mock.calls[0][0].text).toBe('');
     expect(client.capture.mock.calls[0][0].originals?.map(item=>item.file_name)).toEqual(['unknown.custom']);
     expect(await screen.findByText('本机已保存')).toBeInTheDocument();
+  });
+  it('recovers only the selected failed attachment and preserves edits made during the retry',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const blobs=new Map<string,Blob>();
+    const getSource=vi.fn(async(key:string)=>blobs.get(key)??null);
+    const sourceStore:FileSourceStore={put:vi.fn(async(key,blob)=>{blobs.set(key,blob);}),get:getSource,remove:vi.fn(async key=>{blobs.delete(key);})};
+    const stages=new Map<string,BetaStage>();
+    const attempts=new Map<string,number>();
+    let firstStageId='';
+    const recoveryWrite=deferred<BetaStage>(),recoveryStarted=deferred<void>();
+    const writeOriginal=vi.fn(async(_profile:string,stageId:string,offset:number,bytes:Uint8Array)=>{
+      const attempt=(attempts.get(stageId)??0)+1;attempts.set(stageId,attempt);
+      if(attempt===1)throw new Error('synthetic first attempt failure');
+      if(stageId===firstStageId&&attempt===2){recoveryStarted.resolve();const result=await recoveryWrite.promise;stages.set(stageId,result);return result;}
+      const result={...stages.get(stageId)!,next_offset:offset+bytes.byteLength};stages.set(stageId,result);return result;
+    });
+    const verifyOriginal=vi.fn(async(_profile:string,id:string)=>({...stages.get(id)!,state:'verified' as const}));
+    const originals:BetaOriginalClient={
+      begin:vi.fn(async(input:BetaBeginStage)=>{
+        const previous=stages.get(input.stage_id);if(previous)return previous;
+        const stage:BetaStage={stage_id:input.stage_id,profile_id:input.profile_id,original:{original_id:input.original_id,sha256:input.expected_sha256,byte_length:input.byte_length,file_name:input.file_name,media_type:input.media_type},state:'uploading',next_offset:0,generation:1};
+        stages.set(input.stage_id,stage);if(input.file_name==='first.txt')firstStageId=input.stage_id;return stage;
+      }),
+      status:async(_profile,id)=>stages.get(id)!,
+      write:writeOriginal,
+      verify:verifyOriginal,
+      readStage:async()=>new Uint8Array(),readOriginal:async()=>new Uint8Array(),
+    };
+    const client={...fakeClient(),originals};
+    const journal=memoryIntentJournal(),journalKey='exomind:beta:drafts:device-a';
+    const readDraft=()=>{
+      const raw=journal.values.get(journalKey);if(!raw)throw new Error('draft journal has not committed');
+      return JSON.parse(raw) as {drafts:Record<string,{text:string;files:Array<{id:string;stage_id:string;source_key:string;file_name:string;byte_length:number;media_type:string;original?:unknown;state:string;next_offset:number;message?:string}>}>};
+    };
+    render(<BetaApp intentJournal={journal} client={client} sourceStore={sourceStore}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(screen.getByLabelText('选择原件'),{target:{files:[new File(['first body'],'first.txt',{type:'text/plain'}),new File(['second body'],'second.txt',{type:'text/plain'})]}});
+    await waitFor(()=>expect(readDraft().drafts.p.files.map(file=>file.state)).toEqual(['failed','failed']));
+    const before=readDraft().drafts.p.files.map(file=>({...file}));
+    const targetBefore=before[0]!,otherBefore=before[1]!;
+    const readsBefore=new Map(before.map(file=>[file.source_key,getSource.mock.calls.filter(([key])=>key===file.source_key).length]));
+    expect(firstStageId).toBe(targetBefore.stage_id);
+    const targetRow=screen.getByText('first.txt').parentElement?.parentElement;
+    expect(targetRow).not.toBeNull();
+    fireEvent.click(within(targetRow!).getByRole('button',{name:'恢复暂存'}));
+    await recoveryStarted.promise;
+    fireEvent.change(editor,{target:{value:'文字在恢复期间继续编辑'}});
+    await act(async()=>{
+      recoveryWrite.resolve({...stages.get(firstStageId)!,next_offset:targetBefore.byte_length});
+      await new Promise<void>(resolve=>setTimeout(resolve,0));
+    });
+    await waitFor(()=>expect(readDraft().drafts.p.files[0].state).toBe('verified'));
+
+    const after=readDraft().drafts.p;
+    const identity=(file:typeof before[number])=>({id:file.id,stage_id:file.stage_id,source_key:file.source_key,file_name:file.file_name,byte_length:file.byte_length,media_type:file.media_type,original:file.original});
+    expect(after.files.map(identity)).toEqual(before.map(identity));
+    expect(after.files[1]).toEqual(otherBefore);
+    expect(after.files[0].state).toBe('verified');
+    expect(after.text).toBe('文字在恢复期间继续编辑');
+    expect(editor).toHaveValue('文字在恢复期间继续编辑');
+    expect(writeOriginal.mock.calls.map(([,stageId])=>stageId)).toEqual([targetBefore.stage_id,otherBefore.stage_id,targetBefore.stage_id]);
+    expect(verifyOriginal.mock.calls.map(([,stageId])=>stageId)).toEqual([targetBefore.stage_id]);
+    expect(getSource.mock.calls.filter(([key])=>key===targetBefore.source_key)).toHaveLength(readsBefore.get(targetBefore.source_key)!+1);
+    expect(getSource.mock.calls.filter(([key])=>key===otherBefore.source_key)).toHaveLength(readsBefore.get(otherBefore.source_key)!);
+    expect(client.capture).not.toHaveBeenCalled();
   });
 });
