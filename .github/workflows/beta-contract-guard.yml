@@ -120,6 +120,8 @@ jobs:
           import { execFileSync } from 'node:child_process';
           const cases = [
             ['-p', 'exomind-beta-host', '--lib', 'diagnostics::'],
+            ['-p', 'exomind-beta-host', '--lib', 'pre_epoch_sample_returns_clock_unavailable_without_changing_epoch_or_elapsed_domain'],
+            ['-p', 'exomind-beta-host', '--lib', 'unix_epoch_is_a_valid_zero_wall_sample'],
             ['-p', 'exomind-beta-host', '--lib', 'original_auto_queue_status_reads_without_changing_policy_or_transfer_state'],
             ['-p', 'exomind-beta-host', '--test', 'native_export_journal'],
             ['-p', 'exomind-core', '--test', 'origin_provenance', 'conflicting_existing_body_cannot_advance_a_proof_prefix'],

@@ -18,6 +18,9 @@ use uuid::Uuid;
 #[cfg(any(target_os = "android", test))]
 #[path = "boot_clock.rs"]
 mod boot_clock;
+#[cfg(all(test, not(target_os = "android")))]
+#[path = "system_host_clock_tests.rs"]
+mod system_host_clock_tests;
 
 const SCHEDULER_POLL: Duration = Duration::from_millis(100);
 const SCHEDULER_BATCH: usize = 16;
@@ -51,19 +54,23 @@ impl SystemHostClock {
     pub(crate) fn new() -> Result<Self, HostError> {
         Ok(Self::default())
     }
-}
-#[cfg(not(target_os = "android"))]
-impl HostClock for SystemHostClock {
-    fn sample(&self) -> Result<HostClockSample, HostError> {
+
+    fn sample_at(&self, wall: SystemTime) -> Result<HostClockSample, HostError> {
         Ok(HostClockSample {
             epoch_id: self.epoch,
-            wall_ms: SystemTime::now()
+            wall_ms: wall
                 .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
+                .map_err(|_| HostError::ClockUnavailable)?
                 .as_millis()
                 .min(i64::MAX as u128) as i64,
             elapsed_ms: self.started.elapsed().as_millis().min(i64::MAX as u128) as u64,
         })
+    }
+}
+#[cfg(not(target_os = "android"))]
+impl HostClock for SystemHostClock {
+    fn sample(&self) -> Result<HostClockSample, HostError> {
+        self.sample_at(SystemTime::now())
     }
 }
 #[cfg(target_os = "android")]
