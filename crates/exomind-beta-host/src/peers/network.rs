@@ -209,8 +209,10 @@ fn now() -> i64 {
         .min(i64::MAX as u128) as i64
 }
 fn error_code(error: &HostError) -> &'static str {
+    if let Some(kind) = error.peer_transport_failure() {
+        return kind.code();
+    }
     match error {
-        HostError::PeerPinMismatch | HostError::PeerTls => "identity_mismatch",
         HostError::PeerProtocolMismatch => "protocol_mismatch",
         HostError::PeerMembershipDenied | HostError::Forbidden | HostError::Unauthorized => {
             "membership_denied"
@@ -226,6 +228,14 @@ fn error_code(error: &HostError) -> &'static str {
         ) => "data_conflict",
         HostError::Stopped | HostError::PeerCancelled => "stopped",
         _ => "unreachable",
+    }
+}
+fn join_route_error_priority(error: &HostError) -> u8 {
+    match error {
+        HostError::Stopped | HostError::PeerCancelled => 3,
+        HostError::PeerPinMismatch => 2,
+        HostError::PeerTls => 1,
+        _ => 0,
     }
 }
 fn endpoints(listener: SocketAddr) -> Vec<SocketAddr> {
@@ -660,7 +670,10 @@ impl PeerNetwork {
             {
                 Ok(channel) => channel,
                 Err(error) => {
-                    last = error;
+                    // A later unreachable candidate must not erase earlier TLS evidence.
+                    if join_route_error_priority(&error) >= join_route_error_priority(&last) {
+                        last = error;
+                    }
                     continue;
                 }
             };

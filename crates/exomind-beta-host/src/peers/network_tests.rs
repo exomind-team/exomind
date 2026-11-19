@@ -260,6 +260,7 @@ async fn alternate_join_route_preserves_the_signed_issuer_and_rejects_a_differen
     let (_rb, b, ob) = host();
     let (_rc, c, oc) = host();
     let profile = ProfileId::new();
+    let issuer_device = a.device_id;
     a.provision_profile(&oa, profile, "synthetic overlay route")
         .unwrap();
     let na = PeerNetwork::new(a.clone(), oa.clone()).unwrap();
@@ -317,6 +318,84 @@ async fn alternate_join_route_preserves_the_signed_issuer_and_rejects_a_differen
     stopped(a).await;
     stopped(b).await;
     stopped(c).await;
+
+    let reopened = BetaHost::open(_rb.path()).unwrap();
+    let reopened_owner = reopened.owner_session().unwrap();
+    assert!(
+        reopened
+            .peer_routes(&reopened_owner)
+            .unwrap()
+            .iter()
+            .any(|route| {
+                route.profile == profile
+                    && route.device == issuer_device
+                    && route.endpoints.first() == Some(&address)
+            })
+    );
+    reopened.stop().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn alternate_join_route_keeps_pin_mismatch_when_signed_candidate_times_out() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_ra, issuer, issuer_owner) = host();
+    let (_rb, joiner, joiner_owner) = host();
+    let (_rc, different_peer, different_peer_owner) = host();
+    let profile = ProfileId::new();
+    issuer
+        .provision_profile(&issuer_owner, profile, "synthetic alternate route")
+        .unwrap();
+
+    let different_network =
+        PeerNetwork::new(different_peer.clone(), different_peer_owner.clone()).unwrap();
+    different_network.set_enabled(true).await.unwrap();
+    let wrong_address = different_network
+        .local_addresses()
+        .unwrap()
+        .into_iter()
+        .find(|address| address.ip().is_loopback())
+        .unwrap();
+    let unreachable_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let signed_candidate = unreachable_listener.local_addr().unwrap();
+    let invitation = issuer
+        .create_peer_invitation(
+            &issuer_owner,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: profile,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![signed_candidate],
+                ttl_seconds: 600,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+    let network = PeerNetwork::new(joiner.clone(), joiner_owner.clone()).unwrap();
+
+    let result = network
+        .join_with_route(&invitation, Uuid::new_v4(), Some(wrong_address))
+        .await;
+
+    assert!(matches!(result, Err(HostError::PeerPinMismatch)));
+    assert!(joiner.profiles(&joiner_owner).unwrap().is_empty());
+
+    network.stop().await.unwrap();
+    different_network.stop().await.unwrap();
+    drop((network, different_network, unreachable_listener));
+    stopped(issuer).await;
+    stopped(joiner).await;
+    stopped(different_peer).await;
+}
+
+#[test]
+fn peer_network_error_code_distinguishes_pin_tls_and_unreachable() {
+    assert_eq!(error_code(&HostError::PeerPinMismatch), "pin_mismatch");
+    assert_eq!(error_code(&HostError::PeerTls), "tls_handshake_failed");
+    assert_eq!(
+        error_code(&HostError::PeerTransportUnavailable),
+        "unreachable"
+    );
 }
 
 fn record(host: &BetaHost, owner: &Session, profile: ProfileId, text: &str) -> EventId {

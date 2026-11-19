@@ -42,12 +42,12 @@ pub use peers::{
     PeerServiceOutcome, PeerSyncOptions, PeerSyncResult, PeerTransportListener,
     PeerTransportOptions,
 };
+pub mod diagnostics;
 #[cfg(test)]
 mod stop_tests;
 mod storage;
 mod timeblocks;
 mod timeblocks_http;
-pub mod diagnostics;
 pub use timeblocks::{DeadlineEnvelope, HostClock, HostClockSample, ServiceStatus};
 
 use exomind_core::{
@@ -186,6 +186,33 @@ pub enum HostError {
     Filesystem(#[from] std::io::Error),
     #[error("host persisted data is invalid")]
     Serialization(#[from] serde_json::Error),
+}
+
+/// Shared transport classification for network status and Native failures.
+/// A failed handshake alone does not establish that the device identity changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerTransportFailureKind {
+    PinMismatch,
+    TlsHandshakeFailed,
+}
+
+impl PeerTransportFailureKind {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::PinMismatch => "pin_mismatch",
+            Self::TlsHandshakeFailed => "tls_handshake_failed",
+        }
+    }
+}
+
+impl HostError {
+    pub fn peer_transport_failure(&self) -> Option<PeerTransportFailureKind> {
+        match self {
+            Self::PeerPinMismatch => Some(PeerTransportFailureKind::PinMismatch),
+            Self::PeerTls => Some(PeerTransportFailureKind::TlsHandshakeFailed),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
