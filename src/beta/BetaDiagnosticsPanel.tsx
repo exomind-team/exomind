@@ -729,7 +729,7 @@ export function BetaDiagnosticsPanel({ client, visible }: BetaDiagnosticsPanelPr
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-brand-accent">
               <Activity aria-hidden="true" className="h-4 w-4 shrink-0" />
-              <span className="text-xs font-medium uppercase tracking-wide">本机 · 手动诊断</span>
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">本机 · 手动诊断</span>
             </div>
             <h2 className="mt-1 text-lg font-semibold tracking-tight">运行诊断</h2>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -742,7 +742,7 @@ export function BetaDiagnosticsPanel({ client, visible }: BetaDiagnosticsPanelPr
               <RefreshCw aria-hidden="true" /> 刷新快照
             </Button>
             {!observationStarted ? (
-              <Button variant="brand" size="sm" className="bg-brand-accent text-white hover:bg-brand-accent/90" onClick={startObservation} disabled={!client || !documentVisible}>
+              <Button variant="outline" size="sm" className="border-brand-accent bg-brand-accent/15 text-foreground hover:bg-brand-accent/25" onClick={startObservation} disabled={!client || !documentVisible}>
                 <Activity aria-hidden="true" /> 开始观察
               </Button>
             ) : (
