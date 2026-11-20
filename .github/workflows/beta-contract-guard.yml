@@ -13,6 +13,8 @@ on:
       - 'scripts/dev/beta-contract-*.ts'
       - 'scripts/dev/beta-build-request.ts'
       - 'scripts/dev/beta-patch-preflight.mjs'
+      - 'scripts/dev/beta-apk-identity.mjs'
+      - 'tests/unit/scripts/beta-apk-identity.test.mjs'
       - 'tests/unit/scripts/beta-patch-preflight.test.mjs'
       - 'scripts/dev/beta-core8-fixture.ts'
       - 'tests/unit/scripts/beta-core8-fixture.test.ts'
@@ -85,7 +87,7 @@ jobs:
       - name: Install frozen frontend dependencies
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Check read-only patch intake
-        run: node --test tests/unit/scripts/beta-patch-preflight.test.mjs
+        run: node --test --test-concurrency=1 tests/unit/scripts/beta-patch-preflight.test.mjs tests/unit/scripts/beta-apk-identity.test.mjs
       - name: Check evidence rejection rules
         run: bun run test:beta:contract-evidence
       - name: Check original diagnostics and candidate identity
