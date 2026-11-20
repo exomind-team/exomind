@@ -142,9 +142,13 @@ describe('Beta message actions in the record workspace', () => {
     expect(location).toHaveTextContent('已在当前外心档案内找到引用原文');
     const sameFactRows = document.querySelectorAll(`[data-event-id="${TARGET}"][data-timeline-kind="${kind}"]`);
     expect(sameFactRows).toHaveLength(2);
-    const peek = sameFactRows[0] as HTMLElement;
-    fireEvent.click(within(peek).getByRole('button', { name: '更多消息操作' }));
-    fireEvent.click(within(peek).getByRole('button', { name: '复制消息正文' }));
+    // The history and the location peek intentionally share the same fact ID.
+    // Resolve the peek by its owning region, independent of document order.
+    const peek = location.querySelector<HTMLElement>(`[data-event-id="${TARGET}"][data-timeline-kind="${kind}"]`);
+    expect(peek).toBeInTheDocument();
+    expect(history.contains(peek)).toBe(false);
+    fireEvent.click(within(peek!).getByRole('button', { name: '更多消息操作' }));
+    fireEvent.click(within(peek!).getByRole('button', { name: '复制消息正文' }));
     await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(2, body));
   });
 
