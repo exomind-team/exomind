@@ -20,11 +20,11 @@ function finishedLabel(row: ProfileArchiveTask) {
   return row.archive_complete === false ? `${result}，内容不完整` : result;
 }
 
-export function BetaProfileArchiveEntry({ client, profileId, profileName, onImported }: {
+export function BetaProfileArchiveEntry({ client, profileId, profileName, onProfilesChanged }: {
   client?: ProfileArchiveClient;
   profileId: string;
   profileName: string;
-  onImported?: (profileId: string) => void;
+  onProfilesChanged?: (profileId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [capabilities, setCapabilities] = useState<ProfileArchiveCapabilities | null>(null);
@@ -34,12 +34,13 @@ export function BetaProfileArchiveEntry({ client, profileId, profileName, onImpo
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [details, setDetails] = useState<ReadonlySet<string>>(() => new Set());
+  const [abandon, setAbandon] = useState<ProfileArchiveTask | null>(null);
   const epoch = useRef(0);
   const refresh = useRef<() => Promise<void>>(async () => {});
   const notified = useRef(new Set<string>());
-  const imported = useRef(onImported);
-  imported.current = onImported;
-  const changeOpen = (next: boolean) => { epoch.current++; setOpen(next); };
+  const imported = useRef(onProfilesChanged);
+  imported.current = onProfilesChanged;
+  const changeOpen = (next: boolean) => { epoch.current++; if (!next) setAbandon(null); setOpen(next); };
 
   useEffect(() => {
     if (!open) return;
@@ -62,12 +63,16 @@ export function BetaProfileArchiveEntry({ client, profileId, profileName, onImpo
         const next = await client.history();
         if (!valid()) return;
         setRows(next); setError('');
+        const retained = new Set(next.map(row => row.request_id));
+        notified.current = new Set([...notified.current].filter(id => retained.has(id)));
+        let changedProfile: string | undefined;
         for (const row of next) {
-          if (row.direction === 'import' && row.phase === 'succeeded' && row.profile_id && !notified.current.has(row.request_id)) {
+          if (row.direction === 'import' && TERMINAL.has(row.phase) && row.profile_id && !notified.current.has(row.request_id)) {
             notified.current.add(row.request_id);
-            imported.current?.(row.profile_id);
+            changedProfile = row.profile_id;
           }
         }
+        if (changedProfile) imported.current?.(changedProfile);
         if (next.some(row => ongoing(row) && row.phase !== 'preview_ready')) timer = setTimeout(() => { void read(); }, 1000);
       } catch (failure) { if (valid()) setError(message(failure)); }
       finally { reading = false; if (valid()) setLoading(false); }
@@ -143,8 +148,26 @@ export function BetaProfileArchiveEntry({ client, profileId, profileName, onImpo
             <div id={`archive-details-${row.request_id}`} hidden={!details.has(row.request_id)} className="mt-2 space-y-1 break-all"><p>{row.request_id}</p>{row.profile_id && <p>档案：{row.profile_id}</p>}{row.archive_sha256 && <p>SHA-256：{row.archive_sha256}</p>}{row.failure_code && <p>原因：{row.failure_code}</p>}</div>
           </div>
           {ongoing(row) && row.phase !== 'cancel_requested' && client && <Button type="button" variant="outline" size="sm" disabled={acting} onClick={() => { void action(() => client.cancel(row.request_id)); }}>取消此操作</Button>}
+          {(row.phase === 'failed' || row.phase === 'interrupted') && client && <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setAbandon(row)}>放弃此操作</Button>}
         </article>)}
         {capabilities && !loading && rows.length === 0 && <p className="text-sm text-muted">暂无本机档案操作。选择文件后会先显示预览。</p>}
+      </DialogContent>
+    </Dialog>
+    <Dialog open={open && abandon !== null} onOpenChange={next => { if (!next) setAbandon(null); }}>
+      <DialogContent className="beta-ui">
+        <DialogHeader><DialogTitle>放弃此次档案操作？</DialogTitle><DialogDescription>将清除此操作的本机暂存。已导入的记录和目的文件保留；之后需要重新选择来源或重新生成备份。</DialogDescription></DialogHeader>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => setAbandon(null)}>返回</Button>
+          <Button type="button" disabled={acting || !client} onClick={() => {
+            if (!client || !abandon) return;
+            const request = abandon.request_id, current = epoch.current;
+            void action(async () => {
+              const accepted = await client.cancel(request);
+              if (current === epoch.current) setAbandon(null);
+              return accepted;
+            });
+          }}>放弃并清理暂存</Button>
+        </div>
       </DialogContent>
     </Dialog>
   </>;

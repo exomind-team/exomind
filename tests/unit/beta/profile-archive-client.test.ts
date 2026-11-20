@@ -71,6 +71,7 @@ describe('Native profile archive IPC client', () => {
     for (const rows of [
       [{ ...task(), bytes_processed: Number.MAX_SAFE_INTEGER + 1 }],
       [{ ...task(), phase: 'pretend_complete' }],
+      [{ ...task(), direction: ['export'], phase: 'failed', preview: null }],
       [{ ...task(), destination_uri: 'content://private' }],
       [task(), task()],
       Array.from({ length: 34 }, () => task()),

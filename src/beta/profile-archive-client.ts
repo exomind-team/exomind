@@ -93,7 +93,7 @@ function task(value: unknown, filter?: string): ProfileArchiveTask {
   ]);
   const requestId = uuid(raw.request_id);
   const profileId = optional(raw.profile_id, value => uuid(value));
-  if ((filter && profileId !== filter) || !['import', 'export'].includes(String(raw.direction))
+  if ((filter && profileId !== filter) || typeof raw.direction !== 'string' || !['import', 'export'].includes(raw.direction)
     || !(PROFILE_ARCHIVE_PHASES as readonly unknown[]).includes(raw.phase)) invalid();
   const failureCode = optional(raw.failure_code, value => {
     if (typeof value !== 'string' || !/^[a-z][a-z0-9_]{0,63}$/.test(value)) invalid();

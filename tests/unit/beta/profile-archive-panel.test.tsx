@@ -79,7 +79,7 @@ describe('profile archive user controls', () => {
   it('refreshes the profile list after confirmed import without selecting a profile or repeating import', async () => {
     const api = client([{ ...preview(), phase: 'succeeded', preview: undefined, archive_complete: true }]);
     const changed = vi.fn();
-    render(<BetaProfileArchiveEntry client={api} profileId="" profileName="" onImported={changed} />);
+    render(<BetaProfileArchiveEntry client={api} profileId="" profileName="" onProfilesChanged={changed} />);
     fireEvent.click(screen.getByRole('button', { name: '档案备份与导入' }));
     await waitFor(() => expect(changed).toHaveBeenCalledWith(PROFILE));
     fireEvent.click(screen.getByRole('button', { name: '刷新操作历史' }));
@@ -123,5 +123,37 @@ describe('profile archive user controls', () => {
     fireEvent.click(await screen.findByRole('button', { name: '取消此操作' }));
     expect(await screen.findByText('取消请求未被受理，已刷新操作历史。')).toBeVisible();
     expect(screen.queryByText('操作已受理，具体进度与结果见下方。')).toBeNull();
+  });
+
+  it('refreshes profiles after a partially accepted import fails so retained records stay reachable', async () => {
+    const api = client([{ ...preview(), phase: 'failed', preview: undefined, partial_output: true }]);
+    const changed = vi.fn();
+    render(<BetaProfileArchiveEntry client={api} profileId="" profileName="" onProfilesChanged={changed} />);
+    fireEvent.click(screen.getByRole('button', { name: '档案备份与导入' }));
+    await screen.findByText('操作未完成');
+    await waitFor(() => expect(changed).toHaveBeenCalledWith(PROFILE));
+    expect(api.confirmImport).not.toHaveBeenCalled();
+  });
+
+  it('batches multiple retained import outcomes into one profile-list refresh', async () => {
+    const row = { ...preview(), phase: 'succeeded' as const, preview: undefined, archive_complete: true };
+    const api = client([row, { ...row, request_id: '33333333-3333-4333-8333-333333333333' }]);
+    const changed = vi.fn();
+    render(<BetaProfileArchiveEntry client={api} profileId="" profileName="" onProfilesChanged={changed} />);
+    fireEvent.click(screen.getByRole('button', { name: '档案备份与导入' }));
+    await waitFor(() => expect(api.history).toHaveBeenCalledTimes(1));
+    expect(changed).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires explicit confirmation before abandoning an interrupted operation and clearing its private spool', async () => {
+    const api = client([{ ...preview(), phase: 'interrupted', preview: undefined, partial_output: true }]);
+    render(<BetaProfileArchiveEntry client={api} profileId="" profileName="" />);
+    fireEvent.click(screen.getByRole('button', { name: '档案备份与导入' }));
+    fireEvent.click(await screen.findByRole('button', { name: '放弃此操作' }));
+    expect(api.cancel).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: '放弃此次档案操作？' })).toHaveTextContent('已导入的记录和目的文件保留');
+    fireEvent.click(screen.getByRole('button', { name: '放弃并清理暂存' }));
+    await waitFor(() => expect(api.cancel).toHaveBeenCalledWith(REQUEST));
+    expect(api.confirmImport).not.toHaveBeenCalled();
   });
 });
