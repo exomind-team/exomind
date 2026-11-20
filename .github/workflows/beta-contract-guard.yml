@@ -17,7 +17,11 @@ on:
       - 'tests/unit/scripts/beta-apk-identity.test.mjs'
       - 'tests/unit/scripts/beta-patch-preflight.test.mjs'
       - 'scripts/dev/beta-core8-fixture.ts'
+      - 'scripts/dev/beta-core10-fixture.ts'
+      - 'scripts/dev/beta-core-fixture-source.ts'
+      - 'docs/development/beta-core10-migration-fixture.md'
       - 'tests/unit/scripts/beta-core8-fixture.test.ts'
+      - 'tests/unit/scripts/beta-core10-fixture*.test.ts'
       - 'tests/fixtures/beta/**'
       - 'tests/unit/scripts/beta-contract-*.test.ts'
       - 'tests/unit/scripts/beta-build-request.test.ts'
@@ -124,6 +128,8 @@ jobs:
             'tests/unit/beta/original-export-recovery.test.tsx',
             'tests/unit/scripts/beta-build-request.test.ts',
             'tests/unit/scripts/beta-core8-fixture.test.ts',
+            'tests/unit/scripts/beta-core10-fixture.test.ts',
+            'tests/unit/scripts/beta-core10-fixture-execution.test.ts',
           ];
           assert.ok(process.env.CONTRACT_OUT);
           assert.equal(existsSync(process.env.CONTRACT_OUT), false, 'The source gate owns its new evidence directory');
