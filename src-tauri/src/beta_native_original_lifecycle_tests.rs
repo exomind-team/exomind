@@ -589,5 +589,97 @@ fn lifecycle_capability_descriptor_is_explicit_and_contains_no_user_data() {
             target_os = "openbsd"
         ))
     );
-    assert_eq!(value.as_object().unwrap().len(), 5);
+    assert_eq!(value["supports_restore_retry"], true);
+    assert_eq!(value.as_object().unwrap().len(), 6);
+}
+
+#[test]
+fn restore_retry_clears_user_cancel_without_creating_a_new_core_restore() {
+    let fixture = fixture();
+    let release = release_command(fixture.profile, fixture.original.original_id);
+    fixture
+        .host
+        .apply_original_lifecycle(&fixture.owner, &release)
+        .unwrap();
+    let restore = OriginalLifecycleCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: fixture.profile,
+        original_id: fixture.original.original_id,
+        expected_generation: 1,
+        occurred_at_ms: 3,
+        action: OriginalLifecycleAction::Restore,
+        cleanup_confirmed: false,
+        follow_up_device_ids: vec![],
+        responds_to_event_id: None,
+    };
+    let restore_receipt = fixture
+        .host
+        .apply_original_lifecycle(&fixture.owner, &restore)
+        .unwrap();
+    let human = fixture.workspace.human_session(fixture.profile).unwrap();
+    assert_eq!(
+        fixture
+            .host
+            .receipt(&human, fixture.profile, restore.command_id)
+            .unwrap(),
+        Some(restore_receipt.clone())
+    );
+
+    let intent = fixture
+        .host
+        .original_local_intent(&fixture.owner, fixture.profile, fixture.original.original_id)
+        .unwrap();
+    fixture
+        .host
+        .configure_original_auto_suppression(
+            &fixture.owner,
+            fixture.profile,
+            fixture.original.original_id,
+            &exomind_beta_host::OriginalAutoSuppressionCommand {
+                command_id: uuid::Uuid::new_v4(),
+                expected_intent_revision: intent.intent_revision,
+                suppression: Some(exomind_beta_host::OriginalAutoSuppression::UserCancelled),
+            },
+        )
+        .unwrap();
+
+    let peers =
+        exomind_beta_host::PeerNetwork::new(fixture.host.clone(), fixture.owner.clone()).unwrap();
+    assert!(retry_original_restore(
+        &fixture.host,
+        &fixture.owner,
+        &peers,
+        validated_profile(&fixture),
+        fixture.original.original_id,
+    )
+    .unwrap()
+    .is_none());
+
+    let status = fixture
+        .host
+        .original_lifecycle_status(
+            &fixture.owner,
+            fixture.profile,
+            fixture.original.original_id,
+        )
+        .unwrap()
+        .local;
+    assert_eq!(status.bytes_state, OriginalBytesState::RestorePending);
+    assert_eq!(status.restore_request_event_id, Some(restore.event_id));
+    assert_eq!(
+        fixture
+            .host
+            .original_local_intent(&fixture.owner, fixture.profile, fixture.original.original_id)
+            .unwrap()
+            .suppression,
+        None
+    );
+    assert_eq!(
+        fixture
+            .host
+            .receipt(&human, fixture.profile, restore.command_id)
+            .unwrap(),
+        Some(restore_receipt)
+    );
 }

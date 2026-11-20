@@ -3,7 +3,10 @@
 //! the selected Native profile, coordinates Native export/open, and reports the
 //! exact system-open cache result.
 use super::{export, open_cache as cache, trusted_window, Failure, NativeState};
-use exomind_beta_host::{BetaHost, HostError, OriginalLifecycleHostStatus, Session};
+use exomind_beta_host::{
+    BetaHost, HostError, OriginalAutoSuppression, OriginalAutoSuppressionCommand,
+    OriginalLifecycleHostStatus, PeerNetwork, Session,
+};
 
 use exomind_core::{
     OriginalBytesState, OriginalId, OriginalLifecycleAction, OriginalLifecycleCommand, ProfileId,
@@ -18,7 +21,7 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -286,6 +289,57 @@ pub(super) fn apply_original_lifecycle(
     })
 }
 
+/// Resets only a hash-failed stage through Host, preserving its Core request and command IDs.
+/// A cancelled partial stage keeps its durable offset and only clears its explicit suppression.
+pub(super) fn retry_original_restore(
+    host: &BetaHost,
+    owner: &Session,
+    peers: &PeerNetwork,
+    profile: NativeHumanProfile,
+    original_id: OriginalId,
+) -> Result<Option<exomind_core::OriginalRestoreRetry>, Failure> {
+    let lifecycle = host
+        .original_lifecycle_status(owner, profile.profile_id, original_id)
+        .map_err(Failure::from)?
+        .local;
+    if lifecycle.bytes_state != OriginalBytesState::RestorePending {
+        return Err(failure(
+            "original_restore_not_pending",
+            "当前原件没有待续接的恢复请求",
+        ));
+    }
+
+    let transfer = peers
+        .original_status(profile.profile_id, original_id)
+        .map_err(Failure::from)?;
+    let retry = if transfer.availability == "hash_mismatch" {
+        Some(
+            host.retry_failed_original_restore(owner, profile.profile_id, original_id)
+                .map_err(Failure::from)?,
+        )
+    } else {
+        None
+    };
+
+    let intent = host
+        .original_local_intent(owner, profile.profile_id, original_id)
+        .map_err(Failure::from)?;
+    if intent.suppression == Some(OriginalAutoSuppression::UserCancelled) {
+        host.configure_original_auto_suppression(
+            owner,
+            profile.profile_id,
+            original_id,
+            &OriginalAutoSuppressionCommand {
+                command_id: uuid::Uuid::new_v4(),
+                expected_intent_revision: intent.intent_revision,
+                suppression: None,
+            },
+        )
+        .map_err(Failure::from)?;
+    }
+    peers.wake_original_restore_scan();
+    Ok(retry)
+}
 pub(super) fn retry_original_cache_cleanup(
     host: &BetaHost,
     owner: &Session,
@@ -372,6 +426,16 @@ fn app_cache_root(app: &AppHandle) -> Option<std::path::PathBuf> {
     app.path().app_cache_dir().ok()
 }
 
+fn invalidate_original_views(app: &AppHandle, profile_id: ProfileId, original_id: OriginalId) {
+    // An invalidation asks equal data clients to reread; it is not a new
+    // business event or a claim that bytes have arrived. A failed notification
+    // cannot roll back the durable Core receipt.
+    let _ = app.emit("beta-original-availability-changed", serde_json::json!({
+        "profile_id": profile_id,
+        "original_id": original_id,
+    }));
+}
+
 #[derive(Serialize)]
 pub(super) struct NativeOriginalLifecycleCapabilities {
     schema_version: u8,
@@ -379,6 +443,7 @@ pub(super) struct NativeOriginalLifecycleCapabilities {
     operations: [&'static str; 4],
     cache_policy: &'static str,
     supports_reveal: bool,
+    supports_restore_retry: bool,
 }
 
 pub(super) fn capabilities_descriptor() -> NativeOriginalLifecycleCapabilities {
@@ -400,6 +465,7 @@ pub(super) fn capabilities_descriptor() -> NativeOriginalLifecycleCapabilities {
             target_os = "netbsd",
             target_os = "openbsd"
         )),
+        supports_restore_retry: true,
     }
 }
 
@@ -447,7 +513,11 @@ pub(super) async fn beta_apply_original_lifecycle(
 ) -> Result<NativeOriginalLifecycleApplyResult, Failure> {
     trusted_window(&window, state.inner())?;
     let cache_root = app_cache_root(&app);
-    run_native(state.inner().clone(), move |native| {
+    let wake_restore = command.action == OriginalLifecycleAction::Restore;
+    let profile_id = command.profile_id;
+    let original_id = command.original_id;
+    let peers = state.inner().peers.clone();
+    let result = run_native(state.inner().clone(), move |native| {
         let profile = validate_native_profile(command.profile_id, |profile| native.human(profile))?;
         apply_original_lifecycle(
             &native.host,
@@ -461,9 +531,31 @@ pub(super) async fn beta_apply_original_lifecycle(
             || false,
         )
     })
-    .await
+    .await?;
+    if wake_restore {
+        peers.wake_original_restore_scan();
+    }
+    invalidate_original_views(&app, profile_id, original_id);
+    Ok(result)
 }
 
+#[tauri::command]
+pub(super) async fn beta_retry_original_restore(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    original_id: OriginalId,
+) -> Result<Option<exomind_core::OriginalRestoreRetry>, Failure> {
+    trusted_window(&window, state.inner())?;
+    let result = run_native(state.inner().clone(), move |native| {
+        let profile = validate_native_profile(profile_id, |profile| native.human(profile))?;
+        retry_original_restore(&native.host, &native.owner, &native.peers, profile, original_id)
+    })
+    .await?;
+    invalidate_original_views(&app, profile_id, original_id);
+    Ok(result)
+}
 #[tauri::command]
 pub(super) async fn beta_retry_original_cache_cleanup(
     app: AppHandle,

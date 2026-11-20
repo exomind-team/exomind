@@ -249,6 +249,10 @@ jobs:
               expected: [
                 'local_intent_is_rechecked_at_prepare_write_freeze_and_seal_without_erasing_suppression',
                 'source_revocation_between_chunks_prevents_any_verified_receipt',
+                'restore_pending_resumes_after_host_restart_without_a_view_when_auto_policy_is_off',
+                'restore_pending_bypasses_auto_size_limit_after_host_restart_without_a_view',
+                'restore_hash_mismatch_waits_for_host_retry_and_keeps_core_request_ids',
+                'restore_retry_rotates_per_original_and_does_not_globally_defer_other_restores',
               ],
             },
             {

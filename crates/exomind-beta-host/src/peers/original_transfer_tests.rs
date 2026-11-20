@@ -2,7 +2,10 @@ use super::*;
 use crate::{
     CreatePeerInvitation, PeerCapabilities, PeerPin, PeerTransportListener, PeerTransportOptions,
 };
-use exomind_core::{AgentId, CaptureCommand, CommandId, EventId, OriginPageQuery};
+use exomind_core::{
+    AgentId, CaptureCommand, CommandId, EventId, OriginalBytesState, OriginalLifecycleAction,
+    OriginalLifecycleCommand, OriginPageQuery,
+};
 use tempfile::{TempDir, tempdir};
 
 struct Rig {
@@ -207,6 +210,164 @@ fn stage_status(r: &Rig) -> exomind_core::StageStatus {
         OriginalAvailability::Local { stage } => stage,
         _ => panic!("expected a staged but not fabricated original"),
     }
+}
+
+fn restore_command(r: &Rig) -> OriginalLifecycleCommand {
+    let status = r
+        .b
+        .original_lifecycle_status(&r.ob, r.p, r.original.original_id)
+        .unwrap();
+    OriginalLifecycleCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: r.p,
+        original_id: r.original.original_id,
+        expected_generation: status.local.generation,
+        occurred_at_ms: 2_000,
+        action: OriginalLifecycleAction::Restore,
+        cleanup_confirmed: false,
+        follow_up_device_ids: vec![],
+        responds_to_event_id: None,
+    }
+}
+
+async fn restore_network_after_host_restart(
+    r: &Rig,
+    auto_enabled: bool,
+    max_bytes: u64,
+) -> (
+    Arc<crate::PeerNetwork>,
+    Arc<BetaHost>,
+    Session,
+    Arc<crate::PeerNetwork>,
+) {
+    for (host, owner) in [(&r.a, &r.oa), (&r.b, &r.ob)] {
+        host.save_peer_network_settings(
+            owner,
+            crate::PeerNetworkSettings {
+                enabled: false,
+                preferred_port: 0,
+            },
+        )
+        .unwrap();
+    }
+    let source = crate::PeerNetwork::new(r.a.clone(), r.oa.clone()).unwrap();
+    let prior = r.b.original_auto_policy(&r.ob).unwrap();
+    r.b.configure_original_auto_policy(
+        &r.ob,
+        &crate::OriginalAutoPolicyCommand {
+            command_id: Uuid::new_v4(),
+            expected_revision: prior.revision,
+            enabled: auto_enabled,
+            max_bytes,
+        },
+    )
+    .unwrap();
+    source.set_enabled(true).await.unwrap();
+    let endpoint = source
+        .local_addresses()
+        .unwrap()
+        .into_iter()
+        .find(|address| address.ip().is_loopback())
+        .unwrap();
+    r.b.save_peer_routes(&r.ob, r.p, r.a.device_id, vec![endpoint])
+        .unwrap();
+    r.b.save_peer_network_settings(
+        &r.ob,
+        crate::PeerNetworkSettings {
+            enabled: true,
+            preferred_port: 0,
+        },
+    )
+    .unwrap();
+
+    let command = restore_command(r);
+    r.b.apply_original_lifecycle(&r.ob, &command).unwrap();
+    let before_restart = r
+        .b
+        .original_lifecycle_status(&r.ob, r.p, r.original.original_id)
+        .unwrap()
+        .local;
+    assert_eq!(
+        before_restart.bytes_state,
+        OriginalBytesState::RestorePending
+    );
+    assert_eq!(
+        before_restart.restore_request_event_id,
+        Some(command.event_id)
+    );
+
+    stop(r.b.clone()).await;
+    let reopened = Arc::new(BetaHost::open(r.rb.path()).unwrap());
+    let owner = reopened.owner_session().unwrap();
+    let after_restart = reopened
+        .original_lifecycle_status(&owner, r.p, r.original.original_id)
+        .unwrap()
+        .local;
+    assert_eq!(
+        after_restart.bytes_state,
+        OriginalBytesState::RestorePending
+    );
+    assert_eq!(
+        after_restart.restore_request_event_id,
+        Some(command.event_id),
+        "host restart must retain the Core restore request"
+    );
+    let target = crate::PeerNetwork::new(reopened.clone(), owner.clone()).unwrap();
+    target.restore().await.unwrap();
+    (source, reopened, owner, target)
+}
+
+async fn assert_restore_continues_without_a_view(
+    bytes: &[u8],
+    auto_enabled: bool,
+    max_bytes: u64,
+) {
+    let r = rig(bytes).await;
+    let (source, reopened, owner, target) =
+        restore_network_after_host_restart(&r, auto_enabled, max_bytes).await;
+    wait_auto("restore pending after host restart", || {
+        target
+            .original_status(r.p, r.original.original_id)
+            .is_ok_and(|status| status.availability == "complete")
+    })
+    .await;
+    assert_eq!(
+        original_bytes(&reopened, r.p, r.original.original_id),
+        bytes
+    );
+    assert_eq!(
+        reopened
+            .original_lifecycle_status(&owner, r.p, r.original.original_id)
+            .unwrap()
+            .local
+            .bytes_state,
+        OriginalBytesState::Available
+    );
+    target.stop().await.unwrap();
+    source.stop().await.unwrap();
+    stop(reopened).await;
+    stop(r.a).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restore_pending_resumes_after_host_restart_without_a_view_when_auto_policy_is_off() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    assert_restore_continues_without_a_view(
+        b"explicit restore with auto policy off",
+        false,
+        1024 * 1024,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restore_pending_bypasses_auto_size_limit_after_host_restart_without_a_view() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let bytes: Vec<_> = (0..1024 * 1024 + 1)
+        .map(|index| ((index * 131 + 255) % 256) as u8)
+        .collect();
+    assert_restore_continues_without_a_view(&bytes, true, 1024 * 1024).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -798,6 +959,8 @@ async fn automatic_original_yields_after_four_chunks_then_resumes_same_durable_s
 async fn automatic_cancel_is_durable_across_restart_and_manual_oneoff_does_not_clear_it() {
     let _discovery = crate::peers::test_discovery::lease().await;
     let r = rig(b"cancelled auto file\0\xff").await;
+    let restore = restore_command(&r);
+    r.b.apply_original_lifecycle(&r.ob, &restore).unwrap();
     let (entered, ready) = tokio::sync::oneshot::channel();
     let (release, wait) = std::sync::mpsc::sync_channel(1);
     let (source, target) = auto_controllers(
@@ -839,6 +1002,12 @@ async fn automatic_cancel_is_durable_across_restart_and_manual_oneoff_does_not_c
     stop(r.b.clone()).await;
     let reopened = Arc::new(BetaHost::open(r.rb.path()).unwrap());
     let owner = reopened.owner_session().unwrap();
+    let pending = reopened
+        .original_lifecycle_status(&owner, r.p, r.original.original_id)
+        .unwrap()
+        .local;
+    assert_eq!(pending.bytes_state, OriginalBytesState::RestorePending);
+    assert_eq!(pending.restore_request_event_id, Some(restore.event_id));
     let target = crate::PeerNetwork::new(reopened.clone(), owner.clone()).unwrap();
     target.restore().await.unwrap();
     tokio::time::sleep(Duration::from_millis(4300)).await;
@@ -1641,3 +1810,406 @@ async fn empty_original_is_actually_verified_and_source_private_or_wrong_profile
 
 #[path = "original_transfer_lifecycle_red_tests.rs"]
 mod lifecycle_red_tests;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restore_hash_mismatch_waits_for_host_retry_and_keeps_core_request_ids() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let bytes = b"restore hash retry keeps the original Core request";
+    let r = rig(bytes).await;
+    let command = restore_command(&r);
+    r.b.apply_original_lifecycle(&r.ob, &command).unwrap();
+
+    let corrupt = vec![0xff; bytes.len()];
+    {
+        let state = r.a.active_state().unwrap();
+        let db = rusqlite::Connection::open(crate::resources(&state).unwrap().core.database_path())
+            .unwrap();
+        db.execute_batch("DROP TRIGGER original_chunks_no_update")
+            .unwrap();
+        db.execute(
+            "UPDATE original_chunks SET bytes=?1,chunk_sha256=?2 WHERE offset=0",
+            rusqlite::params![corrupt, format!("{:x}", Sha256::digest(&corrupt))],
+        )
+        .unwrap();
+    }
+
+    let (source, target) = auto_controllers(&r, 1024 * 1024, None).await;
+    wait_auto("restore hash mismatch", || {
+        target
+            .original_status(r.p, r.original.original_id)
+            .is_ok_and(|status| status.availability == "hash_mismatch")
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let failed = target
+        .original_status(r.p, r.original.original_id)
+        .unwrap();
+    assert_eq!(failed.availability, "hash_mismatch");
+    assert!(
+        failed.request_id.is_none(),
+        "hash mismatch must stop background restore attempts"
+    );
+    let pending = r
+        .b
+        .original_lifecycle_status(&r.ob, r.p, r.original.original_id)
+        .unwrap()
+        .local;
+    assert_eq!(pending.bytes_state, OriginalBytesState::RestorePending);
+    assert_eq!(pending.restore_request_event_id, Some(command.event_id));
+
+    target.stop().await.unwrap();
+    source.stop().await.unwrap();
+    {
+        let state = r.a.active_state().unwrap();
+        let db = rusqlite::Connection::open(crate::resources(&state).unwrap().core.database_path())
+            .unwrap();
+        db.execute(
+            "UPDATE original_chunks SET bytes=?1,chunk_sha256=?2 WHERE offset=0",
+            rusqlite::params![bytes, format!("{:x}", Sha256::digest(bytes))],
+        )
+        .unwrap();
+    }
+
+    let retry = r
+        .b
+        .retry_failed_original_restore(&r.ob, r.p, r.original.original_id)
+        .unwrap();
+    assert_eq!(retry.restore_request_event_id, command.event_id);
+    assert_eq!(retry.restore_command_id, command.command_id);
+    assert_eq!(retry.stage.state, StageState::Uploading);
+    assert_eq!(retry.stage.next_offset, 0);
+
+    source.restore().await.unwrap();
+    target.restore().await.unwrap();
+    wait_auto("explicit Host retry resumes the same restore", || {
+        target
+            .original_status(r.p, r.original.original_id)
+            .is_ok_and(|status| status.availability == "complete")
+    })
+    .await;
+    assert_eq!(original_bytes(&r.b, r.p, r.original.original_id), bytes);
+    assert_eq!(
+        r.b.original_lifecycle_status(&r.ob, r.p, r.original.original_id)
+            .unwrap()
+            .local
+            .bytes_state,
+        OriginalBytesState::Available
+    );
+    target.stop().await.unwrap();
+    source.stop().await.unwrap();
+    stop(r.b).await;
+    stop(r.a).await;
+}
+
+fn materialize_existing_original(
+    host: &BetaHost,
+    profile: ProfileId,
+    original: &OriginalRef,
+    bytes: &[u8],
+) {
+    assert_eq!(bytes.len() as u64, original.byte_length);
+    assert_eq!(format!("{:x}", Sha256::digest(bytes)), original.sha256);
+    let stage_id = StageId::new();
+    let ticket = {
+        let state = host.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        let human = core.local_human(profile).unwrap();
+        core.begin_stage(
+            &human,
+            &BeginStageCommand {
+                stage_id,
+                original_id: original.original_id,
+                profile_id: profile,
+                expected_sha256: original.sha256.clone(),
+                byte_length: original.byte_length,
+                file_name: original.file_name.clone(),
+                media_type: original.media_type.clone(),
+            },
+        )
+        .unwrap();
+        for (index, chunk) in bytes.chunks(MAX_ORIGINAL_CHUNK_BYTES).enumerate() {
+            core.write_stage_chunk(
+                &human,
+                stage_id,
+                (index * MAX_ORIGINAL_CHUNK_BYTES) as u64,
+                chunk,
+            )
+            .unwrap();
+        }
+        core.freeze_stage(&human, stage_id).unwrap()
+    };
+    let proof = ticket.verify(|| false).unwrap();
+    let state = host.active_state().unwrap();
+    let core = &crate::resources(&state).unwrap().core;
+    let human = core.local_human(profile).unwrap();
+    assert_eq!(core.finish_stage(&human, &proof).unwrap().original, *original);
+}
+
+fn release_local_original(host: &BetaHost, owner: &Session, profile: ProfileId, original: OriginalId) {
+    let local = host.original_lifecycle_status(owner, profile, original).unwrap().local;
+    assert_eq!(local.bytes_state, OriginalBytesState::Available);
+    host.apply_original_lifecycle(
+        owner,
+        &OriginalLifecycleCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            original_id: original,
+            expected_generation: local.generation,
+            occurred_at_ms: 3_000,
+            action: OriginalLifecycleAction::ReleaseLocal,
+            cleanup_confirmed: true,
+            follow_up_device_ids: vec![],
+            responds_to_event_id: None,
+        },
+    )
+    .unwrap();
+}
+
+fn restore_command_for(
+    host: &BetaHost,
+    owner: &Session,
+    profile: ProfileId,
+    original: OriginalId,
+) -> OriginalLifecycleCommand {
+    let local = host.original_lifecycle_status(owner, profile, original).unwrap().local;
+    OriginalLifecycleCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: profile,
+        original_id: original,
+        expected_generation: local.generation,
+        occurred_at_ms: 4_000,
+        action: OriginalLifecycleAction::Restore,
+        cleanup_confirmed: false,
+        follow_up_device_ids: vec![],
+        responds_to_event_id: None,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restore_retry_rotates_per_original_and_does_not_globally_defer_other_restores() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let first_bytes = b"first referenced original";
+    let second_bytes = b"second referenced original";
+    let r = rig(first_bytes).await;
+    let second_original = seed(&r.a, r.p, second_bytes, true);
+
+    let third_root = tempdir().unwrap();
+    let (third, third_owner) = open(&third_root);
+    third
+        .provision_profile(&third_owner, r.p, "original transfer")
+        .unwrap();
+    let page = {
+        let state = r.a.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        core.export_origin_page(
+            &core.local_human(r.p).unwrap(),
+            r.p,
+            &OriginPageQuery::default(),
+        )
+        .unwrap()
+    };
+    {
+        let state = third.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        let context = core
+            .trusted_replica_context(r.p, r.a.device_id, page.origin.restoration_epoch, 1)
+            .unwrap();
+        core.import_origin_page(&context, &page).unwrap();
+    }
+    materialize_existing_original(&third, r.p, &r.original, first_bytes);
+    materialize_existing_original(&third, r.p, &second_original, second_bytes);
+
+    let (listener, client, server) = channels(&r.b, &r.ob, &third, &third_owner).await;
+    let invitation = r
+        .b
+        .create_peer_invitation(
+            &r.ob,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: r.p,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![listener.addr()],
+                ttl_seconds: 120,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+    let claim = third
+        .prepare_peer_join(&third_owner, &invitation, Uuid::new_v4())
+        .unwrap();
+    let receipt = r.b.claim_peer_invitation_verified(&server, &claim).unwrap();
+    let confirmation = third
+        .accept_peer_claim_verified(&client, &receipt)
+        .unwrap();
+    let ready = r
+        .b
+        .confirm_peer_join_verified(&server, &confirmation)
+        .unwrap();
+    third
+        .finish_peer_join_verified(&client, &ready)
+        .unwrap();
+    r.b
+        .acknowledge_peer_ready_verified(&server, &ready.acknowledgement().unwrap())
+        .unwrap();
+    drop(client);
+    drop(server);
+    drop(listener);
+    let target_host = r.b.clone();
+    let third_host = third.clone();
+    tokio::task::spawn_blocking(move || {
+        target_host.peers.wait_empty(Duration::from_secs(3)).unwrap();
+        third_host.peers.wait_empty(Duration::from_secs(3)).unwrap();
+    })
+    .await
+    .unwrap();
+
+    let (metadata_id, metadata_host, metadata_owner, holder_id) =
+        if r.a.device_id.to_string() < third.device_id.to_string() {
+            (r.a.device_id, r.a.clone(), r.oa.clone(), third.device_id)
+        } else {
+            (third.device_id, third.clone(), third_owner.clone(), r.a.device_id)
+        };
+    let first_is_a = metadata_id == r.a.device_id;
+    release_local_original(
+        &metadata_host,
+        &metadata_owner,
+        r.p,
+        r.original.original_id,
+    );
+    release_local_original(
+        &metadata_host,
+        &metadata_owner,
+        r.p,
+        second_original.original_id,
+    );
+
+    for (host, owner) in [(&r.a, &r.oa), (&r.b, &r.ob), (&third, &third_owner)] {
+        host.save_peer_network_settings(
+            owner,
+            crate::PeerNetworkSettings {
+                enabled: false,
+                preferred_port: 0,
+            },
+        )
+        .unwrap();
+    }
+    let policy = r.b.original_auto_policy(&r.ob).unwrap();
+    r.b.configure_original_auto_policy(
+        &r.ob,
+        &crate::OriginalAutoPolicyCommand {
+            command_id: Uuid::new_v4(),
+            expected_revision: policy.revision,
+            enabled: false,
+            max_bytes: 1024 * 1024,
+        },
+    )
+    .unwrap();
+    let source_a = crate::PeerNetwork::new(r.a.clone(), r.oa.clone()).unwrap();
+    let source_third = crate::PeerNetwork::new(third.clone(), third_owner.clone()).unwrap();
+    let target = crate::PeerNetwork::new(r.b.clone(), r.ob.clone()).unwrap();
+    source_a.set_enabled(true).await.unwrap();
+    source_third.set_enabled(true).await.unwrap();
+    let endpoint_a = source_a
+        .local_addresses()
+        .unwrap()
+        .into_iter()
+        .find(|address| address.ip().is_loopback())
+        .unwrap();
+    let endpoint_third = source_third
+        .local_addresses()
+        .unwrap()
+        .into_iter()
+        .find(|address| address.ip().is_loopback())
+        .unwrap();
+    r.b.save_peer_routes(&r.ob, r.p, r.a.device_id, vec![endpoint_a])
+        .unwrap();
+    r.b
+        .save_peer_routes(&r.ob, r.p, third.device_id, vec![endpoint_third])
+        .unwrap();
+
+    target.set_enabled(true).await.unwrap();
+    wait_auto("both ready sources finish metadata sync", || {
+        target.status(r.p).is_ok_and(|status| {
+            let ready = status
+                .peers
+                .iter()
+                .filter(|peer| peer.member_state == "ready" && peer.event_sync == "complete")
+                .collect::<Vec<_>>();
+            ready.len() == 2
+                && ready[0].device_id == metadata_id
+                && ready[1].device_id == holder_id
+        }) && target.original_status(r.p, second_original.original_id).is_ok()
+    })
+    .await;
+
+    let metadata_network = if first_is_a {
+        &source_a
+    } else {
+        &source_third
+    };
+    let (first_attempt, first_attempt_ready) = tokio::sync::oneshot::channel();
+    metadata_network
+        .source_hook_for_test(move || {
+            let _ = first_attempt.send(());
+        })
+        .await;
+    let first_restore = restore_command(&r);
+    r.b.apply_original_lifecycle(&r.ob, &first_restore).unwrap();
+    target.wake_original_restore_scan();
+    tokio::time::timeout(Duration::from_secs(10), first_attempt_ready)
+        .await
+        .expect("the first metadata-only peer should receive the first restore attempt")
+        .unwrap();
+    wait_auto("first metadata-only attempt fails", || {
+        target.original_status(r.p, r.original.original_id).is_ok_and(|status| {
+            status.request_id.is_none() && status.last_error_code.is_some()
+        })
+    })
+    .await;
+
+    let (second_attempt, second_attempt_ready) = tokio::sync::oneshot::channel();
+    metadata_network
+        .source_hook_for_test(move || {
+            let _ = second_attempt.send(());
+        })
+        .await;
+    let second_restore = restore_command_for(
+        &r.b,
+        &r.ob,
+        r.p,
+        second_original.original_id,
+    );
+    r.b.apply_original_lifecycle(&r.ob, &second_restore).unwrap();
+    tokio::time::timeout(Duration::from_millis(4_500), second_attempt_ready)
+        .await
+        .expect("one failed restore must not defer a different pending original")
+        .unwrap();
+
+    wait_auto("first restore rotates to the source with bytes", || {
+        target
+            .original_status(r.p, r.original.original_id)
+            .is_ok_and(|status| status.availability == "complete")
+    })
+    .await;
+    wait_auto("second restore rotates to the source with bytes", || {
+        target
+            .original_status(r.p, second_original.original_id)
+            .is_ok_and(|status| status.availability == "complete")
+    })
+    .await;
+    assert_eq!(original_bytes(&r.b, r.p, r.original.original_id), first_bytes);
+    assert_eq!(
+        original_bytes(&r.b, r.p, second_original.original_id),
+        second_bytes
+    );
+
+    target.stop().await.unwrap();
+    source_a.stop().await.unwrap();
+    source_third.stop().await.unwrap();
+    stop(r.a).await;
+    stop(r.b).await;
+    stop(third).await;
+}

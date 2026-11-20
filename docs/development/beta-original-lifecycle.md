@@ -69,6 +69,26 @@ Native 的 `beta_native_original_lifecycle.rs` 提供按需状态、能力探测
 一次 peer 探测推断操作成功。peer probe 仅确认候选端点声称有可用副本；实际 fetch 仍须传输并
 通过完整原件 SHA-256 校验。
 
+## 待恢复取回的运行所有者
+
+`Restore` 的 Core 回执只确认恢复请求已记录，不表示字节已经到达。Host 的原件队列在
+启动、网络恢复和 Native 明确唤醒后扫描持久 `restore_pending`，复用原来的 job/status/
+cancel/stage 路径。它不依赖消息卡片、管理面板或主文档存在。明确的恢复请求绕过普通
+自动下载的开关和大小上限；网络关闭、成员授权、来源资格、完整 hash 和显式取消仍约束它。
+
+恢复传输使用新的传输任务 ID，保留原 Core Restore 的 command/event ID 与 stage。hash
+不符会阻止自动重试；取消会保留抑制，直到用户明确选择「重试恢复」。该命令只重置失败
+阶段或取消抑制并唤醒扫描，不创建新的 Core Restore。重试回执也不能被展示成恢复完成。
+
+恢复失败按档案/原件分别退避五秒并轮换来源，最多保留 256 项内存退避；一个没有持件的
+peer 不得持续占住其他原件的恢复。普通自动下载的持久退避保持独立。扫描每页最多 100
+项并复用原传输并发上限；这些工作预算不等于已验证手机空闲能耗或大档案扫描成本。
+Native 的可用性通知只要求对等客户端重读数据，不改变 Core 回执或取得业务停止权。
+
+已有四项真实 Host/PeerNetwork 回归通过：关闭自动下载后重启续接、超限原件续接、hash
+错误停止并保留请求身份，以及三 Host 来源轮换/不阻塞另一原件。Windows Native 14 项
+通过，包含取消后重试不另建恢复事实。管理界面与完整候选仍需分别实测。
+
 ## Core10 schema 与复制
 
 Core10 将 `orig_lifecycle/1` 纳入 event kind、replicated fact 和 origin schema。Core9→10 迁移
@@ -94,7 +114,7 @@ DDL。`tests/replication.rs` 的 `rechain` helper 补入显式
 以下依赖仍未覆盖，不能据本切片声称完整 Beta 可编译/可用：
 
 - UI 上 reclaim、restore、release、purge、远端 follow-up 的动作、确认和 receipt 展示。
-- restore_pending 的后台取回、关闭视图与重启后的续接。
+- restore_pending 的合成 Host 重启续接已覆盖；完整候选、真实设备与能耗仍需验证。
 - Native lifecycle 命令与缓存处置接通后的完整候选 CI。
 - 跨设备字节处置、Native 缓存字节处置、系统文件导出结果和用户侧完整流程验收。
 

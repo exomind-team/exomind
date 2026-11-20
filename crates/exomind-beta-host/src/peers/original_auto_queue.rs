@@ -3,6 +3,7 @@
 use super::*;
 use tokio::task::JoinSet;
 const CAP: usize = 256;
+const RESTORE_RETRY_DELAY_MS: u64 = 5_000;
 #[derive(Debug, Clone, Serialize)]
 pub struct OriginalAutoQueueStatus {
     pub network_enabled: bool,
@@ -18,11 +19,13 @@ pub(in crate::peers::network) struct AutoQueue {
     retry: HashMap<(ProfileId, OriginalId), Instant>,
     sources: HashMap<(ProfileId, OriginalId), usize>,
     defer_until: Option<Instant>,
+    restore_retry: HashMap<(ProfileId, OriginalId), Instant>,
 }
 pub(in crate::peers::network) enum Disposition {
     Ready,
     Partial,
     Retry(u64),
+    RestoreRetry(u64),
     Skipped,
     Blocked,
     Error(&'static str),
@@ -40,6 +43,7 @@ impl AutoQueue {
             retry: HashMap::new(),
             sources: HashMap::new(),
             defer_until: None,
+            restore_retry: HashMap::new(),
         }
     }
     pub(in crate::peers::network) fn completed(
@@ -62,22 +66,33 @@ impl AutoQueue {
                             state.auto_error = Some("original_queue_full");
                         }
                     }
-                    if self.sources.len() >= CAP && !self.sources.contains_key(&done.key) {
-                        if let Some(stale) = self
-                            .sources
-                            .keys()
-                            .find(|key| !self.retry.contains_key(*key))
-                            .copied()
+                    self.advance_source(done.key);
+                }
+                Disposition::RestoreRetry(delay) => {
+                    let now = Instant::now();
+                    self.restore_retry.retain(|_, until| *until > now);
+                    if self.restore_retry.len() >= CAP
+                        && !self.restore_retry.contains_key(&done.key)
+                    {
+                        if let Some(oldest) = self
+                            .restore_retry
+                            .iter()
+                            .min_by_key(|(_, until)| **until)
+                            .map(|(key, _)| *key)
                         {
-                            self.sources.remove(&stale);
+                            self.restore_retry.remove(&oldest);
                         }
                     }
-                    if self.sources.len() < CAP || self.sources.contains_key(&done.key) {
-                        let n = self.sources.entry(done.key).or_default();
-                        *n = n.wrapping_add(1);
+                    self.restore_retry
+                        .insert(done.key, now + Duration::from_millis(delay));
+                    self.advance_source(done.key);
+                    if let Ok(mut state) = worker.shared.lock() {
+                        state.auto_error = Some("original_restore_retry_waiting");
+                        state.auto_deferred = true;
                     }
                 }
                 Disposition::Ready | Disposition::Blocked => {
+                    self.restore_retry.remove(&done.key);
                     self.retry.remove(&done.key);
                     self.sources.remove(&done.key);
                 }
@@ -111,6 +126,7 @@ impl AutoQueue {
         cancel: &PeerCancellation,
         generation: u64,
         jobs: &mut JoinSet<AutoCompletion>,
+        immediate_restore_scan: bool,
     ) -> Result<(), HostError> {
         {
             let mut state = worker.shared.lock().map_err(|_| HostError::StatePoisoned)?;
@@ -119,16 +135,21 @@ impl AutoQueue {
             }
             state.auto_deferred = false;
         }
-        let policy = worker.host.original_auto_policy(&worker.owner)?;
-        if !worker.host.peer_network_settings(&worker.owner)?.enabled || !policy.enabled {
+        if !worker.host.peer_network_settings(&worker.owner)?.enabled {
             jobs.abort_all();
             return Ok(());
         }
-        if self.defer_until.is_some_and(|until| until > Instant::now()) {
-            worker.auto_deferred()?;
-            return Ok(());
+        let policy = worker.host.original_auto_policy(&worker.owner)?;
+        if immediate_restore_scan {
+            self.restore_retry.clear();
         }
-        self.defer_until = None;
+        let now = Instant::now();
+        self.restore_retry.retain(|_, until| *until > now);
+        if self.defer_until.is_some_and(|until| until <= now) {
+            self.defer_until = None;
+        }
+        let restore_deferred = !self.restore_retry.is_empty();
+        let auto_deferred = self.defer_until.is_some_and(|until| until > now);
         let active = worker
             .originals
             .entries
@@ -172,26 +193,27 @@ impl AutoQueue {
             .lock()
             .map_err(|_| HostError::StatePoisoned)?
             .auto_error = None;
-        let now = Instant::now();
+        if restore_deferred || auto_deferred {
+            worker.auto_deferred()?;
+            if restore_deferred {
+                worker
+                    .shared
+                    .lock()
+                    .map_err(|_| HostError::StatePoisoned)?
+                    .auto_error = Some("original_restore_retry_waiting");
+            }
+        }
         self.retry.retain(|_, until| *until > now);
         let mut spawned = 0;
         for original in page.items {
             if spawned >= free {
                 break;
             }
-            if original.byte_length > policy.max_bytes {
-                continue;
-            }
             let key = (profile, original.original_id);
-            let (intent, backoff, blocked) = {
+            let (intent, lifecycle, hash_mismatch) = {
                 let state = worker.host.active_state()?;
                 let r = crate::resources(&state)?;
                 let intent = original_auto_store::intent(
-                    &r.persistence.auth,
-                    profile,
-                    original.original_id,
-                )?;
-                let backoff = original_auto_store::backoff(
                     &r.persistence.auth,
                     profile,
                     original.original_id,
@@ -201,14 +223,73 @@ impl AutoQueue {
                     profile,
                     original.original_id,
                 )?;
-                let blocked = !crate::original_lifecycle::automatic_fetch_allowed(
-                    lifecycle.bytes_state,
-                ) || matches!(r.core.original_availability(&r.core.local_human(profile)?,profile,original.original_id)?,OriginalAvailability::Local{stage}if stage.state==StageState::HashMismatch);
-                (intent, backoff, blocked)
+
+                let availability = r.core.original_availability(
+                    &r.core.local_human(profile)?,
+                    profile,
+                    original.original_id,
+                )?;
+                let hash_mismatch = matches!(
+                    availability,
+                    OriginalAvailability::Local { stage }
+                        if stage.state == StageState::HashMismatch
+                );
+                (intent, lifecycle, hash_mismatch)
             };
-            if intent.suppression.is_some() || blocked {
+
+            if lifecycle.bytes_state == exomind_core::OriginalBytesState::RestorePending {
+                if intent.suppression
+                    == Some(original_auto_store::OriginalAutoSuppression::UserCancelled)
+                    || hash_mismatch
+                    || self.restore_retry.contains_key(&key)
+                {
+                    continue;
+                }
+                if peers.is_empty() {
+                    let mut state =
+                        worker.shared.lock().map_err(|_| HostError::StatePoisoned)?;
+                    state.auto_deferred = true;
+                    state.auto_error = Some("original_source_waiting");
+                    break;
+                }
+                let index = self.sources.get(&key).copied().unwrap_or(0) % peers.len();
+                let peer = peers[index];
+                let worker = worker.clone();
+                let cancel = cancel.clone();
+                jobs.spawn(async move {
+                    worker
+                        .auto_attempt(
+                            profile,
+                            peer,
+                            original,
+                            OriginalFetchMode::Manual,
+                            cancel,
+                            generation,
+                        )
+                        .await
+                });
+                spawned += 1;
                 continue;
             }
+
+            if !policy.enabled
+                || auto_deferred
+                || original.byte_length > policy.max_bytes
+                || intent.suppression.is_some()
+                || !crate::original_lifecycle::automatic_fetch_allowed(lifecycle.bytes_state)
+                || hash_mismatch
+            {
+                continue;
+            }
+            let backoff = {
+                let state = worker.host.active_state()?;
+                let r = crate::resources(&state)?;
+                original_auto_store::backoff(
+                    &r.persistence.auth,
+                    profile,
+                    original.original_id,
+                )?
+            };
             let deadline = self
                 .retry
                 .get(&key)
@@ -223,8 +304,6 @@ impl AutoQueue {
                 state.auto_error = Some("original_source_waiting");
                 break;
             }
-            // Unexpired live deadlines are never evicted/rearmed from an old
-            // bootstrap anchor. Overflow is visible and admission is deferred.
             if self.retry.len() >= CAP && !self.retry.contains_key(&key) {
                 worker.auto_deferred()?;
                 break;
@@ -233,15 +312,33 @@ impl AutoQueue {
             let peer = peers[index];
             let worker = worker.clone();
             let cancel = cancel.clone();
-            let policy_revision = policy.revision;
+            let mode = OriginalFetchMode::Automatic {
+                policy_revision: policy.revision,
+            };
             jobs.spawn(async move {
                 worker
-                    .auto_attempt(profile, peer, original, policy_revision, cancel, generation)
+                    .auto_attempt(profile, peer, original, mode, cancel, generation)
                     .await
             });
             spawned += 1;
         }
         Ok(())
+    }
+    fn advance_source(&mut self, key: (ProfileId, OriginalId)) {
+        if self.sources.len() >= CAP && !self.sources.contains_key(&key) {
+            if let Some(stale) = self
+                .sources
+                .keys()
+                .find(|key| !self.retry.contains_key(*key))
+                .copied()
+            {
+                self.sources.remove(&stale);
+            }
+        }
+        if self.sources.len() < CAP || self.sources.contains_key(&key) {
+            let n = self.sources.entry(key).or_default();
+            *n = n.wrapping_add(1);
+        }
     }
 }
 impl Worker {
@@ -306,13 +403,13 @@ impl Worker {
         p: ProfileId,
         peer: DeviceId,
         original: OriginalRef,
-        policy_revision: Uuid,
+        mode: OriginalFetchMode,
         network_cancel: PeerCancellation,
         generation: u64,
     ) -> AutoCompletion {
         let key = (p, original.original_id);
         let request = Uuid::new_v4();
-        let mode = OriginalFetchMode::Automatic { policy_revision };
+
         let admitted =
             (|| -> Result<Option<(Job, crate::peers::Lease, Option<Uuid>)>, HostError> {
                 let state = self.host.active_state()?;
@@ -326,6 +423,22 @@ impl Worker {
                         .generation
                         != generation
                 {
+                    return Ok(None);
+                }
+                let lifecycle = r.core.original_lifecycle_status(
+                    &r.core.local_human(p)?,
+                    p,
+                    original.original_id,
+                )?;
+                let lifecycle_allows_fetch = match mode {
+                    OriginalFetchMode::Automatic { .. } => {
+                        crate::original_lifecycle::automatic_fetch_allowed(lifecycle.bytes_state)
+                    }
+                    OriginalFetchMode::Manual => {
+                        lifecycle.bytes_state == exomind_core::OriginalBytesState::RestorePending
+                    }
+                };
+                if !lifecycle_allows_fetch {
                     return Ok(None);
                 }
                 let availability = r.core.original_availability(
@@ -346,14 +459,23 @@ impl Worker {
                 }
                 let intent =
                     original_auto_store::intent(&r.persistence.auth, p, original.original_id)?;
-                if !original_auto_store::eligible(
-                    &r.persistence.auth,
-                    p,
-                    original.original_id,
-                    original.byte_length,
-                    policy_revision,
-                    intent.intent_revision,
-                )? {
+                let allowed = match mode {
+                    OriginalFetchMode::Automatic { policy_revision } => {
+                        original_auto_store::eligible(
+                            &r.persistence.auth,
+                            p,
+                            original.original_id,
+                            original.byte_length,
+                            policy_revision,
+                            intent.intent_revision,
+                        )?
+                    }
+                    OriginalFetchMode::Manual => {
+                        intent.suppression
+                            != Some(original_auto_store::OriginalAutoSuppression::UserCancelled)
+                    }
+                };
+                if !allowed {
                     return Ok(None);
                 }
                 let job = self.originals.start(key, peer, request)?;
@@ -452,17 +574,24 @@ impl Worker {
                                             | HostError::PeerNetworkDisabled
                                             | HostError::Stopped,
                                         ) => Disposition::Skipped,
-                                        Err(error) => match original_auto_store::note_failure(
-                                            &tx,
-                                            p,
-                                            id,
-                                            original_error(error),
-                                            original.byte_length,
-                                            policy_revision,
-                                            intent_revision,
-                                        )? {
-                                            Some(retry) => Disposition::Retry(retry.delay_ms),
-                                            None => Disposition::Skipped,
+                                        Err(error) => match mode {
+                                            OriginalFetchMode::Automatic { policy_revision } => {
+                                                match original_auto_store::note_failure(
+                                                    &tx,
+                                                    p,
+                                                    id,
+                                                    original_error(error),
+                                                    original.byte_length,
+                                                    policy_revision,
+                                                    intent_revision,
+                                                )? {
+                                                    Some(retry) => Disposition::Retry(retry.delay_ms),
+                                                    None => Disposition::Skipped,
+                                                }
+                                            }
+                                            OriginalFetchMode::Manual => {
+                                                Disposition::RestoreRetry(RESTORE_RETRY_DELAY_MS)
+                                            }
                                         },
                                     }
                                 };

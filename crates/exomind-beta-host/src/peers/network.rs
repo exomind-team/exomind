@@ -152,6 +152,7 @@ pub struct PeerNetwork {
     control: tokio::sync::Mutex<()>,
     shared: Arc<Mutex<Shared>>,
     originals: Arc<original_network::OriginalJobs>,
+    restore_wake: Arc<tokio::sync::Notify>,
 }
 impl Drop for PeerNetwork {
     fn drop(&mut self) {
@@ -165,6 +166,7 @@ struct Worker {
     owner: Session,
     shared: Arc<Mutex<Shared>>,
     originals: Arc<original_network::OriginalJobs>,
+    restore_wake: Arc<tokio::sync::Notify>,
 }
 struct Busy {
     shared: Arc<Mutex<Shared>>,
@@ -317,7 +319,11 @@ impl PeerNetwork {
                 auto_yields: 0,
             })),
             originals: Arc::new(original_network::OriginalJobs::default()),
+            restore_wake: Arc::new(tokio::sync::Notify::new()),
         }))
+    }
+    pub fn wake_original_restore_scan(&self) {
+        self.restore_wake.notify_one();
     }
     fn worker(&self) -> Worker {
         Worker {
@@ -325,12 +331,14 @@ impl PeerNetwork {
             owner: self.owner.clone(),
             shared: self.shared.clone(),
             originals: self.originals.clone(),
+            restore_wake: self.restore_wake.clone(),
         }
     }
     pub async fn restore(self: &Arc<Self>) -> Result<(), HostError> {
         let _control = self.control.lock().await;
         if self.host.peer_network_settings(&self.owner)?.enabled {
             self.start().await?;
+            self.wake_original_restore_scan();
         }
         Ok(())
     }
@@ -342,6 +350,7 @@ impl PeerNetwork {
             .save_peer_network_settings(&self.owner, settings)?;
         if enabled {
             self.start().await?;
+            self.wake_original_restore_scan();
         } else {
             self.stop_work().await?;
         }
@@ -427,6 +436,7 @@ impl PeerNetwork {
             incoming,
             joined: false,
         });
+        self.restore_wake.notify_one();
         Ok(())
     }
     pub async fn stop(&self) -> Result<(), HostError> {
@@ -1281,6 +1291,9 @@ impl Worker {
             tokio::select! {
                 _=cancel.cancelled()=>break,
                 _=self.host.peers.cancel.cancelled()=>break,
+                _=self.restore_wake.notified()=>{
+                    if let Err(error)=auto.tick(&self,&cancel,generation,&mut auto_jobs,true){if let Ok(mut state)=self.shared.lock(){state.auto_deferred=true;state.auto_error=Some(error_code(&error));}}
+                },
                 result=listener.accept(cancel.clone())=>{match result {Ok(channel)=>{if incoming.track_channel(&channel).is_err(){drop(channel);break;}if incoming_jobs.len()>=8{drop(channel);continue;}let network=self.clone();let completion=incoming.clone();let lease=match self.host.peers.register(false){Ok(l)=>l,Err(_)=>break};incoming_jobs.spawn(async move{let _lease=lease;if let Ok(outcome)=network.host.accept_peer_service_owned(&network.owner,channel,Some(completion)).await{network.incoming(generation,outcome);}});},Err(HostError::PeerTimeout|HostError::PeerTls)=>{},Err(_)=>break}},
                 received=async{match &udp {Some(socket)=>socket.recv_from(&mut packet).await,None=>std::future::pending().await}}=>{
                     if let Ok((n,source))=received{if n<=1024{if let Ok(value)=serde_json::from_slice::<Announcement>(&packet[..n]){let _=self.remember_announcement(value,source,generation);}}}
@@ -1291,7 +1304,7 @@ impl Worker {
                     if jobs.len()>=2{continue;}if let Ok(mut routes)=self.routes(){if !routes.is_empty(){let mut state=match self.shared.lock(){Ok(s)=>s,Err(_)=>return};let count=routes.len();routes.rotate_left(state.route_cursor%count);state.route_cursor=state.route_cursor.wrapping_add(1);routes.sort_by_key(|r|!state.forced.contains(&(r.profile,r.device)));}for route in routes {if jobs.len()>=2{break;}let key=(route.profile,route.device);let force;{let mut state=match self.shared.lock(){Ok(s)=>s,Err(_)=>return};force=state.forced.remove(&key);if state.progress.get(&key).is_some_and(|p|p.busy||(!force&&p.retry.is_some_and(|at|at>Instant::now()))){continue;}}
                         let network=self.clone();let cancel=cancel.clone();jobs.spawn(async move{let _=network.attempt(route,cancel,generation,force).await;});
                     }}
-                    if let Err(error)=auto.tick(&self,&cancel,generation,&mut auto_jobs){if let Ok(mut state)=self.shared.lock(){state.auto_deferred=true;state.auto_error=Some(error_code(&error));}}
+                    if let Err(error)=auto.tick(&self,&cancel,generation,&mut auto_jobs,false){if let Ok(mut state)=self.shared.lock(){state.auto_deferred=true;state.auto_error=Some(error_code(&error));}}
                 },
                 result=auto_jobs.join_next(),if !auto_jobs.is_empty()=>{if let Some(result)=result{auto.completed(result,&self);}},
                 _=incoming_jobs.join_next(),if !incoming_jobs.is_empty()=>{},
