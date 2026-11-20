@@ -3,7 +3,7 @@ import type { BetaOriginal, BetaOriginalClient } from './original-types';
 import { BetaApiError } from './api-error';
 import { boundedOriginalBody, nativeOriginalClient, webOriginalClient, validateOriginal } from './original-client';
 import { nativeTimeblockFeatures, webTimeblockFeatures } from './timeblocks-client';
-import type { BetaTimeblockClient, BetaTimelinePage } from './timeblocks-types';
+import type { BetaTimeblockClient, BetaTimelinePage, BetaTimelinePeriodQuery } from './timeblocks-types';
 import { nativeOriginalExports, type BetaOriginalExportsClient } from './original-export';
 import { nativeOriginalOpener, type BetaOriginalOpener } from './original-open';
 import { nativeOriginalAcquisition, type BetaOriginalAcquisitionClient } from './original-acquisition';
@@ -12,10 +12,27 @@ import type {SummaryModelConfigurationService} from './summary-model-config';
 import {nativeSummaryClient,webSummaryClient} from './summary-client';
 import type {SummaryClient} from './summary-types';
 import {nativeTimelineEventReader,webTimelineEventReader} from './timeline-event-client';
+import { nativeCorrectionSourceReader, webCorrectionSourceReader } from './correction-source-client';
+import { nativeRecordOrganizationClient, webRecordOrganizationClient } from './record-organization-client';
+import type { BetaCorrectionEntry, BetaRecordOrganizationClient } from './record-organization-client';
 import { nativeOriginalAutoDiagnostics, type BetaOriginalAutoDiagnosticsClient } from './original-auto-diagnostics';
 export { BetaApiError } from './api-error';
 
-export interface BetaStatus { protocol: string; device_id: string; runtime_id?: string; running: boolean; capabilities?: { originals?: boolean; max_original_chunk_bytes?: number; timeblocks?: boolean; typed_timeline?: boolean; summary_jobs?:boolean } }
+export interface BetaStatus {
+  protocol: string;
+  device_id: string;
+  runtime_id?: string;
+  running: boolean;
+  capabilities?: {
+    originals?: boolean;
+    max_original_chunk_bytes?: number;
+    timeblocks?: boolean;
+    typed_timeline?: boolean;
+    timeline_period?: boolean;
+    summary_jobs?: boolean;
+    correction_source?: boolean;
+  };
+}
 export interface BetaProfile { profile_id: string; display_name: string }
 export interface BetaCommand {
   command_id: string; event_id: string; profile_id: string;
@@ -35,16 +52,21 @@ export interface BetaEvent {
 export interface BetaQuery { before?: number; through?: number; limit?: number; search?: string }
 export interface BetaPage { items: BetaEvent[]; next_before: number | null; highwater: number }
 export interface BetaClient {
+  /** Stable, non-secret service identity used to scope local command recovery. */
+  serviceScope?: string;
   summaryModel?:SummaryModelConfigurationService;
   summaries?:SummaryClient;
   timelineEvent?(profileId:string,eventId:string):Promise<import('./timeblocks-types').BetaTimelineItem|null>;
+  correctionSource?(profileId: string, eventId: string, digest: string): Promise<BetaCorrectionEntry | null>;
   originalAcquisition?: BetaOriginalAcquisitionClient;
   originalAutoDiagnostics?: BetaOriginalAutoDiagnosticsClient;
   originalExports?: BetaOriginalExportsClient;
   originalOpener?: BetaOriginalOpener;
   originals?: BetaOriginalClient;
   timeblocks?: BetaTimeblockClient;
+  recordOrganization?: BetaRecordOrganizationClient;
   timelinePage?(profileId: string, query: BetaQuery): Promise<BetaTimelinePage>;
+  timelinePeriodPage?(profileId: string, query: BetaTimelinePeriodQuery): Promise<BetaTimelinePage>;
   status(): Promise<BetaStatus>;
   profiles(): Promise<BetaProfile[]>;
   provisionProfile(profileId: string, name: string): Promise<BetaProfile>;
@@ -73,6 +95,15 @@ function status(value: unknown): BetaStatus {
   const item = object(value);
   if (item.protocol !== 'exomind-beta/1' || typeof item.device_id !== 'string' || !item.device_id || item.running !== true) {
     throw new BetaApiError('incompatible_service', '服务版本不匹配或尚未就绪');
+  }
+  if (item.capabilities !== undefined) {
+    const capabilities = object(item.capabilities);
+    if (capabilities.timeline_period !== undefined && typeof capabilities.timeline_period !== 'boolean') {
+      throw new BetaApiError('invalid_response', '服务的范围时间线能力声明无效');
+    }
+    if (capabilities.correction_source !== undefined && typeof capabilities.correction_source !== 'boolean') {
+      throw new BetaApiError('invalid_response', '服务的更正来源能力声明无效');
+    }
   }
   return item as unknown as BetaStatus;
 }
@@ -128,9 +159,11 @@ export function nativeBetaClient(call: NativeInvoke = invoke): BetaClient {
     return call<T>(name, args);
   }
   return {
+    serviceScope: 'tauri-native-beta-v1',
     originalOpener: nativeOriginalOpener(checked),
     summaries:nativeSummaryClient(call,async()=>check(await call('beta_status'))),
     timelineEvent:nativeTimelineEventReader(call,async()=>check(await call('beta_status'))),
+    correctionSource:nativeCorrectionSourceReader(call,async()=>check(await call('beta_status'))),
     summaryModel:nativeSummaryModelConfigurationService(call,async()=>{
       const current=check(await call('beta_status'));
       if(current.capabilities?.summary_jobs!==true)throw new BetaApiError('unsupported_summaries','当前服务尚不支持回顾设置，请使用同版 Beta');
@@ -148,6 +181,7 @@ export function nativeBetaClient(call: NativeInvoke = invoke): BetaClient {
       return call<T>(name,args);
     }),
     ...nativeTimeblockFeatures(call, async () => check(await call('beta_status'))),
+    recordOrganization: nativeRecordOrganizationClient(checked),
     originals: nativeOriginalClient(async <T>(name: string,args?:Record<string,unknown>) => {
       const current=check(await call('beta_status'));
       if(current.capabilities?.originals!==true) throw new BetaApiError('unsupported_originals','本机服务尚不支持原件，请更新后重试');
@@ -216,13 +250,20 @@ export function webBetaClient(endpoint: string, ownerToken: string, fetcher: typ
     return grant;
   }
   return {
+    serviceScope: base,
     summaries:webSummaryClient({identity:hello,async json(profileId,path,method,body){return request(path,await humanToken(profileId),method,body);},async ownerJson(path,method){await hello();return request(path,ownerToken,method);}}),
     timelineEvent:webTimelineEventReader({identity:hello,async json(profileId,path){return request(path,await humanToken(profileId));}}),
+    correctionSource:webCorrectionSourceReader({identity:hello,async json(profileId,path){return request(path,await humanToken(profileId));}}),
     summaryModel:webSummaryModelConfigurationService({identity:hello,async ownerJson(_profileId,path,method,body){
       const current=await hello();if(current.capabilities?.summary_jobs!==true)throw new BetaApiError('unsupported_summaries','当前服务尚不支持回顾设置，请使用同版 Beta');
       return request(path,ownerToken,method,body);
     }}),
     ...webTimeblockFeatures({ identity: hello, async json(profileId,path,method,body) { return request(path,await humanToken(profileId),method,body); } }),
+    recordOrganization: webRecordOrganizationClient({
+      async json(profileId, path, method, body) {
+        return request(path, await humanToken(profileId), method, body);
+      },
+    }),
     originals: webOriginalClient({
       async json(profileId,path,method,body) { return request(path,await humanToken(profileId,true),method,body); },
       async binary(profileId,path,method,body,responseLimit) { return request(path,await humanToken(profileId,true),method,body,body!==undefined,responseLimit); },

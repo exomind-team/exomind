@@ -31,6 +31,11 @@ describe('summary strict scoped wire decoders',()=>{
     const selected=snapshot();selected.selection.selected_original_ids=[O];expect(()=>validateSummarySnapshot(selected,P)).toThrow();selected.materials[0].selected=true;expect(validateSummarySnapshot(selected,P).materials[0].selected).toBe(true);
     expect(()=>validateSummarySelection({...snapshot().selection,block_ids:[B,B]})).toThrow();expect(()=>validateSummarySelection({...snapshot().selection,selected_original_ids:undefined})).toThrow();
   });
+  it('accepts a correction fact as an exact summary source without changing feedback or material rules',()=>{
+    const value=snapshot();value.sources[0].kind='correction/1';
+    expect(validateSummarySnapshot(value,P).sources[0]).toEqual(value.sources[0]);
+    value.feedback_ids=[value.sources[0].event_id];expect(()=>validateSummarySnapshot(value,P)).toThrow();
+  });
   it('requires known evidence and permits read-original claims only for explicitly selected verified originals',()=>{
     const invalid=artifact();invalid.output.evidence=[N];expect(()=>validateSummaryArtifact(invalid,P,T)).toThrow();invalid.output.evidence=[];expect(()=>validateSummaryArtifact(invalid,P,T)).toThrow();
     const empty=artifact();empty.snapshot.sources=[];empty.output.evidence=[];expect(()=>validateSummaryArtifact(empty,P,T)).toThrow();

@@ -15,6 +15,7 @@ describe('external Agent summary uses its own typed read contract',()=>{
     const value=externalRecord();for(const change of [
       {...value,snapshot:{...value.snapshot,sources:[]}},
       {...value,snapshot:{...value.snapshot,sources:[{...value.snapshot.sources[0],kind:'summary/1'}]}},
+      {...value,snapshot:{...value.snapshot,sources:[{...value.snapshot.sources[0],kind:'correction/1'}]}},
       {...value,snapshot:{...value.snapshot,sources:[value.snapshot.sources[0],value.snapshot.sources[0]]}},
       {...value,evidence:[id(9)]},{...value,evidence:[id(5),id(5)]},{...value,narrative:' '},{...value,narrative:'x'.repeat(128*1024+1)},
       {...value,snapshot:{...value.snapshot,coverage:{...value.snapshot.coverage,source_delivery:'attested'}}},

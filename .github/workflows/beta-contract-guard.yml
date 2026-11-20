@@ -93,6 +93,77 @@ jobs:
           echo "CORE10_EVIDENCE=$CORE10_EVIDENCE" >> "$GITHUB_ENV"
       - name: Install frozen frontend dependencies
         run: bun install --frozen-lockfile --ignore-scripts
+      - name: Run bounded 15-file Beta regressions
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { spawnSync } from 'node:child_process';
+          import { readFileSync, statSync, writeFileSync } from 'node:fs';
+          import { join, relative, resolve } from 'node:path';
+
+          const root = process.cwd();
+          const evidence = process.env.CORE8_EVIDENCE;
+          assert.ok(evidence, 'CORE8_EVIDENCE must name an external evidence directory');
+          const featureTests = [
+            'tests/unit/beta/audio-recording.test.ts',
+            'tests/unit/beta/audio-recording-ui.test.tsx',
+            'tests/unit/beta/period-window.test.ts',
+            'tests/unit/beta/period-client.test.ts',
+            'tests/unit/beta/period-timeline.test.tsx',
+            'tests/unit/beta/correction-source-client.test.ts',
+            'tests/unit/beta/summary-source-dialog.test.tsx',
+            'tests/unit/beta/summary-validation.test.ts',
+            'tests/unit/beta/external-summary.test.tsx',
+            'tests/unit/beta/summary-feed.test.tsx',
+            'tests/unit/beta/record-correction-owner.test.ts',
+            'tests/unit/beta/record-organization-client.test.ts',
+            'tests/unit/beta/record-organization-drafts.test.ts',
+            'tests/unit/beta/record-workspace-integration.test.tsx',
+            'tests/unit/beta/original-drafts.test.ts',
+          ];
+
+          function runVitest(name, files, expectedTestCount) {
+            for (const file of files) {
+              const stats = statSync(resolve(root, file), { throwIfNoEntry: false });
+              assert.ok(stats?.isFile() && stats.size > 0, `Missing or empty test file: ${file}`);
+            }
+            const reportPath = join(evidence, `${name}.json`);
+            const result = spawnSync(process.execPath, [
+              'node_modules/vitest/vitest.mjs', 'run', ...files,
+              '--maxWorkers=1', '--reporter=json', `--outputFile=${reportPath}`,
+            ], { cwd: root, encoding: 'utf8', timeout: 600000, maxBuffer: 32 * 1024 * 1024, windowsHide: true });
+            writeFileSync(join(evidence, `${name}.stdout`), result.stdout ?? '', { flag: 'wx' });
+            writeFileSync(join(evidence, `${name}.stderr`), [result.stderr ?? '', result.error ? `${result.error.name}: ${result.error.message}\n` : ''].join(''), { flag: 'wx' });
+            assert.equal(result.error, undefined, `${name} process failed; see external evidence`);
+            assert.equal(result.status, 0, `${name} failed; see external evidence`);
+
+            const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+            assert.equal(report.success, true, `${name} did not report success`);
+            assert.equal(report.numFailedTests, 0, `${name} has failing assertions`);
+            assert.equal(report.numPendingTests, 0, `${name} has skipped or pending assertions`);
+            assert.equal(report.numTodoTests, 0, `${name} has todo assertions`);
+            assert.ok(report.numTotalTests > 0, `${name} executed no assertions`);
+            assert.equal(report.numPassedTests, report.numTotalTests, `${name} did not pass every assertion`);
+            if (expectedTestCount !== undefined) assert.equal(report.numPassedTests, expectedTestCount, `${name} changed its expected assertion count`);
+            assert.equal(report.testResults.length, files.length, `${name} did not execute every selected file`);
+
+            const seen = new Set();
+            for (const fileResult of report.testResults) {
+              const path = relative(root, fileResult.name).replaceAll('\\', '/');
+              assert.ok(files.includes(path), `${name} reported an unexpected file: ${path}`);
+              assert.ok(!seen.has(path), `${name} reported a duplicate file: ${path}`);
+              seen.add(path);
+              assert.equal(fileResult.status, 'passed', `${path} did not pass`);
+              assert.ok(fileResult.assertionResults.length > 0, `${path} contained no assertions`);
+              assert.ok(fileResult.assertionResults.every(test => test.status === 'passed'), `${path} contains a skipped or failed assertion`);
+            }
+            assert.deepEqual([...seen].sort(), [...files].sort(), `${name} file coverage changed`);
+            process.stdout.write(`${name}: ${report.numPassedTests} passed across ${seen.size} files\n`);
+          }
+
+          runVitest('beta-core8-related-feature-regressions', featureTests);
+          NODE
       - name: Check read-only patch intake
         run: node --test --test-concurrency=1 tests/unit/scripts/beta-patch-preflight.test.mjs tests/unit/scripts/beta-apk-identity.test.mjs
       - name: Check evidence rejection rules

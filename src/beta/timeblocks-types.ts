@@ -45,6 +45,11 @@ export interface BetaTimeblockNode {
 export interface BetaTimeblockNodePage { items: BetaTimeblockNode[]; highwater: number; next_before: number | null }
 export type BetaTimelineItem = { kind: 'capture'; record: BetaEvent } | { kind: 'timeblock'; record: BetaTimeblockNode } | { kind: 'summary/1'; record: SummaryArtifactRecord } | {kind:'agent_summary/1';record:ExternalSummaryRecord};
 export interface BetaTimelinePage { items: BetaTimelineItem[]; highwater: number; next_before: number | null }
+export interface BetaTimelinePeriodQuery extends BetaQuery {
+  from_ms: number;
+  to_ms: number;
+  tag?: string;
+}
 export interface BetaIntervalQuery { from_ms: number; to_ms: number; through?: string; limit?: number }
 export interface BetaInterval {
   from_ms: number; to_ms: number; kind: 'running' | 'paused' | 'feedback' | 'gap'; block_id: string | null; source_event_ids: string[];

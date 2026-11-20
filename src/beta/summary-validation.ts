@@ -35,7 +35,7 @@ export function validateSummarySelection(value:unknown):SummarySelection{
   const raw=object(value,['block_ids','from_ms','to_ms','selected_original_ids']);const from=integer(raw.from_ms),to=integer(raw.to_ms);if(to<from)return invalid();
   return{block_ids:ids(raw.block_ids,100,1),from_ms:from,to_ms:to,selected_original_ids:ids(raw.selected_original_ids,256)};
 }
-function source(value:unknown):SummarySourceRef{const raw=object(value,['event_id','kind','digest']);return{event_id:summaryUuid(raw.event_id),kind:choice(raw.kind,['capture','timeblock/1']),digest:hash(raw.digest)};}
+function source(value:unknown):SummarySourceRef{const raw=object(value,['event_id','kind','digest']);return{event_id:summaryUuid(raw.event_id),kind:choice(raw.kind,['capture','timeblock/1','correction/1']),digest:hash(raw.digest)};}
 function original(value:unknown):BetaOriginal{
   const raw=object(value,['original_id','sha256','byte_length','file_name','media_type']);const name=text(raw.file_name,1024,1),media=text(raw.media_type,256);
   if(/[\u0000-\u001f\u007f-\u009f/\\]/.test(name)||/[\u0000-\u001f\u007f-\u009f]/.test(media))return invalid();

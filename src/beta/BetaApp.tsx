@@ -7,13 +7,14 @@ import { NowInputRowView, resizeNowInputTextarea } from '@/ui/app/components/Now
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { EventDateDisplayMode } from '@/lib/eventlog/format-event-timestamp';
-import { nativeBetaClient, webBetaClient, type BetaClient, type BetaProfile, type BetaStatus, type BetaQuery } from './client';
+import { nativeBetaClient, webBetaClient, type BetaClient, type BetaEvent, type BetaProfile, type BetaStatus, type BetaQuery } from './client';
 import { BetaDraftController, errorMessage } from './drafts';
 import { betaUuid } from './initialization';
 import { useBetaNow } from './date-clock';
+import { formatBetaPeriodWindow, resolveBetaPeriodWindow, shiftBetaPeriodAnchor, type BetaPeriodWindow, type BetaTimelinePeriod } from './period-window';
 import type { FileSourceStore } from './file-source-store';
 import type { LocalIntentJournal,IntentPredecessor } from './local-intent-journal';
-import type { BetaTimelineItem, BetaTimelinePage } from './timeblocks-types';
+import type { BetaTimelineItem, BetaTimelinePage, BetaTimelinePeriodQuery } from './timeblocks-types';
 import type { SummaryArtifactRecord,SummarySourceRef } from './summary-types';
 import { BetaSummaryTasksPanel } from './BetaSummaryTasksPanel';
 import { BetaSummarySourceDialog } from './BetaSummarySourceDialog';
@@ -51,23 +52,15 @@ import { FieldSelect } from '@/components/ui/field-select';
 import { pickNativeFiles } from './native-attachments';
 import { useNativeAttachmentDrop } from './native-attachment-drop';
 import type { AttachmentSelection } from './native-attachment-types';
+import { BetaAudioRecordingController } from './beta-audio-recording';
+import { BetaAudioRecorder } from './BetaAudioRecorder';
+import { BetaCaptureTagsEditor, BetaRecordCorrectionDialog, BetaRecordTagFilter } from './BetaRecordOrganization';
+import { BetaRecordCorrectionOwner } from './record-correction-owner';
 import { useBetaDeviceNames } from './device-names';
-import {
-  BetaMessageLocationBoundary,
-  BetaMessageReferenceDraft,
-  type BetaMessageLocationNotice,
-} from './BetaMessageActions';
+import { BetaMessageLocationBoundary, BetaMessageReferenceDraft, type BetaMessageLocationNotice } from './BetaMessageActions';
 import { locateBetaMessageReference } from './beta-message-locator';
-import {
-  buildBetaMessageReferenceUri,
-  insertBetaMessageReference,
-  removeBetaMessageReference,
-} from './message-references';
-import type {
-  BetaMessageReference,
-  BetaMessageReferenceIdentity,
-  BetaMessageReferenceSource,
-} from './message-references';
+import { buildBetaMessageReferenceUri, insertBetaMessageReference, removeBetaMessageReference } from './message-references';
+import type { BetaMessageReference, BetaMessageReferenceIdentity, BetaMessageReferenceSource } from './message-references';
 
 const SESSION_KEY = 'exomind:beta:connection';
 
@@ -113,21 +106,13 @@ export function BetaApp({ client: injected, sourceStore, intentJournal, intentPr
 }
 
 type DeadlineLocation={handoffId:string;profileId:string;blockId:string;attempt:number};
-type MessageReadingPosition = { top: number; followTail: boolean; layout: BetaWorkspaceLayout };
-type MessageLocationRestore =
-  | { kind: 'reading'; position: MessageReadingPosition }
-  | { kind: 'latest' };
-type MessageLocationView = {
-  reference: BetaMessageReferenceIdentity;
-  state: BetaMessageLocationNotice;
-  item?: BetaTimelinePage['items'][number];
-};
-type MessageLocationFlight = {
-  profileId: string;
-  eventId: string;
-  client: BetaClient;
-  abort: AbortController;
-};
+type MessageReadingPosition={top:number;followTail:boolean;layout:BetaWorkspaceLayout};
+type MessageLocationRestore={kind:'reading';position:MessageReadingPosition}|{kind:'latest'};
+type MessageLocationView={reference:BetaMessageReferenceIdentity;state:BetaMessageLocationNotice;item?:BetaTimelinePage['items'][number]};
+type MessageLocationFlight={sequence:number;profileId:string;eventId:string;client:BetaClient;abort:AbortController};
+type BetaTimelineMode = 'all' | BetaTimelinePeriod;
+type BetaTimelinePageOwner = {client:BetaClient;profileId:string;query:string;tag:string;mode:BetaTimelineMode;from_ms:number|null;to_ms:number|null};
+type TagReturnView={client:BetaClient;profileId:string;query:string;search:string;tagSearch:string;tag:string;mode:BetaTimelineMode;from_ms:number|null;to_ms:number|null;page:BetaTimelinePage|null;top:number;followTail:boolean};
 function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, intentJournal, intentPredecessor, endpoint }: { client: BetaClient; peers:BetaPeersClient|null; handoffs:BetaDeadlineHandoffsClient|null; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; endpoint?: string }) {
   const [status, setStatus] = useState<BetaStatus | null>(null);
   const [profiles, setProfiles] = useState<BetaProfile[]>([]);
@@ -305,14 +290,54 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     {loading && <p role="status" className="p-5 text-sm text-muted">正在连接…</p>}
     {error && <div role="alert" className="flex items-center gap-2 px-5 py-3 text-sm text-destructive">{error}
       {!status && <Button variant="outline" onClick={() => setReload(value => value + 1)}>重新连接</Button>}</div>}
-    {status && <DeviceWorkspace key={`${status.device_id}`} workspace={workspace} active={section==='now'} eventRevision={eventRevision} client={client} deviceId={status.device_id} profileId={profileId} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} deadlineLocation={deadlineLocation} onDeadlineLocated={(id,hint,attempt)=>{const waiter=locationWaiter.current;if(waiter?.id===id&&waiter.attempt===attempt)waiter.finish(undefined,hint);}} onConfigureSummary={()=>setSection('settings')} onOpenSync={peers?()=>setSection('sync'):undefined} />}
+    {status && <DeviceWorkspace key={`${status.device_id}`} workspace={workspace} active={section==='now'} eventRevision={eventRevision} client={client} deviceId={status.device_id} profileId={profileId} profiles={profiles} status={status} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} deadlineLocation={deadlineLocation} onDeadlineLocated={(id,hint,attempt)=>{const waiter=locationWaiter.current;if(waiter?.id===id&&waiter.attempt===attempt)waiter.finish(undefined,hint);}} onConfigureSummary={()=>setSection('settings')} onOpenSync={peers?()=>setSection('sync'):undefined} onReturnToProfile={target=>{void changeProfile(target);}} />}
   </PageShell>}/><BetaProfileDialog open={profileDialog} onOpenChange={setProfileDialog} profiles={profiles} profileId={profileId} loading={loading} disabled={persistenceBusy||switching||!switchGuardReady} creating={creating} name={name} onNameChange={setName} onCreate={create} onSelect={changeProfile} error={error}/></>;
 }
 
-function DeviceWorkspace({ workspace, client, deviceId, profileId, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync }: { workspace: BetaWorkspacePresentation; client: BetaClient; deviceId: string; profileId: string; sourceStore?: FileSourceStore; intentJournal?:LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:ProfileSwitchGuardGate; active:boolean;eventRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void }) {
+function DeviceWorkspace({ workspace, client, deviceId, profileId, profiles, status, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync,onReturnToProfile }: { workspace: BetaWorkspacePresentation; client: BetaClient; deviceId: string; profileId: string; profiles:BetaProfile[]; status:BetaStatus; sourceStore?: FileSourceStore; intentJournal?:LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:ProfileSwitchGuardGate; active:boolean;eventRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void;onReturnToProfile:(profileId:string)=>void }) {
   const summaryOwner=useRef<SummaryTasksController|null>(null);
+  const profileNames=useMemo(()=>new Map(profiles.map(profile=>[profile.profile_id,profile.display_name])),[profiles]);
+  const profileNameFor=useCallback((id:string)=>profileNames.get(id)??id,[profileNames]);
+  const profileName=profileNameFor(profileId);
   type Owners={capture:BetaDraftController;focus:BetaTimeblockController|null;profileId:string};
   const [owners, setOwners] = useState<Owners | null>(null);
+  const [correctionOwner, setCorrectionOwner] = useState<BetaRecordCorrectionOwner | null>(null);
+  const [correctionOwnerError, setCorrectionOwnerError] = useState('');
+  const [audioRecorder] = useState(() => new BetaAudioRecordingController());
+  const activeOwners = useRef<Owners | null>(null); activeOwners.current = owners;
+  const activeProfile = useRef(profileId); activeProfile.current = profileId;
+  const correctionServiceScope = client.serviceScope ?? 'injected-beta-service';
+  useEffect(() => {
+    let active = true;
+    let opened: BetaRecordCorrectionOwner | undefined;
+    setCorrectionOwner(null);
+    setCorrectionOwnerError('');
+    void BetaRecordCorrectionOwner.open({ deviceId, serviceScope: correctionServiceScope, journal: intentJournal })
+      .then(owner => {
+        opened = owner;
+        if (!active) { owner.close(); return; }
+        setCorrectionOwner(owner);
+      })
+      .catch(failure => {
+        if (active) setCorrectionOwnerError(errorMessage(failure));
+      });
+    return () => { active = false; opened?.close(); setCorrectionOwner(null); };
+  }, [deviceId, correctionServiceScope, intentJournal]);
+  const addRecordedFile = useCallback(async (targetProfileId: string, file: File, sourceId: string): Promise<void> => {
+    const current = activeOwners.current;
+    if (activeProfile.current !== targetProfileId || !current || current.profileId !== targetProfileId) {
+      throw new Error(`这段原声属于档案 ${targetProfileId}；请返回该档案后重试，录音仍保留。`);
+    }
+    const attachmentIds = await current.capture.addFiles(targetProfileId, [file], { sourceIds: [sourceId] });
+    const attachmentId = attachmentIds[0];
+    if (!attachmentId) throw new Error('草稿没有返回这段原声的附件身份；原声仍保留，可以重试。');
+    const entry = current.capture.snapshot().drafts[targetProfileId]?.files?.find(item => item.id === attachmentId);
+    if (!entry || entry.source_id !== sourceId) throw new Error('草稿与录音来源没有建立关联；原声仍保留，可以重试。');
+    const source = await current.capture.previewSource(targetProfileId, attachmentId);
+    if (!source || source.size !== file.size) throw new Error('草稿尚未确认保存这段原声；原声仍保留，可以重试。');
+  }, []);
+  useLayoutEffect(() => { audioRecorder.setAttachmentSink(addRecordedFile); return () => audioRecorder.setAttachmentSink(null); }, [audioRecorder, addRecordedFile]);
+  useEffect(() => () => audioRecorder.dispose(), [audioRecorder]);
   const [error, setError] = useState('');
   const [recoveryRequired,setRecoveryRequired]=useState(false);
   const [legacyConsent,setLegacyConsent]=useState<{client:BetaClient;deviceId:string;profileId:string}|null>(null);
@@ -379,14 +404,26 @@ function DeviceWorkspace({ workspace, client, deviceId, profileId, sourceStore, 
   </div>;
   if(!owners||owners.profileId!==profileId)return <p role="status" className="p-5 text-xs text-muted">正在恢复本机草稿…</p>;
   if(!profileId)return null;
-  return <ProfileWorkspace workspace={workspace} key={profileId} visible={active} externalRevision={eventRevision} client={client} controller={owners.capture} focus={owners.focus} deviceId={deviceId} profileId={profileId} deadlineLocation={deadlineLocation} onDeadlineLocated={onDeadlineLocated} onConfigureSummary={onConfigureSummary} onOpenSync={onOpenSync} intentJournal={intentJournal} summaryOwner={summaryOwner}/>;
+  return <ProfileWorkspace workspace={workspace} key={profileId} visible={active} externalRevision={eventRevision} client={client} status={status} controller={owners.capture} focus={owners.focus} deviceId={deviceId} profileId={profileId} profileName={profileName} profileNameFor={profileNameFor} deadlineLocation={deadlineLocation} onDeadlineLocated={onDeadlineLocated} onConfigureSummary={onConfigureSummary} onOpenSync={onOpenSync} onReturnToProfile={onReturnToProfile} audioRecorder={audioRecorder} correctionOwner={correctionOwner} correctionOwnerError={correctionOwnerError} addRecordedFile={addRecordedFile} intentJournal={intentJournal} summaryOwner={summaryOwner}/>;
 }
 
-async function readTimeline(client:BetaClient,profileId:string,query:BetaQuery):Promise<BetaTimelinePage>{
-  if(client.timelinePage)return client.timelinePage(profileId,query);
+function isTimelinePeriodBudgetError(failure:unknown): boolean {
+  if (failure instanceof BetaApiError) return failure.code === 'timeline_period_budget_exceeded';
+  return !!failure && typeof failure === 'object' && 'code' in failure && failure.code === 'timeline_period_budget_exceeded';
+}
+function betaPeriodQuery(window:BetaPeriodWindow,query:BetaQuery,tag:string):BetaTimelinePeriodQuery {
+  return {from_ms:window.from_ms,to_ms:window.to_ms,...query,...(tag?{tag}:{})};
+}
+async function readTimeline(client:BetaClient,profileId:string,query:BetaQuery,tag:string|undefined,typedTimelineAvailable:boolean):Promise<BetaTimelinePage>{
+  if (tag) {
+    if (!client.recordOrganization) throw new BetaApiError('unsupported_record_tags', '当前连接尚不支持标签筛选，请更新 Beta 服务');
+    const page = await client.recordOrganization.eventsPageWithTag(profileId, query, tag);
+    return { ...page, items: page.items.map(record => ({ kind: 'capture' as const, record })) };
+  }
+  if(client.timelinePage&&typedTimelineAvailable)return client.timelinePage(profileId,query);
   const page=await client.eventsPage(profileId,query);return{...page,items:page.items.map(record=>({kind:'capture' as const,record}))};
 }
-function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profileId, visible, externalRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync,intentJournal,summaryOwner }: { workspace: BetaWorkspacePresentation; client: BetaClient; controller: BetaDraftController; focus:BetaTimeblockController|null; deviceId:string;profileId: string; visible:boolean;externalRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void;intentJournal?:LocalIntentJournal;summaryOwner:MutableRefObject<SummaryTasksController|null> }) {
+function ProfileWorkspace({ workspace, client, status, controller, focus, deviceId,profileId,profileName,profileNameFor, visible, externalRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync,onReturnToProfile,audioRecorder,correctionOwner,correctionOwnerError,addRecordedFile,intentJournal,summaryOwner }: { workspace: BetaWorkspacePresentation; client: BetaClient; status:BetaStatus; controller: BetaDraftController; focus:BetaTimeblockController|null; deviceId:string;profileId: string;profileName:string;profileNameFor:(profileId:string)=>string;visible:boolean;externalRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void;onReturnToProfile:(profileId:string)=>void;audioRecorder:BetaAudioRecordingController;correctionOwner:BetaRecordCorrectionOwner|null;correctionOwnerError:string;addRecordedFile:(profileId:string,file:File,sourceId:string)=>Promise<void>;intentJournal?:LocalIntentJournal;summaryOwner:MutableRefObject<SummaryTasksController|null> }) {
   const drafts = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const deviceNames=useBetaDeviceNames(deviceId);
   const { layout, change: changeLayout } = workspace;
@@ -396,50 +433,67 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
   const inputSendMode = useBetaInputSendMode();
   const [page, setPage] = useState<BetaTimelinePage | null>(null);
   const pageRef=useRef(page);pageRef.current=page;
-  const pageOwner=useRef({client,profileId,query:''});
+  const pageOwner=useRef<BetaTimelinePageOwner>({client,profileId,query:'',tag:'',mode:'all',from_ms:null,to_ms:null});
+  const tagReturnView=useRef<TagReturnView|null>(null);
   const [search, setSearch] = useState(''); const [query, setQuery] = useState('');
+  const [tagSearch, setTagSearch] = useState(''); const [tagFilter, setTagFilter] = useState('');
+  const [timelinePeriod, setTimelinePeriod] = useState<BetaTimelineMode>('all');
+  const [periodAnchor, setPeriodAnchor] = useState(() => Date.now());
+  const periodType:BetaTimelinePeriod=timelinePeriod==='all'?'day':timelinePeriod;
+  const periodWindow = useMemo(() => resolveBetaPeriodWindow(periodAnchor, periodType), [periodAnchor, periodType]);
+  const periodAvailable = typeof client.timelinePeriodPage === 'function'
+    && status.capabilities?.timeline_period !== false
+    && (client.serviceScope === undefined || status.capabilities?.timeline_period === true);
+  const periodUnavailable = client.serviceScope !== undefined && !periodAvailable;
+  const typedTimelineAvailable = typeof client.timelinePage === 'function'
+    && status.capabilities?.typed_timeline !== false
+    && (client.serviceScope === undefined || status.capabilities?.typed_timeline === true);
+  const activePeriod:BetaTimelineMode=periodAvailable?timelinePeriod:'all';
+  const periodViewActive=activePeriod!=='all';
   const [searchOpen, setSearchOpen] = useState(false);
   const [revision, setRevision] = useState(0); const [loading, setLoading] = useState(false);
   const [error, setError] = useState(''); const generation = useRef(0);
   const [historyError, setHistoryError] = useState('');
+  const [periodBudgetExceeded, setPeriodBudgetExceeded] = useState(false);
   const scroll = useRef<HTMLDivElement>(null); const olderHeight = useRef<number | null>(null);
+  const periodPositionRestore = useRef<{top:number;followTail:boolean}|null>(null);
   const historyContent = useRef<HTMLDivElement>(null);
   const alive = useRef(true); const now = useBetaNow(recordsActive);
   const mode=useBetaDateDisplayMode();
   const readingTop=useRef(0);const followTail=useRef(true);
-  const [messageLocation, setMessageLocation] = useState<MessageLocationView | null>(null);
-  const messageLocationSequence = useRef(0);
-  const messageLocationFlight = useRef<MessageLocationFlight | null>(null);
-  const messageLocationOrigin = useRef<MessageReadingPosition | null>(null);
-  const pendingMessageLocationRestore = useRef<MessageLocationRestore | null>(null);
-  const [messageLocationRestoreRevision, setMessageLocationRestoreRevision] = useState(0);
-  const [messageDraftNotice, setMessageDraftNotice] = useState('');
-  const messageScope = useRef({ client, profileId });
-  messageScope.current = { client, profileId };
-  const [reviewsOpen,setReviewsOpen]=useState(false),[reviewTarget,setReviewTarget]=useState<SummaryArtifactRecord|null>(null),[summarySource,setSummarySource]=useState<SummarySourceRef|null>(null);
+  const [messageLocation,setMessageLocation]=useState<MessageLocationView|null>(null);
+  const messageLocationSequence=useRef(0);
+  const messageLocationFlight=useRef<MessageLocationFlight|null>(null);
+  const messageLocationOrigin=useRef<MessageReadingPosition|null>(null);
+  const pendingMessageLocationRestore=useRef<MessageLocationRestore|null>(null);
+  const [messageLocationRestoreRevision,setMessageLocationRestoreRevision]=useState(0);
+  const [messageDraftNotice,setMessageDraftNotice]=useState('');
+  const [correctionTarget,setCorrectionTarget]=useState<BetaEvent|null>(null);
+  const messageScope=useRef({client,profileId});messageScope.current={client,profileId};
+  const [reviewsOpen,setReviewsOpen]=useState(false),[reviewTarget,setReviewTarget]=useState<SummaryArtifactRecord|null>(null),[summarySource,setSummarySource]=useState<{profileId:string;source:SummarySourceRef}|null>(null);
   const sourceReader=useMemo(()=>client.timelineEvent?(profile:string,event:string)=>client.timelineEvent!(profile,event):undefined,[client,client.timelineEvent]);
+  const correctionSourceReader=useMemo(()=>client.correctionSource?(profile:string,event:string,digest:string)=>client.correctionSource!(profile,event,digest):undefined,[client,client.correctionSource]);
+  useEffect(()=>{setSummarySource(null);},[profileId]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  useEffect(() => () => {
+  useEffect(()=>()=>{
     ++messageLocationSequence.current;
     messageLocationFlight.current?.abort.abort();
-    messageLocationFlight.current = null;
-  }, []);
-  useLayoutEffect(() => {
-    const restore = pendingMessageLocationRestore.current;
-    const element = scroll.current;
-    if (!restore || !element) return;
-
-    if (restore.kind === 'latest') {
-      followTail.current = true;
-      element.scrollTop = element.scrollHeight;
-    } else {
-      followTail.current = restore.position.followTail;
-      element.scrollTop = restore.position.top;
+    messageLocationFlight.current=null;
+  },[]);
+  useLayoutEffect(()=>{
+    const restore=pendingMessageLocationRestore.current;
+    const element=scroll.current;
+    if(!restore||!element)return;
+    if(restore.kind==='latest'){
+      followTail.current=true;
+      element.scrollTop=element.scrollHeight;
+    }else{
+      followTail.current=restore.position.followTail;
+      element.scrollTop=restore.position.top;
     }
-
-    readingTop.current = element.scrollTop;
-    pendingMessageLocationRestore.current = null;
-  }, [messageLocationRestoreRevision]);
+    readingTop.current=element.scrollTop;
+    pendingMessageLocationRestore.current=null;
+  },[messageLocationRestoreRevision]);
   useEffect(() => {
     if (visible && deadlineLocation?.profileId === profileId) changeLayout({ focus: 'expanded', minimal: false });
   }, [visible, profileId, deadlineLocation?.handoffId, deadlineLocation?.attempt]);
@@ -450,28 +504,51 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
     // Visibility does not itself invalidate a retained reading window. Changed
     // facts/queries while hidden are reconciled once when the pane returns.
     if (!recordsActive) { deferredRefresh.current = true; return; }
-    const same=pageOwner.current.client===client&&pageOwner.current.profileId===profileId&&pageOwner.current.query===query;
-    const previous=same?pageRef.current:null;
-    if(!same){setPage(null);pageRef.current=null;followTail.current=true;readingTop.current=0;}
-    pageOwner.current={client,profileId,query};
-    const current = ++generation.current; setLoading(true);
-    void refreshTimelineWindow(next=>readTimeline(client,profileId,next),previous,query).then(result => {
-      if (current === generation.current) { olderHeight.current = null; setPage(result); setHistoryError(''); }
-    }).catch(failure => { if (current === generation.current) setHistoryError(errorMessage(failure)); })
+    const mode=activePeriod;
+    const from_ms=periodViewActive?periodWindow.from_ms:null;
+    const to_ms=periodViewActive?periodWindow.to_ms:null;
+    const same=pageOwner.current.client===client&&pageOwner.current.profileId===profileId&&pageOwner.current.query===query&&pageOwner.current.tag===tagFilter
+      &&pageOwner.current.mode===mode&&pageOwner.current.from_ms===from_ms&&pageOwner.current.to_ms===to_ms;
+    const previous=same&&!periodViewActive?pageRef.current:null;
+    if(!same){
+      // A second period can be selected while the first page is still pending.
+      // Its current reading position supersedes the earlier window's snapshot.
+      if(periodViewActive)periodPositionRestore.current={top:scroll.current?.scrollTop??readingTop.current,followTail:followTail.current};
+      setPage(null);pageRef.current=null;
+    }
+    pageOwner.current={client,profileId,query,tag:tagFilter,mode,from_ms,to_ms};
+    const current = ++generation.current; setLoading(true);setHistoryError('');setPeriodBudgetExceeded(false);
+    const request = periodViewActive
+      ? client.timelinePeriodPage!(profileId,betaPeriodQuery(periodWindow,{limit:100,...(query?{search:query}:{})},tagFilter))
+      : refreshTimelineWindow(next=>readTimeline(client,profileId,next,tagFilter,typedTimelineAvailable),previous,query);
+    void request.then(result => {
+      if (current === generation.current) { olderHeight.current = null; setPage(result); setHistoryError('');setPeriodBudgetExceeded(false); }
+    }).catch(failure => { if (current === generation.current) {setHistoryError(errorMessage(failure));setPeriodBudgetExceeded(isTimelinePeriodBudgetError(failure));} })
       .finally(() => { if (current === generation.current) setLoading(false); });
     return () => { ++generation.current; };
-  }, [client, profileId, query, revision,externalRevision]);
+  }, [client, profileId, query, tagFilter, revision,externalRevision,periodAvailable,activePeriod,periodViewActive,typedTimelineAvailable,periodWindow.from_ms,periodWindow.to_ms]);
   useEffect(()=>{
-    if(!recordsActive||!client.summaries||loading)return;
+    if(!recordsActive||!client.summaries||loading||tagFilter)return;
     // Read-only foreground refresh, serialized by the existing timeline load.
     // Each reconciliation remains bounded to the existing 16-page window.
     const refresh=()=>{if(!document.hidden&&alive.current)setRevision(value=>value+1);};
     const timer=setTimeout(refresh,3000);document.addEventListener('visibilitychange',refresh);
     return()=>{clearTimeout(timer);document.removeEventListener('visibilitychange',refresh);};
-  },[recordsActive,client,client.summaries,profileId,loading,query]);
+  },[recordsActive,client,client.summaries,profileId,loading,query,tagFilter]);
   useLayoutEffect(() => {
     const element = scroll.current; if (!element) return;
     if(!recordsActive)return;
+    const restore=periodPositionRestore.current;
+    if(restore&&!page)return;
+    if(restore&&page){
+      followTail.current=restore.followTail;
+      const maximum=Math.max(0,element.scrollHeight-element.clientHeight);
+      element.scrollTop=restore.followTail?element.scrollHeight:Math.min(restore.top,maximum);
+      readingTop.current=restore.followTail?element.scrollTop:restore.top;
+      periodPositionRestore.current=null;
+      olderHeight.current=null;
+      return;
+    }
     if (olderHeight.current !== null) element.scrollTop += element.scrollHeight - olderHeight.current;
     else if(followTail.current)element.scrollTop = element.scrollHeight;
     else element.scrollTop=readingTop.current;
@@ -487,31 +564,60 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
     });
     observer.observe(historyContent.current); return () => observer.disconnect();
   }, [recordsActive]);
-  async function older(): Promise<BetaTimelinePage | null> {
+  async function older():Promise<BetaTimelinePage|null> {
     if (!page || page.next_before === null || loading) return null;
-    const current = generation.current;
-    setLoading(true);
-
+    const current = generation.current; setLoading(true);
     try {
-      const result = await readTimeline(client, profileId, {
-        before: page.next_before,
-        through: page.highwater,
-        limit: 100,
-        ...(query ? { search: query } : {}),
-      });
+      const olderQuery = { before: page.next_before, through: page.highwater, limit: 100, ...(query ? { search: query } : {}) };
+      const result = periodViewActive && client.timelinePeriodPage
+        ? await client.timelinePeriodPage(profileId,betaPeriodQuery(periodWindow,olderQuery,tagFilter))
+        : await readTimeline(client,profileId,olderQuery,tagFilter,typedTimelineAvailable);
       if (current !== generation.current) return null;
-
       olderHeight.current = scroll.current?.scrollHeight ?? null;
-      const merged = { ...result, items: mergeTimelineItems(page.items, result.items) };
-      pageRef.current = merged;
+      const merged={...result,items:mergeTimelineItems(page.items,result.items)};
+      pageRef.current=merged;
       setPage(merged);
-      setHistoryError('');
+      setHistoryError('');setPeriodBudgetExceeded(false);
       return merged;
-    } catch (failure) {
-      if (current === generation.current) setHistoryError(errorMessage(failure));
-      return null;
-    } finally {
-      if (current === generation.current) setLoading(false);
+    } catch (failure) { if (current === generation.current) {setHistoryError(errorMessage(failure));setPeriodBudgetExceeded(isTimelinePeriodBudgetError(failure));}return null; }
+    finally { if (current === generation.current) setLoading(false); }
+  }
+  function tagReturnMatchesCurrentView(restore:TagReturnView):boolean {
+    return restore.mode===activePeriod
+      &&restore.from_ms===(periodViewActive?periodWindow.from_ms:null)
+      &&restore.to_ms===(periodViewActive?periodWindow.to_ms:null);
+  }
+  function applyTagFilter(tag: string): void {
+    if (!tagFilter && !tagReturnView.current) {
+      tagReturnView.current = {
+        client, profileId, query, search, tagSearch, tag: tagFilter, mode:activePeriod,
+        from_ms:periodViewActive?periodWindow.from_ms:null,to_ms:periodViewActive?periodWindow.to_ms:null,
+        page: pageRef.current, top: scroll.current?.scrollTop ?? readingTop.current,
+        followTail: followTail.current,
+      };
+    }
+    setTagFilter(tag);
+  }
+  function clearTagFilter(): void {
+    const restore = tagReturnView.current;
+    tagReturnView.current = null;
+    setTagFilter(restore?.tag ?? '');
+    setTagSearch(restore?.tagSearch ?? '');
+    if (restore && restore.client === client && restore.profileId === profileId && tagReturnMatchesCurrentView(restore)) {
+      setSearch(restore.search); setQuery(restore.query);
+      pageRef.current = restore.page; setPage(restore.page);
+      pageOwner.current = { client, profileId, query: restore.query, tag: restore.tag, mode:restore.mode, from_ms:restore.from_ms, to_ms:restore.to_ms };
+      readingTop.current = restore.top; followTail.current = restore.followTail;
+    }
+  }
+  function clearAllFilters(): void {
+    const restore = tagReturnView.current;
+    tagReturnView.current = null;
+    setSearch(''); setQuery(''); setTagSearch(''); setTagFilter('');
+    if (restore && restore.client === client && restore.profileId === profileId && !restore.query && !restore.tag && tagReturnMatchesCurrentView(restore)) {
+      pageRef.current = restore.page; setPage(restore.page);
+      pageOwner.current = { client, profileId, query: '', tag: '', mode:restore.mode, from_ms:restore.from_ms, to_ms:restore.to_ms };
+      readingTop.current = restore.top; followTail.current = restore.followTail;
     }
   }
   async function submit(commandId?: string) {
@@ -543,12 +649,7 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
     }
     if(!layout.minimal&&layout.records!=='expanded')changeLayout({records:'expanded'});
     const abort=new AbortController();
-    const flight: MessageLocationFlight = {
-      profileId,
-      eventId: reference.eventId,
-      client,
-      abort,
-    };
+    const flight:MessageLocationFlight={sequence,profileId,eventId:reference.eventId,client,abort};
     messageLocationFlight.current=flight;
     setMessageLocation({reference,state:{kind:'loading'}});
     const isCurrent=()=>alive.current
@@ -633,13 +734,7 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       setMessageDraftNotice('引用已加入当前草稿');
       requestAnimationFrame(()=>{
         const latest=controller.snapshot().drafts[profileId];
-        if (!alive.current
-          || messageScope.current.profileId !== profileId
-          || messageScope.current.client !== client
-          || !latest
-          || latest.text !== inserted.text
-          || latest.revision !== insertedRevision
-          || !textareaRef.current) return;
+        if(!alive.current||!latest||latest.text!==inserted.text||latest.revision!==insertedRevision||!textareaRef.current)return;
         textareaRef.current.focus({preventScroll:true});
         textareaRef.current.setSelectionRange(selectionStart+inserted.cursorOffsetDelta,selectionEnd+inserted.cursorOffsetDelta);
         resizeNowInputTextarea(textareaRef.current);
@@ -718,7 +813,8 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
   const [attachmentNow,setAttachmentNow]=useState(Date.now);
   useEffect(()=>{if(!attachmentsBusy)return;setAttachmentNow(Date.now());const timer=setInterval(()=>setAttachmentNow(Date.now()),1000);return()=>clearInterval(timer);},[attachmentsBusy]);
   const currentCommitted = draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision);
-  const captureStatus = drafts.persistenceState === 'failed' ? 'error' : clipboardBusy || drafts.persistenceState === 'pending' || pending.length ? 'pending' : currentCommitted ? 'committed' : draft?.text.trim() || draft?.files?.length ? 'draft' : 'idle';
+  const hasDraftContent = !!draft?.text.trim() || !!draft?.files?.length || !!draft?.tags?.length;
+  const captureStatus = drafts.persistenceState === 'failed' ? 'error' : clipboardBusy || drafts.persistenceState === 'pending' || pending.length ? 'pending' : currentCommitted ? 'committed' : hasDraftContent ? 'draft' : 'idle';
   const dropRoot=useRef<HTMLDivElement>(null);
   const mountDroppedFiles=useCallback(async(files:AttachmentSelection[])=>{if(!client.originals)throw new Error('当前服务尚不支持附件原件');await controller.addFiles(profileId,files);},[client,controller,profileId]);
   const dropError=useCallback((failure:unknown)=>{if(alive.current)setError(errorMessage(failure));},[]);
@@ -734,8 +830,9 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
     return <BetaTimelineItemRow key={item.record.event_id} item={item} client={client}
       deviceId={deviceId} revision={revision} now={now} dateMode={mode} recordsActive={recordsActive}
       deviceLabel={deviceNames.label} onQuote={quoteMessage} onOpenReference={openMessageReference}
+      onCorrect={client.recordOrganization?record=>setCorrectionTarget(record):undefined}
       sourceLabel={messageReferenceSourceLabel} onInspectSummary={record=>{setReviewTarget(record);setReviewsOpen(true);}}
-      onOpenSource={sourceReader?source=>setSummarySource(source):undefined} />;
+      onOpenSource={sourceReader||correctionSourceReader?source=>setSummarySource({profileId,source}):undefined} />;
   }
   const locatedMessageContent=messageLocation?.item
     ? renderTimelineItem(messageLocation.item, messageLocation.state.kind==='found' ? messageLocation.state.highwater??page?.highwater??0 : page?.highwater??0)
@@ -773,43 +870,74 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
         }
       }}/></div></BetaWorkspacePane>
     }
-    {messageLocation?.state.kind === 'profile-mismatch' && messageLocationBoundary}
+    {messageLocation?.state.kind==='profile-mismatch'&&messageLocationBoundary}
     <BetaWorkspacePane kind="records" state={layout.minimal ? 'expanded' : layout.records} chrome={!layout.minimal&&layout.records!=='expanded'} onToggle={()=>changeLayout({records:layout.records==='collapsed'?'expanded':'collapsed'})}>
-    {!client.timelinePage&&<p className="px-5 py-1 text-[11px] text-muted">此连接仅提供兼容记录历史，尚未提供完整时间线</p>}
-    {!layout.minimal&&<BetaHistoryToolbar onCollapse={()=>changeLayout({records:'collapsed'})} searchOpen={searchOpen||!!query} onSearch={()=>setSearchOpen(value=>!value)} onRefresh={()=>setRevision(value=>value+1)} onReview={()=>{setReviewTarget(null);setReviewsOpen(true);}}/>}
-    {layout.minimal&&query&&<Button size="sm" variant="ghost" className="self-start" onClick={()=>{setSearch('');setQuery('');}}>清除筛选：{query}</Button>}
-    <div hidden={!!layout.minimal||!searchOpen&&!query} className={layout.minimal||!searchOpen&&!query ? 'hidden' : 'flex flex-wrap gap-2 border-b border-border-page px-3 py-2'}>
+    {!periodViewActive&&!typedTimelineAvailable&&<p className="px-5 py-1 text-[11px] text-muted">此连接仅提供兼容记录历史，尚未提供完整时间线</p>}
+    {periodUnavailable&&<p role="status" className="px-5 py-1 text-[11px] text-muted">{client.serviceScope==='tauri-native-beta-v1'?'此本机 Beta 版本尚不支持日／周／月范围浏览；现有历史仍可阅读。更新应用后可用。':'当前 Beta 服务尚不支持日／周／月范围浏览；现有历史仍可阅读。请更新服务后重试。'}</p>}
+    {!layout.minimal&&<BetaHistoryToolbar onCollapse={()=>changeLayout({records:'collapsed'})} searchOpen={searchOpen||!!query||!!tagFilter} onSearch={()=>setSearchOpen(value=>!value)} onRefresh={()=>setRevision(value=>value+1)} onReview={()=>{setReviewTarget(null);setReviewsOpen(true);}}/>}
+    {periodAvailable&&<div className="flex flex-wrap items-center gap-2 border-b border-border-page px-3 py-2">
+      <div role="group" aria-label="浏览周期" className="flex items-center gap-1">
+        <Button type="button" size="sm" variant={activePeriod==='all'?'secondary':'ghost'} aria-pressed={activePeriod==='all'} className="focus-visible:ring-1" onClick={()=>setTimelinePeriod('all')}>全部</Button>
+        <Button type="button" size="sm" variant={activePeriod==='day'?'secondary':'ghost'} aria-pressed={activePeriod==='day'} className="focus-visible:ring-1" onClick={()=>setTimelinePeriod('day')}>日</Button>
+        <Button type="button" size="sm" variant={activePeriod==='week'?'secondary':'ghost'} aria-pressed={activePeriod==='week'} className="focus-visible:ring-1" onClick={()=>setTimelinePeriod('week')}>周</Button>
+        <Button type="button" size="sm" variant={activePeriod==='month'?'secondary':'ghost'} aria-pressed={activePeriod==='month'} className="focus-visible:ring-1" onClick={()=>setTimelinePeriod('month')}>月</Button>
+      </div>
+      {periodViewActive&&<>
+        <Button type="button" size="sm" variant="ghost" aria-label="上一个周期" onClick={()=>setPeriodAnchor(anchor=>shiftBetaPeriodAnchor(anchor,periodType,-1))}><span aria-hidden="true">‹</span></Button>
+        <Button type="button" size="sm" variant="ghost" aria-label="下一个周期" onClick={()=>setPeriodAnchor(anchor=>shiftBetaPeriodAnchor(anchor,periodType,1))}><span aria-hidden="true">›</span></Button>
+        <span aria-live="polite" className="text-xs text-secondary">{formatBetaPeriodWindow(periodWindow,periodType)}</span>
+      </>}
+    </div>}
+    {periodViewActive&&<p className="px-5 py-1 text-[11px] text-muted">时间块按生效时间归入范围，列表日期仍显示其记录时间。</p>}
+    {layout.minimal&&<div className="flex items-center gap-2 px-3 py-1">
+      <Button size="sm" variant={searchOpen||!!query||!!tagFilter?'secondary':'ghost'} aria-expanded={searchOpen||!!query||!!tagFilter} onClick={()=>setSearchOpen(value=>!value)}>检索记录</Button>
+      {(query||tagFilter)&&<Button size="sm" variant="ghost" onClick={clearAllFilters}>清除筛选</Button>}
+    </div>}
+    <div hidden={!searchOpen&&!query&&!tagFilter} className={!searchOpen&&!query&&!tagFilter ? 'hidden' : 'flex flex-wrap gap-2 border-b border-border-page px-3 py-2'}>
       <form className="flex min-w-0 flex-1 basis-full gap-2 sm:basis-0" onSubmit={event => { event.preventDefault(); setQuery(search); }}>
         <Input aria-label="搜索记录" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索文字" />
         <Button variant="outline" type="submit">搜索</Button>
       </form>
+      <BetaRecordTagFilter value={tagSearch} activeTag={tagFilter} onValueChange={setTagSearch}
+        onApply={tag=>{applyTagFilter(tag);setSearchOpen(true);}}
+        onClear={clearTagFilter} />
+      {(query||tagFilter)&&<Button size="sm" variant="ghost" onClick={clearAllFilters}>清除筛选</Button>}
       <FieldSelect label="日期显示" value={mode} onValueChange={next => {
         const value = next as EventDateDisplayMode;
         try { setBetaDateDisplayMode(value); } catch { setError('日期偏好暂时无法保存'); }
       }} options={[{value:'compact',label:'简略日期'},{value:'full',label:'完整日期'},{value:'weekday',label:'星期日期'}]}/>
     </div>
     {historyError && <p role="alert" className="shrink-0 px-5 py-2 text-sm text-destructive">{historyError}</p>}
-    {messageLocation && messageLocation.state.kind !== 'profile-mismatch' && messageLocationBoundary}
+    {periodBudgetExceeded&&periodViewActive&&<div className="flex flex-wrap items-center gap-2 px-5 pb-2 text-xs text-muted">
+      {activePeriod==='month'&&<Button size="sm" variant="outline" onClick={()=>setTimelinePeriod('week')}>缩小到周范围</Button>}
+      {activePeriod==='week'&&<Button size="sm" variant="outline" onClick={()=>setTimelinePeriod('day')}>缩小到日范围</Button>}
+      <Button size="sm" variant="outline" onClick={()=>setTimelinePeriod('all')}>返回全部历史</Button>
+    </div>}
+    {messageLocation&&messageLocation.state.kind!=='profile-mismatch'&&messageLocationBoundary}
     <div ref={scroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4" aria-label="记录历史" aria-busy={loading} onScroll={event=>{if(!recordsActive)return;const element=event.currentTarget;readingTop.current=element.scrollTop;followTail.current=element.scrollHeight-element.clientHeight-element.scrollTop<64;}}>
       {page?.next_before !== null && page && <div className="mb-4 text-center"><Button variant="ghost" disabled={loading} onClick={() => void older()}>加载更早记录</Button></div>}
       {loading && !page && <p role="status" className="text-center text-sm text-muted">正在读取…</p>}
-      {page?.items.length === 0 && <p className="py-8 text-center text-sm text-muted">{query ? '没有匹配记录' : '还没有记录'}</p>}
+      {page?.items.length === 0 && <p className="py-8 text-center text-sm text-muted">{periodViewActive?(query||tagFilter?'此时间范围没有匹配记录':'此时间范围没有记录'):(query||tagFilter?'没有匹配记录':'还没有记录')}</p>}
+      {periodViewActive&&!!tagFilter&&<p className="pb-3 text-center text-[11px] text-muted">标签仅筛选记录；时间块与回顾仍按时间范围显示</p>}
       <div ref={historyContent} className="space-y-4">{page && [...page.items].reverse().map(item=>renderTimelineItem(item,page.highwater))}</div>
     </div>
     </BetaWorkspacePane>
     {!layout.minimal&&layout.records!=='expanded'&&<div className="flex min-h-0 flex-1 items-center justify-center px-5 py-6">{layout.records==='hidden'&&(!focus||layout.focus==='hidden')&&<p className="text-center text-sm text-muted">工作区已收起，仍可记录想法。上方可恢复视图。</p>}</div>}
     </div>
     {error && <p role="alert" className="shrink-0 px-5 py-2 text-sm text-destructive">{error}</p>}
-    <BetaSummaryTasksPanel open={reviewsOpen} onOpenChange={setReviewsOpen} client={client} deviceId={deviceId} profileId={profileId} target={reviewTarget} revision={page?.highwater??0} now={now} dateMode={mode} onConfigure={onConfigureSummary} onChanged={()=>{if(alive.current)setRevision(value=>value+1);}} onOpenSource={sourceReader?source=>setSummarySource(source):undefined} intentJournal={intentJournal} onOwner={owner=>{summaryOwner.current=owner;}}/>
-    <BetaSummarySourceDialog profileId={profileId} source={summarySource} reader={sourceReader} onClose={()=>setSummarySource(null)} now={now} dateMode={mode}/>
+    <BetaRecordCorrectionDialog open={!!correctionTarget} target={correctionTarget} profileId={profileId} client={client}
+      highwater={page?.highwater} now={now} dateMode={mode} owner={correctionOwner} ownerError={correctionOwnerError} onOpenChange={open=>{if(!open)setCorrectionTarget(null);}}
+      onChanged={()=>{if(alive.current)setRevision(value=>value+1);}} />
+    <BetaSummaryTasksPanel open={reviewsOpen} onOpenChange={setReviewsOpen} client={client} deviceId={deviceId} profileId={profileId} target={reviewTarget} revision={page?.highwater??0} now={now} dateMode={mode} onConfigure={onConfigureSummary} onChanged={()=>{if(alive.current)setRevision(value=>value+1);}} onOpenSource={sourceReader||correctionSourceReader?source=>setSummarySource({profileId,source}):undefined} intentJournal={intentJournal} onOwner={owner=>{summaryOwner.current=owner;}}/>
+    <BetaSummarySourceDialog profileId={profileId} sourceProfileId={summarySource?.profileId??null} source={summarySource?.source??null} reader={sourceReader} correctionReader={correctionSourceReader} onClose={()=>setSummarySource(null)} now={now} dateMode={mode}/>
     <NowInputRowView
       value={draft?.text ?? ''}
       placeholder="记录此刻的想法…"
       inputRef={textareaRef}
       textareaLabel="记录当下"
-      voiceControl={false}
+      voiceControl={client.originals ? <BetaAudioRecorder controller={audioRecorder} profileId={profileId} profileName={profileName} profileNameFor={profileNameFor} onAddFile={addRecordedFile} onReturnToProfile={onReturnToProfile}/> : false}
       sendLabel="发送"
-      onValueChange={(next, element) => { setMessageDraftNotice(''); try { controller.setDraft(profileId, next); resizeNowInputTextarea(element); } catch (failure) { setError(errorMessage(failure)); } }}
+      onValueChange={(next, element) => { setMessageDraftNotice('');try { controller.setDraft(profileId, next); resizeNowInputTextarea(element); } catch (failure) { setError(errorMessage(failure)); } }}
       onKeyDown={event => { if (!event.nativeEvent.isComposing && shouldSubmitOnEnter(inputSendMode, event)) { event.preventDefault(); void submit(); } }}
       onPaste={event => {
         const files = clipboardImageFiles(event.clipboardData);
@@ -826,6 +954,7 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
       onAttachmentClick={client.originals ? () => {void chooseFiles();} : undefined}
       sendDisabled={(!draft?.text.trim() && !draft?.files?.length) || preparing || busy || clipboardBusy || !!drafts.persistenceError}
       beforeControls={<>
+      <BetaCaptureTagsEditor tags={draft?.tags??[]} onChange={tags=>controller.setTags(profileId,tags)}/>
       <input ref={fileInput} type="file" multiple hidden aria-label="选择原件" onChange={event => {
         const selected = Array.from(event.target.files ?? []); event.target.value = '';
         const target = reselectTarget.current; reselectTarget.current = null;
@@ -833,13 +962,8 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
         const operation = target ? controller.reselectFile(profileId, target, selected[0]) : controller.addFiles(profileId, selected);
         void operation.catch(failure => { if (alive.current) setError(errorMessage(failure)); });
       }} />
-      <BetaMessageReferenceDraft
-        value={draft?.text ?? ''}
-        onOpen={reference => { void openMessageReference(reference); }}
-        onRemove={removeDraftReference}
-        sourceLabel={messageReferenceSourceLabel}
-      />
-      {messageDraftNotice && <p role="status" className="mb-2 text-xs text-secondary">{messageDraftNotice}</p>}
+      <BetaMessageReferenceDraft value={draft?.text??''} onOpen={reference=>{void openMessageReference(reference);}} onRemove={removeDraftReference} sourceLabel={messageReferenceSourceLabel}/>
+      {messageDraftNotice&&<p role="status" className="mb-2 text-xs text-secondary">{messageDraftNotice}</p>}
       {!!draft?.files?.length && <div className="mb-2 flex max-h-[28dvh] flex-col gap-2 overflow-y-auto overscroll-contain" aria-label="原件队列">
         {draft.files.map(file => <div key={file.id} className="flex items-center gap-2 rounded-2xl border border-[#E7E5E4] bg-white/90 px-3 py-2 shadow-sm dark:border-[#292524] dark:bg-[#1C1917]">
           {file.original && <BetaImagePreview identity={`${deviceId}:${profileId}:${file.id}:${file.original.sha256}`} sourceScope={client} visible={workspaceActive} fileName={file.file_name} mediaType={file.media_type} byteLength={file.byte_length} load={() => controller.previewSource(profileId, file.id)} thumbnail />}
@@ -867,7 +991,7 @@ function ProfileWorkspace({ workspace, client, controller, focus, deviceId,profi
         {item.state !== 'pending' && <Button variant="outline" size="sm" onClick={() => void submit(item.command.command_id)}>查证并重试</Button>}
       </div>)}
       </>}
-      inputStatus={<BetaCaptureStatus state={captureStatus} message={clipboardBusy?'正在粘贴…':drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':pending.length ? '待确认的提交会保留原文与原命令' : currentCommitted ? '本机已保存' : draft?.text.trim()||draft?.files?.length?'记录草稿已暂存 · 尚未提交':`${inputSendShortcutLabel(inputSendMode)} · 支持粘贴图片`}/> }
+      inputStatus={<BetaCaptureStatus state={captureStatus} message={clipboardBusy?'正在粘贴…':drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':pending.length ? '待确认的提交会保留原文与原命令' : currentCommitted ? '本机已保存' : hasDraftContent?'记录草稿已暂存 · 尚未提交':`${inputSendShortcutLabel(inputSendMode)} · 支持粘贴图片`}/> }
     />
   </div>;
 }

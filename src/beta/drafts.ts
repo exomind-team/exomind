@@ -7,15 +7,18 @@ import { openDurableIntentStorage, type DurableIntentStorage, type LocalIntentJo
 import { productionIntentStorage } from './native-intent-journal';
 import type { AttachmentProgress, FileSourceWork } from './attachment-progress';
 import { hasNativeAttachmentSources, isNativeAttachment, type AttachmentSelection } from './native-attachment-types';
+import { MAX_BETA_EVENT_TAG_BYTES, MAX_BETA_EVENT_TAGS } from './record-organization-client';
 
 export interface DraftFile {
   id: string; stage_id: string; source_key: string;
+  /** Stable origin supplied by an owning capture controller, such as a recording session. */
+  source_id?: string;
   file_name: string; byte_length: number; media_type: string;
   original?: BetaOriginal;
   state: 'preparing' | 'uploading' | 'verified' | 'failed' | 'source_missing';
   next_offset: number; message?: string;
 }
-interface Draft { text: string; revision: number; files?: DraftFile[] }
+interface Draft { text: string; revision: number; tags?: string[]; files?: DraftFile[] }
 export interface PendingCapture {
   command: BetaCommand; draft_revision: number;
   state: 'pending' | 'unknown' | 'failed' | 'committed';
@@ -48,6 +51,7 @@ function sameOriginal(left: BetaOriginal, right: BetaOriginal): boolean {
 }
 function validateFile(file: DraftFile, profileId: string, deviceId: string): void {
   if (!file || typeof file.id !== 'string' || typeof file.stage_id !== 'string' || file.source_key !== sourceKey(deviceId, profileId, file.id)
+    || (file.source_id !== undefined && (typeof file.source_id !== 'string' || !file.source_id.trim() || file.source_id.length > 128))
     || typeof file.file_name !== 'string' || !Number.isSafeInteger(file.byte_length) || file.byte_length < 0 || typeof file.media_type !== 'string'
     || !['preparing','uploading','verified','failed','source_missing'].includes(file.state)
     || !Number.isSafeInteger(file.next_offset) || file.next_offset < 0 || file.next_offset > file.byte_length
@@ -63,12 +67,19 @@ function freezeCommand(command: BetaCommand): BetaCommand {
   }
   Object.freeze(command.tags); return Object.freeze(command);
 }
+function validTags(tags: readonly string[]): boolean {
+  return tags.length <= MAX_BETA_EVENT_TAGS
+    && tags.every(tag => typeof tag === 'string' && tag.trim().length > 0
+      && new TextEncoder().encode(tag).byteLength <= MAX_BETA_EVENT_TAG_BYTES);
+}
 function load(raw: string | null, deviceId: string): PersistedState {
   if (raw === null) return { version: 1, drafts: {}, pending: [], confirmed: [] };
   const value = JSON.parse(raw) as PersistedState;
   if (value.version !== 1 || !value.drafts || typeof value.drafts !== 'object' || !Array.isArray(value.pending)) throw new Error('Invalid draft cache');
   for (const [profile, draft] of Object.entries(value.drafts)) {
-    if (typeof draft.text !== 'string' || !Number.isSafeInteger(draft.revision) || draft.revision < 0 || (draft.files !== undefined && !Array.isArray(draft.files))) throw new Error('Invalid draft');
+    if (typeof draft.text !== 'string' || !Number.isSafeInteger(draft.revision) || draft.revision < 0
+      || (draft.tags !== undefined && (!Array.isArray(draft.tags) || !validTags(draft.tags)))
+      || (draft.files !== undefined && !Array.isArray(draft.files))) throw new Error('Invalid draft');
     draft.files?.forEach(file => validateFile(file, profile, deviceId));
   }
   const confirmed: Confirmation[] = value.confirmed ?? [];
@@ -81,7 +92,7 @@ function load(raw: string | null, deviceId: string): PersistedState {
     const command = entry.command;
     if (!command || typeof command.command_id !== 'string' || typeof command.event_id !== 'string'
       || typeof command.profile_id !== 'string' || typeof command.text !== 'string' || !Number.isSafeInteger(command.occurred_at_ms)
-      || !Array.isArray(command.tags) || !command.tags.every(tag => typeof tag === 'string')
+      || !Array.isArray(command.tags) || !validTags(command.tags)
       || !['pending','unknown','failed','committed'].includes(entry.state) || !Number.isSafeInteger(entry.draft_revision) || entry.draft_revision < 0) throw new Error('Invalid pending capture');
     if (entry.state === 'committed') confirmed.push({ receipt: validateReceipt(entry.receipt, command), draft_revision: entry.draft_revision });
     if (entry.state === 'pending') entry.state = 'unknown';
@@ -182,8 +193,16 @@ export class BetaDraftController {
   }
 
   setDraft(profileId: string, text: string): void {
-    const previous = this.state.drafts[profileId] ?? { text: '', revision: 0 };
+    const previous = this.state.drafts[profileId] ?? { text: '', revision: 0, tags: [] };
     this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...previous, text, revision: previous.revision + 1 } } });
+  }
+
+  setTags(profileId: string, tags: readonly string[]): void {
+    const normalized = Array.from(new Set(tags.map(tag => tag.trim()).filter(Boolean)));
+    if (!validTags(normalized)) throw new BetaApiError('invalid_tags', '最多可添加 64 个标签，每个标签最多 128 字节');
+    const previous = this.state.drafts[profileId] ?? { text: '', revision: 0, tags: [] };
+    if (JSON.stringify(previous.tags ?? []) === JSON.stringify(normalized)) return;
+    this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...previous, tags: normalized, revision: previous.revision + 1 } } });
   }
 
   private needed(profileId: string, id: string): boolean {
@@ -239,29 +258,56 @@ export class BetaDraftController {
     return source;
   }
 
-  async addFiles(profileId: string, selected: readonly AttachmentSelection[]): Promise<void> {
+  async addFiles(profileId: string, selected: readonly AttachmentSelection[], options: { sourceIds?: readonly (string | undefined)[] } = {}): Promise<string[]> {
     this.active();
     if (!this.client.originals) throw new BetaApiError('unsupported_capability', '当前服务尚未提供原件暂存');
     // Persist the whole selection intent before yielding, so B cannot disappear
     // from the intended A/B group while A is being copied/hashed.
     const inputs = Array.from(selected);
-    const incoming: DraftFile[] = inputs.map(file => {
+    const sourceIds = options.sourceIds ?? [];
+    if (sourceIds.length && sourceIds.length !== inputs.length) throw new BetaApiError('invalid_source_identity', '附件来源身份与所选文件数量不一致');
+    const ids = new Array<string>(inputs.length);
+    const incomingInputs: Array<{ file: AttachmentSelection; index: number; sourceId?: string }> = [];
+    const previousDraft = this.state.drafts[profileId] ?? { text: '', revision: 0, tags: [] };
+    const seenSourceIds = new Set<string>();
+    for (let index = 0; index < inputs.length; index++) {
+      const sourceId = sourceIds[index];
+      if (sourceId !== undefined) {
+        if (!sourceId.trim() || sourceId.length > 128 || seenSourceIds.has(sourceId)) {
+          throw new BetaApiError('invalid_source_identity', '附件来源身份无效或重复');
+        }
+        seenSourceIds.add(sourceId);
+        const existing = previousDraft.files?.find(file => file.source_id === sourceId);
+        if (existing) {
+          if (existing.byte_length !== inputs[index].size || existing.media_type !== (inputs[index].type || 'application/octet-stream')) {
+            throw new BetaApiError('source_identity_conflict', '同一录音来源对应了不同附件内容，原草稿保持不变');
+          }
+          ids[index] = existing.id;
+          const source = await this.previewSource(profileId, existing.id);
+          if (!source || source.size !== inputs[index].size) await this.reselectFile(profileId, existing.id, inputs[index]);
+          continue;
+        }
+      }
+      incomingInputs.push({ file: inputs[index], index, ...(sourceId ? { sourceId } : {}) });
+    }
+    const incoming: DraftFile[] = incomingInputs.map(({ file, sourceId }) => {
       const id = this.uuid();
       return { id, stage_id: this.uuid(), source_key: sourceKey(this.deviceId, profileId, id), file_name: file.name,
-        byte_length: file.size, media_type: file.type || 'application/octet-stream', state: 'preparing', next_offset: 0 };
+        ...(sourceId ? { source_id: sourceId } : {}), byte_length: file.size, media_type: file.type || 'application/octet-stream', state: 'preparing', next_offset: 0 };
     });
-    if (!incoming.length) return;
-    const previous = this.state.drafts[profileId] ?? { text: '', revision: 0 };
+    if (!incoming.length) return ids;
+    incomingInputs.forEach(({ index }, position) => { ids[index] = incoming[position].id; });
+    const previous = this.state.drafts[profileId] ?? { text: '', revision: 0, tags: [] };
     const selectedAt=this.clock(),fileProgress={...this.state.fileProgress};for(const file of incoming)fileProgress[file.id]={phase:'queued',completed:null,total:file.byte_length,startedAt:selectedAt,phaseStartedAt:selectedAt,updatedAt:selectedAt};
     const next = { ...this.state,fileProgress, drafts: { ...this.state.drafts, [profileId]: { ...previous, revision: previous.revision + 1, files: [...(previous.files ?? []), ...incoming] } } };
     let admitted=false;
     try { this.publish(next, true);admitted=true; if (durable(this.storage)) { await this.requiredCommit(); this.active(); } }
     catch (error) {
-      const latest=this.state.drafts[profileId]??{text:'',revision:0},ids=new Set(incoming.map(file=>file.id)),existing=new Set(latest.files?.map(file=>file.id));
+      const latest=this.state.drafts[profileId]??{text:'',revision:0},incomingIds=new Set(incoming.map(file=>file.id)),existing=new Set(latest.files?.map(file=>file.id));
       const failed=(file:DraftFile):DraftFile=>({...file,state:'failed',message:errorMessage(error)});
-      const files=[...(latest.files??[]).map(file=>ids.has(file.id)?failed(file):file),...(!admitted?incoming.filter(file=>!existing.has(file.id)).map(failed):[])];
+      const files=[...(latest.files??[]).map(file=>incomingIds.has(file.id)?failed(file):file),...(!admitted?incoming.filter(file=>!existing.has(file.id)).map(failed):[])];
       this.publish({...this.state,drafts:{...this.state.drafts,[profileId]:{...latest,revision:latest.revision+(admitted?0:1),files}}});
-      return;
+      return ids;
     }
     for (let index = 0; index < incoming.length; index++) {
       const file = incoming[index];
@@ -270,7 +316,7 @@ export class BetaDraftController {
         this.selected(profileId,file.id);
         // Complete the backend's durable source copy before publishing the
         // original manifest or beginning Core stage/capture operations.
-        const input=inputs[index],work=this.fileWork(profileId,file);
+        const input=incomingInputs[index].file,work=this.fileWork(profileId,file);
         if(isNativeAttachment(input)){
           if(!hasNativeAttachmentSources(this.sources))throw new BetaApiError('unsupported_file_source','当前环境不能读取系统文件，请通过附件重新选择');
           await this.sources.importFile(file.source_key,input,work);
@@ -281,6 +327,7 @@ export class BetaDraftController {
         if (!this.disposed) this.patchFile(profileId, file.id, { state: 'failed', message: errorMessage(error) });
       }
     }
+    return ids;
   }
 
   removeFile(profileId: string, id: string): void {
@@ -427,7 +474,7 @@ export class BetaDraftController {
     if (previous) return this.retry(previous.command.command_id);
     const files = draft.files?.map(file => ({ ...file, original: { ...file.original! } })) ?? [];
     const command = freezeCommand({ command_id: this.uuid(), event_id: this.uuid(), profile_id: profileId,
-      occurred_at_ms: this.clock(), text: draft.text, tags: [], ...(files.length ? { originals: files.map(file => ({ ...file.original! })) } : {}) });
+      occurred_at_ms: this.clock(), text: draft.text, tags: [...(draft.tags ?? [])], ...(files.length ? { originals: files.map(file => ({ ...file.original! })) } : {}) });
     const pending: PendingCapture = { command, draft_revision: draft.revision, state: 'pending', ...(files.length ? { files, capture_attempted: false } : {}) };
     this.publish({ ...this.state, pending: [...this.state.pending, pending] }, true);
     if (durable(this.storage)) {
@@ -467,7 +514,7 @@ export class BetaDraftController {
     const profile = pending.command.profile_id;
     const draft = this.state.drafts[profile];
     const drafts = draft?.revision === pending.draft_revision
-      ? { ...this.state.drafts, [profile]: { text: '', revision: draft.revision + 1, files: [] } }
+      ? { ...this.state.drafts, [profile]: { text: '', revision: draft.revision + 1, tags: [], files: [] } }
       : this.state.drafts;
     this.publish({ ...this.state, drafts,
       pending: this.state.pending.filter(entry => entry.command.command_id !== pending.command.command_id),

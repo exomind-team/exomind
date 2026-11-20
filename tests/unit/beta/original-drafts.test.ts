@@ -38,6 +38,17 @@ function fixture() {
 const file=(name:string,bytes:BlobPart[]=['data'])=>new File(bytes,name,{type:'application/octet-stream'});
 
 describe('Beta original drafts',()=>{
+  it('reuses an audio attachment by stable source identity, not a retry filename',async()=>{
+    const f=fixture(),draft=f.create();
+    const first=await draft.addFiles('p',[file('first-name.webm',['same bytes'])],{sourceIds:['recording-session-1']});
+    const selected=draft.snapshot().drafts.p.files?.[0];expect(selected?.id).toBe(first[0]);
+    const retried=await draft.addFiles('p',[file('renamed-on-retry.webm',['same bytes'])],{sourceIds:['recording-session-1']});
+    expect(retried).toEqual(first);
+    expect(draft.snapshot().drafts.p.files).toHaveLength(1);
+    expect(draft.snapshot().drafts.p.files?.[0]).toMatchObject({id:first[0],source_id:'recording-session-1',file_name:'first-name.webm'});
+    draft.dispose();
+  });
+
   it('B14-A03: a late selection-intent write failure preserves text typed while waiting for its acknowledgement',async()=>{
     const f=fixture(),entered=deferred<void>(),gate=deferred<void>();
     const owner=await BetaDraftController.open(f.client,'device-a',{legacy:memoryStorage(),sources:f.store,journal:{read:async()=>null,write:async()=>{entered.resolve();await gate.promise;}}});
