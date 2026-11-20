@@ -33,6 +33,118 @@ fn correction(
 }
 
 #[test]
+fn corrected_text_search_returns_the_unchanged_capture_with_its_exact_tag() {
+    let root = tempfile::tempdir().unwrap();
+    let core = Core::open(root.path()).unwrap();
+    let profile = core.create_profile("synthetic P").unwrap();
+    let context = core.local_human(profile).unwrap();
+    let original = capture(profile, "original wording", &["daily"]);
+    core.submit(&context, &original).unwrap();
+    let target = core
+        .events(&context, profile)
+        .unwrap()
+        .into_iter()
+        .find(|item| item.event_id == original.event_id)
+        .unwrap();
+    core.record_correction(
+        &context,
+        &correction(
+            profile,
+            original.event_id,
+            &target.digest,
+            "searchable corrected phrase",
+        ),
+    )
+    .unwrap();
+    let page = core
+        .events_page_with_tag(
+            &context,
+            profile,
+            &EventQuery {
+                search: Some("corrected phrase".into()),
+                ..EventQuery::default()
+            },
+            Some("daily"),
+        )
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].event_id, original.event_id);
+    assert_eq!(page.items[0].text, "original wording");
+}
+
+#[test]
+fn correction_target_page_is_bounded_and_keeps_its_highwater() {
+    let root = tempfile::tempdir().unwrap();
+    let core = Core::open(root.path()).unwrap();
+    let profile = core.create_profile("synthetic P").unwrap();
+    let context = core.local_human(profile).unwrap();
+    let first = capture(profile, "first", &["daily"]);
+    let second = capture(profile, "second", &["daily"]);
+    core.submit(&context, &first).unwrap();
+    core.submit(&context, &second).unwrap();
+    let captures = core.events(&context, profile).unwrap();
+    let first_digest = &captures
+        .iter()
+        .find(|item| item.event_id == first.event_id)
+        .unwrap()
+        .digest;
+    let second_digest = &captures
+        .iter()
+        .find(|item| item.event_id == second.event_id)
+        .unwrap()
+        .digest;
+    core.record_correction(
+        &context,
+        &correction(profile, first.event_id, first_digest, "first correction"),
+    )
+    .unwrap();
+    core.record_correction(
+        &context,
+        &correction(profile, second.event_id, second_digest, "second correction"),
+    )
+    .unwrap();
+    let fixed = core
+        .corrections_page(&context, profile, &EventQuery::default())
+        .unwrap()
+        .highwater;
+    core.record_correction(
+        &context,
+        &correction(
+            profile,
+            first.event_id,
+            first_digest,
+            "later first correction",
+        ),
+    )
+    .unwrap();
+    let bounded = core
+        .corrections_page_for_target(
+            &context,
+            profile,
+            &EventQuery {
+                through: Some(fixed),
+                limit: 100,
+                ..EventQuery::default()
+            },
+            first.event_id,
+        )
+        .unwrap();
+    let current = core
+        .corrections_page_for_target(&context, profile, &EventQuery::default(), first.event_id)
+        .unwrap();
+    assert_eq!(bounded.highwater, fixed);
+    assert_eq!(bounded.items.len(), 1);
+    assert_eq!(bounded.items[0].record.target_event_id, first.event_id);
+    assert_eq!(current.items.len(), 2);
+    assert!(
+        current
+            .items
+            .iter()
+            .all(|item| item.record.target_event_id == first.event_id)
+    );
+}
+
+#[test]
 fn tag_query_matches_one_normalized_tag_and_composes_with_literal_search() {
     let root = tempfile::tempdir().unwrap();
     let core = Core::open(root.path()).unwrap();

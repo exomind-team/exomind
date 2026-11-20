@@ -509,6 +509,7 @@ struct CorrectionQuery {
     through: Option<u64>,
     limit: Option<usize>,
     q: Option<String>,
+    target_event_id: Option<exomind_core::EventId>,
 }
 
 async fn correct(
@@ -546,6 +547,7 @@ async fn corrections(
     let token = bearer(&headers)?;
     let Path(profile) = profile.map_err(|_| HostError::InvalidRequest)?;
     let Query(query) = query.map_err(|_| HostError::InvalidRequest)?;
+    let target_event_id = query.target_event_id;
     let query = EventQuery {
         before: query.before,
         through: query.through,
@@ -554,7 +556,11 @@ async fn corrections(
     };
     Ok(Json(
         work(host, move |host| {
-            host.corrections_page(&host.authenticate(&token)?, profile, &query)
+            let session = host.authenticate(&token)?;
+            match target_event_id {
+                Some(target) => host.corrections_page_for_target(&session, profile, &query, target),
+                None => host.corrections_page(&session, profile, &query),
+            }
         })
         .await?,
     ))

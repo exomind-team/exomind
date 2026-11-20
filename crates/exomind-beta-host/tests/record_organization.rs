@@ -196,6 +196,30 @@ async fn scoped_http_tag_search_and_correction_roles_are_explicit() {
         .json()
         .await
         .unwrap();
+    let target_page: Value = http
+        .get(format!("{url}/beta/v1/profiles/{profile}/corrections"))
+        .bearer_auth(&observer)
+        .query(&[("target_event_id", original_record.event_id.to_string())])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let correction_search: Value = http
+        .get(format!("{url}/beta/v1/profiles/{profile}/events"))
+        .bearer_auth(&observer)
+        .query(&[("q", "distinct corrected statement")])
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let original_after = host
         .events_page(
             &human_session,
@@ -220,6 +244,16 @@ async fn scoped_http_tag_search_and_correction_roles_are_explicit() {
     assert_eq!(page["items"].as_array().unwrap().len(), 1);
     assert_eq!(page["items"][0]["target_state"], "digest_matches");
     assert_eq!(page["items"][0]["record"]["author_kind"], "human");
+    assert_eq!(target_page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        target_page["items"][0]["record"]["target_event_id"],
+        original_record.event_id.to_string()
+    );
+    assert_eq!(correction_search["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        correction_search["items"][0]["event_id"],
+        original_record.event_id.to_string()
+    );
     assert_eq!(original_after.digest, original_record.digest);
     assert_eq!(original_after.text, original_record.text);
 

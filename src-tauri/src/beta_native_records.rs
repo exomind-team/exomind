@@ -5,7 +5,7 @@
 
 use super::{trusted_window, work, Failure, NativeState};
 use exomind_core::{
-    CorrectionPage, EventPage, EventQuery, ProfileId, Receipt, RecordCorrectionCommand,
+    CorrectionPage, EventId, EventPage, EventQuery, ProfileId, Receipt, RecordCorrectionCommand,
 };
 use std::sync::Arc;
 use tauri::{State, WebviewWindow};
@@ -48,11 +48,15 @@ pub(super) async fn beta_corrections_page(
     state: State<'_, Arc<NativeState>>,
     profile_id: ProfileId,
     query: EventQuery,
+    target_event_id: Option<EventId>,
 ) -> Result<CorrectionPage, Failure> {
     trusted_window(&window, state.inner())?;
     work(state.inner(), move |state| {
         let human = state.human(profile_id)?;
-        state.host.corrections_page(&human, profile_id, &query)
+        match target_event_id {
+            Some(target) => state.host.corrections_page_for_target(&human, profile_id, &query, target),
+            None => state.host.corrections_page(&human, profile_id, &query),
+        }
     })
     .await
 }

@@ -299,7 +299,7 @@ impl Core {
         let (highwater, through, before) = page_bounds(&connection, profile, query)?;
         let rows = if let Some(tag) = tag {
             let mut statement = connection.prepare(
-                "SELECT e.local_seq,e.body FROM event_tags t JOIN events e ON e.event_id=t.event_id AND e.profile_id=t.profile_id AND e.local_seq=t.local_seq AND e.kind='capture' WHERE t.profile_id=?1 AND t.tag=?2 AND t.local_seq<=?3 AND (?4 IS NULL OR t.local_seq<?4) AND (?5 IS NULL OR instr(json_extract(e.body,'$.text'),?5)>0) ORDER BY t.local_seq DESC LIMIT ?6",
+                "SELECT e.local_seq,e.body FROM event_tags t JOIN events e ON e.event_id=t.event_id AND e.profile_id=t.profile_id AND e.local_seq=t.local_seq AND e.kind='capture' WHERE t.profile_id=?1 AND t.tag=?2 AND t.local_seq<=?3 AND (?4 IS NULL OR t.local_seq<?4) AND (?5 IS NULL OR instr(json_extract(e.body,'$.text'),?5)>0 OR EXISTS(SELECT 1 FROM events c WHERE c.profile_id=e.profile_id AND c.kind='correction/1' AND c.local_seq<=?3 AND json_extract(c.body,'$.target_event_id')=e.event_id AND json_extract(c.body,'$.target_digest')=e.digest AND instr(json_extract(c.body,'$.corrected_text'),?5)>0)) ORDER BY t.local_seq DESC LIMIT ?6",
             )?;
             statement
                 .query_map(
@@ -316,7 +316,7 @@ impl Core {
                 .collect::<Result<Vec<_>, _>>()?
         } else {
             let mut statement = connection.prepare(
-                "SELECT local_seq,body FROM events WHERE profile_id=?1 AND kind='capture' AND local_seq<=?2 AND (?3 IS NULL OR local_seq<?3) AND (?4 IS NULL OR instr(json_extract(body,'$.text'),?4)>0) ORDER BY local_seq DESC LIMIT ?5",
+                "SELECT e.local_seq,e.body FROM events e WHERE e.profile_id=?1 AND e.kind='capture' AND e.local_seq<=?2 AND (?3 IS NULL OR e.local_seq<?3) AND (?4 IS NULL OR instr(json_extract(e.body,'$.text'),?4)>0 OR EXISTS(SELECT 1 FROM events c WHERE c.profile_id=e.profile_id AND c.kind='correction/1' AND c.local_seq<=?2 AND json_extract(c.body,'$.target_event_id')=e.event_id AND json_extract(c.body,'$.target_digest')=e.digest AND instr(json_extract(c.body,'$.corrected_text'),?4)>0)) ORDER BY e.local_seq DESC LIMIT ?5",
             )?;
             statement
                 .query_map(
@@ -464,12 +464,40 @@ impl Core {
         profile: ProfileId,
         query: &EventQuery,
     ) -> Result<CorrectionPage, CoreError> {
+        self.corrections_page_filtered(context, profile, query, None)
+    }
+
+    /// Read a single capture's correction history at the same fixed snapshot.
+    pub fn corrections_page_for_target(
+        &self,
+        context: &WriterContext,
+        profile: ProfileId,
+        query: &EventQuery,
+        target_event_id: EventId,
+    ) -> Result<CorrectionPage, CoreError> {
+        self.corrections_page_filtered(context, profile, query, Some(target_event_id))
+    }
+
+    fn corrections_page_filtered(
+        &self,
+        context: &WriterContext,
+        profile: ProfileId,
+        query: &EventQuery,
+        target_event_id: Option<EventId>,
+    ) -> Result<CorrectionPage, CoreError> {
         self.check_scope(context, profile)?;
         let connection = self.connection()?;
         let (highwater, through, before) = page_bounds(&connection, profile, query)?;
-        let mut statement = connection.prepare(
-            "SELECT local_seq,event_id,digest,body FROM events WHERE profile_id=?1 AND kind='correction/1' AND local_seq<=?2 AND (?3 IS NULL OR local_seq<?3) AND (?4 IS NULL OR instr(json_extract(body,'$.corrected_text'),?4)>0) ORDER BY local_seq DESC LIMIT ?5",
-        )?;
+        // Keep the target equality explicit so a target/sequence expression
+        // index can bound this path; an optional-parameter OR hides that key.
+        let target_clause = if target_event_id.is_some() {
+            "AND json_extract(body,'$.target_event_id')=?6"
+        } else {
+            "AND ?6 IS NULL"
+        };
+        let mut statement = connection.prepare(&format!(
+            "SELECT local_seq,event_id,digest,body FROM events WHERE profile_id=?1 AND kind='correction/1' AND local_seq<=?2 AND (?3 IS NULL OR local_seq<?3) AND (?4 IS NULL OR instr(json_extract(body,'$.corrected_text'),?4)>0) {target_clause} ORDER BY local_seq DESC LIMIT ?5"
+        ))?;
         let rows = statement
             .query_map(
                 params![
@@ -478,6 +506,7 @@ impl Core {
                     before,
                     query.search.as_deref(),
                     (query.limit + 1) as i64,
+                    target_event_id.map(|target| target.to_string()),
                 ],
                 |row| {
                     Ok((

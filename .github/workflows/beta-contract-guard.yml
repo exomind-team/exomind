@@ -276,6 +276,20 @@ jobs:
               ],
             },
             {
+              name: 'core-record-organization',
+              args: ['test', '--locked', '-p', 'exomind-core', '--test', 'record_organization', '--', '--test-threads=1'],
+              expected: [
+                'corrected_text_search_returns_the_unchanged_capture_with_its_exact_tag',
+                'correction_target_page_is_bounded_and_keeps_its_highwater',
+                'correction_rejects_agent_context_cross_profile_targets_and_wrong_digests',
+              ],
+            },
+            {
+              name: 'host-http-record-organization',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'record_organization', '--', '--test-threads=1'],
+              expected: ['scoped_http_tag_search_and_correction_roles_are_explicit'],
+            },
+            {
               name: 'core-summary-currentness',
               args: ['test', '--locked', '-p', 'exomind-core', '--test', 'summaries', '--', '--test-threads=1'],
               expected: [
