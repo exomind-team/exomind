@@ -149,6 +149,10 @@ fn one_profile_roundtrip_preserves_facts_and_originals_without_copying_authority
         )
         .unwrap();
     assert_eq!(preview.profile_id, profile);
+    assert_eq!(
+        preview.source_display_name.as_deref(),
+        Some("synthetic archive profile")
+    );
     assert!(preview.can_import);
     assert!(preview.conflicts.is_empty());
     assert!(preview.missing_originals.is_empty());

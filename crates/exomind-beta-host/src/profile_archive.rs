@@ -371,6 +371,8 @@ pub struct ProfileArchivePreview {
     pub package_sha256: String,
     pub origins: Vec<ProfileArchiveOriginPreview>,
     pub profile_id: ProfileId,
+    /// Display metadata from the verified container, not a device/author identity claim.
+    pub source_display_name: Option<String>,
     pub fact_count: u64,
     pub original_count: usize,
     pub conflicts: Vec<ProfileArchiveConflict>,
@@ -1781,6 +1783,9 @@ impl BetaHost {
             package_sha256,
             origins,
             profile_id: profile,
+            source_display_name: (!scan.manifest.display_name.trim().is_empty()
+                && scan.manifest.display_name.len() <= 4096)
+                .then(|| scan.manifest.display_name.clone()),
             fact_count: scan.manifest.fact_count,
             original_count: scan.manifest.originals.len(),
             conflicts,
