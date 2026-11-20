@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
+#[cfg(feature = "alpha-legacy-runtime")]
 use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
+#[cfg(feature = "alpha-legacy-runtime")]
 use exomind_runtime::config::ConfigStore;
 
 pub const DEV_APP_DATA_DIR_ENV: &str = "EXOMIND_DEV_APP_DATA_DIR";
@@ -17,12 +19,18 @@ pub const DEV_LEGACY_SHARED_RUNTIME_DIR_ENV: &str = "EXOMIND_DEV_LEGACY_SHARED_R
 const RUNTIME_DIR_NAME: &str = "runtime";
 const APP_DATA_LEGACY_SEED_MARKER_NAME: &str = ".legacy-app-data-seeded";
 const WEBVIEW_MAIN_LEGACY_SEED_MARKER_NAME: &str = ".legacy-webview-main-seeded";
+#[cfg(feature = "alpha-legacy-runtime")]
 const RUNTIME_LEGACY_SEED_MARKER_NAME: &str = ".legacy-runtime-seeded";
+#[cfg(feature = "alpha-legacy-runtime")]
 const RUNTIME_CONFIG_SQLITE_FILE_NAME: &str = "config.sqlite";
+#[cfg(feature = "alpha-legacy-runtime")]
 const RUNTIME_MESH_STATE_FILE_NAME: &str = "mesh-state.json";
+#[cfg(feature = "alpha-legacy-runtime")]
 const DEVICE_RUNTIME_HOST_ID_KEY: &str = "exomind:runtimeHostId";
+#[cfg(feature = "alpha-legacy-runtime")]
 const DEVICE_RUNTIME_DEVICE_ID_KEY: &str = "exomind:deviceId";
 const APP_DATA_SEED_ENTRY_NAMES: &[&str] = &[".exomind", "eventlog", "settings"];
+#[cfg(feature = "alpha-legacy-runtime")]
 const RUNTIME_SQLITE_BASENAMES: &[&str] = &[
     "signal-pool.sqlite",
     "eventlog.sqlite",
@@ -31,11 +39,13 @@ const RUNTIME_SQLITE_BASENAMES: &[&str] = &[
     "sessions.sqlite",
     "config.sqlite",
 ];
+#[cfg(feature = "alpha-legacy-runtime")]
 const RUNTIME_JSON_FILE_NAMES: &[&str] = &[
     "runtime-network-mode.json",
     "runtime-target-mode.json",
     "mesh-state.json",
 ];
+#[cfg(feature = "alpha-legacy-runtime")]
 const RUNTIME_DIR_ENTRY_NAMES: &[&str] = &["agents", "eventlog"];
 
 fn resolve_env_path(key: &str) -> Option<PathBuf> {
@@ -120,6 +130,7 @@ pub fn resolve_mcp_bridge_base_port() -> Option<u16> {
         .filter(|port| *port > 0)
 }
 
+#[cfg(feature = "alpha-legacy-runtime")]
 fn runtime_seed_whitelist() -> Vec<String> {
     let mut names = Vec::new();
     for base in RUNTIME_SQLITE_BASENAMES {
@@ -140,6 +151,7 @@ fn app_data_seed_whitelist() -> Vec<String> {
         .collect()
 }
 
+#[cfg(feature = "alpha-legacy-runtime")]
 fn runtime_seed_entry_names() -> Vec<String> {
     let mut names = runtime_seed_whitelist();
     for entry_name in RUNTIME_DIR_ENTRY_NAMES {
@@ -218,6 +230,7 @@ fn write_seed_marker(target_dir: &Path, marker_name: &str) -> Result<(), String>
     })
 }
 
+#[cfg(feature = "alpha-legacy-runtime")]
 fn reset_cloned_runtime_identity_state(runtime_dir: &Path) -> Result<(), String> {
     let config_sqlite_path = runtime_dir.join(RUNTIME_CONFIG_SQLITE_FILE_NAME);
     if config_sqlite_path.exists() {
@@ -271,6 +284,7 @@ pub fn seed_instance_app_data_dir_if_needed(
     write_seed_marker(app_data_dir, APP_DATA_LEGACY_SEED_MARKER_NAME)
 }
 
+#[cfg(feature = "alpha-legacy-runtime")]
 pub fn seed_instance_runtime_dir_if_needed(
     runtime_dir: &Path,
     legacy_runtime_dir: &Path,
@@ -336,7 +350,9 @@ pub fn seed_instance_webview_main_data_dir_if_needed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "alpha-legacy-runtime")]
     use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
+    #[cfg(feature = "alpha-legacy-runtime")]
     use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
     use std::ffi::OsString;
     use std::fs;
@@ -378,6 +394,7 @@ mod tests {
         std::env::temp_dir().join(format!("exomind-{name}-{nanos}"))
     }
 
+    #[cfg(feature = "alpha-legacy-runtime")]
     fn put_runtime_identity(store: &ConfigStore, key: &str, value: &str) {
         store
             .put(PutConfigEntryInput {
@@ -624,6 +641,7 @@ mod tests {
         fs::remove_dir_all(&legacy_dir).ok();
     }
 
+    #[cfg(feature = "alpha-legacy-runtime")]
     #[test]
     fn dev_instance_paths_runtime_seed_copies_whitelist_once_without_overwriting() {
         let runtime_dir = temp_path("runtime-seed-target");
@@ -733,6 +751,7 @@ mod tests {
         fs::remove_dir_all(&legacy_dir).ok();
     }
 
+    #[cfg(feature = "alpha-legacy-runtime")]
     #[test]
     fn dev_instance_paths_runtime_seed_retries_when_some_entries_fail() {
         let runtime_dir = temp_path("runtime-seed-retry-target");

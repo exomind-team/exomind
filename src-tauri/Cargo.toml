@@ -21,8 +21,14 @@ serde_json = "1"
 [features]
 # Ensure plain `cargo build --release` embeds frontend assets
 # instead of falling back to devUrl (localhost).
-default = ["custom-protocol"]
+default = ["custom-protocol", "alpha-legacy-runtime"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Preserve the historical Alpha runtime path as the default application mode.
+alpha-legacy-runtime = ["dep:exomind-runtime"]
+
+# Beta uses its Native Host/Core route without compiling the Alpha Runtime path.
+beta-native-only = []
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
@@ -46,7 +52,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 base64 = "0.22"
 tauri-plugin-mcp-bridge = "0.9"
 thiserror = "1"
-exomind-runtime = { path = "../crates/exomind-runtime" }
+exomind-runtime = { path = "../crates/exomind-runtime", optional = true }
 exomind-core = { path = "../crates/exomind-core" }
 exomind-beta-host = { path = "../crates/exomind-beta-host" }
 exomind-android-keepalive = { path = "../crates/exomind-android-keepalive" }

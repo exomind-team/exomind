@@ -1,37 +1,54 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
+#[cfg(all(feature = "alpha-legacy-runtime", feature = "beta-native-only"))]
+compile_error!("choose either alpha-legacy-runtime or beta-native-only");
+#[cfg(not(any(feature = "alpha-legacy-runtime", feature = "beta-native-only")))]
+compile_error!("enable exactly one runtime feature");
+
+#[cfg(feature = "alpha-legacy-runtime")]
 mod app_lifecycle;
-mod beta_native;
+#[cfg(feature = "alpha-legacy-runtime")]
 mod appbar;
+mod beta_native;
 mod commands;
 mod dev_instance_paths;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod system_tray;
+#[cfg(feature = "alpha-legacy-runtime")]
 mod windows_appbar;
 
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::asr_commands::{
     volcano_asr_check_config, volcano_asr_recognize, volcano_asr_stream_cancel,
     volcano_asr_stream_finish, volcano_asr_stream_push, volcano_asr_stream_session_exists,
     volcano_asr_stream_start, VolcanoAsrStreamState,
 };
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::dev_commands::dev_instance_runtime_info;
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::device_commands::get_device_id;
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::eventlog_commands::{
     eventlog_append, eventlog_append_raw, eventlog_clear, eventlog_get, eventlog_list,
     eventlog_mirror_status, eventlog_rebuild_markdown,
 };
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::file_commands::{
     append_file, append_to_markdown, delete_file, export_messages_to_markdown, file_exists,
     list_files, pick_audio_files, pick_json_file, read_file, read_file_binary, save_binary_file,
     save_json_file, write_file,
 };
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::keep_awake_commands::focus_keep_awake_set;
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::mobile_display_commands::mobile_fullscreen_set;
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::now_workbench_overlay_commands::{
     now_workbench_overlay_ensure, now_workbench_overlay_focus_main, now_workbench_overlay_hide,
     now_workbench_overlay_profile_get, now_workbench_overlay_profile_set,
     now_workbench_overlay_restore, now_workbench_overlay_set_position, now_workbench_overlay_show,
 };
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::runtime_commands::{
     ensure_runtime_started, load_persisted_runtime_network_mode,
     load_persisted_runtime_target_mode, runtime_external_address_get, runtime_external_address_set,
@@ -41,6 +58,7 @@ use commands::runtime_commands::{
     runtime_target_mode_set, signal_publish_fast, sync_android_runtime_keepalive,
     RuntimeProcessState, RuntimeTargetMode,
 };
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::shortcut_commands::{
     ensure_voice_overlay_window, foreground_window_get, main_window_shortcut_get,
     main_window_shortcut_set, main_window_shortcut_take_pending_activation,
@@ -49,37 +67,52 @@ use commands::shortcut_commands::{
     voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, MainWindowShortcutState,
     VoiceShortcutState,
 };
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::timeblock_end_alert_commands::{
     timeblock_end_alert_cancel, timeblock_end_alert_notification_permission_request,
     timeblock_end_alert_notification_permission_state, timeblock_end_alert_schedule,
     timeblock_end_alert_take_pending_handoff,
 };
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::workspace_commands::{
     get_agent_workspace_actions, get_agent_workspace_knowledge, get_agent_workspace_knowledge_list,
     get_agent_workspace_soul, get_agent_workspace_status,
 };
+#[cfg(feature = "alpha-legacy-runtime")]
 use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
+#[cfg(feature = "alpha-legacy-runtime")]
+use dev_instance_paths::resolve_instance_runtime_dir;
+#[cfg(feature = "alpha-legacy-runtime")]
 use dev_instance_paths::{
-    resolve_instance_log_dir_from_env, resolve_instance_runtime_dir, resolve_main_webview_data_dir,
-    resolve_mcp_bridge_base_port,
+    resolve_instance_log_dir_from_env, resolve_main_webview_data_dir, resolve_mcp_bridge_base_port,
 };
+#[cfg(feature = "alpha-legacy-runtime")]
 use exomind_runtime::config::types::DEVICE_CONFIG_SCOPE;
+#[cfg(feature = "alpha-legacy-runtime")]
 use exomind_runtime::config::{ConfigStore, PutConfigEntryInput};
+#[cfg(feature = "alpha-legacy-runtime")]
 use tauri::Manager;
+#[cfg(feature = "alpha-legacy-runtime")]
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+#[cfg(feature = "alpha-legacy-runtime")]
 use windows_appbar::{
     ensure_action_dock_window, windows_appbar_attach_right, windows_appbar_detach,
     windows_appbar_resize,
 };
 
+#[cfg(feature = "alpha-legacy-runtime")]
 const DEFAULT_SIGNAL_ROUTES_FILE_NAME: &str = "signal-routes.default.json";
+#[cfg(feature = "alpha-legacy-runtime")]
 const DEFAULT_SIGNAL_ROUTES_BUNDLED_JSON: &str =
     include_str!("../../config/signal-routes.default.json");
-#[cfg(test)]
+#[cfg(all(test, feature = "alpha-legacy-runtime"))]
 const DEFAULT_MESH_STATE_FILE_NAME: &str = "mesh-state.json";
+#[cfg(feature = "alpha-legacy-runtime")]
 const DEVICE_RUNTIME_HOST_ID_KEY: &str = "exomind:runtimeHostId";
+#[cfg(feature = "alpha-legacy-runtime")]
 const RUNTIME_IDENTITY_SOURCE: &str = "src-tauri:seed-runtime-identity";
 
+#[cfg(feature = "alpha-legacy-runtime")]
 fn seed_runtime_default_signal_routes_path(
     runtime_dir: &std::path::Path,
 ) -> Result<std::path::PathBuf, std::io::Error> {
@@ -98,7 +131,7 @@ fn seed_runtime_default_signal_routes_path(
     Ok(bundled_routes_path)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "alpha-legacy-runtime"))]
 fn resolve_runtime_config_sqlite_path(runtime_dir: &std::path::Path) -> std::path::PathBuf {
     std::env::var_os("EXOMIND_RT_CONFIG_SQLITE_PATH")
         .filter(|value| !value.is_empty())
@@ -106,6 +139,7 @@ fn resolve_runtime_config_sqlite_path(runtime_dir: &std::path::Path) -> std::pat
         .unwrap_or_else(|| runtime_dir.join("config.sqlite"))
 }
 
+#[cfg(feature = "alpha-legacy-runtime")]
 fn resolve_or_create_runtime_host_id(
     config_store: &ConfigStore,
 ) -> Result<String, exomind_runtime::config::ConfigStoreError> {
@@ -128,7 +162,7 @@ fn resolve_or_create_runtime_host_id(
     Ok(generated)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "alpha-legacy-runtime"))]
 fn seed_runtime_identity_env_paths(runtime_dir: &std::path::Path) {
     if std::env::var_os("EXOMIND_RT_HOST_ID").is_none() {
         let config_sqlite_path = resolve_runtime_config_sqlite_path(runtime_dir);
@@ -160,7 +194,7 @@ fn seed_runtime_identity_env_paths(runtime_dir: &std::path::Path) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "alpha-legacy-runtime"))]
 fn seed_runtime_sqlite_env_paths(runtime_dir: &std::path::Path) {
     if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none() {
         let signal_sqlite_path = runtime_dir.join("signal-pool.sqlite");
@@ -222,6 +256,7 @@ fn seed_runtime_sqlite_env_paths(runtime_dir: &std::path::Path) {
     seed_runtime_identity_env_paths(runtime_dir);
 }
 
+#[cfg(feature = "alpha-legacy-runtime")]
 fn resolve_embedded_runtime_port() -> u16 {
     std::env::var("EXOMIND_RT_PORT")
         .ok()
@@ -229,14 +264,55 @@ fn resolve_embedded_runtime_port() -> u16 {
         .unwrap_or(9124)
 }
 
+const BETA_CONFIG_IDENTIFIER: &str = "com.exomind.app.v06.beta";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeConfigRoute {
+    BetaNative,
+    AlphaLegacy,
+}
+
+fn select_runtime_config_route(identifier: &str) -> Result<RuntimeConfigRoute, &'static str> {
+    if identifier == BETA_CONFIG_IDENTIFIER {
+        return Ok(RuntimeConfigRoute::BetaNative);
+    }
+
+    #[cfg(feature = "alpha-legacy-runtime")]
+    {
+        Ok(RuntimeConfigRoute::AlphaLegacy)
+    }
+    #[cfg(feature = "beta-native-only")]
+    {
+        Err("beta_native_only_requires_beta_configuration")
+    }
+}
+
+#[cfg(feature = "beta-native-only")]
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let context = tauri::generate_context!();
+    let route = select_runtime_config_route(context.config().identifier.as_str());
+    assert_eq!(
+        route,
+        Ok(RuntimeConfigRoute::BetaNative),
+        "beta-native-only build requires the Beta Tauri configuration"
+    );
+    beta_native::run(context);
+}
+
+#[cfg(feature = "alpha-legacy-runtime")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut context = tauri::generate_context!();
     // Select the isolated host before constructing any legacy runtime state or
     // reading its configuration. This identifier is supplied by beta config.
-    if context.config().identifier == "com.exomind.app.v06.beta" {
-        beta_native::run(context);
-        return;
+    match select_runtime_config_route(context.config().identifier.as_str()) {
+        Ok(RuntimeConfigRoute::BetaNative) => {
+            beta_native::run(context);
+            return;
+        }
+        Ok(RuntimeConfigRoute::AlphaLegacy) => {}
+        Err(reason) => panic!("{reason}"),
     }
     let ws_client_state = std::sync::Arc::new(WsClientState::default());
     let runtime_process_state = std::sync::Arc::new(RuntimeProcessState::new());
@@ -556,6 +632,37 @@ pub fn run() {
 }
 
 #[cfg(test)]
+mod runtime_config_route_tests {
+    use super::{select_runtime_config_route, RuntimeConfigRoute};
+
+    #[test]
+    fn beta_identifier_selects_beta_native_route() {
+        assert_eq!(
+            select_runtime_config_route("com.exomind.app.v06.beta"),
+            Ok(RuntimeConfigRoute::BetaNative)
+        );
+    }
+
+    #[cfg(feature = "alpha-legacy-runtime")]
+    #[test]
+    fn default_alpha_identifier_keeps_the_legacy_route() {
+        assert_eq!(
+            select_runtime_config_route("com.exomind.app.v06"),
+            Ok(RuntimeConfigRoute::AlphaLegacy)
+        );
+    }
+
+    #[cfg(feature = "beta-native-only")]
+    #[test]
+    fn beta_only_rejects_the_default_alpha_identifier() {
+        assert_eq!(
+            select_runtime_config_route("com.exomind.app.v06"),
+            Err("beta_native_only_requires_beta_configuration")
+        );
+    }
+}
+
+#[cfg(all(test, feature = "alpha-legacy-runtime"))]
 mod tests {
     use super::{seed_runtime_default_signal_routes_path, seed_runtime_sqlite_env_paths};
     use exomind_runtime::config::store::ConfigStore;
@@ -740,7 +847,8 @@ mod tests {
     #[test]
     fn bundled_route_writer_preserves_the_process_environment() {
         let _guard = runtime_env_lock().lock().unwrap();
-        let directory = std::env::temp_dir().join(format!("exomind-routes-writer-{}", Uuid::new_v4()));
+        let directory =
+            std::env::temp_dir().join(format!("exomind-routes-writer-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let before = std::env::var_os("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT");
         let written = seed_runtime_default_signal_routes_path(&directory).unwrap();
@@ -752,7 +860,8 @@ mod tests {
 
     #[test]
     fn bundled_route_writer_returns_unusable_directory_errors() {
-        let directory = std::env::temp_dir().join(format!("exomind-routes-error-{}", Uuid::new_v4()));
+        let directory =
+            std::env::temp_dir().join(format!("exomind-routes-error-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let not_a_directory = directory.join("file");
         std::fs::write(&not_a_directory, "fixture").unwrap();
