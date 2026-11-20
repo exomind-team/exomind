@@ -1,6 +1,6 @@
 use super::{facts, model::*};
 use crate::{CoreError, EventId, EventRecord, ProfileId, TimeblockNodeRecord};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::BTreeMap;
 
 pub(super) fn record(
@@ -281,6 +281,32 @@ pub(super) fn changed(
     let newer:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM (SELECT event_id FROM summary_capture_sources WHERE profile_id=?1 AND occurred_at_ms BETWEEN ?2 AND ?3 UNION SELECT event_id FROM summary_block_sources WHERE profile_id=?1 AND block_id IN (SELECT value FROM json_each(?4))) selected JOIN origin_entries o ON o.event_id=selected.event_id AND o.profile_id=?1 WHERE NOT EXISTS(SELECT 1 FROM json_each(?5) h WHERE json_extract(h.value,'$.origin.device_id')=o.origin_device AND json_extract(h.value,'$.origin.restoration_epoch')=o.restoration_epoch AND json_extract(h.value,'$.cursor.seq')>=o.origin_seq))",params![p.to_string(),snapshot.selection.from_ms,snapshot.selection.to_ms,blocks,heads],|r|r.get(0))?;
     if newer {
         return Ok(true);
+    }
+    // Compare each correction's origin position with the frozen origin heads;
+    // local_seq belongs to this Core and cannot be compared after replication.
+    // Core10's profile/target index narrows each probe to one capture. Work can
+    // grow with that target's correction history.
+    let profile = p.to_string();
+    let mut correction = connection.prepare(
+        "SELECT EXISTS(SELECT 1 FROM events INDEXED BY original_lifecycle_correction_target_sequence WHERE profile_id=?1 AND kind='correction/1' AND json_extract(body,'$.target_event_id')=?2 AND json_extract(body,'$.target_digest')=?3 AND EXISTS(SELECT 1 FROM origin_entries o WHERE o.profile_id=events.profile_id AND o.event_id=events.event_id AND NOT EXISTS(SELECT 1 FROM json_each(?4) h WHERE json_extract(h.value,'$.origin.device_id')=o.origin_device AND json_extract(h.value,'$.origin.restoration_epoch')=o.restoration_epoch AND json_extract(h.value,'$.cursor.seq')>=o.origin_seq)))",
+    )?;
+    for source in snapshot
+        .sources
+        .iter()
+        .filter(|source| source.kind == "capture")
+    {
+        let newer_correction: bool = correction.query_row(
+            params![
+                profile.as_str(),
+                source.event_id.to_string(),
+                source.digest.as_str(),
+                heads.as_str()
+            ],
+            |row| row.get(0),
+        )?;
+        if newer_correction {
+            return Ok(true);
+        }
     }
     for parent in &snapshot.coverage.missing_parents {
         let exists:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE profile_id=?1 AND event_id=?2 AND kind='timeblock/1')",params![p.to_string(),parent.to_string()],|r|r.get(0))?;

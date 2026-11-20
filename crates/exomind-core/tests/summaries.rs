@@ -160,23 +160,21 @@ fn automatic_trigger_follows_creator_after_offline_remote_feedback_without_ui() 
     sync(&a, &b, p);
     end(&b, p, block);
     let bx = b.local_summary_executor();
-    assert!(
-        b.reconcile_summary_triggers(&bx)
-            .unwrap()
-            .created
-            .is_empty()
-    );
+    assert!(b
+        .reconcile_summary_triggers(&bx)
+        .unwrap()
+        .created
+        .is_empty());
     sync(&b, &a, p);
     let ax = a.local_summary_executor();
     let first = a.reconcile_summary_triggers(&ax).unwrap();
     assert_eq!(first.created.len(), 1);
     let before = counts(&a);
-    assert!(
-        a.reconcile_summary_triggers(&ax)
-            .unwrap()
-            .created
-            .is_empty()
-    );
+    assert!(a
+        .reconcile_summary_triggers(&ax)
+        .unwrap()
+        .created
+        .is_empty());
     assert_eq!(counts(&a), before);
     let task = one(&a, p);
     assert_eq!(task.creator_event_id, creator);
@@ -216,10 +214,9 @@ fn frozen_cross_page_inputs_late_update_new_artifact_and_timeline_skips_jobs() {
     assert_eq!(work.snapshot.sources.len(), 253);
     let input = core.summary_input_records(&executor, &work.ticket).unwrap();
     assert_eq!(input.records.len(), 253);
-    assert!(
-        refs.iter()
-            .all(|id| work.snapshot.sources.iter().any(|r| r.event_id == *id))
-    );
+    assert!(refs
+        .iter()
+        .all(|id| work.snapshot.sources.iter().any(|r| r.event_id == *id)));
     assert_eq!(input.encoded_bytes, work.snapshot.input_encoded_bytes);
     assert!(input.encoded_bytes <= MAX_SUMMARY_INPUT_BYTES as u64);
     let result = core
@@ -305,6 +302,533 @@ fn frozen_cross_page_inputs_late_update_new_artifact_and_timeline_skips_jobs() {
 }
 
 #[test]
+fn post_snapshot_correction_marks_review_changed_without_rewriting_saved_artifact() {
+    let root = tempfile::tempdir().unwrap();
+    let core = Core::open(root.path()).unwrap();
+    let p = core.create_profile("P").unwrap();
+    let (block, _) = start(&core, p);
+    let target = capture(&core, p, "frozen source");
+    end(&core, p, block);
+
+    let executor = core.local_summary_executor();
+    core.reconcile_summary_triggers(&executor).unwrap();
+    let task = one(&core, p);
+    core.summary_wait_for_configuration(&executor, p, task.task_id)
+        .unwrap();
+    let work = core
+        .begin_summary_attempt(&executor, &begin(&core, p, &one(&core, p)))
+        .unwrap();
+    let target_digest = work
+        .snapshot
+        .sources
+        .iter()
+        .find(|source| source.event_id == target)
+        .unwrap()
+        .digest
+        .clone();
+    let result = core
+        .finish_summary_attempt(&executor, &work.ticket, &output(&work.snapshot))
+        .unwrap();
+    let SummaryCommitOutcome::Applied {
+        artifact_event_id, ..
+    } = result
+    else {
+        panic!("applied artifact")
+    };
+
+    let ctx = core.local_human(p).unwrap();
+    let artifact_before = core
+        .summary_artifacts_page(&ctx, p, task.task_id, None, 100)
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|artifact| artifact.event_id == artifact_event_id)
+        .unwrap();
+    let snapshot_digest_before = artifact_before.snapshot.digest.clone();
+    let stored_artifact = |event_id: EventId| {
+        let db = Connection::open(core.database_path()).unwrap();
+        db.query_row(
+            "SELECT body,digest FROM events WHERE profile_id=?1 AND event_id=?2 AND kind='summary/1'",
+            rusqlite::params![p.to_string(), event_id.to_string()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .unwrap()
+    };
+    let artifact_bytes_and_digest_before = stored_artifact(artifact_event_id);
+
+    core.record_correction(
+        &ctx,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: p,
+            occurred_at_ms: 4_000,
+            target_event_id: target,
+            target_digest,
+            corrected_text: "corrected source".into(),
+        },
+    )
+    .unwrap();
+
+    let current = core.read_summary_task(&ctx, p, task.task_id).unwrap();
+    assert!(
+        current.coverage_changed,
+        "a post-snapshot correction to a selected capture changes review coverage"
+    );
+    assert_eq!(current.state, SummaryState::Succeeded);
+    assert_eq!(current.selection, work.snapshot.selection);
+    let current_snapshot = current
+        .current_run
+        .as_ref()
+        .and_then(|run| run.snapshot.as_ref())
+        .unwrap();
+    assert_eq!(current_snapshot.digest, work.snapshot.digest);
+    assert_eq!(current_snapshot.selection, work.snapshot.selection);
+
+    let artifact_after = core
+        .summary_artifacts_page(&ctx, p, task.task_id, None, 100)
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|artifact| artifact.event_id == artifact_event_id)
+        .unwrap();
+    assert_eq!(artifact_after.snapshot.digest, snapshot_digest_before);
+    assert_eq!(
+        stored_artifact(artifact_event_id),
+        artifact_bytes_and_digest_before,
+        "marking coverage changed must preserve the saved artifact body and digest"
+    );
+}
+
+#[test]
+fn pre_snapshot_and_unmatched_corrections_do_not_change_review_coverage() {
+    let (_a, _b, core, peer, p) = pair();
+    let q = core.create_profile("Q").unwrap();
+    peer.provision_profile(q, "Q").unwrap();
+    let (block, _) = start(&core, p);
+    let target = capture(&core, p, "selected source");
+    let ctx = core.local_human(p).unwrap();
+    let target_digest = core
+        .events(&ctx, p)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.event_id == target)
+        .unwrap()
+        .digest;
+    core.record_correction(
+        &ctx,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: p,
+            occurred_at_ms: 1_600,
+            target_event_id: target,
+            target_digest: target_digest.clone(),
+            corrected_text: "corrected before snapshot".into(),
+        },
+    )
+    .unwrap();
+    end(&core, p, block);
+
+    let executor = core.local_summary_executor();
+    core.reconcile_summary_triggers(&executor).unwrap();
+    let task = one(&core, p);
+    core.summary_wait_for_configuration(&executor, p, task.task_id)
+        .unwrap();
+    let work = core
+        .begin_summary_attempt(&executor, &begin(&core, p, &one(&core, p)))
+        .unwrap();
+    assert!(work
+        .snapshot
+        .sources
+        .iter()
+        .any(|source| source.event_id == target && source.digest == target_digest));
+    assert!(matches!(
+        core.finish_summary_attempt(&executor, &work.ticket, &output(&work.snapshot))
+            .unwrap(),
+        SummaryCommitOutcome::Applied { .. }
+    ));
+
+    // This checks only post-snapshot freshness; it makes no claim about whether
+    // a correction already present at freeze belongs in provider input.
+    let outside = CaptureCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: p,
+        occurred_at_ms: work.snapshot.selection.to_ms.saturating_add(60_000),
+        text: "outside frozen selection".into(),
+        tags: vec![],
+        originals: vec![],
+    };
+    assert!(outside.occurred_at_ms > work.snapshot.selection.to_ms);
+    let outside_receipt = core.submit(&ctx, &outside).unwrap();
+    core.record_correction(
+        &ctx,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: p,
+            occurred_at_ms: outside.occurred_at_ms,
+            target_event_id: outside.event_id,
+            target_digest: outside_receipt.event_digest,
+            corrected_text: "outside correction".into(),
+        },
+    )
+    .unwrap();
+
+    let conflicting_digest = "0".repeat(64);
+    assert_ne!(conflicting_digest, target_digest);
+    peer.record_correction(
+        &peer.local_human(p).unwrap(),
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: p,
+            occurred_at_ms: 5_000,
+            target_event_id: target,
+            target_digest: conflicting_digest.clone(),
+            corrected_text: "conflicting target digest".into(),
+        },
+    )
+    .unwrap();
+    peer.record_correction(
+        &peer.local_human(q).unwrap(),
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: q,
+            occurred_at_ms: 5_001,
+            target_event_id: target,
+            target_digest: target_digest.clone(),
+            corrected_text: "correction scoped to another profile".into(),
+        },
+    )
+    .unwrap();
+    sync(&peer, &core, p);
+    sync(&peer, &core, q);
+
+    let query = EventQuery {
+        limit: 10,
+        ..Default::default()
+    };
+    let p_corrections = core.corrections_page(&ctx, p, &query).unwrap();
+    assert!(p_corrections.items.iter().any(|entry| {
+        entry.record.target_event_id == target
+            && entry.record.target_digest == conflicting_digest
+            && entry.target_state == CorrectionTargetState::DigestConflict
+    }));
+    let q_corrections = core
+        .corrections_page(&core.local_human(q).unwrap(), q, &query)
+        .unwrap();
+    assert!(q_corrections
+        .items
+        .iter()
+        .any(|entry| entry.record.target_event_id == target
+            && entry.target_state == CorrectionTargetState::Unresolved));
+
+    let current = core.read_summary_task(&ctx, p, task.task_id).unwrap();
+    assert!(!current.coverage_changed);
+    assert_eq!(current.state, SummaryState::Succeeded);
+    assert_eq!(current.selection, work.snapshot.selection);
+    assert_eq!(
+        current
+            .current_run
+            .as_ref()
+            .and_then(|run| run.snapshot.as_ref())
+            .unwrap()
+            .digest,
+        work.snapshot.digest
+    );
+}
+
+#[test]
+fn replicated_post_snapshot_correction_is_detected_with_lower_receiver_local_seq() {
+    let (_source_root, _receiver_root, source, receiver, p) = pair();
+    let q = source.create_profile("Source sequence filler").unwrap();
+    for index in 0..128 {
+        capture(&source, q, &format!("source Q filler {index}"));
+    }
+
+    let (block, _) = start(&source, p);
+    let target = capture(&source, p, "selected source");
+    end(&source, p, block);
+    let executor = source.local_summary_executor();
+    source.reconcile_summary_triggers(&executor).unwrap();
+    let task = one(&source, p);
+    source
+        .summary_wait_for_configuration(&executor, p, task.task_id)
+        .unwrap();
+    let work = source
+        .begin_summary_attempt(&executor, &begin(&source, p, &one(&source, p)))
+        .unwrap();
+    let target_digest = work
+        .snapshot
+        .sources
+        .iter()
+        .find(|item| item.event_id == target)
+        .unwrap()
+        .digest
+        .clone();
+    let result = source
+        .finish_summary_attempt(&executor, &work.ticket, &output(&work.snapshot))
+        .unwrap();
+    let SummaryCommitOutcome::Applied {
+        artifact_event_id, ..
+    } = result
+    else {
+        panic!("applied artifact")
+    };
+
+    let source_ctx = source.local_human(p).unwrap();
+    let receiver_ctx = receiver.local_human(p).unwrap();
+    // Transfer P only; the source's Q sequence offset is absent on the receiver.
+    sync(&source, &receiver, p);
+    let before = receiver
+        .read_summary_task(&receiver_ctx, p, task.task_id)
+        .unwrap();
+    assert!(!before.coverage_changed);
+    assert_eq!(before.state, SummaryState::Succeeded);
+    let snapshot_before = before
+        .current_run
+        .as_ref()
+        .and_then(|run| run.snapshot.as_ref())
+        .unwrap()
+        .clone();
+    assert_eq!(snapshot_before.digest, work.snapshot.digest);
+    let selection_before = before.selection.clone();
+
+    let artifact_before = receiver
+        .summary_artifacts_page(&receiver_ctx, p, task.task_id, None, 100)
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|artifact| artifact.event_id == artifact_event_id)
+        .unwrap();
+    let artifact_snapshot_digest_before = artifact_before.snapshot.digest.clone();
+    let stored_artifact = |core: &Core| {
+        let db = Connection::open(core.database_path()).unwrap();
+        db.query_row(
+            "SELECT body,digest FROM events WHERE profile_id=?1 AND event_id=?2 AND kind='summary/1'",
+            rusqlite::params![p.to_string(), artifact_event_id.to_string()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .unwrap()
+    };
+    let artifact_bytes_and_digest_before = stored_artifact(&receiver);
+
+    let correction = source
+        .record_correction(
+            &source_ctx,
+            &RecordCorrectionCommand {
+                command_id: CommandId::new(),
+                event_id: EventId::new(),
+                profile_id: p,
+                occurred_at_ms: 4_000,
+                target_event_id: target,
+                target_digest: target_digest.clone(),
+                corrected_text: "corrected after snapshot".into(),
+            },
+        )
+        .unwrap();
+    assert!(correction.local_seq > work.snapshot.through);
+    sync(&source, &receiver, p);
+
+    let corrections = receiver
+        .corrections_page(
+            &receiver_ctx,
+            p,
+            &EventQuery {
+                limit: 100,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let received = corrections
+        .items
+        .iter()
+        .find(|entry| entry.record.event_id == correction.event_id)
+        .unwrap();
+    assert_eq!(received.record.target_event_id, target);
+    assert_eq!(received.record.target_digest, target_digest);
+    assert_eq!(received.target_state, CorrectionTargetState::DigestMatches);
+    assert!(received.record.local_seq <= work.snapshot.through);
+
+    let current = receiver
+        .read_summary_task(&receiver_ctx, p, task.task_id)
+        .unwrap();
+    assert!(
+        current.coverage_changed,
+        "a replicated post-snapshot correction must survive incomparable local_seq values"
+    );
+    assert_eq!(current.state, SummaryState::Succeeded);
+    assert_eq!(current.selection, selection_before);
+    let current_snapshot = current
+        .current_run
+        .as_ref()
+        .and_then(|run| run.snapshot.as_ref())
+        .unwrap();
+    assert_eq!(current_snapshot.digest, snapshot_before.digest);
+    assert_eq!(current_snapshot.selection, snapshot_before.selection);
+
+    let artifact_after = receiver
+        .summary_artifacts_page(&receiver_ctx, p, task.task_id, None, 100)
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|artifact| artifact.event_id == artifact_event_id)
+        .unwrap();
+    assert_eq!(
+        artifact_after.snapshot.digest,
+        artifact_snapshot_digest_before
+    );
+    assert_eq!(
+        stored_artifact(&receiver),
+        artifact_bytes_and_digest_before
+    );
+}
+
+#[test]
+fn replicated_prefreeze_correction_is_not_stale_with_higher_receiver_local_seq() {
+    let (_source_root, _receiver_root, source, receiver, p) = pair();
+    let (block, _) = start(&source, p);
+    let target = capture(&source, p, "selected source");
+    let source_ctx = source.local_human(p).unwrap();
+    let target_digest = source
+        .events(&source_ctx, p)
+        .unwrap()
+        .into_iter()
+        .find(|event| event.event_id == target)
+        .unwrap()
+        .digest;
+    let correction = source
+        .record_correction(
+            &source_ctx,
+            &RecordCorrectionCommand {
+                command_id: CommandId::new(),
+                event_id: EventId::new(),
+                profile_id: p,
+                occurred_at_ms: 1_600,
+                target_event_id: target,
+                target_digest: target_digest.clone(),
+                corrected_text: "corrected before snapshot".into(),
+            },
+        )
+        .unwrap();
+    end(&source, p, block);
+
+    let executor = source.local_summary_executor();
+    source.reconcile_summary_triggers(&executor).unwrap();
+    let task = one(&source, p);
+    source
+        .summary_wait_for_configuration(&executor, p, task.task_id)
+        .unwrap();
+    let work = source
+        .begin_summary_attempt(&executor, &begin(&source, p, &one(&source, p)))
+        .unwrap();
+    assert!(correction.local_seq <= work.snapshot.through);
+    assert!(work
+        .snapshot
+        .sources
+        .iter()
+        .any(|item| item.event_id == target && item.digest == target_digest));
+    let result = source
+        .finish_summary_attempt(&executor, &work.ticket, &output(&work.snapshot))
+        .unwrap();
+    let SummaryCommitOutcome::Applied {
+        artifact_event_id, ..
+    } = result
+    else {
+        panic!("applied artifact")
+    };
+
+    let origin_page = source
+        .export_origin_page(
+            &source_ctx,
+            p,
+            &OriginPageQuery {
+                max_bytes: MAX_ORIGIN_PAGE_BYTES,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let correction_origin_seq = origin_page
+        .entries
+        .iter()
+        .find(|entry| entry.fact.event_id() == correction.event_id)
+        .unwrap()
+        .origin_seq;
+    let frozen_origin_head = work
+        .snapshot
+        .origin_heads
+        .iter()
+        .find(|head| head.origin == origin_page.origin)
+        .unwrap();
+    assert!(frozen_origin_head.cursor.seq >= correction_origin_seq);
+
+    let q = receiver.create_profile("Receiver sequence filler").unwrap();
+    for index in 0..128 {
+        capture(&receiver, q, &format!("receiver Q filler {index}"));
+    }
+    let receiver_ctx = receiver.local_human(p).unwrap();
+    // The correction is in the source's frozen origin head; only P is copied.
+    sync(&source, &receiver, p);
+    let corrections = receiver
+        .corrections_page(
+            &receiver_ctx,
+            p,
+            &EventQuery {
+                limit: 100,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let received = corrections
+        .items
+        .iter()
+        .find(|entry| entry.record.event_id == correction.event_id)
+        .unwrap();
+    assert_eq!(received.record.target_event_id, target);
+    assert_eq!(received.record.target_digest, target_digest);
+    assert_eq!(received.target_state, CorrectionTargetState::DigestMatches);
+    assert!(received.record.local_seq > work.snapshot.through);
+
+    let current = receiver
+        .read_summary_task(&receiver_ctx, p, task.task_id)
+        .unwrap();
+    assert!(
+        !current.coverage_changed,
+        "a source-frozen correction is not later material when copied to a higher-local_seq device"
+    );
+    assert_eq!(current.state, SummaryState::Succeeded);
+    assert_eq!(current.selection, work.snapshot.selection);
+    assert_eq!(
+        current
+            .current_run
+            .as_ref()
+            .and_then(|run| run.snapshot.as_ref())
+            .unwrap()
+            .digest,
+        work.snapshot.digest
+    );
+
+    let stored_artifact = |core: &Core| {
+        let db = Connection::open(core.database_path()).unwrap();
+        db.query_row(
+            "SELECT body,digest FROM events WHERE profile_id=?1 AND event_id=?2 AND kind='summary/1'",
+            rusqlite::params![p.to_string(), artifact_event_id.to_string()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .unwrap()
+    };
+    let source_artifact_bytes_and_digest = stored_artifact(&source);
+    let receiver_artifact_bytes_and_digest = stored_artifact(&receiver);
+    assert_eq!(
+        receiver_artifact_bytes_and_digest,
+        source_artifact_bytes_and_digest
+    );
+}
+
+#[test]
 fn cancel_stop_and_wrong_scope_reject_claims_and_late_seal_without_new_writes() {
     let root = tempfile::tempdir().unwrap();
     let core = Core::open(root.path()).unwrap();
@@ -332,10 +856,9 @@ fn cancel_stop_and_wrong_scope_reject_claims_and_late_seal_without_new_writes() 
             .unwrap(),
         SummaryCommitOutcome::Stale
     ));
-    assert!(
-        core.begin_summary_attempt(&executor, &begin(&core, p, &one(&core, p)))
-            .is_err()
-    );
+    assert!(core
+        .begin_summary_attempt(&executor, &begin(&core, p, &one(&core, p)))
+        .is_err());
     assert_eq!(counts(&core), c);
     control(
         &core,
@@ -388,10 +911,9 @@ fn restart_marks_unknown_without_automatic_paid_retry_and_preserves_frozen_input
         Some("external_outcome_unknown")
     );
     let c = counts(&core);
-    assert!(
-        core.begin_summary_attempt(&fresh, &begin(&core, p, &one(&core, p)))
-            .is_err()
-    );
+    assert!(core
+        .begin_summary_attempt(&fresh, &begin(&core, p, &one(&core, p)))
+        .is_err());
     assert_eq!(counts(&core), c);
     assert_eq!(core.recover_summary_attempts(&fresh, 5000).unwrap(), 1);
     assert_eq!(core.recover_summary_attempts(&fresh, 5001).unwrap(), 0);
@@ -464,10 +986,9 @@ fn concurrent_cancel_and_takeover_converge_blocking_until_explicit_causal_resolu
         .unwrap();
     sync(&b, &a, p);
     assert_eq!(one(&a, p).state, SummaryState::Succeeded);
-    assert!(
-        a.begin_summary_attempt(&executor, &begin(&a, p, &one(&a, p)))
-            .is_err()
-    );
+    assert!(a
+        .begin_summary_attempt(&executor, &begin(&a, p, &one(&a, p)))
+        .is_err());
 }
 
 #[test]
@@ -493,21 +1014,18 @@ fn byte_omissions_unknown_evidence_and_read_claims_are_explicit_and_retry_is_fin
     let mut bad = output(&work.snapshot);
     bad.evidence = vec![EventId::new()];
     let c = counts(&core);
-    assert!(
-        core.finish_summary_attempt(&executor, &work.ticket, &bad)
-            .is_err()
-    );
+    assert!(core
+        .finish_summary_attempt(&executor, &work.ticket, &bad)
+        .is_err());
     bad.evidence.clear();
-    assert!(
-        core.finish_summary_attempt(&executor, &work.ticket, &bad)
-            .is_err()
-    );
+    assert!(core
+        .finish_summary_attempt(&executor, &work.ticket, &bad)
+        .is_err());
     bad = output(&work.snapshot);
     bad.read_original_ids = vec![OriginalId::new()];
-    assert!(
-        core.finish_summary_attempt(&executor, &work.ticket, &bad)
-            .is_err()
-    );
+    assert!(core
+        .finish_summary_attempt(&executor, &work.ticket, &bad)
+        .is_err());
     assert_eq!(counts(&core), c);
     assert!(matches!(
         core.fail_summary_attempt(
@@ -662,10 +1180,9 @@ fn remote_metadata_stays_unread_by_default_and_explicit_missing_original_never_c
         work.snapshot.coverage.unread_originals,
         vec![original.original_id]
     );
-    assert!(
-        b.read_original_range(&b.local_human(p).unwrap(), p, original.original_id, 0, 1)
-            .is_err()
-    );
+    assert!(b
+        .read_original_range(&b.local_human(p).unwrap(), p, original.original_id, 0, 1)
+        .is_err());
     let mut lie = output(&work.snapshot);
     lie.read_original_ids = vec![original.original_id];
     assert!(b.finish_summary_attempt(&bx, &work.ticket, &lie).is_err());

@@ -276,6 +276,16 @@ jobs:
               ],
             },
             {
+              name: 'core-summary-currentness',
+              args: ['test', '--locked', '-p', 'exomind-core', '--test', 'summaries', '--', '--test-threads=1'],
+              expected: [
+                'post_snapshot_correction_marks_review_changed_without_rewriting_saved_artifact',
+                'pre_snapshot_and_unmatched_corrections_do_not_change_review_coverage',
+                'replicated_post_snapshot_correction_is_detected_with_lower_receiver_local_seq',
+                'replicated_prefreeze_correction_is_not_stale_with_higher_receiver_local_seq',
+              ],
+            },
+            {
               name: 'core-replication',
               args: ['test', '--locked', '-p', 'exomind-core', '--test', 'replication', '--', '--test-threads=1'],
               expected: [

@@ -69,6 +69,13 @@ Android 系统选择器期间的进程回收、导出持久结果及重新选址
 [原件导出恢复合同](../../docs/development/beta-original-export-recovery.md)。任务面板只观察；
 原件到达、另存为成功和操作回执分别验收。
 
+摘要的 `coverage_changed` 是当前来源相对冻结快照发生变化的提示，不会改写旧摘要、
+snapshot digest 或 selection，也不会因读取触发模型重跑。冻结后针对已选 capture 的
+有效更正，同样会更新这个提示；只匹配同档案、目标 ID 和原 digest。跨设备比较使用
+`origin_heads` 中的来源/epoch/sequence，不能用两个数据库的 `local_seq` 相比。Core10
+目标索引缩小查询范围，单个目标更正很多时成本仍会增长。冻结前的更正是否纳入模型输入，
+与这一当前性修复分开处理；本切片没有改变 provider 输入、复制 schema 或 Agent bundle。
+
 ## 最容易误读的名称
 
 | 名称 | 当前含义/边界 |
