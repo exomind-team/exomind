@@ -91,6 +91,7 @@
 - 核验依据：`live 版本信息 + 代码文件/提交 + GitHub issue/PR/文档`
 
 ## 最近维护记录
+- `2026-11-20` | 更新者：`Codex` | 更新内容概要：`补记个人 Skill 的独立真实调用证据。` | 核验依据：`独立 Luna 驱动、个人安装脚本与真实隔离 Core10 source Host，run 9d5739f3-0e06-497e-81c4-429cbd4cf475 exit0、cleanup true；同一 through=511 两批完整历史、4 件 SHA、AgentNote 查证与 changed Wait。首轮报告超输出预算的 run ffd20f0b-8217-416e-89bc-bffc50d9e87c 保留为驱动失败，不混为产品结果。没有系统剪贴板/候选/设备结论。`
 - `2026-11-20` | 更新者：`Codex` | 更新内容概要：`收束生产 monitor adapter，按目标 block ID 区分结束动作与反馈完成；同步个人 exomind-monitor 的 Beta 分流与 bundled adapter。` | 核验依据：`19 项 SDK 回归全部通过；实际 HTTP run 42b75def-b237-4bf3-bd3b-9ea674edd94d exit 0、cleanup confirmed，使用当前生产脚本、FileStateStore 和独立 Core10 source Host，覆盖 105 capture、更正、4 个时间块节点、图片/视频/文件 SHA、AgentNote 收发、Wait、observer 403 与撤销后 401。个人脚本与维护源 SHA-256 一致；这不代表最终 Native 候选、剪贴板或设备完成验收。下列维护记录保留各轮原始 red 与当时的待验范围。`
 - `2026-11-20` | 更新者：`Codex` | 更新内容概要：`将 seen 约束为 1024 项 LRU digest 窗口；有界 JSON 流按 caller budget cancel/降 page limit 重读；maxPages 仍接受至 10000，但单次每 feed 限 4 页并可续读。` | 核验依据：用户提供 RED run 6e64ae19-797f-485d-b346-13fa0691eecd（19 项 16 pass/3 fail，cleanup true），包括 4000 条 state_too_large、stream cancel false、maxPages=10000 返回 6 页。HTTP source cap 为 1 MiB，Core MAX_TEXT_BYTES 为 128 KiB、MAX_CAPTURE_ORIGINALS 为 256、MAX_FACT_BYTES 为 2 MiB；默认 2 MiB response budget 为合法单 capture 的服务端元数据留出空间。此 patch lane 不运行 tests/HTTP/build；父 lane 应验证 caller-budget companion patch 与生产实现。
 

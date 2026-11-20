@@ -50,6 +50,13 @@ Beta 的 Core/Host/Native/UI 边界按上面的当前入口读取，不把下表
 
 ## 当前阶段
 
+2026-11-21 工作区已完成档案往返／选取内容导出的 Native 与 UI 接线，准备
+**Beta20／6020／Core11**。733 项 Beta 前端、完整类型与生产 Web、90 项 Beta Native、
+Host 导出 9 项及选择预算 5 项通过，本地源码合同门禁通过。个人 monitor Skill 的独立
+真实 HTTP 驱动已读完 506 capture、更正与时间块历史，核对 4 件并查证 AgentNote。
+尚未固定该候选 source／recipe 或签收其窗口／设备；下方 Beta19 仍是已冻结的旧候选。
+入口见 [用户导出](development/beta-user-exports.md)和[持续完成计划](plans/2026-11-19-beta16-frozen-and-beta-completion.md)。
+
 2026-11-20 的冻结候选为 **Beta19／6019／Core10**，payload `cc3bc937`、recipe
 `5708e0ba`，四平台仅构建成功。平板全新安装由用户点击系统确认后完成；该次不算
 保数据升级。隔离 PC 与平板经指定 EasyTier 地址双向记录、跨端计时与反馈已实测。

@@ -103,7 +103,7 @@ jobs:
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import { spawnSync } from 'node:child_process';
+          import { execFileSync, spawnSync } from 'node:child_process';
           import { readFileSync, statSync, writeFileSync } from 'node:fs';
           import { join, relative, resolve } from 'node:path';
 
@@ -169,6 +169,10 @@ jobs:
           }
 
           runVitest('beta-core8-related-feature-regressions', featureTests);
+          const allBetaTests = execFileSync('git', ['ls-files', '-z', '--', 'tests/unit/beta'], { encoding: 'utf8' })
+            .split('\0').filter(file => /\.test\.tsx?$/.test(file)).sort();
+          assert.ok(allBetaTests.length > 0, 'The tracked Beta regression suite must not be empty');
+          runVitest('beta-complete-ui-regressions', allBetaTests);
           NODE
       - name: Check read-only patch intake
         run: node --test --test-concurrency=1 tests/unit/scripts/beta-patch-preflight.test.mjs tests/unit/scripts/beta-apk-identity.test.mjs
@@ -253,6 +257,9 @@ jobs:
             ['-p', 'exomind-beta-host', '--lib', 'original_auto_queue_status_reads_without_changing_policy_or_transfer_state'],
             ['-p', 'exomind-beta-host', '--test', 'native_export_journal'],
             ['-p', 'exomind-beta-host', '--test', 'native_export_manager'],
+            ['-p', 'exomind-beta-host', '--test', 'native_profile_archive_paths'],
+            ['-p', 'exomind-beta-host', '--test', 'native_user_export'],
+            ['-p', 'exomind-beta-host', '--test', 'user_export_source'],
             ['-p', 'exomind-beta-host', '--test', 'agent_wait_http'],
             ['-p', 'exomind-beta-host', '--test', 'agent_export_http'],
             ['-p', 'exomind-beta-host', '--test', 'agent_access'],

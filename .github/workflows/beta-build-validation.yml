@@ -174,6 +174,74 @@ jobs:
       - name: Build embedded Beta debug executable (no installer/signing/publishing)
         shell: bash
         run: node node_modules/@tauri-apps/cli/tauri.js build --ci --debug --no-bundle --target "${{ matrix.target }}" --config src-tauri/tauri.beta.conf.json -- --locked
+      - name: Check Windows export source regressions for Beta20 and later
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { execFileSync } from 'node:child_process';
+          const version = process.env.BETA_VERSION.match(/^0\.6\.0-beta([1-9][0-9]*)$/);
+          assert.ok(version, 'The source resolver must supply a canonical Beta version');
+          if (BigInt(version[1]) < 20n) {
+            console.log('Legacy candidate: export regressions were not part of this frozen source.');
+          } else {
+            const cases = [
+              { filter: 'beta_native::profile_archive', names: [
+                'restart_abandons_a_process_exit_partial_spool_and_admits_a_new_task',
+                'restart_abandons_a_sealed_spool_whose_receipt_was_not_journaled',
+                'abandon_refuses_a_partial_spool_replaced_after_process_exit',
+              ] },
+              { filter: 'beta_native::user_export', names: [
+                'restart_projects_pending_export_to_interrupted_without_saved_receipt',
+                'restart_preserves_a_private_stage_not_bound_to_a_creation_record',
+                'restart_preserves_a_uuid_named_manifest_temporary_without_creation_proof',
+              ] },
+            ];
+            const results = [];
+            const reportPath = path.join(process.env.RUNNER_TEMP, 'beta-native-export-source-tests.json');
+            const report = { scope: 'source-regressions', source_sha: process.env.SOURCE_SHA,
+              workflow_recipe_sha: process.env.WORKFLOW_RECIPE_SHA, results, candidate_ui_tested: false };
+            fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+            for (const entry of cases) {
+              const progress = { filter: entry.filter, status: 'running', required_cases: entry.names };
+              results.push(progress);
+              try {
+              const output = execFileSync('cargo', ['test', '--locked', '-p', 'exomind',
+                '--target', process.env.BUILD_TARGET, '--no-default-features',
+                '--features', 'custom-protocol,beta-native-only', '--lib', entry.filter,
+                '--', '--nocapture', '--test-threads=1'], {
+                encoding: 'utf8', timeout: 1200000, maxBuffer: 32 * 1024 * 1024,
+                env: { ...process.env, TAURI_CONFIG: fs.readFileSync('src-tauri/tauri.beta.conf.json', 'utf8') },
+              });
+              const matches = [...output.matchAll(/test result: ok\. (\d+) passed; (\d+) failed; (\d+) ignored;/g)];
+              assert.equal(matches.length, 1, 'One result must belong to each selected Native module');
+              assert.ok(Number(matches[0][1]) > 0);
+              assert.equal(Number(matches[0][2]), 0);
+              assert.equal(Number(matches[0][3]), 0);
+              for (const name of entry.names) assert.ok(output.includes(name), `Missing recovery regression: ${name}`);
+              process.stdout.write(output);
+              progress.status = 'passed';
+              progress.passed = Number(matches[0][1]);
+              } catch (error) {
+                progress.status = 'failed';
+                progress.exit_code = Number.isInteger(error.status) ? error.status : null;
+                throw error;
+              } finally {
+                fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+              }
+            }
+          }
+          NODE
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'Windows' && always()
+        with:
+          name: beta-windows-export-source-tests-${{ needs.resolve-source.outputs.sha }}-attempt${{ github.run_attempt }}
+          path: ${{ runner.temp }}/beta-native-export-source-tests.json
+          if-no-files-found: warn
+          retention-days: 7
       - name: Check actual Windows PE product identity
         if: runner.os == 'Windows'
         shell: pwsh

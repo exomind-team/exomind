@@ -1,5 +1,9 @@
 //! Isolated Beta embedding. No legacy runtime/config/store is opened here.
 
+#[path = "beta_native_profile_archive.rs"]
+mod profile_archive;
+#[path = "beta_profile_archive_paths.rs"]
+mod profile_archive_paths;
 #[path = "beta_native_attachments.rs"]
 mod attachments;
 #[path = "beta_native_deadlines.rs"]
@@ -10,6 +14,8 @@ mod desktop_settings;
 mod diagnostics;
 #[path = "beta_native_export.rs"]
 mod export;
+#[path = "beta_native_user_export.rs"]
+mod user_export;
 #[path = "beta_native_grants.rs"]
 mod grants;
 #[path = "beta_native_sources.rs"]
@@ -275,6 +281,8 @@ struct NativeState {
     owner: Session,
     peers: Arc<exomind_beta_host::PeerNetwork>,
     exports: Arc<export::ExportManager>,
+    profile_archives: Arc<profile_archive::ProfileArchiveManager>,
+    user_range_exports: Arc<user_export::UserRangeExportManager>,
     attachment_jobs: Arc<attachments::AttachmentJobs>,
     grant_credentials: grants::GrantCredentialVault,
     original_observer: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
@@ -291,7 +299,7 @@ struct NativeState {
 }
 
 impl NativeState {
-    fn open(root: &std::path::Path, dev_origin: Option<url::Origin>) -> Result<Self, HostError> {
+    fn open(root: &std::path::Path, archive_root: &std::path::Path, dev_origin: Option<url::Origin>) -> Result<Self, HostError> {
         let host = Arc::new(BetaHost::open(root)?);
         let owner = host.owner_session()?;
         host.start_services()?;
@@ -305,6 +313,8 @@ impl NativeState {
             owner,
             peers,
             exports: Arc::new(export::ExportManager::default()),
+            profile_archives: Arc::new(profile_archive::ProfileArchiveManager::new(archive_root.to_path_buf(), root.to_path_buf())),
+            user_range_exports: Arc::new(user_export::UserRangeExportManager::open(root)),
             attachment_jobs: Arc::new(attachments::AttachmentJobs::default()),
             grant_credentials: grants::GrantCredentialVault::default(),
             original_observer: Mutex::new(None),
@@ -363,13 +373,19 @@ impl NativeState {
         }
         self.deadlines.stop().await?;
         self.exports.request_stop();
+        self.profile_archives.request_stop();
+        self.user_range_exports.request_stop();
         self.attachment_jobs.request_stop();
         self.peers.stop().await?;
         let exports = self.exports.clone();
+        let profile_archives = self.profile_archives.clone();
         let attachments = self.attachment_jobs.clone();
+        let user_range_exports = self.user_range_exports.clone();
         tauri::async_runtime::spawn_blocking(move || {
             exports.wait_empty(std::time::Duration::from_secs(10))?;
-            attachments.wait_empty(std::time::Duration::from_secs(10))
+            profile_archives.wait_empty(std::time::Duration::from_secs(10))?;
+            attachments.wait_empty(std::time::Duration::from_secs(10))?;
+            user_range_exports.wait_empty(std::time::Duration::from_secs(10))
         })
         .await
         .map_err(|_| HostError::Shutdown)??;
@@ -909,6 +925,8 @@ fn request_exit(app: &AppHandle, code: i32) {
     }
     // Fence HTTP as well as IPC immediately, before scheduling resource close.
     state.exports.request_stop();
+    state.profile_archives.request_stop();
+    state.user_range_exports.request_stop();
     state.attachment_jobs.request_stop();
     state.host.request_stop();
     let app = app.clone();
@@ -1092,7 +1110,9 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                 Err(std::env::VarError::NotPresent) => 0,
                 Err(_) => return Err("EXOMIND_BETA_PORT must be valid Unicode".into()),
             };
-            let state = match NativeState::open(&data_root(app.handle())?, dev_origin.clone()) {
+            let native_root = data_root(app.handle())?;
+            let archive_root = profile_archive_paths::recovery_root(&native_root)?;
+            let state = match NativeState::open(&native_root, &archive_root, dev_origin.clone()) {
                 Ok(state) => Arc::new(state),
                 Err(error) => {
                     report_startup_failure(app.handle(), &error);
@@ -1101,6 +1121,9 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             };
             if let Err(error) = export::initialize_journal(app.handle(), &state.data_directory) {
                 log::warn!("Beta export task recovery unavailable: {}", error.code);
+            }
+            if let Err(error) = state.profile_archives.initialize() {
+                log::warn!("Beta profile archive recovery unavailable: {}", error.code);
             }
             app.manage(state.clone());
             let mut changes = state.peers.subscribe_original_changes();
@@ -1199,6 +1222,16 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             export::beta_original_export_history,
             export::beta_open_original,
             export::beta_cancel_original_export,
+            profile_archive::beta_profile_archive_capabilities,
+            profile_archive::beta_profile_archive_history,
+            profile_archive::beta_profile_archive_import_preview,
+            profile_archive::beta_profile_archive_import_confirm,
+            profile_archive::beta_profile_archive_export,
+            profile_archive::beta_profile_archive_cancel,
+            user_export::command::beta_user_range_export_capabilities,
+            user_export::command::beta_export_user_range,
+            user_export::command::beta_cancel_user_range_export,
+            user_export::command::beta_user_range_export_status,
             peer_commands::beta_peer_status,
             peer_commands::beta_peer_set_enabled,
             peer_commands::beta_peer_create_invitation,
@@ -1456,7 +1489,7 @@ mod tests {
     async fn queued_native_command_cannot_commit_after_close_or_resurrect_listener() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("host");
-        let state = Arc::new(NativeState::open(&root, None).unwrap());
+        let state = Arc::new(NativeState::open(&root, &root.with_file_name("beta-native-profile-archive"), None).unwrap());
         assert!(state.host.service_status().unwrap().unwrap().running);
         let profile = ProfileId::new();
         state

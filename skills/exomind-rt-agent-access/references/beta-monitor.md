@@ -75,3 +75,5 @@ stdin 最多接受 256 KiB，按严格 UTF-8 解码；超限返回 `stdin_limit_
 ## 本轮验证边界
 
 生产 adapter 的 19 项回归已通过，包括独立 FileStateStore 竞争、4,000 条历史、有界响应流和固定快照续页。真实 HTTP run `42b75def-b237-4bf3-bd3b-9ea674edd94d` 正常退出且清理确认：当前生产脚本与 FileStateStore 接入独立 Core10 source Host，读取 105 条 capture、更正、4 个时间块节点，核对图片/视频/文件的独立 SHA，验证 AgentNote 收发、有界 Wait，以及 observer 403 和撤销后 401。它不覆盖最终 Native 候选、系统剪贴板或设备。本轮不启动旧 Runtime。该 adapter 不属于冻结 Beta19 Native 包。
+
+个人 `exomind-monitor` 的独立 Luna 驱动由主代理监督实跑：run `9d5739f3-0e06-497e-81c4-429cbd4cf475` 正常退出并确认清理，两次调用沿同一 `through=511` 读完历史，校验 4 个原件（图片、视频和两份文件），AgentNote 回执已查证，Wait 返回 changed。changed 只说明出现新历史，不代表有人回复或目标时间块反馈完成。首轮因验收驱动的报告输出预算不足而中止，未记为产品通过；两轮证据分别保留。此结果仍是隔离 source Host，未提升为候选验收。

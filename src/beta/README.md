@@ -69,6 +69,10 @@ Android 系统选择器期间的进程回收、导出持久结果及重新选址
 [原件导出恢复合同](../../docs/development/beta-original-export-recovery.md)。任务面板只观察；
 原件到达、另存为成功和操作回执分别验收。
 
+档案 `.exomind-profile` 往返、选取记录／时间块导出、跨进程查证和私有暂存归属，见
+[用户导出维护入口](../../docs/development/beta-user-exports.md)。两种产物用途不同；
+范围导出包不作为完整档案导入，也不把取消 ACK 当作保存完成。
+
 摘要的 `coverage_changed` 是当前来源相对冻结快照发生变化的提示，不会改写旧摘要、
 snapshot digest 或 selection，也不会因读取触发模型重跑。冻结后针对已选 capture 的
 有效更正，同样会更新这个提示；只匹配同档案、目标 ID 和原 digest。跨设备比较使用

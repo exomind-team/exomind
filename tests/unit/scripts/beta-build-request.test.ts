@@ -189,9 +189,22 @@ describe('Beta build request validation', () => {
     }
   });
 
-  it('validates the exact Beta19 config file through the immutable request identity', () => {
+  it('accepts Beta20 only with Android versionCode 6020 and rejects adjacent codes', () => {
     const request = resolveBetaBuildRequest(dispatchInput({
-      dispatchInputs: { ...candidateRequest, expected_version: '0.6.0-beta19' },
+      dispatchInputs: { ...candidateRequest, expected_version: '0.6.0-beta20' },
+    }));
+    const config = { ...beta16Config(), version: '0.6.0-beta20', bundle: { android: { versionCode: 6020 } } };
+    expect(validateBetaCandidateIdentity(request, CANDIDATE_SHA, config)).toBeUndefined();
+    for (const versionCode of [6018, 6019, 6021]) {
+      expectCode(() => validateBetaCandidateIdentity(request, CANDIDATE_SHA, {
+        ...config, bundle: { android: { versionCode } },
+      }), 'version_code_mismatch');
+    }
+  });
+
+  it('validates the exact Beta20 config file through the immutable request identity', () => {
+    const request = resolveBetaBuildRequest(dispatchInput({
+      dispatchInputs: { ...candidateRequest, expected_version: '0.6.0-beta20' },
     }));
     const config = JSON.parse(readFileSync(resolve('src-tauri/tauri.beta.conf.json'), 'utf8')) as unknown;
     expect(validateBetaCandidateIdentity(request, CANDIDATE_SHA, config)).toBeUndefined();

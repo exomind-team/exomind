@@ -1299,7 +1299,7 @@ mod tests {
     #[test]
     fn uncertain_issue_recovery_never_reissues_a_grant() {
         let directory = tempfile::tempdir().unwrap();
-        let state = NativeState::open(directory.path(), None).unwrap();
+        let state = NativeState::open(&directory.path().join("host"), &directory.path().join("archive"), None).unwrap();
         let profile = ProfileId::new();
         state
             .host
@@ -1335,7 +1335,7 @@ mod tests {
     #[tokio::test]
     async fn native_shutdown_clears_copy_material_without_revoking_the_grant() {
         let directory = tempfile::tempdir().unwrap();
-        let state = NativeState::open(directory.path(), None).unwrap();
+        let state = NativeState::open(&directory.path().join("host"), &directory.path().join("archive"), None).unwrap();
         let profile = ProfileId::new();
         state
             .host
@@ -1381,7 +1381,7 @@ mod tests {
         ));
         drop(state);
 
-        let reopened = BetaHost::open(directory.path()).unwrap();
+        let reopened = BetaHost::open(&directory.path().join("host")).unwrap();
         let authorized = reopened.authenticate(&credential_text).unwrap();
         assert!(reopened
             .check_agent_access(

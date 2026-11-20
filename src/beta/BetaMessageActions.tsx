@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ChevronDown, Copy, Link2, MoreHorizontal, PencilLine, Quote, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import type { UserRangeSelection } from './user-range-export-client';
 import { writeBetaMessageClipboard } from './beta-message-clipboard';
 import { MAX_BETA_MESSAGE_LOCATE_PAGES } from './beta-message-locator';
 import {
@@ -45,6 +46,10 @@ function OnDemandExplanation({ label, children }: { label: string; children: Rea
   );
 }
 
+export interface BetaMessageExportChoice {
+  selection: UserRangeSelection;
+  label: string;
+}
 export interface BetaMessageActionsProps {
   content: string;
   profileId: string;
@@ -55,6 +60,9 @@ export interface BetaMessageActionsProps {
   referenceMetadata?: string;
   onCorrect?: () => void;
   writeClipboardText?: (value: string) => void | Promise<void>;
+  exportChoices?: readonly BetaMessageExportChoice[];
+  selectedExportSelections?: readonly UserRangeSelection[];
+  onToggleExportSelection?: (selection: UserRangeSelection) => void;
 }
 
 function feedbackText(feedback: ClipboardFeedback): string {
@@ -104,6 +112,9 @@ export function BetaMessageActions({
   referenceMetadata,
   onCorrect,
   writeClipboardText = writeBetaMessageClipboard,
+  exportChoices,
+  selectedExportSelections = [],
+  onToggleExportSelection,
 }: BetaMessageActionsProps) {
   const [feedback, setFeedback] = useState<ClipboardFeedback>(null);
   const [expanded, setExpanded] = useState(false);
@@ -250,6 +261,22 @@ export function BetaMessageActions({
             <span>更正与原文</span>
           </Button>
         ) : null}
+      {expanded && onToggleExportSelection && exportChoices?.map(choice => {
+        const key = choice.selection.kind === 'event' ? 'event:' + choice.selection.event_id : 'timeblock:' + choice.selection.block_id;
+        const pressed = selectedExportSelections.some(selection => (selection.kind === 'event' ? 'event:' + selection.event_id : 'timeblock:' + selection.block_id) === key);
+        return <div key={key} role="group" aria-label={choice.label} className="flex flex-wrap items-center gap-1">
+          <span className="px-2 text-xs text-muted">{choice.label}</span>
+          <Button
+            type="button"
+            variant={pressed ? 'secondary' : 'ghost'}
+            className={ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
+            aria-label="选入导出"
+            aria-pressed={pressed}
+            onClick={() => onToggleExportSelection(choice.selection)}
+            data-testid={"beta-message-select-for-export-" + key}
+          >选入导出</Button>
+        </div>;
+      })}
       </div>
       {visibleFeedback ? (
         <span

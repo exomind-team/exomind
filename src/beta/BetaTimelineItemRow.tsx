@@ -6,6 +6,8 @@ import { EventTimestamp } from '@/ui/app/components/EventTimestamp';
 import type { EventDateDisplayMode } from '@/lib/eventlog/format-event-timestamp';
 import type { BetaClient, BetaEvent } from './client';
 import type { BetaTimelineItem } from './timeblocks-types';
+import type { UserRangeSelection } from './user-range-export-client';
+import type { BetaMessageExportChoice } from './BetaMessageActions';
 import type { SummaryArtifactRecord, SummarySourceRef } from './summary-types';
 import { BetaSummaryHistoryRow } from './BetaSummaryHistoryRow';
 import { BetaExternalSummaryHistoryRow } from './BetaExternalSummaryHistoryRow';
@@ -29,8 +31,24 @@ interface BetaTimelineItemRowProps {
   sourceLabel: (reference: BetaMessageReference) => string | undefined;
   onInspectSummary: (record: SummaryArtifactRecord) => void;
   onOpenSource?: (source: SummarySourceRef) => void;
+  rangeExport?: { selections: readonly UserRangeSelection[]; onToggle: (selection: UserRangeSelection) => void };
 }
 
+type TimelineExportChoice = BetaMessageExportChoice;
+
+function timeblockExportChoices(node: Extract<BetaTimelineItem, { kind: 'timeblock' }>['record']): TimelineExportChoice[] {
+  if (node.payload.kind !== 'action') {
+    return [{ selection: { kind: 'timeblock', block_id: node.payload.block_id }, label: '此时间块' }];
+  }
+  const action = node.payload.action;
+  if (action.kind === 'rotate') {
+    return [
+      { selection: { kind: 'timeblock', block_id: action.from_block_id }, label: '前一时间块' },
+      { selection: { kind: 'timeblock', block_id: action.next.block_id }, label: '后一时间块' },
+    ];
+  }
+  return [{ selection: { kind: 'timeblock', block_id: action.block_id }, label: '此时间块' }];
+}
 export function BetaTimelineItemRow({
   item,
   client,
@@ -46,6 +64,7 @@ export function BetaTimelineItemRow({
   sourceLabel,
   onInspectSummary,
   onOpenSource,
+  rangeExport,
 }: BetaTimelineItemRowProps) {
   const capture = item.kind === 'capture' ? item.record : null;
   const timeblock = item.kind === 'timeblock' ? item.record : null;
@@ -79,6 +98,9 @@ export function BetaTimelineItemRow({
       : `附件数：${capture?.originals?.length ?? 0}`
     : undefined;
   const canQuote = actionContent.trim().length > 0 || !!referenceLabel || !!referenceMetadata;
+  const exportChoices: TimelineExportChoice[] = !rangeExport ? [] : capture
+    ? [{ selection: { kind: 'event', event_id: capture.event_id }, label: '此消息' }]
+    : timeblock ? timeblockExportChoices(timeblock) : [];
   const messageActions = (
     <>
       <BetaMessageActions
@@ -90,6 +112,9 @@ export function BetaTimelineItemRow({
         onCorrect={capture && onCorrect ? () => onCorrect(capture) : undefined}
         referenceLabel={referenceLabel}
         referenceMetadata={referenceMetadata}
+        exportChoices={exportChoices}
+        selectedExportSelections={rangeExport?.selections}
+        onToggleExportSelection={rangeExport?.onToggle}
       />
       {capture ? (
         <BetaMessageReferenceLinks value={capture.text} onOpen={onOpenReference} sourceLabel={sourceLabel} />

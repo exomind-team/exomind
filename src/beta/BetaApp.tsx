@@ -49,6 +49,9 @@ import { betaDesktopPreferences } from './desktop-preferences';
 import { inputSendShortcutLabel, shouldSubmitOnEnter, useBetaInputSendMode } from './input-preferences';
 import { BetaCaptureStatus } from './BetaCaptureStatus';
 import { BetaOriginalExportCenter } from './BetaOriginalExportCenter';
+import { BetaUserRangeExportControls } from './BetaUserRangeExportControls';
+import { useUserRangeExportState } from './user-range-export-state';
+import type { UserRangeSelection } from './user-range-export-client';
 import { BetaAttachmentProgress } from './BetaAttachmentProgress';
 import { FieldSelect } from '@/components/ui/field-select';
 import { pickNativeFiles } from './native-attachments';
@@ -444,6 +447,18 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
   const { layout, change: changeLayout } = workspace;
   const workspaceActive = useBetaViewActive(visible);
   const recordsActive = workspaceActive && (layout.minimal || layout.records === 'expanded');
+  const rangeExportViewActive = visible && (layout.minimal || layout.records === 'expanded');
+  const rangeExportSession = useUserRangeExportState(client.userRangeExports, {
+    deviceId, runtimeId: status.runtime_id ?? '', profileId,
+  }, rangeExportViewActive);
+  const rangeExportOwner = rangeExportSession.owner;
+  const rangeExportSnapshot = rangeExportSession.state;
+  const rangeExportActions = rangeExportOwner && rangeExportSnapshot.supported && rangeExportSnapshot.storageReady
+    ? {
+      selections: rangeExportSnapshot.selections,
+      onToggle: (selection: UserRangeSelection) => { void rangeExportOwner.toggleSelection(selection); },
+    }
+    : undefined;
   const deferredRefresh = useRef(false);
   const inputSendMode = useBetaInputSendMode();
   const [page, setPage] = useState<BetaTimelinePage | null>(null);
@@ -844,7 +859,7 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
   function renderTimelineItem(item: BetaTimelineItem, revision: number) {
     return <BetaTimelineItemRow key={item.record.event_id} item={item} client={client}
       deviceId={deviceId} revision={revision} now={now} dateMode={mode} recordsActive={recordsActive}
-      deviceLabel={deviceNames.label} onQuote={quoteMessage} onOpenReference={openMessageReference}
+      deviceLabel={deviceNames.label} onQuote={quoteMessage} onOpenReference={openMessageReference} rangeExport={rangeExportActions}
       onCorrect={client.recordOrganization?record=>setCorrectionTarget(record):undefined}
       sourceLabel={messageReferenceSourceLabel} onInspectSummary={record=>{setReviewTarget(record);setReviewsOpen(true);}}
       onOpenSource={sourceReader||correctionSourceReader?source=>setSummarySource({profileId,source}):undefined} />;
@@ -887,6 +902,7 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
     }
     {messageLocation?.state.kind==='profile-mismatch'&&messageLocationBoundary}
     <BetaWorkspacePane kind="records" state={layout.minimal ? 'expanded' : layout.records} chrome={!layout.minimal&&layout.records!=='expanded'} onToggle={()=>changeLayout({records:layout.records==='collapsed'?'expanded':'collapsed'})}>
+    {rangeExportOwner && <BetaUserRangeExportControls owner={rangeExportOwner} state={rangeExportSnapshot} profileNameFor={profileNameFor} />}
     {!periodViewActive&&!typedTimelineAvailable&&<p className="px-5 py-1 text-[11px] text-muted">此连接仅提供兼容记录历史，尚未提供完整时间线</p>}
     {periodUnavailable&&<p role="status" className="px-5 py-1 text-[11px] text-muted">{client.serviceScope==='tauri-native-beta-v1'?'此本机 Beta 版本尚不支持日／周／月范围浏览；现有历史仍可阅读。更新应用后可用。':'当前 Beta 服务尚不支持日／周／月范围浏览；现有历史仍可阅读。请更新服务后重试。'}</p>}
     {!layout.minimal&&<BetaHistoryToolbar onCollapse={()=>changeLayout({records:'collapsed'})} searchOpen={searchOpen||!!query||!!tagFilter} onSearch={()=>setSearchOpen(value=>!value)} onRefresh={()=>setRevision(value=>value+1)} onReview={()=>{setReviewTarget(null);setReviewsOpen(true);}}/>}

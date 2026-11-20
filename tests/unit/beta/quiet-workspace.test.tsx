@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
 import { asyncDraftLocks } from './fixtures';
@@ -43,8 +43,10 @@ describe('Beta12 feedback: progressive workspace disclosure', () => {
     render(<BetaApp client={client} intentJournal={memoryIntentJournal()} />);
     const input = await screen.findByRole('textbox', { name: '记录当下' });
     fireEvent.change(input, { target: { value: '草稿状态按需查看' } });
-    await waitFor(() => expect(screen.getByRole('button', { name: '记录保存状态' })).toHaveAttribute('title', '记录草稿已暂存 · 尚未提交'));
-    fireEvent.click(screen.getByRole('button', { name: '记录保存状态' }));
+    const saveStatus = screen.getByRole('button', { name: '记录保存状态' });
+    await waitFor(() => expect(within(saveStatus).getByRole('status')).toHaveTextContent('记录草稿已暂存 · 尚未提交'));
+    expect(saveStatus).not.toHaveAttribute('title');
+    fireEvent.click(saveStatus);
     expect(screen.getByRole('dialog')).toHaveTextContent('记录草稿已暂存 · 尚未提交');
     expect(screen.getByRole('dialog')).toHaveTextContent('不代表其他设备已收到');
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));

@@ -68,6 +68,7 @@ mod timeblocks;
 mod timeblocks_http;
 mod timeline_period;
 pub mod user_export;
+pub mod user_export_source;
 pub use original_lifecycle::{
     DEFAULT_ORIGINAL_RECLAIM_WINDOW, OriginalLifecycleHostStatus, OriginalLifecycleRemoteSource,
     RemoteOriginalProbeState,
