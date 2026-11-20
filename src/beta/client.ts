@@ -16,6 +16,7 @@ import { nativeCorrectionSourceReader, webCorrectionSourceReader } from './corre
 import { nativeRecordOrganizationClient, webRecordOrganizationClient } from './record-organization-client';
 import type { BetaCorrectionEntry, BetaRecordOrganizationClient } from './record-organization-client';
 import { nativeOriginalAutoDiagnostics, type BetaOriginalAutoDiagnosticsClient } from './original-auto-diagnostics';
+import { createProfileArchiveClient, type ProfileArchiveClient } from './profile-archive-client';
 export { BetaApiError } from './api-error';
 
 export interface BetaStatus {
@@ -60,6 +61,7 @@ export interface BetaClient {
   correctionSource?(profileId: string, eventId: string, digest: string): Promise<BetaCorrectionEntry | null>;
   originalAcquisition?: BetaOriginalAcquisitionClient;
   originalAutoDiagnostics?: BetaOriginalAutoDiagnosticsClient;
+  profileArchives?: ProfileArchiveClient;
   originalExports?: BetaOriginalExportsClient;
   originalOpener?: BetaOriginalOpener;
   originals?: BetaOriginalClient;
@@ -175,6 +177,7 @@ export function nativeBetaClient(call: NativeInvoke = invoke): BetaClient {
       return call<T>(name,args);
     }),
     originalAutoDiagnostics: nativeOriginalAutoDiagnostics(checked),
+    profileArchives: createProfileArchiveClient(checked),
     originalExports: nativeOriginalExports(async <T>(name:string,args?:Record<string,unknown>) => {
       const current=check(await call('beta_status'));
       if(current.capabilities?.originals!==true) throw new BetaApiError('unsupported_originals','本机服务尚不支持原件导出，请更新后重试');

@@ -34,6 +34,7 @@ import { nativeBetaPeersClient, type BetaPeersClient } from './peers-client';
 import { setBetaDateDisplayMode, setBetaOverlayEnabled, useBetaDateDisplayMode, useBetaThemePresentation } from './preferences';
 import { mergeTimelineItems, refreshTimelineWindow } from './timeline-refresh';
 import { BetaProfileDialog } from './BetaProfileDialog';
+import { BetaProfileArchiveEntry } from './BetaProfileArchives';
 import { rememberLastBetaProfile, restoreLastBetaProfile } from './last-profile';
 import { BetaApiError } from './api-error';
 import { ProfileSwitchGuardGate } from './profile-switch-guard';
@@ -221,6 +222,17 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     finally { if (current === generation.current) setCreating(false); }
   }
   const profileName=profiles.find(profile=>profile.profile_id===profileId)?.display_name??'';
+  function refreshImportedProfiles() {
+    const current = generation.current, scope = selectionScope.current;
+    if (!scope || scope.generation !== current) return;
+    void client.profiles().then(list => {
+      if (generation.current !== current || selectionScope.current !== scope) return;
+      scope.profiles = list;
+      setProfiles(list);
+    }).catch(failure => {
+      if (generation.current === current && selectionScope.current === scope) setError(`档案已导入，列表暂未刷新：${errorMessage(failure)}`);
+    });
+  }
   async function joined(nextProfile:string){
     const current=generation.current;
     const scope=selectionScope.current;if(!scope||scope.generation!==current)throw new Error('本机档案列表尚未就绪，请稍后重试');
@@ -292,7 +304,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     {error && <div role="alert" className="flex items-center gap-2 px-5 py-3 text-sm text-destructive">{error}
       {!status && <Button variant="outline" onClick={() => setReload(value => value + 1)}>重新连接</Button>}</div>}
     {status && <DeviceWorkspace key={`${status.device_id}`} workspace={workspace} active={section==='now'} eventRevision={eventRevision} client={client} deviceId={status.device_id} profileId={profileId} profiles={profiles} status={status} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} deadlineLocation={deadlineLocation} onDeadlineLocated={(id,hint,attempt)=>{const waiter=locationWaiter.current;if(waiter?.id===id&&waiter.attempt===attempt)waiter.finish(undefined,hint);}} onConfigureSummary={()=>setSection('settings')} onOpenSync={peers?()=>setSection('sync'):undefined} onReturnToProfile={target=>{void changeProfile(target);}} />}
-  </PageShell>}/><BetaProfileDialog open={profileDialog} onOpenChange={setProfileDialog} profiles={profiles} profileId={profileId} loading={loading} disabled={persistenceBusy||switching||!switchGuardReady} creating={creating} name={name} onNameChange={setName} onCreate={create} onSelect={changeProfile} error={error}/></>;
+  </PageShell>}/><BetaProfileDialog open={profileDialog} onOpenChange={setProfileDialog} profiles={profiles} profileId={profileId} loading={loading} disabled={persistenceBusy||switching||!switchGuardReady} creating={creating} name={name} onNameChange={setName} onCreate={create} onSelect={changeProfile} error={error} archiveActions={<BetaProfileArchiveEntry client={client.profileArchives} profileId={profileId} profileName={profileName} onImported={refreshImportedProfiles} />}/></>;
 }
 
 function DeviceWorkspace({ workspace, client, deviceId, profileId, profiles, status, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync,onReturnToProfile }: { workspace: BetaWorkspacePresentation; client: BetaClient; deviceId: string; profileId: string; profiles:BetaProfile[]; status:BetaStatus; sourceStore?: FileSourceStore; intentJournal?:LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:ProfileSwitchGuardGate; active:boolean;eventRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void;onReturnToProfile:(profileId:string)=>void }) {
