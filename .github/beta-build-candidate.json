@@ -1,5 +1,5 @@
 {
-    "source_ref":  "cc3bc937c4196d1a6a838b10a82018dc37d66480",
-    "expected_sha":  "cc3bc937c4196d1a6a838b10a82018dc37d66480",
-    "expected_version":  "0.6.0-beta19"
+  "source_ref": "6ad7869dcec271bbc3f103dbacc2d6d512d2d7ca",
+  "expected_sha": "6ad7869dcec271bbc3f103dbacc2d6d512d2d7ca",
+  "expected_version": "0.6.0-beta20"
 }
