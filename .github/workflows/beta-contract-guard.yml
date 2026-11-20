@@ -279,7 +279,7 @@ jobs:
             },
             {
               name: 'host-user-range-export',
-              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'user_export', '--test', 'user_export_corrections', '--', '--test-threads=1'],
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'user_export', '--', '--test-threads=1'],
               expected: [
                 'event_selection_keeps_only_the_exact_fact_inside_one_profile_and_highwater',
                 'block_selection_expands_all_referencing_nodes_through_highwater_only',
@@ -287,6 +287,12 @@ jobs:
                 'incomplete_block_scan_is_explained_instead_of_reported_as_missing_or_complete',
                 'output_limit_does_not_masquerade_as_scan_limit',
                 'a_cross_profile_fact_is_rejected_instead_of_silently_joined',
+              ],
+            },
+            {
+              name: 'host-user-range-export-corrections',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'user_export_corrections', '--', '--test-threads=1'],
+              expected: [
                 'default_correction_derivation_freezes_profile_target_digest_and_highwater',
                 'cross_profile_correction_is_rejected_before_it_can_be_joined',
                 'correction_target_page_must_use_the_frozen_highwater',
