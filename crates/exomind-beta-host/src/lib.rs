@@ -18,9 +18,16 @@ mod model_config;
 mod model_config_http;
 mod model_provider;
 pub mod native_workspace;
+mod profile_archive;
 mod summary_jobs;
 mod summary_jobs_http;
 mod summary_material;
+pub use profile_archive::{
+    ArchiveBudget, ArchiveCancelHandle, ArchiveLimits, ArchivePreviewId, ProfileArchiveConflict,
+    ProfileArchiveError, ProfileArchiveExportReceipt, ProfileArchiveImportReceipt,
+    ProfileArchiveOriginPreview, ProfileArchivePhase, ProfileArchivePreview,
+    ProfileArchiveProgress, ProfileArchiveUnverifiedOrigin,
+};
 pub use local_sources::{
     LocalSourceBegin, LocalSourceInfo, LocalSourceState, MAX_LOCAL_SOURCE_BYTES,
     MAX_LOCAL_SOURCE_CHUNK_BYTES,

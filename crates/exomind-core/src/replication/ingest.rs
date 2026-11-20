@@ -102,6 +102,57 @@ fn validate_page(context: &ReplicaContext, page: &OriginPage) -> Result<(), Core
     Ok(())
 }
 
+pub(super) fn validate_archive_page(
+    profile: crate::ProfileId,
+    page: &OriginPage,
+) -> Result<(), CoreError> {
+    if page.origin.profile_id != profile {
+        return Err(CoreError::ScopeMismatch);
+    }
+    if page.origin.restoration_epoch.is_nil()
+        || page.entries.len() > 100
+        || !valid_cursor(&page.from)
+        || !valid_cursor(&page.to)
+        || !valid_cursor(&page.through)
+        || page.from.seq > page.to.seq
+        || page.to.seq > page.through.seq
+        || page.to.seq - page.from.seq != page.entries.len() as u64
+        || page.has_more != (page.to.seq < page.through.seq)
+        || page.entries.is_empty() && page.has_more
+        || page.to.seq == page.through.seq && page.to.hash != page.through.hash
+    {
+        return Err(CoreError::InvalidReplication("invalid archive origin page"));
+    }
+    let mut previous = page.from.clone();
+    let mut events = HashSet::new();
+    for entry in &page.entries {
+        entry.fact.validate()?;
+        if entry.fact.profile_id() != profile
+            || entry.fact.device_id() != page.origin.device_id
+            || entry.origin_seq != previous.seq.saturating_add(1)
+            || !events.insert(entry.fact.event_id())
+            || origin::entry_hash(
+                &page.origin,
+                entry.origin_seq,
+                entry.fact.fact_type(),
+                entry.fact.event_id(),
+                entry.fact.digest(),
+                &previous.hash,
+            )? != entry.chain_hash
+        {
+            return Err(CoreError::InvalidReplication("invalid archive origin chain"));
+        }
+        previous = OriginCursor {
+            seq: entry.origin_seq,
+            hash: entry.chain_hash.clone(),
+        };
+    }
+    if previous != page.to || encoded_size(page)? > MAX_ORIGIN_PAGE_BYTES {
+        return Err(CoreError::InvalidReplication("archive page digest or byte budget"));
+    }
+    Ok(())
+}
+
 fn check_references(connection: &Connection, fact: &ReplicatedFact) -> Result<(), CoreError> {
     let mut statement=connection.prepare("SELECT ordinal,CASE WHEN length(original_id)=36 THEN original_id END FROM event_originals WHERE event_id=?1 ORDER BY ordinal LIMIT 257")?;
     let rows = statement
@@ -180,7 +231,6 @@ fn missing_for_page(
 fn apply_page(
     transaction: &Transaction<'_>,
     core: &Core,
-    context: &ReplicaContext,
     page: &OriginPage,
     conflict: &mut Option<Conflict>,
 ) -> Result<ImportAck, CoreError> {
@@ -378,7 +428,6 @@ fn apply_page(
             |row| row.get(0),
         )?
     };
-    let _ = context; // Host alone owns the current member-generation truth.
     Ok(ImportAck {
         origin: id.clone(),
         cursor: current,
@@ -408,7 +457,7 @@ pub(super) fn import_page_with_provenance(
     let mut connection = core.connection()?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut conflict = None;
-    let applied = apply_page(&transaction, core, context, page, &mut conflict).and_then(|ack| {
+    let applied = apply_page(&transaction, core, page, &mut conflict).and_then(|ack| {
         if let Some((key, proof)) = proof {
             super::provenance::admit(&transaction, page, key, proof)?;
         }
@@ -426,6 +475,126 @@ pub(super) fn import_page_with_provenance(
                 // errors never become conflicts, and no business body is logged.
                 let evidence =
                     connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                evidence.execute("INSERT INTO import_conflicts(profile_id,origin_device,restoration_epoch,origin_seq,event_id,expected_digest,received_digest,reason) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![page.origin.profile_id.to_string(),page.origin.device_id.to_string(),page.origin.restoration_epoch.to_string(),conflict.seq,conflict.event.to_string(),conflict.expected,conflict.received,conflict.reason])?;
+                evidence.commit()?;
+            }
+            Err(error)
+        }
+    }
+}
+
+/// Read-only duplicate check for a source whose DeviceId is already local.
+/// A copied DeviceId may replay only an exact subset of this local origin.
+pub(super) fn local_archive_page_duplicate(
+    core: &Core,
+    page: &OriginPage,
+) -> Result<Option<ImportAck>, CoreError> {
+    validate_archive_page(page.origin.profile_id, page)?;
+    if page.origin.device_id != core.device_id() {
+        return Ok(None);
+    }
+    let mut connection = core.connection()?;
+    let transaction = connection.transaction()?;
+    let head = origin::head(&transaction, &page.origin)?;
+    if page.to.seq > head.seq
+        || page.through.seq > head.seq
+        || cursor_at(&transaction, &page.origin, page.from.seq)? != page.from
+        || cursor_at(&transaction, &page.origin, page.to.seq)? != page.to
+        || cursor_at(&transaction, &page.origin, page.through.seq)? != page.through
+    {
+        return Ok(None);
+    }
+    for entry in &page.entries {
+        let Some((event, kind, digest, chain)) =
+            existing_origin(&transaction, &page.origin, entry.origin_seq)?
+        else {
+            return Ok(None);
+        };
+        if event != entry.fact.event_id().to_string()
+            || kind != entry.fact.fact_type()
+            || digest != entry.fact.digest()
+            || chain != entry.chain_hash
+        {
+            return Ok(None);
+        }
+        let Some(stored) = load_fact(&transaction, entry.fact.event_id())? else {
+            return Err(CoreError::RecoveryRequired);
+        };
+        if stored.canonical_fact_bytes()? != entry.fact.canonical_fact_bytes()? {
+            return Ok(None);
+        }
+        check_references(&transaction, &stored)?;
+    }
+    let projection_complete: bool = transaction.query_row(
+        "SELECT status='complete' FROM replication_projection_status WHERE profile_id=?1",
+        [page.origin.profile_id.to_string()],
+        |row| row.get(0),
+    )?;
+    let missing_originals = missing_for_page(&transaction, page)?;
+    transaction.commit()?;
+    Ok(Some(ImportAck {
+        origin: page.origin.clone(),
+        cursor: page.to.clone(),
+        inserted: 0,
+        duplicates: page.entries.len() as u64,
+        replayed: true,
+        projection_complete,
+        missing_originals,
+    }))
+}
+
+/// Historical archive admission is separate from peer/carrier admission. The
+/// Host validates the Human session and any source signatures before calling.
+pub(super) fn import_archive_page(
+    core: &Core,
+    page: &OriginPage,
+    proof: Option<(&super::OriginProvenanceKey, &super::OriginPageProof)>,
+) -> Result<ImportAck, CoreError> {
+    validate_archive_page(page.origin.profile_id, page)?;
+    if page.origin.device_id == core.device_id() {
+        return local_archive_page_duplicate(core, page)?.ok_or(
+            CoreError::InvalidReplication("archive origin collides with local device identity"),
+        );
+    }
+
+    let mut connection = core.connection()?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if proof.is_none()
+        && super::provenance::load_key(
+            &transaction,
+            page.origin.profile_id,
+            page.origin.device_id,
+        )?
+        .is_some()
+    {
+        for entry in &page.entries {
+            let Some(stored) = load_fact(&transaction, entry.fact.event_id())? else {
+                return Err(CoreError::InvalidReplication("pinned origin requires its proof"));
+            };
+            if stored.profile_id() != page.origin.profile_id
+                || stored.canonical_fact_bytes()? != entry.fact.canonical_fact_bytes()?
+            {
+                return Err(CoreError::InvalidReplication("pinned origin requires its proof"));
+            }
+        }
+    }
+
+    let mut conflict = None;
+    let applied = apply_page(&transaction, core, page, &mut conflict).and_then(|ack| {
+        if let Some((key, proof)) = proof {
+            super::provenance::admit(&transaction, page, key, proof)?;
+        }
+        Ok(ack)
+    });
+    match applied {
+        Ok(ack) => {
+            transaction.commit()?;
+            Ok(ack)
+        }
+        Err(error) => {
+            transaction.rollback()?;
+            if let Some(conflict) = conflict {
+                let evidence = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 evidence.execute("INSERT INTO import_conflicts(profile_id,origin_device,restoration_epoch,origin_seq,event_id,expected_digest,received_digest,reason) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![page.origin.profile_id.to_string(),page.origin.device_id.to_string(),page.origin.restoration_epoch.to_string(),conflict.seq,conflict.event.to_string(),conflict.expected,conflict.received,conflict.reason])?;
                 evidence.commit()?;
             }

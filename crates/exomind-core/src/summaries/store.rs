@@ -6,6 +6,55 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use std::sync::atomic::Ordering;
 use uuid::Uuid;
 
+fn summary_owner_has_local_receipt(
+    connection: &Connection,
+    profile: ProfileId,
+    owner_event: EventId,
+) -> Result<bool, CoreError> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM command_receipts r JOIN events e ON e.profile_id=r.profile_id WHERE r.profile_id=?1 AND e.event_id=?2 AND json_extract(r.receipt,'$.event_id')=e.event_id AND json_extract(r.receipt,'$.event_digest')=e.digest)",
+        params![profile.to_string(), owner_event.to_string()],
+        |row| row.get(0),
+    )?)
+}
+
+fn summary_task_execution_admitted(
+    connection: &Connection,
+    task: &projection::Task,
+    local_device: crate::DeviceId,
+) -> Result<bool, CoreError> {
+    if task.view.owner_device_id != local_device {
+        return Ok(false);
+    }
+    if summary_owner_has_local_receipt(
+        connection,
+        task.view.profile_id,
+        task.view.owner_control_event_id,
+    )? {
+        return Ok(true);
+    }
+    // Preserve the local automatic-review path. Archive import never creates
+    // this private candidate row, so archived controls cannot qualify here.
+    if task.owner.selection.block_ids.len() != 1 {
+        return Ok(false);
+    }
+    let expected = event(
+        "summary-auto-request/1",
+        &[&local_device.to_string(), &task.view.task_id.to_string()],
+    );
+    if task.view.owner_control_event_id != expected {
+        return Ok(false);
+    }
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM summary_auto_candidates WHERE profile_id=?1 AND block_id=?2 AND state='created')",
+        params![
+            task.view.profile_id.to_string(),
+            task.owner.selection.block_ids[0].to_string(),
+        ],
+        |row| row.get(0),
+    )?)
+}
+
 fn id(domain: &str, values: &[&str]) -> Uuid {
     super::derived_uuid(domain, values)
 }
@@ -660,6 +709,19 @@ impl Core {
         tx.commit()?;
         Ok(out)
     }
+    /// Imported history stays visible; paid work needs a local owner receipt
+    /// or a locally created automatic-review candidate.
+    pub fn summary_task_execution_admitted(
+        &self,
+        executor: &SummaryExecutorContext,
+        profile: ProfileId,
+        task_id: Uuid,
+    ) -> Result<bool, CoreError> {
+        self.check_summary_executor(executor)?;
+        let connection = self.connection()?;
+        let task = projection::load(&connection, profile, task_id)?;
+        summary_task_execution_admitted(&connection, &task, self.device_id())
+    }
     pub fn begin_summary_attempt(
         &self,
         executor: &SummaryExecutorContext,
@@ -679,6 +741,9 @@ impl Core {
         let input = facts::hash(&(self.device_id(), "summary-begin/1", request))?;
         let task = projection::load(&tx, request.profile_id, request.task_id)?;
         qualify(&task, self)?;
+        if !summary_task_execution_admitted(&tx, &task, self.device_id())? {
+            return Err(CoreError::SummaryBlocked("owner_control_not_locally_admitted"));
+        }
         if task.owner.generation != request.expected_owner_generation
             || task.owner.token != request.expected_owner_control_event_id
             || task.owner.run != request.expected_run_id
@@ -839,6 +904,9 @@ impl Core {
         }
         let task = projection::load(c, ticket.profile_id, ticket.task_id)?;
         qualify(&task, self)?;
+        if !summary_task_execution_admitted(c, &task, self.device_id())? {
+            return Err(CoreError::SummaryBlocked("owner_control_not_locally_admitted"));
+        }
         let active:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM summary_attempts WHERE attempt_id=?1 AND profile_id=?2 AND task_id=?3 AND run_id=?4 AND core_lifecycle=?5 AND snapshot_digest=?6 AND state='active')",params![ticket.attempt_id.to_string(),ticket.profile_id.to_string(),ticket.task_id.to_string(),ticket.run_id.to_string(),ticket.lifecycle.to_string(),ticket.snapshot_digest],|r|r.get(0))?;
         if !active
             || task.view.state != SummaryState::Running
@@ -1178,6 +1246,9 @@ impl Core {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = projection::load(&tx, p, task_id)?;
         qualify(&task, self)?;
+        if !summary_task_execution_admitted(&tx, &task, self.device_id())? {
+            return Err(CoreError::SummaryBlocked("owner_control_not_locally_admitted"));
+        }
         if task.view.state == SummaryState::WaitingConfiguration {
             return Ok(());
         }

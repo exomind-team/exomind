@@ -3,10 +3,12 @@ mod facts;
 mod ingest;
 mod origin;
 mod provenance;
+mod profile_archive;
 mod schema;
 mod transfer;
 use crate::{Core, CoreError, DeviceId, ProfileId};
 pub use facts::ReplicatedFact;
+pub use profile_archive::{ProfileArchiveFactMatch, ProfileArchiveImportContext, ProfileArchiveOriginalState};
 pub(crate) use origin::{provision_local_origin, record_local_fact};
 pub use provenance::{
     OriginPageProof, OriginProvenanceKey, OriginReceiveState, VerifiedOriginContext,

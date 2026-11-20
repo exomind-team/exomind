@@ -80,6 +80,18 @@ fn valid_positions(page: &OriginPage) -> bool {
 }
 
 fn sign_local_page(identity: &Identity, page: OriginPage) -> Result<SignedOriginPage, HostError> {
+    let signed = sign_local_page_unbounded(identity, page)?;
+    if serde_json::to_vec(&signed)?.len() + RPC_WRAPPER_RESERVE > super::framing::MAX_MESSAGE_BYTES
+    {
+        return Err(HostError::PayloadTooLarge);
+    }
+    Ok(signed)
+}
+
+fn sign_local_page_unbounded(
+    identity: &Identity,
+    page: OriginPage,
+) -> Result<SignedOriginPage, HostError> {
     if page.origin.device_id != identity.info.device_id || !valid_positions(&page) {
         return Err(HostError::PeerSyncRecoveryRequired);
     }
@@ -98,17 +110,12 @@ fn sign_local_page(identity: &Identity, page: OriginPage) -> Result<SignedOrigin
             )?)
         })
         .collect::<Result<Vec<_>, HostError>>()?;
-    let signed = SignedOriginPage {
+    Ok(SignedOriginPage {
         page,
         signer: identity.info.clone(),
         through_signature,
         entry_signatures,
-    };
-    if serde_json::to_vec(&signed)?.len() + RPC_WRAPPER_RESERVE > super::framing::MAX_MESSAGE_BYTES
-    {
-        return Err(HostError::PayloadTooLarge);
-    }
-    Ok(signed)
+    })
 }
 
 impl SignedOriginPage {
@@ -165,6 +172,26 @@ pub(super) fn signed_page_query(query: &OriginPageQuery) -> Result<OriginPageQue
             .min(super::framing::MAX_MESSAGE_BYTES - ENVELOPE_RESERVE),
         ..query.clone()
     })
+}
+
+/// Archive proofs reuse the same source signatures but do not inherit the peer
+/// transport frame ceiling or any carrier/member qualification.
+pub(super) fn export_local_archive_page(
+    identity: &Identity,
+    core: &Core,
+    profile: ProfileId,
+    query: &OriginPageQuery,
+) -> Result<SignedOriginPage, HostError> {
+    if query.limit == 0
+        || query.limit > MAX_PAGE_FACTS
+        || query.max_bytes == 0
+        || query.max_bytes > exomind_core::MAX_ORIGIN_PAGE_BYTES
+    {
+        return Err(HostError::InvalidRequest);
+    }
+    let reader = core.local_human(profile)?;
+    let page = core.export_origin_page(&reader, profile, query)?;
+    sign_local_page_unbounded(identity, page)
 }
 
 /// The caller must qualify its local owner or current peer read scope before

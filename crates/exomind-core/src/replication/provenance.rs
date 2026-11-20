@@ -142,7 +142,7 @@ impl VerifiedOriginContext {
     }
 }
 
-fn load_key(
+pub(super) fn load_key(
     connection: &Connection,
     profile: ProfileId,
     device: DeviceId,

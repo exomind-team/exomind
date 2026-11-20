@@ -35,12 +35,51 @@ pub use membership::*;
 mod pairing;
 mod transport;
 use crate::{BetaHost, HostError, Session};
+use exomind_core::{Core, OriginPage, OriginPageProof, OriginPageQuery, OriginProvenanceKey, ProfileId};
 pub use identity::DeviceIdentityInfo;
 pub(crate) use identity::Identity;
 use std::{
     sync::{Arc, Condvar, Mutex},
     time::{Duration, Instant},
 };
+pub(crate) fn sign_archive_origin_page(
+    identity: &Identity,
+    core: &Core,
+    profile: ProfileId,
+    query: &OriginPageQuery,
+) -> Result<(OriginPage, OriginProvenanceKey, OriginPageProof), HostError> {
+    let signed = origin_proof::export_local_archive_page(identity, core, profile, query)?;
+    let key = OriginProvenanceKey {
+        public_key_spki: signed.signer.spki_der.clone(),
+        fingerprint_sha256: signed.signer.fingerprint_sha256.clone(),
+    };
+    let proof = OriginPageProof {
+        entry_signatures: signed.entry_signatures,
+        through_signature: signed.through_signature,
+    };
+    Ok((signed.page, key, proof))
+}
+
+/// Verify historical source positions without granting live peer membership.
+pub(crate) fn verify_archive_origin_page(
+    page: &OriginPage,
+    key: &OriginProvenanceKey,
+    proof: &OriginPageProof,
+) -> Result<(), HostError> {
+    let signer = DeviceIdentityInfo {
+        device_id: page.origin.device_id,
+        spki_der: key.public_key_spki.clone(),
+        fingerprint_sha256: key.fingerprint_sha256.clone(),
+    };
+    let signed = origin_proof::SignedOriginPage {
+        page: page.clone(),
+        signer: signer.clone(),
+        through_signature: proof.through_signature.clone(),
+        entry_signatures: proof.entry_signatures.clone(),
+    };
+    signed.verify_positions(&page.origin, &signer)
+}
+
 const MAX_CONNECTIONS: usize = 8;
 pub use transport::{
     PeerCancellation, PeerChannel, PeerPin, PeerTransportListener, PeerTransportOptions,

@@ -43,7 +43,8 @@ pub use record_organization::{
 pub use replication::{
     DEFAULT_ORIGIN_PAGE_BYTES, ImportAck, MAX_ORIGIN_PAGE_BYTES, OriginCursor, OriginEntry,
     OriginIdentity, OriginPage, OriginPageProof, OriginPageQuery, OriginProvenanceKey,
-    OriginReceiveState, OriginSnapshot, ReplicaContext, ReplicatedFact, VerifiedOriginContext,
+    OriginReceiveState, OriginSnapshot, ProfileArchiveFactMatch, ProfileArchiveImportContext,
+    ProfileArchiveOriginalState, ReplicaContext, ReplicatedFact, VerifiedOriginContext,
     VerifiedOriginState,
 };
 use serde::{Deserialize, Serialize};

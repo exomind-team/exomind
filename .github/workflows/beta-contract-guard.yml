@@ -390,6 +390,27 @@ jobs:
               ],
             },
             {
+              name: 'core-profile-archive-admission',
+              args: ['test', '--locked', '-p', 'exomind-core', '--test', 'profile_archive_admission', '--', '--test-threads=1'],
+              expected: [
+                'archive_imported_summary_control_cannot_admit_an_unknown_paid_attempt',
+                'archive_imported_timer_is_history_only_on_a_new_device',
+                'archive_new_facts_with_a_cloned_local_device_id_are_rejected_before_projection_changes',
+              ],
+            },
+            {
+              name: 'host-profile-archive-public-api',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'profile_archive_public_api', '--', '--test-threads=1'],
+              expected: [
+                'archive_roundtrip_crosses_fact_pages_and_original_chunks',
+                'cancelled_or_over_budget_import_does_not_provision_a_profile',
+                'conflicting_ids_and_corrupt_archives_do_not_replace_existing_profile_facts',
+                'import_rejects_a_different_package_after_preview_without_provisioning_profile',
+                'one_profile_roundtrip_preserves_facts_and_originals_without_copying_authority',
+                'unsigned_archive_remains_explicitly_partial_after_import',
+              ],
+            },
+            {
               name: 'core-summary-currentness',
               args: ['test', '--locked', '-p', 'exomind-core', '--test', 'summaries', '--', '--test-threads=1'],
               expected: [
