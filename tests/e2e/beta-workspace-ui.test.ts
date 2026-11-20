@@ -29,6 +29,16 @@ test('grant card keeps its identity readable beside reachable actions on a narro
   await activate(page,card.getByRole('button',{name:'查看授权 ID 详情',exact:true}));
   await activate(page,card.getByRole('button',{name:'清除本机接入材料',exact:true}));
   await expect(page.getByRole('button',{name:'确认清除本机材料',exact:true})).toBeInViewport();
+  const contrast=await page.getByRole('button',{name:'确认清除本机材料',exact:true}).evaluate(element=>{
+    const style=getComputedStyle(element);
+    const luminance=(color:string)=>{
+      const parts=color.match(/[\d.]+/g)!.slice(0,3).map(Number).map(value=>{value/=255;return value<=.04045?value/12.92:((value+.055)/1.055)**2.4;});
+      return .2126*parts[0]+.7152*parts[1]+.0722*parts[2];
+    };
+    const foreground=luminance(style.color),background=luminance(style.backgroundColor);
+    return (Math.max(foreground,background)+.05)/(Math.min(foreground,background)+.05);
+  });
+  expect(contrast).toBeGreaterThanOrEqual(4.5);
   const dialog=page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'清除本机接入材料？',exact:true})});
   expect(await dialog.evaluate(element=>element.scrollWidth-element.clientWidth)).toBeLessThanOrEqual(1);
 });
