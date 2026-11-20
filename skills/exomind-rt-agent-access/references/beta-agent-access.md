@@ -1,8 +1,11 @@
-> 最后更新：`2026-11-16` | 更新者：`Codex` | 更新内容概要：`按正式 Beta 源码记录现有 HTTP 权限、分页、追加、回执与原件边界；不把旧 RT 或计划接口列为可用。`
+> 最后更新：`2026-11-20` | 更新者：`Codex` | 更新内容概要：`维护 Beta 分流、实际 HTTP 接入与生产 monitor 的验证范围；保留旧 RT 路线。`
 
 # Beta Agent 接入：exomind-beta/1
 
-适用于明确的 0.6 Beta 实例。源码基线 `2d8c827b7f813ef55f79a26ddb0e444cc9848cd0`；本文件来自代码与 [Beta 计划 V16](../../../docs/plans/2026-11-13-v0.6-beta-feature-plan.md) 核对，不是本轮 live 验收报告。
+适用于明确的 0.6 Beta 实例。当前协议接线已实现；生产 monitor 还在工作树收束。19 项 SDK
+边界回归与独立 Core10 source Host 的实际 HTTP 组合已通过，后者覆盖完整分页、三类文件
+字节/SHA、AgentNote 与有界 Wait。最终 Native 交接、系统剪贴板及真机分别验收，不能用
+source Host 结果代替冻结 Beta19 或后续候选。日用调用见 [Beta monitor](beta-monitor.md)。
 
 内容：连接与授权 → 分页与来源 → 分类追加与回执 → 原件 → 错误及未实现能力。旧 Runtime 的 `/act/*`、`/eventlog`、slug、匿名 scope 和配置文件均不在此路线使用。
 
@@ -19,14 +22,14 @@
 
 | grant | 当前可用范围 |
 |---|---|
-| `observer` | 同 P 的记录/混合时间线/精确来源、时间块与回顾只读、回执、已提交且本机可读的原件。不能 capture 或访问上传 stage。 |
+| `observer` | 同 P 的 records/timeline/精确来源、时间块与回顾只读、回执、已提交且本机可读的原件；可用有界 Wait 和 metadata Agent bundle。不能 capture 或访问上传 stage。 |
 | `agent_note` | 上述只读；追加 `agent_note` capture；同授权作者的原件 stage 创建、写块、验证、状态/预览及提交引用也已支持。不能控制人类时间块、启动/控制模型总结或管理模型配置。 |
-| `human` | 人类 Adapter 的 capture、时间块与模型任务控制；不是外部 Agent 的默认授权升级路径。 |
+| `human` | 人类 Adapter 的 capture、时间块与模型任务控制；通过有效 profile grant 读取时也可 Wait/export bundle，不是外部 Agent 的默认授权升级路径。 |
 | owner | 列出/建立档案、签发/撤销 grant、模型配置等管理面；直接调用 P 数据读写仍被拒绝。 |
 
 grant 不等于只读文件沙箱或“只能追加一条说明”：特别是 `agent_note` 的 stage 能力确实存在，不应在授权说明中隐去。stage 还有 P 与作者约束，不能读取其他作者的私有暂存。
 
-hello 当前只描述 `originals`、`max_original_chunk_bytes`、`timeblocks`、`typed_timeline`、`summary_jobs` 这些全局功能字段，不提供 per-grant capability 清单。授权类别以 broker 实际签发结果和业务响应为准；没有可调用的 `access/check` 端点。
+hello 只描述全局功能字段，不返回 per-grant 能力。使用源码已接线的 `access/check` 查询当前 token 的实际 grant；不要从 hello 推断某个角色可调用的 API。冻结的 Beta16 安装包不含这批后续源码增量，使用它时以其真实响应为准，不能因 404/403 回退到旧 Runtime。
 
 授权 broker 已有的管理面（不是 Agent 自行操作步骤）：
 
@@ -61,15 +64,46 @@ hello 当前只描述 `originals`、`max_original_chunk_bytes`、`timeblocks`、
 
 新写入不会加入正在读的固定快照。需要刷新时从新 highwater 开始，分别对账，不能把跨快照的半页拼成完整覆盖。摘要 raw `summary/1` 是不可变事实，不自带当前成功资格；如需判断当前有效，另读同 P 的 task 和 artifact view，旧正文仍绑定自身 ID/snapshot。
 
-## 新源码的有效能力发现（Beta04 安装包不含）
+## 当前源码的 grant 能力发现
 
-源码保存点 `1a797b96615ac643163e643d8a66ce5038277780` 起新增 `POST /beta/v1/profiles/P/access/check`。仅在 broker 明确提供的该版或更新实例使用；本文前述已构建 Beta04 仍不含此端点，404 不得触发旧 RT 回退。
+源码提供 `POST /beta/v1/profiles/P/access/check`。仅在 broker 提供的版本实际接线该 endpoint 时调用；未知版本的 404 不得触发旧 RT 回退。
 
 Body 为 `{"required":[]}`，或已知能力列表，如 `{"required":["events_read","capture_append_agent_note"]}`。返回当前 `runtime_id/device_id/profile_id/grant_kind/agent_id`、`allowed/unsupported` 及分页／原件分块上限，不返回 token、其他档案或模型配置。未知字段、未知能力、重复项或超过 32 项为 400；已知但此 grant 不具备的能力为 403；错 P 为 403、失效或撤销为 401。空列表只描述当前授权，不创建任务或凭据。
 
-能力名为 `events_read/timeline_read/receipts_read/originals_read/timeblocks_read/summaries_read`，写入依角色另外包含 `capture_append_human`、`capture_append_agent_note`、`originals_stage`、`timeblocks_control/summaries_control`。`wait/export_bundle/external_summary_append` 明确未实现，请求为 403。能力快照不保证某一条业务命令符合归属、状态或内容条件；后续每次操作仍重新校验当前授权。
+根接线 patch 应用后的能力集为 `events_read/timeline_read/receipts_read/originals_read/timeblocks_read/summaries_read/wait/export_bundle`；追加与控制能力仍按角色增加 `capture_append_human`、`capture_append_agent_note`、`originals_stage`、`timeblocks_control/summaries_control`、`external_summary_append`。查询时可请求 `{"required":["wait","export_bundle"]}`；不支持该源码能力的旧安装包可能返回 403 或没有这些名称，按实际响应停止，不回退到旧 RT。权限快照不保证某一条读取或字节导出具备资格，业务 endpoint 仍按 P、当前 grant 与原件 lifecycle 状态重新检查。
 
-该端点有真实 HTTP 与生命周期／撤销回归，尚不能代替外部 Agent 整体 V16 验收。以 broker 的精确源码和实际响应为准，不用全局 hello flags 推导私有权限。
+`access/check` 已有真实 HTTP 与生命周期／撤销回归，但不代替外部 Agent 整体 V16 验收。S08 Wait/bundle 的新增 HTTP 回归在本轮只写入、未运行；根接线 patch 尚未应用。以 broker 的精确源码和实际响应为准，不用全局 hello flags 推导私有权限。
+
+## 有界 Wait
+
+`POST /beta/v1/profiles/P/wait` 仅等待此 grant 绑定的 P 的 profile `local_seq` 高于给定 cursor；它不返回事实正文，也不等价于旧 Runtime 的 `POST /act/await` 任务、时间块或 proposal 条件。
+
+请求使用严格 JSON：
+
+```json
+{"after_local_seq":42,"timeout_ms":15000}
+```
+
+`after_local_seq` 是非负本机序号，必须不高于第一次读取的当前 highwater；`timeout_ms` 为 1–30000。当前实现每个活跃请求最多每 500ms 做一次 bounded Core highwater 读取，Host 同时最多接受 4 个 Wait；无活跃 Wait 时没有轮询。等待期间撤销会唤醒并重新校验授权；Host stop 返回 503 `stopped`；并发已满返回 429 `agent_wait_busy`。超时返回 200、`state="timeout"` 和最近一次读取的 highwater（若尚未完成第一次读取则为 `null`）；变化返回 `state="changed"` 和观察到的 highwater。客户端断开会丢弃该请求的轮询与 RAII 名额，不启动无人拥有的后台 waiter。一次已开始的 blocking Core 查询可能在断开后完成，但不会继续轮询。
+
+调用后沿同一 P 的 timeline/events API 读取；Wait 本身不给跨档案线索、条件 payload 或旧 `/act/await` 兼容承诺。
+
+## 服务端 Agent bundle
+
+`POST /beta/v1/profiles/P/export-bundle` 是限定范围的只读 Agent bundle，不是 Markdown/目录导出或全备份。请求字段均可省略并使用默认值：
+
+```json
+{"after_local_seq":0,"through":null,"before":null,"max_pages":4,"max_bytes":524288,"include_original_ids":[]}
+```
+
+- 首次响应的 `coverage.through` 固定该次 snapshot highwater；继续分页时原样带回 `through`，并用 `coverage.next_before` 作为下一请求的 `before`。
+- `after_local_seq` 是排他的范围下界；`before` 是 Core cursor。每页读取一个 typed timeline fact；`max_pages` 为 1–8（默认 4），`max_bytes` 为 4096–1048576（默认 524288），大小按最终 JSON 响应计算。
+- `coverage.scope="typed_timeline_supported_subset"` 明示当前包括 capture、timeblock/1、summary/1、agent_summary/1；`correction/1`、`orig_lifecycle/1` 与未来未知 fact type 不在该 typed timeline 查询里。`coverage.complete=true` 只表示此固定 snapshot 中该支持子集的请求范围读尽，不表示完整 Core 备份。
+- `facts` 带真实 `fact_id/event_id`、`kind`、`local_seq`、Core digest 和 typed record。页数、字节或 direct-original manifest 上限到达时 `complete=false`，返回 `next_before` 和 `stop_reason`；不能把截断写成 complete。
+- `originals` 默认只返回从所含事实直接引用的 hash、长度、文件名/媒体类型和本机 lifecycle 状态；不追随 summary source，不输出路径。只有 `include_original_ids` 显式列出已返回 fact 的直接引用、最多 16 件，才尝试附加 bytes。只有 `available/reclaimed` 状态可读，按 Core lifecycle permit 分块读取、验证完整长度与 SHA-256；响应将字节十六进制编码。`missing/released/restore_pending/unknown`、读取变化、完整性错误或 byte budget 不足均返回 `included=false` 与原因，不用零字节补位。
+- 选择不属于此 bundle fact 集的 original ID 返回 403。Observer 及其他有 P 读取权的 grant 可请求；owner 仍不能以 HTTP 绕过 grant 数据面。
+
+以上路径在本次源码工作区尚待应用 Agent 根接线 patch、Core lifecycle export patch并按交付报告验收；没有 live 运行结果时，不要把源码说明宣称成候选能力。
 
 ## 追加分类说明与查证回执
 
@@ -164,6 +198,7 @@ HTTP 业务错误返回 `{"error":{"code":"…","message":"…"}}`；判断 stat
 | 409 `conflict` | ID 已绑定其他内容/作者，不随机换 ID 掩盖。 |
 | 409 `original_not_ready` / `original_hash_mismatch` / `original_integrity_mismatch` | 缺件或校验未通过，不报字节完成。 |
 | 413 `payload_too_large` | 超出请求大小上限；不能只截断原文后沿用原命令。 |
+| 429 `agent_wait_busy` | 同时 Wait 已达 Host 上限；结束或取消现有请求后重试。 |
 | 503 `stopped` / `recovery_required` | 服务停止或资料需恢复，保留未确认命令，不把错误当空数据。 |
 
 回顾专用失败还可能是 `summary_forbidden/summary_blocked/summary_conflict/summary_not_found`；读 task/coverage 可以解释状态，但 observer/agent_note 不因此得到模型执行或控制权。
@@ -171,9 +206,9 @@ HTTP 业务错误返回 `{"error":{"code":"…","message":"…"}}`；判断 stat
 以下目前没有可用 Beta 接口，不能调用计划中的路径或回退 0.5：
 
 - 已构建 Beta04 尚无 per-grant `access/check`；后续源码的有条件接入见上节，hello 全局 features 不能代替。
-- Beta await/SSE/长轮询或旧 `/act/await` 的任务条件语义。有界客户端只读轮询现有接口只能称轮询；不得写成服务端等待已实现。
+- 旧 `/act/await` 的任务条件语义及其所有 fulfilled payload。Beta `wait` 只等档案序号变化，不兼容任务、时间块或 proposal await。
 - Beta04 的内部 `external_summary` 枚举仍是预留且不能作为追加方式；后续Core7的独立 producer／`agent_summary/1` 路线见上节，不借内部模型 request/control。
-- 选事件/块的 Markdown+manifest 导出 HTTP API。可以明确受限范围后自行导出已实际读到的资料，并核对 ID/字节/hash、列出缺页/缺件；这不是已实现的服务端完整导出。Native 单原件保存框也不供外部 HTTP Agent 调用。
+- Beta Agent bundle 是按上面的 typed timeline 子集提供 JSON；不提供产品 Markdown/目录导出或全备份。Native 单原件保存框也不供外部 HTTP Agent 调用。
 - 通过 Agent API 清理、回收、释放副本或兼容旧 0.5 协议。本 skill 不授权这些操作。
 
 ## 核验来源
@@ -183,4 +218,4 @@ HTTP 业务错误返回 `{"error":{"code":"…","message":"…"}}`；判断 stat
 - [原件 HTTP](../../../crates/exomind-beta-host/src/originals_http.rs)、[原件授权 facade](../../../crates/exomind-beta-host/src/originals.rs)、[原件真实字节](../../../crates/exomind-core/src/originals.rs)
 - [时间块 HTTP](../../../crates/exomind-beta-host/src/timeblocks_http.rs)、[回顾及精确来源 HTTP](../../../crates/exomind-beta-host/src/summary_jobs_http.rs)
 - [外部 producer 的显式拒绝](../../../crates/exomind-core/src/summaries/store.rs)、[事实校验](../../../crates/exomind-core/src/summaries/facts.rs)
-- [HTTP 权限回归](../../../crates/exomind-beta-host/tests/host.rs)、[原件范围回归](../../../crates/exomind-beta-host/tests/originals.rs)
+- [HTTP 权限回归](../../../crates/exomind-beta-host/tests/agent_access.rs)、[Wait HTTP 回归](../../../crates/exomind-beta-host/tests/agent_wait_http.rs)、[bundle HTTP 回归](../../../crates/exomind-beta-host/tests/agent_export_http.rs)、[原件范围回归](../../../crates/exomind-beta-host/tests/originals.rs)

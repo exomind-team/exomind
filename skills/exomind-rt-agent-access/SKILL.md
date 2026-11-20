@@ -8,6 +8,7 @@ description: Connect an external Agent to ExoMind through its actual HTTP protoc
 ## 先区分 Beta 与旧 Runtime
 
 - **0.6 Beta / `exomind-beta/1`**：先读 [Beta Agent 接入](references/beta-agent-access.md)。使用 broker 提供的精确地址、UUID 档案 P 和低权 grant；核对 `GET /beta/v1/hello` 的协议及设备身份。Beta 不走 `/act/*`，不能用 owner-only `/beta/v1/profiles` 发现档案，也不能把旧 RT 配置、slug、鉴权或 API 当作回退。
+  日常 monitor 流程另读 [Beta monitor adapter](references/beta-monitor.md)，使用真实 Native handoff 与显式 target；一次有界 Beta Wait 不继承旧 `/act/await` 语义。
 - **明确指定的旧 Runtime**：继续使用下文的 `/act/*` 优先、raw fallback 路线及原有 references。
 - 目标不明时先根据用户提供的实例信息识别；Beta 探测失败、功能未实现或返回拒绝时，停止该操作并报告事实，不能自动改打另一个旧实例。
 
@@ -39,14 +40,14 @@ description: Connect an external Agent to ExoMind through its actual HTTP protoc
 
 ## 版本与时效性
 
-- 最后更新日期：`2026-11-16`
+- 最后更新日期：`2026-11-20`
 - 更新者：`Codex`
-- 更新内容概要：`新增 Beta 与旧 Runtime 的准确分流；Beta 精确 scope/grant、已实现分页/追加/原件 API、HTTP 回执 404 与未实现能力独立披露；保留旧 RT 路线。`
+- 更新内容概要：`维护 Beta/旧 Runtime 分流；新增 production monitor adapter、完整分页/原件读取、有界 Wait、固定 ID 查证及旧 skill 的显式联动边界。`
 - 旧 Runtime 的历史核验依据（不是本轮 Beta live 结果）：
   - `GET /version` 等 live 版本信息
   - 当前工作区代码与相关路由实现
   - GitHub 对应 issue / PR / 文档信息
-- 核验范围：本轮 Beta 为源码与计划只读核对，未运行 HTTP/Agent 实测，不能据此宣称 V16 通过；旧 Runtime 下列基线保持独立。
+- 核验范围：Beta 生产 adapter 已通过 19 项边界回归及独立 Core10 source Host 的实际 HTTP 历史、三类原件 SHA、AgentNote、Wait、403/401 授权拒绝；最新联调 run `42b75def-b237-4bf3-bd3b-9ea674edd94d` 正常退出并清理。它不代替最终 Native 候选与真机；旧 Runtime 下列基线保持独立。
 - Beta 源码基线：`2d8c827b7f813ef55f79a26ddb0e444cc9848cd0`，`crates/exomind-beta-host/src/{lib,http,originals_http,timeblocks_http,summary_jobs_http}.rs` 与 `crates/exomind-core/src/{lib,store,originals}.rs`
 - 旧 Runtime 基线提交：`da88bc11`
 - 旧 Runtime 真相源：
@@ -97,6 +98,7 @@ description: Connect an external Agent to ExoMind through its actual HTTP protoc
 | 场景 | 读取文件 |
 |------|----------|
 | 0.6 Beta、`exomind-beta/1`、UUID P、observer/agent_note grant | [references/beta-agent-access.md](references/beta-agent-access.md)；不加载旧 RT API 作为回退 |
+| Beta 日常 monitor、完整事实分页、一次 Wait、原件字节或 agent_note 回执查证 | [references/beta-monitor.md](references/beta-monitor.md)；适配器源码位于 `skills/exomind-rt-agent-access/scripts/beta-monitor-adapter.mjs` |
 | 先确认 references 目录地图、关键词和跨域组合方式 | `references/index.md` |
 | 健康检查、版本、拓扑、profiles、signals、PowerShell curl 约定、鉴权边界 | `references/discovery-and-diagnostics.md` |
 | eventlog 读写、raw watch、备份、导入、清空 | `references/eventlog.md` |

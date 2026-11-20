@@ -23,6 +23,8 @@ on:
       - 'tests/fixtures/beta/**'
       - 'tests/unit/scripts/beta-core8-fixture.test.ts'
       - 'tests/unit/scripts/beta-core10-fixture*.test.ts'
+      - 'tests/unit/scripts/beta-monitor-adapter.test.ts'
+      - 'skills/exomind-rt-agent-access/**'
       - 'scripts/dev/beta-core8-fixture.ts'
       - 'scripts/dev/beta-core-fixture-source.ts'
       - 'scripts/dev/beta-core10-fixture.ts'
@@ -213,6 +215,7 @@ jobs:
             'tests/unit/scripts/beta-core8-fixture.test.ts',
             'tests/unit/scripts/beta-core10-fixture.test.ts',
             'tests/unit/scripts/beta-core10-fixture-execution.test.ts',
+            'tests/unit/scripts/beta-monitor-adapter.test.ts',
           ];
           assert.ok(process.env.CONTRACT_OUT);
           assert.equal(existsSync(process.env.CONTRACT_OUT), false, 'The source gate owns its new evidence directory');
