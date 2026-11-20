@@ -1,3 +1,4 @@
+import { Tooltip } from '@/components/ui/tooltip';
 import { BetaTimelineItemRow } from './BetaTimelineItemRow';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type MutableRefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
@@ -263,9 +264,9 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   const handoff=useBetaDeadlineHandoff(handoffs,status?`${status.device_id}:${status.runtime_id??''}:${generation.current}`:'',!!status&&switchGuardReady&&!switching&&!creating,openDeadlineHandoff);
   useEffect(()=>{if(handoff.pending||handoff.failed)setSection('now');},[handoff.pending?.handoff_id,handoff.failed]);
   const workspaceTools = <>{client.originalExports&&<BetaOriginalExportCenter client={client} profileId={profileId} visible={section==='now'}/>}<BetaRuntimeLocation endpoint={endpoint} compact/>
-    {isTauri()&&!/Android|iPhone|iPad/i.test(navigator.userAgent)&&<Button size="icon" variant="ghost" aria-label="专注浮窗" title="在浮窗打开当前档案" onClick={()=>{void invoke('beta_workspace_bind',{profileId}).then(()=>setBetaOverlayEnabled(true)).catch(failure=>setError(errorMessage(failure)));}}><PanelsTopLeft size={16}/></Button>}
+    {isTauri()&&!/Android|iPhone|iPad/i.test(navigator.userAgent)&&<Tooltip content="在浮窗打开当前档案"><Button size="icon" variant="ghost" aria-label="专注浮窗"  onClick={()=>{void invoke('beta_workspace_bind',{profileId}).then(()=>setBetaOverlayEnabled(true)).catch(failure=>setError(errorMessage(failure)));}}><PanelsTopLeft size={16}/></Button></Tooltip>}
     <FieldSelect id="beta-profile" label="当前档案" title="当前档案" className="max-w-28" value={profileId} disabled={!switchGuardReady||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profile.display_name}))}/>
-    <Button variant="ghost" size="icon" aria-label="管理档案" title={`档案：${profileName || '未选择'}`} onClick={()=>setProfileDialog(true)}><FolderOpen size={16}/></Button>
+    <Tooltip content={`档案：${profileName || '未选择'}`}><Button variant="ghost" size="icon" aria-label="管理档案"  onClick={()=>setProfileDialog(true)}><FolderOpen size={16}/></Button></Tooltip>
     {onDisconnect&&<Button variant="ghost" size="sm" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}</>;
   return <><BetaAppShell section={section} onSectionChange={setSection} profileName={profileName} onProfileClick={()=>setProfileDialog(true)}
     sync={<BetaPeersPage peers={peers} visible={section==='sync'} profileId={profileId} profileName={profileName} runtimeId={status?.runtime_id??''} deviceId={status?.device_id??''} onJoined={joined} onEventsChanged={changed=>{if(changed===profileId)setEventRevision(value=>value+1);}}/>}
@@ -980,8 +981,8 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
             }}>恢复暂存</Button>}
             <Button size="sm" variant="ghost" onClick={() => {void chooseFiles(file.id);}}>重新选择</Button>
           </>}
-          <Button type="button" size="icon" variant="ghost" className="h-9 w-9 shrink-0 rounded-full text-muted [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-            aria-label={`移除原件：${file.file_name}`} title={pending.some(item=>item.files?.some(selected=>selected.id===file.id))?'仅从下一份草稿移除；已提交的固定整组不受影响':file.state==='preparing'||file.state==='uploading'?'取消准备并移除附件（当前步骤完成后停止）':'移除附件'} onClick={() => { try { controller.removeFile(profileId, file.id); } catch (failure) { setError(errorMessage(failure)); } }}><X size={14} /></Button>
+          <Tooltip content={pending.some(item=>item.files?.some(selected=>selected.id===file.id))?'仅从下一份草稿移除；已提交的固定整组不受影响':file.state==='preparing'||file.state==='uploading'?'取消准备并移除附件（当前步骤完成后停止）':'移除附件'}><Button type="button" size="icon" variant="ghost" className="h-9 w-9 shrink-0 rounded-full text-muted [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+            aria-label={`移除原件：${file.file_name}`}  onClick={() => { try { controller.removeFile(profileId, file.id); } catch (failure) { setError(errorMessage(failure)); } }}><X size={14} /></Button></Tooltip>
         </div>)}
       </div>}
       {drafts.persistenceError && <p role="alert" className="mb-2 text-xs text-destructive">{drafts.persistenceError}</p>}

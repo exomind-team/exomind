@@ -1,3 +1,4 @@
+import { Tooltip } from '@/components/ui/tooltip';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Settings, Target, Waypoints } from 'lucide-react';
@@ -63,7 +64,7 @@ export function BetaAppShell({ section, onSectionChange, profileName, onProfileC
     <section data-beta-view="settings" hidden={section !== 'settings'} className={section === 'settings' ? 'h-full min-h-0 overflow-hidden' : 'hidden'}>{settings}</section>
   </>;
   const renderNavigationItem = (item: typeof items[number], view: { className: string; children: ReactNode; testId?: string }) =>
-    <button type="button" data-testid={view.testId} aria-label={item.title} aria-current={item.active ? 'page' : undefined} title={item.title} className={view.className} onClick={() => select(item.key)}>{view.children}</button>;
+    <Tooltip content={item.title}><button type="button" data-testid={view.testId} aria-label={item.title} aria-current={item.active ? 'page' : undefined}  className={view.className} onClick={() => select(item.key)}>{view.children}</button></Tooltip>;
   const slot=<div ref={attachWorkspace} className="h-full min-h-0 overflow-hidden"/>;
   const shell=!desktop?<AlphaMobileShellView items={items} fillContainer fullscreen={compactEditing} renderNavigationItem={renderNavigationItem}>{slot}</AlphaMobileShellView>
     :<AlphaDesktopShellView fillContainer sidebar={<AlphaDesktopSidebarView items={items} collapsed={collapsed}

@@ -1,3 +1,4 @@
+import { Tooltip } from '@/components/ui/tooltip';
 import { useEffect, useState } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Copy, MapPin, RefreshCw } from 'lucide-react';
@@ -55,9 +56,9 @@ export function BetaRuntimeLocation({ endpoint, compact = false }: { endpoint?: 
   return <Dialog open={open} onOpenChange={next => { setOpen(next); setNotice(''); setCopyError(''); }}>
     <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted">
       {!compact && <span className="shrink-0">{appVersion}</span>}
-      <DialogTrigger asChild><button type="button" className={`inline-flex min-w-0 items-center justify-center gap-1 rounded-md text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${compact ? 'h-9 w-9' : ''}`} aria-label="查看当前运行地址与资料目录" title={compact ? '当前运行位置' : label}>
+      <DialogTrigger asChild><Tooltip content={compact ? '当前运行位置' : label}><button type="button" className={`inline-flex min-w-0 items-center justify-center gap-1 rounded-md text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${compact ? 'h-9 w-9' : ''}`} aria-label="查看当前运行地址与资料目录" >
         <MapPin size={compact ? 16 : 12} className="shrink-0"/>{!compact && <span data-testid="beta-current-address" className="truncate">{label}</span>}
-      </button></DialogTrigger>
+      </button></Tooltip></DialogTrigger>
     </div>
     <DialogContent className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] overflow-y-auto">
       <DialogHeader><DialogTitle>当前运行位置</DialogTitle><DialogDescription>{native ? '服务地址与资料目录来自此应用当前使用的本机实例。' : '当前页面连接的服务地址。资料目录由服务所在设备管理。'}</DialogDescription></DialogHeader>

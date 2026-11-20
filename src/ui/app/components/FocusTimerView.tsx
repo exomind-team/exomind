@@ -1,3 +1,4 @@
+import { Tooltip } from '@/components/ui/tooltip';
 import type {
   ChangeEventHandler,
   FocusEventHandler,
@@ -294,13 +295,13 @@ export function FocusTimerView({
     }
 
     return (
-      <button
+      <Tooltip content="编辑时间块名称"><button
         type="button"
         data-testid="new-focus-running-name-display"
         onClick={handleBeginRunningNameEdit}
         onMouseDown={(event) => event.stopPropagation()}
         disabled={feedbackInProgress || isRunningNameSaving}
-        title="编辑时间块名称"
+
         className={`block min-w-0 max-w-full truncate rounded-[8px] text-left font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C75B3A]/45 disabled:cursor-default disabled:opacity-100 ${
           isOverlayVariant
             ? "pt-0.5 text-[18px] leading-[1.35] text-[#F5EDE7] hover:text-white"
@@ -308,7 +309,7 @@ export function FocusTimerView({
         }`}
       >
         {runningNameDisplayText}
-      </button>
+      </button></Tooltip>
     );
   };
 
@@ -553,10 +554,9 @@ export function FocusTimerView({
                   className="flex min-w-0 items-start justify-between gap-3"
                   data-testid="new-focus-overlay-running-header"
                 >
-                  <div
+                  <Tooltip content="按住这里拖动窗口"><div
                     data-testid="new-focus-overlay-drag-handle"
                     data-tauri-drag-region
-                    title="按住这里拖动窗口"
                     className="min-w-0 cursor-grab select-none active:cursor-grabbing"
                   >
                     <p
@@ -566,7 +566,7 @@ export function FocusTimerView({
                       {overlayChrome.statusLabel}
                     </p>
                     {renderRunningNameControl("overlay")}
-                  </div>
+                  </div></Tooltip>
                   <div className="ml-auto flex shrink-0 items-center gap-1.5">
                     {hasFocusBgmConfigured ? (
                       <Button
@@ -580,28 +580,28 @@ export function FocusTimerView({
                         {focusBgmToggleIcon}
                       </Button>
                     ) : null}
-                    <Button
+                    <Tooltip content="收起"><Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       onClick={overlayChrome.onCollapse}
                       aria-label="收起"
-                      title="收起"
+
                       className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/8 p-0 text-[#E7D7CF] hover:bg-white/15"
                     >
                       <Shrink size={15} />
-                    </Button>
-                    <Button
+                    </Button></Tooltip>
+                    <Tooltip content="显示主程序"><Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       onClick={overlayChrome.onReturnToMain}
                       aria-label="显示主程序"
-                      title="显示主程序"
+
                       className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/8 p-0 text-[#E7D7CF] hover:bg-white/15"
                     >
                       <ArrowUpRight size={15} />
-                    </Button>
+                    </Button></Tooltip>
                   </div>
                 </div>
               ) : (
@@ -671,17 +671,17 @@ export function FocusTimerView({
                     </span>
                   )}
                 </div>
-                <Button
+                <Tooltip content={endActionTitle}><Button
                   type="button"
                   data-testid="new-focus-end-button"
                   aria-label={endActionAriaLabel}
-                  title={endActionTitle}
+
                   disabled={actionsDisabled || isEndActionDisabled}
                   onClick={handleOpenEndDialog}
                   className={endActionButtonClass}
                 >
                   {endActionIcon}
-                </Button>
+                </Button></Tooltip>
               </div>
               {hasRunningLinkedTasks && (
                 <>
@@ -699,18 +699,16 @@ export function FocusTimerView({
                       className={`list-disc space-y-1 pl-4 text-[12px] leading-[1.35] ${isOverlaySurface ? "text-[#F5EDE7]" : "text-[#44403C] dark:text-[#E7E5E4]"}`}
                     >
                       {linkedTasks.map((task) => (
-                        <li
-                          key={task.id}
+                        <Tooltip key={task.id} content={task.title}><li
                           data-testid={`new-focus-running-linked-task-${task.id}`}
                           className={
                             useAutoHeightRunningLayout || !isOverlaySurface
                               ? "break-words whitespace-normal marker:text-[#C75B3A]"
                               : "truncate marker:text-[#C75B3A]"
                           }
-                          title={task.title}
                         >
                           {task.title}
-                        </li>
+                        </li></Tooltip>
                       ))}
                     </ul>
                   </div>

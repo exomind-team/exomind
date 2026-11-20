@@ -1,3 +1,4 @@
+import { Tooltip } from '@/components/ui/tooltip';
 import { Fragment, type ReactNode } from 'react';
 import { Brain, PanelLeftClose, PanelLeftOpen, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -32,9 +33,9 @@ export function AlphaDesktopSidebarView<T extends AppShellNavigationItem>({
     className={cn('flex h-full shrink-0 flex-col border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] transition-[width] duration-200 ease-out', collapsed ? 'w-16' : 'w-64')}>
     <div className={cn('border-b border-[hsl(var(--sidebar-border))]', collapsed ? 'p-2' : 'p-3')}>
       {brand ? <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'}`}>
-        <button type="button" data-testid="desktop-sidebar-toggle" aria-label="收起侧边栏" aria-pressed={collapsed} aria-expanded={!collapsed} title={collapsed ? '展开侧边栏' : '收起侧边栏'} onClick={onToggleCollapsed}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md outline-none transition-colors hover:bg-[hsl(var(--sidebar-accent))] focus-visible:ring-2 focus-visible:ring-ring">{brand}</button>
-        {!collapsed && <p className="min-w-0 truncate text-xs font-medium" title={typeof subtitle === 'string' ? subtitle : undefined}>{subtitle}</p>}
+        <Tooltip content={collapsed ? '展开侧边栏' : '收起侧边栏'}><button type="button" data-testid="desktop-sidebar-toggle" aria-label="收起侧边栏" aria-pressed={collapsed} aria-expanded={!collapsed}  onClick={onToggleCollapsed}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md outline-none transition-colors hover:bg-[hsl(var(--sidebar-accent))] focus-visible:ring-2 focus-visible:ring-ring">{brand}</button></Tooltip>
+        {!collapsed && <Tooltip content={typeof subtitle === 'string' ? subtitle : undefined}><p className="min-w-0 truncate text-xs font-medium"  tabIndex={0}>{subtitle}</p></Tooltip>}
       </div> : collapsed ? <div className="flex flex-col items-center gap-2 rounded-md py-2">
         <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]"><Brain size={16}/></div>
         <button type="button" data-testid="desktop-sidebar-toggle" aria-label="展开侧边栏" aria-expanded="false" onClick={onToggleCollapsed}

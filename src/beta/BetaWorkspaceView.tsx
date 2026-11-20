@@ -1,3 +1,4 @@
+import { Tooltip } from '@/components/ui/tooltip';
 import { type ReactNode } from 'react';
 import { ChevronDown, EyeOff, Maximize2, NotebookPen, RefreshCw, RotateCcw, Search, Sparkles, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -7,11 +8,11 @@ export function BetaWorkspaceToolbar({ layout, onChange, hasFocus, tools }: {
   layout: BetaWorkspaceLayout; onChange: (patch: Partial<BetaWorkspaceLayout>) => void; hasFocus: boolean; tools?: ReactNode;
 }) {
   return <div data-testid="beta-workspace-toolbar" className="flex min-h-11 shrink-0 items-center gap-1 border-b border-border-page px-3" aria-label="工作区视图">
-    <Button size="icon" variant={layout.minimal ? 'secondary' : 'ghost'} aria-label="简洁记录" title="简洁记录" aria-pressed={!!layout.minimal} onClick={() => onChange({ minimal: !layout.minimal })}><Maximize2 size={16} aria-hidden="true"/></Button>
+    <Tooltip content="简洁记录"><Button size="icon" variant={layout.minimal ? 'secondary' : 'ghost'} aria-label="简洁记录"  aria-pressed={!!layout.minimal} onClick={() => onChange({ minimal: !layout.minimal })}><Maximize2 size={16} aria-hidden="true"/></Button></Tooltip>
     {!layout.minimal && <>
-    {hasFocus && <Button size="icon" variant={layout.focus === 'hidden' ? 'secondary' : 'ghost'} aria-label="隐藏专注" title="隐藏专注" aria-pressed={layout.focus === 'hidden'} onClick={() => onChange({ focus: layout.focus === 'hidden' ? 'expanded' : 'hidden' })}><Target size={16} aria-hidden="true" /></Button>}
-    <Button size="icon" variant={layout.records === 'hidden' ? 'secondary' : 'ghost'} aria-label="隐藏记录" title="隐藏记录" aria-pressed={layout.records === 'hidden'} onClick={() => onChange({ records: layout.records === 'hidden' ? 'expanded' : 'hidden' })}><EyeOff size={16} aria-hidden="true" /></Button>
-    {(layout.records !== 'expanded' || hasFocus && layout.focus !== 'expanded') && <Button size="icon" variant="ghost" aria-label="恢复默认视图" title="恢复默认视图" onClick={() => onChange({ focus: 'expanded', records: 'expanded' })}><RotateCcw size={15} aria-hidden="true"/></Button>}
+    {hasFocus && <Tooltip content="隐藏专注"><Button size="icon" variant={layout.focus === 'hidden' ? 'secondary' : 'ghost'} aria-label="隐藏专注"  aria-pressed={layout.focus === 'hidden'} onClick={() => onChange({ focus: layout.focus === 'hidden' ? 'expanded' : 'hidden' })}><Target size={16} aria-hidden="true" /></Button></Tooltip>}
+    <Tooltip content="隐藏记录"><Button size="icon" variant={layout.records === 'hidden' ? 'secondary' : 'ghost'} aria-label="隐藏记录"  aria-pressed={layout.records === 'hidden'} onClick={() => onChange({ records: layout.records === 'hidden' ? 'expanded' : 'hidden' })}><EyeOff size={16} aria-hidden="true" /></Button></Tooltip>
+    {(layout.records !== 'expanded' || hasFocus && layout.focus !== 'expanded') && <Tooltip content="恢复默认视图"><Button size="icon" variant="ghost" aria-label="恢复默认视图"  onClick={() => onChange({ focus: 'expanded', records: 'expanded' })}><RotateCcw size={15} aria-hidden="true"/></Button></Tooltip>}
     </>}
     <div className="ml-auto flex min-w-0 items-center gap-1">{tools}</div>
   </div>;
@@ -23,9 +24,9 @@ export function BetaHistoryToolbar({ onCollapse, onSearch, onRefresh, onReview, 
   return <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-page px-3" aria-label="记录工具">
     <Button size="sm" variant="ghost" aria-label="折叠记录" aria-expanded="true" onClick={onCollapse}><NotebookPen size={14} aria-hidden="true"/><span>记录</span><ChevronDown size={12} aria-hidden="true"/></Button>
     <div className="ml-auto flex items-center gap-1">
-      <Button size="icon" variant={searchOpen ? 'secondary' : 'ghost'} aria-label="检索记录" title="检索记录" aria-pressed={searchOpen} onClick={onSearch}><Search size={15} aria-hidden="true"/></Button>
-      <Button size="icon" variant="ghost" aria-label="刷新记录" title="刷新记录" onClick={onRefresh}><RefreshCw size={15} aria-hidden="true"/></Button>
-      <Button size="icon" variant="ghost" aria-label="回顾" title="回顾" onClick={onReview}><Sparkles size={15} aria-hidden="true"/></Button>
+      <Tooltip content="检索记录"><Button size="icon" variant={searchOpen ? 'secondary' : 'ghost'} aria-label="检索记录"  aria-pressed={searchOpen} onClick={onSearch}><Search size={15} aria-hidden="true"/></Button></Tooltip>
+      <Tooltip content="刷新记录"><Button size="icon" variant="ghost" aria-label="刷新记录"  onClick={onRefresh}><RefreshCw size={15} aria-hidden="true"/></Button></Tooltip>
+      <Tooltip content="回顾"><Button size="icon" variant="ghost" aria-label="回顾"  onClick={onReview}><Sparkles size={15} aria-hidden="true"/></Button></Tooltip>
     </div>
   </div>;
 }

@@ -72,7 +72,7 @@ export function BetaAudioRecorder({ controller, profileId, profileName, profileN
           <Button
             type="button" size="icon" variant="ghost"
             className="h-9 w-9 shrink-0 rounded-full text-muted hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-            aria-label="开始原声录音" title="开始原声录音"
+            aria-label="开始原声录音"
             onClick={() => { void controller.start(profileId).catch(() => {}); }}
           >
             <Mic size={16} />
@@ -99,7 +99,7 @@ export function BetaAudioRecorder({ controller, profileId, profileName, profileN
             {formatDuration(snapshot.durationMs)}
           </span>
           <span className="min-w-[5.5ch] font-mono text-xs tabular-nums text-muted" aria-label="已收集原声字节" data-testid="beta-audio-bytes">
-            <span title={exactBytes(snapshot.byteLength)}>{formatBytes(snapshot.byteLength)}</span>
+            <Tooltip content={exactBytes(snapshot.byteLength)}><span  tabIndex={0}>{formatBytes(snapshot.byteLength)}</span></Tooltip>
           </span>
           {(nearDurationLimit || nearByteLimit) && (
             <span className="text-[11px] text-secondary" role="status">
@@ -107,7 +107,7 @@ export function BetaAudioRecorder({ controller, profileId, profileName, profileN
             </span>
           )}
           <ActionTooltip label="停止并保留原声">
-            <Button type="button" size="sm" variant="outline" onClick={() => { void controller.stop(); }} aria-label="停止原声录音" title="停止并保留原声">
+            <Button type="button" size="sm" variant="outline" onClick={() => { void controller.stop(); }} aria-label="停止原声录音" >
               <Square size={13} className="mr-1.5 fill-current" />停止
             </Button>
           </ActionTooltip>
@@ -124,18 +124,18 @@ export function BetaAudioRecorder({ controller, profileId, profileName, profileN
         <div className="flex min-w-0 items-center gap-2 text-xs text-secondary" role="status" aria-live="polite">
           <LoaderCircle size={15} className="shrink-0 animate-spin" />
           <span>正在收束原声</span>
-          <span className="font-mono tabular-nums" title={exactBytes(snapshot.byteLength)}>{formatDuration(snapshot.durationMs)} · {formatBytes(snapshot.byteLength)}</span>
+          <Tooltip content={exactBytes(snapshot.byteLength)}><span className="font-mono tabular-nums"  tabIndex={0}>{formatDuration(snapshot.durationMs)} · {formatBytes(snapshot.byteLength)}</span></Tooltip>
         </div>
       )}
 
       {phase === 'awaiting_attachment' && (
         <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="beta-audio-pending-status">
-          <span className="min-w-0 max-w-48 truncate text-xs font-medium text-foreground" title={snapshot.fileName ?? undefined}>
+          <Tooltip content={snapshot.fileName ?? undefined}><span className="min-w-0 max-w-48 truncate text-xs font-medium text-foreground"  tabIndex={0}>
             原声待保存到草稿
-          </span>
-          <span className="font-mono text-xs tabular-nums text-muted" title={exactBytes(snapshot.byteLength)}>
+          </span></Tooltip>
+          <Tooltip content={exactBytes(snapshot.byteLength)}><span className="font-mono text-xs tabular-nums text-muted"  tabIndex={0}>
             {formatDuration(snapshot.durationMs)} · {formatBytes(snapshot.byteLength)}
-          </span>
+          </span></Tooltip>
           {scopeMismatch && (
             <div className="flex flex-wrap items-center gap-2" role="status">
               <span className="text-xs text-secondary">属于档案 {boundProfileName}；请回到该档案继续保存</span>
@@ -176,7 +176,7 @@ export function BetaAudioRecorder({ controller, profileId, profileName, profileN
         <div className="flex min-w-0 items-center gap-2 text-xs text-secondary" role="status" aria-live="polite">
           <LoaderCircle size={15} className="shrink-0 animate-spin" />
           <span>正在保存到记录草稿</span>
-          <span className="font-mono tabular-nums" title={exactBytes(snapshot.byteLength)}>{formatDuration(snapshot.durationMs)} · {formatBytes(snapshot.byteLength)}</span>
+          <Tooltip content={exactBytes(snapshot.byteLength)}><span className="font-mono tabular-nums"  tabIndex={0}>{formatDuration(snapshot.durationMs)} · {formatBytes(snapshot.byteLength)}</span></Tooltip>
         </div>
       )}
 

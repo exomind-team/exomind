@@ -14,7 +14,10 @@ on:
       - 'scripts/dev/beta-build-request.ts'
       - 'scripts/dev/beta-patch-preflight.mjs'
       - 'scripts/dev/beta-apk-identity.mjs'
+      - 'scripts/dev/beta-staged-imports.mjs'
+      - 'tests/unit/ui/tooltip.test.tsx'
       - 'tests/unit/scripts/beta-apk-identity.test.mjs'
+      - 'tests/unit/scripts/beta-staged-imports.test.mjs'
       - 'tests/unit/scripts/beta-patch-preflight.test.mjs'
       - 'docs/development/beta-core8-migration-fixture.md'
       - 'tests/fixtures/beta/**'
@@ -93,7 +96,7 @@ jobs:
           echo "CORE10_EVIDENCE=$CORE10_EVIDENCE" >> "$GITHUB_ENV"
       - name: Install frozen frontend dependencies
         run: bun install --frozen-lockfile --ignore-scripts
-      - name: Run bounded 15-file Beta regressions
+      - name: Run bounded Beta interface regressions
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -106,6 +109,7 @@ jobs:
           const evidence = process.env.CORE8_EVIDENCE;
           assert.ok(evidence, 'CORE8_EVIDENCE must name an external evidence directory');
           const featureTests = [
+            'tests/unit/ui/tooltip.test.tsx',
             'tests/unit/beta/audio-recording.test.ts',
             'tests/unit/beta/audio-recording-ui.test.tsx',
             'tests/unit/beta/period-window.test.ts',
@@ -166,6 +170,8 @@ jobs:
           NODE
       - name: Check read-only patch intake
         run: node --test --test-concurrency=1 tests/unit/scripts/beta-patch-preflight.test.mjs tests/unit/scripts/beta-apk-identity.test.mjs
+      - name: Check staged import audit contract
+        run: node --test --test-concurrency=1 tests/unit/scripts/beta-staged-imports.test.mjs
       - name: Check evidence rejection rules
         run: bun run test:beta:contract-evidence
       - name: Check original diagnostics and candidate identity

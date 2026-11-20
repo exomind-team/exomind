@@ -1,3 +1,4 @@
+import { Tooltip } from '@/components/ui/tooltip';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -46,18 +47,18 @@ export function BetaOriginalExportCenter({ client, profileId, visible = true }: 
 
   return <Dialog open={open && viewActive} onOpenChange={next => { setOpen(next && viewActive); }}>
     <DialogTrigger asChild>
-      <Button
+      <Tooltip content={history.phase === 'failed'
+          ? '导出历史读取失败；打开任务中心后可重试'
+          : running ? running + ' 项导出正在处理' : '附件导出任务'}><Button
         variant="ghost"
         size="icon"
         aria-label="附件导出任务"
-        title={history.phase === 'failed'
-          ? '导出历史读取失败；打开任务中心后可重试'
-          : running ? running + ' 项导出正在处理' : '附件导出任务'}
+
         className="relative"
       >
         <Download size={16}/>
         {running > 0 && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-brand-accent"/>}
-      </Button>
+      </Button></Tooltip>
     </DialogTrigger>
     <DialogContent className="max-h-[80dvh] overflow-y-auto">
       <DialogHeader>

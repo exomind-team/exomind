@@ -1,6 +1,7 @@
 import type React from 'react';
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useId } from 'react';
 import type { CSSProperties } from 'react';
+import { Tooltip } from '@/components/ui/tooltip';
 
 const SettingsToneContext = createContext<string | null>(null);
 
@@ -52,21 +53,26 @@ export function SettingRow({
   title?: string;
 }) {
   const Wrapper = onClick ? 'button' : 'div';
+  const explanationId = useId();
+  const explanation = disabled && title ? title : undefined;
   return (
-    <Wrapper
+    <Tooltip content={title}><Wrapper
       data-testid={testId}
       type={onClick ? 'button' : undefined}
       onClick={onClick}
       disabled={onClick ? disabled : undefined}
-      title={title}
+      aria-describedby={explanation ? explanationId : undefined}
       className={`flex w-full items-center justify-between px-4 py-[14px] ${onClick ? 'active:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60 dark:active:bg-stone-800' : ''} ${className}`}
     >
       <div className="flex items-center gap-3">
         {icon ?? null}
-        <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">{label}</span>
+        <span>
+          <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">{label}</span>
+          {explanation && <span id={explanationId} className="mt-1 block text-xs leading-5 text-muted">{explanation}</span>}
+        </span>
       </div>
       {right}
-    </Wrapper>
+    </Wrapper></Tooltip>
   );
 }
 

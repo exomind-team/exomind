@@ -1,3 +1,4 @@
+import { Tooltip } from '@/components/ui/tooltip';
 import { useEffect,useLayoutEffect,useRef,useState,useSyncExternalStore,type KeyboardEvent } from 'react';
 import { FocusTimerView,type FocusTimerViewModel } from '@/ui/app/components/FocusTimerView';
 import { TimeBlockFeedbackDialog } from '@/ui/app/components/TimeBlockFeedbackDialog';
@@ -110,7 +111,7 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
       {onCollapse&&<Button size="sm" variant="ghost" aria-label="折叠专注" aria-expanded="true" onClick={onCollapse}><Target size={14} aria-hidden="true"/><ChevronDown size={12} aria-hidden="true"/></Button>}
       {active&&<Button size="sm" variant="ghost" disabled={disabled} onClick={()=>{setCustom({editing:false,text:String(state.draft.minutes)});setPanel({kind:'rotate',from:active.block_id,name:active.name});}}>切换时间块</Button>}
       {!!Object.keys(roster).length&&<><FieldSelect label="反馈时间块" className="max-w-44" value={selected} onValueChange={setChoice} options={Object.entries(roster).map(([id,name])=>({value:id,label:name}))}/><Button size="sm" variant="ghost" disabled={!selected||disabled} onClick={()=>setFeedback({id:selected,kind:'append'})}>追加反馈</Button></>}
-      <Button size="icon" variant="ghost" className="ml-auto h-8 w-8" aria-label="刷新时间块" title="刷新时间块" onClick={()=>void controller.refresh()}><RefreshCw size={14} aria-hidden="true" /></Button>
+      <Tooltip content="刷新时间块"><Button size="icon" variant="ghost" className="ml-auto h-8 w-8" aria-label="刷新时间块"  onClick={()=>void controller.refresh()}><RefreshCw size={14} aria-hidden="true" /></Button></Tooltip>
       {state.persistenceState==='pending'?<span role="status">正在暂存时间块草稿…</span>:state.persistenceState==='idle'&&(state.draft.name.trim()||Object.values(state.feedback).some(item=>item.text.trim()))?<span role="status">草稿已暂存 · 尚未提交</span>:null}
     </div>
     {(error||state.error||state.cacheError)&&<p role="alert" className="px-5 py-2 text-xs text-destructive">{error||state.error||state.cacheError}</p>}
