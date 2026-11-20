@@ -4,6 +4,11 @@
 .beta-ui * {
   scrollbar-width: none;
 }
+/* A display utility must never reveal a collapsed menu or workspace pane. */
+.beta-ui[hidden],
+.beta-ui [hidden] {
+  display: none !important;
+}
 .beta-ui::-webkit-scrollbar,
 .beta-ui *::-webkit-scrollbar {
   display: none;
