@@ -8,7 +8,6 @@ on:
       - .github/workflows/beta-native-size-probe.yml
       - Cargo.lock
       - src-tauri/Cargo.toml
-      - src-tauri/tauri.beta.conf.json
       - src-tauri/src/lib.rs
       - src-tauri/src/commands/mod.rs
       - src-tauri/src/dev_instance_paths.rs
