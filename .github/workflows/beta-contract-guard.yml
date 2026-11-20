@@ -12,6 +12,8 @@ on:
       - 'specs/**'
       - 'scripts/dev/beta-contract-*.ts'
       - 'scripts/dev/beta-build-request.ts'
+      - 'scripts/dev/beta-patch-preflight.mjs'
+      - 'tests/unit/scripts/beta-patch-preflight.test.mjs'
       - 'scripts/dev/beta-core8-fixture.ts'
       - 'tests/unit/scripts/beta-core8-fixture.test.ts'
       - 'tests/fixtures/beta/**'
@@ -82,6 +84,8 @@ jobs:
           echo "CORE10_EVIDENCE=$CORE10_EVIDENCE" >> "$GITHUB_ENV"
       - name: Install frozen frontend dependencies
         run: bun install --frozen-lockfile --ignore-scripts
+      - name: Check read-only patch intake
+        run: node --test tests/unit/scripts/beta-patch-preflight.test.mjs
       - name: Check evidence rejection rules
         run: bun run test:beta:contract-evidence
       - name: Check original diagnostics and candidate identity
