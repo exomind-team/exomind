@@ -1615,7 +1615,15 @@ fn save_to_destination(
     let expected_length = record.byte_length.ok_or_else(|| save_failure("archive_spool_unverified", "档案长度未确认", false))?;
     let expected_sha = record.archive_sha256.as_deref().ok_or_else(|| save_failure("archive_spool_unverified", "档案 SHA-256 未确认", false))?;
     match destination {
-        FilePath::Path(path) => save_to_path(path, spool_path, paths, run, expected_length, expected_sha),
+        FilePath::Path(path) => {
+            #[cfg(not(target_os = "android"))]
+            { save_to_path(path, spool_path, paths, run, expected_length, expected_sha) }
+            #[cfg(target_os = "android")]
+            {
+                let _ = (path, paths);
+                Err(save_failure("archive_destination_unsupported", "请通过系统文档选择器选择保存位置", false))
+            }
+        }
         FilePath::Url(uri) => {
             #[cfg(target_os = "android")]
             { save_to_uri(app, uri, spool_path, run, expected_length, expected_sha) }

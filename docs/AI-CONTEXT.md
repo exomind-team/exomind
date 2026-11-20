@@ -50,6 +50,11 @@ Beta 的 Core/Host/Native/UI 边界按上面的当前入口读取，不把下表
 
 ## 当前阶段
 
+2026-11-21 后续候选修复：Beta20 source `6ad7869d` 的 Source Contracts 已通过，但四平台
+构建的 Android job 在档案保存分支发现 `E0425`：Android 引用了仅桌面编译的保存函数。
+工作区已隔离该平台分支，并为不支持的保存位置补可操作反馈；新版本入口递增为
+**Beta21／6021**。Beta20 的 source／recipe 和失败记录保留，不将桌面通过当成 Android 通过。
+
 2026-11-21 工作区已完成档案往返／选取内容导出的 Native 与 UI 接线，准备
 **Beta20／6020／Core11**。733 项 Beta 前端、完整类型与生产 Web、90 项 Beta Native、
 Host 导出 9 项及选择预算 5 项通过，本地源码合同门禁通过。个人 monitor Skill 的独立

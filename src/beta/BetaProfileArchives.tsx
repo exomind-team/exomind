@@ -15,6 +15,9 @@ const TERMINAL = new Set<ProfileArchivePhase>(['succeeded', 'cancelled', 'failed
 function ongoing(row: ProfileArchiveTask) { return !TERMINAL.has(row.phase); }
 function message(error: unknown) { return error instanceof Error ? error.message : '无法确认档案操作，请刷新操作历史核对结果。'; }
 function finishedLabel(row: ProfileArchiveTask) {
+  if (row.phase === 'failed' && row.failure_code === 'archive_destination_unsupported') {
+    return '此保存位置不受支持，请通过系统文档选择器重新选择位置。';
+  }
   if (row.phase !== 'succeeded') return PHASE[row.phase];
   const result = row.direction === 'import' ? '导入完成' : '备份已保存';
   return row.archive_complete === false ? `${result}，内容不完整` : result;

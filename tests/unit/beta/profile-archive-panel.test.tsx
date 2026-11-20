@@ -29,6 +29,15 @@ function client(rows: ProfileArchiveTask[] = []) {
 }
 
 describe('profile archive user controls', () => {
+  it('explains how to recover when the system returns an unsupported save location', async () => {
+    const row = { ...preview(), direction: 'export' as const, phase: 'failed' as const,
+      preview: undefined, failure_code: 'archive_destination_unsupported' };
+    const api = client([row]);
+    render(<BetaProfileArchiveEntry client={api} profileId={PROFILE} profileName="已有档案" />);
+    fireEvent.click(screen.getByRole('button', { name: '档案备份与导入' }));
+    expect(await screen.findByText('此保存位置不受支持，请通过系统文档选择器重新选择位置。')).toBeVisible();
+  });
+
   it('loads only on explicit opening and allows an empty device to choose an import source', async () => {
     const api = client();
     render(<BetaProfileArchiveEntry client={api} profileId="" profileName="" />);

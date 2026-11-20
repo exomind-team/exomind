@@ -1,5 +1,14 @@
 # Beta16 冻结与 Beta 持续完成计划
 
+## Beta20 构建失败与 Beta21 修复
+
+Beta20 固定 source `6ad7869dcec271bbc3f103dbacc2d6d512d2d7ca`、recipe
+`ba6bae4d88050e910bf66452278618eb594704e7`，Source Contracts run `44774969606`
+成功。四平台 run `44775196313` 的 Android job 在真实 ARM64 编译报 `E0425`：
+档案保存的 Path 分支调用了 Android 下未编译的桌面函数。这是平台编译缺口，不归为
+设备或安装限制。已补平台分支隔离，并为系统返回不支持的位置提供重新选址反馈。
+修复版本递增为 Beta21／6021；旧 Beta20 来源与失败证据不移动。
+
 ## 2026-11-21 源码收束状态
 
 下一候选的版本入口已准备为 **Beta20／6020／Core11**；source SHA 尚待本轮提交后固定，旧 Beta19 的 payload／recipe 不变。本节覆盖下方较早的阶段性状态，不代表 Beta20 二进制或完整 Beta 已验收。
