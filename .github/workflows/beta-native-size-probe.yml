@@ -84,6 +84,8 @@ jobs:
           $readobj = Join-Path $toolBin 'llvm-readobj.exe'
           if (-not (Test-Path -LiteralPath $linker -PathType Leaf)) { throw 'Owned Rust toolchain rust-lld.exe is missing' }
           if (-not (Test-Path -LiteralPath $readobj -PathType Leaf)) { throw 'Rust llvm-tools-preview llvm-readobj.exe is missing' }
+          & $linker -flavor link --version
+          if ($LASTEXITCODE -ne 0) { throw 'Windows linker version preflight failed before compilation' }
 
           $evidenceRoot = Join-Path $env:RUNNER_TEMP "exomind-beta-native-size-probe-ab-$($env:GITHUB_RUN_ID)-attempt-$($env:GITHUB_RUN_ATTEMPT)"
           if (Test-Path -LiteralPath $evidenceRoot) { throw 'Probe artifact directory already exists' }

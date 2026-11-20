@@ -454,7 +454,8 @@ async function captureToolchain(linker, readobj) {
     cargo_version: runCaptured("cargo", ["-V"]),
     target: TARGET,
     linker: "Rust toolchain rust-lld.exe",
-    linker_version: runCaptured(linker, ["--version"]),
+    // rust-lld is a generic driver, including for version queries.
+    linker_version: runCaptured(linker, ["-flavor", "link", "--version"]),
     linker_sha256: await sha256File(linker),
     llvm_readobj_version: runCaptured(readobj, ["--version"]),
     llvm_readobj_sha256: await sha256File(readobj)
