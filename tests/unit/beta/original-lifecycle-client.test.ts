@@ -79,6 +79,21 @@ function cleanup(
 }
 
 describe("Native original lifecycle client contract", () => {
+  it("accepts the unchanged lifecycle schema 1 capability from Core 11 without downgrading its identity", async () => {
+    const descriptor = { ...capabilities(), core_schema: 11, supports_restore_retry: true };
+    const nativeInvoke = vi.fn(async () => descriptor);
+    const client = createOriginalLifecycleClient(nativeInvoke as unknown as OriginalLifecycleInvoke);
+    await expect(client.capabilities()).resolves.toEqual(descriptor);
+    expect(nativeInvoke).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([12, 11.5, "11"])("rejects unverified Core capability %s", async (coreSchema) => {
+    const nativeInvoke = vi.fn(async () => ({ ...capabilities(), core_schema: coreSchema }));
+    const client = createOriginalLifecycleClient(nativeInvoke as unknown as OriginalLifecycleInvoke);
+    await expect(client.capabilities()).rejects.toMatchObject({ code: "unsupported_schema" });
+    expect(nativeInvoke).toHaveBeenCalledTimes(1);
+  });
+
   it("reads the schema 1 / Core 10 descriptor and preserves mobile reveal denial", async () => {
     const nativeInvoke = vi.fn(async () => capabilities(false, "retained"));
     const client = createOriginalLifecycleClient(

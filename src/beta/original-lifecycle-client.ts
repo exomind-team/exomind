@@ -11,6 +11,7 @@ export const ORIGINAL_LIFECYCLE_COMMANDS = {
 
 export const ORIGINAL_LIFECYCLE_SCHEMA_VERSION = 1;
 export const ORIGINAL_LIFECYCLE_CORE_SCHEMA = 10;
+const SUPPORTED_LIFECYCLE_CORE_SCHEMAS = [ORIGINAL_LIFECYCLE_CORE_SCHEMA, 11] as const;
 
 export type OriginalLifecycleAction =
   | "reclaim"
@@ -41,7 +42,7 @@ export type OriginalCacheCleanupReason =
 
 export interface OriginalLifecycleCapabilities {
   schema_version: 1;
-  core_schema: 10;
+  core_schema: 10 | 11;
   operations: OriginalLifecycleAction[];
   cache_policy: OriginalCachePolicy;
   supports_reveal: boolean;
@@ -230,7 +231,7 @@ function parseCapabilities(value: unknown): OriginalLifecycleCapabilities {
   const descriptor = object(value);
   if (
     descriptor.schema_version !== ORIGINAL_LIFECYCLE_SCHEMA_VERSION ||
-    descriptor.core_schema !== ORIGINAL_LIFECYCLE_CORE_SCHEMA ||
+    !(SUPPORTED_LIFECYCLE_CORE_SCHEMAS as readonly unknown[]).includes(descriptor.core_schema) ||
     !Array.isArray(descriptor.operations) ||
     typeof descriptor.cache_policy !== "string" ||
     !["verified_same_handle", "retained"].includes(descriptor.cache_policy) ||
@@ -261,7 +262,7 @@ function parseCapabilities(value: unknown): OriginalLifecycleCapabilities {
   }
   return {
     schema_version: 1,
-    core_schema: 10,
+    core_schema: descriptor.core_schema as 10 | 11,
     operations: operations as OriginalLifecycleAction[],
     cache_policy: descriptor.cache_policy as OriginalCachePolicy,
     supports_reveal: descriptor.supports_reveal,
