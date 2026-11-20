@@ -16,13 +16,14 @@ on:
       - 'scripts/dev/beta-apk-identity.mjs'
       - 'tests/unit/scripts/beta-apk-identity.test.mjs'
       - 'tests/unit/scripts/beta-patch-preflight.test.mjs'
-      - 'scripts/dev/beta-core8-fixture.ts'
-      - 'scripts/dev/beta-core10-fixture.ts'
-      - 'scripts/dev/beta-core-fixture-source.ts'
-      - 'docs/development/beta-core10-migration-fixture.md'
+      - 'docs/development/beta-core8-migration-fixture.md'
+      - 'tests/fixtures/beta/**'
       - 'tests/unit/scripts/beta-core8-fixture.test.ts'
       - 'tests/unit/scripts/beta-core10-fixture*.test.ts'
-      - 'tests/fixtures/beta/**'
+      - 'scripts/dev/beta-core8-fixture.ts'
+      - 'scripts/dev/beta-core-fixture-source.ts'
+      - 'scripts/dev/beta-core10-fixture.ts'
+      - 'docs/development/beta-core10-migration-fixture.md'
       - 'tests/unit/scripts/beta-contract-*.test.ts'
       - 'tests/unit/scripts/beta-build-request.test.ts'
       - 'crates/exomind-beta-host/**'
@@ -81,6 +82,8 @@ jobs:
         run: |
           echo "CARGO_TARGET_DIR=$RUNNER_TEMP/exomind-contract-cache" >> "$GITHUB_ENV"
           echo "CONTRACT_OUT=$RUNNER_TEMP/exomind-contract-evidence" >> "$GITHUB_ENV"
+          echo "CORE8_EVIDENCE=$RUNNER_TEMP/exomind-core8-evidence" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/exomind-core8-evidence"
           CORE10_EVIDENCE="$RUNNER_TEMP/exomind-core10-lifecycle-evidence"
           if [[ -e "$CORE10_EVIDENCE" ]]; then
             echo "Core10 evidence directory already exists: $CORE10_EVIDENCE" >&2
@@ -104,23 +107,6 @@ jobs:
           import { relative } from 'node:path';
           const files = [
             'tests/unit/beta/profile-switch-guard.test.ts',
-            'tests/unit/beta/message-actions.test.tsx',
-            'tests/unit/beta/message-references.test.ts',
-            'tests/unit/beta/agent-grants-client.test.ts',
-            'tests/unit/beta/agent-grants-state.test.ts',
-            'tests/unit/beta/agent-grants-panel.test.tsx',
-            'tests/unit/beta/settings-diagnostics-agent-grants.integration.test.tsx',
-            'tests/unit/beta/beta-message-locator.test.ts',
-            'tests/unit/beta/message-integration.test.tsx',
-            'tests/unit/beta/diagnostics-client.test.ts',
-            'tests/unit/beta/diagnostics-state.test.ts',
-            'tests/unit/beta/original-lifecycle-client.test.ts',
-            'tests/unit/beta/original-lifecycle-state.test.ts',
-            'tests/unit/beta/original-lifecycle-panel.test.tsx',
-            'tests/unit/beta/original-lifecycle-restore-retry.test.tsx',
-            'tests/unit/beta/control-color-contract.test.tsx',
-            'tests/unit/beta/diagnostics-panel.test.tsx',
-            'tests/unit/beta/diagnostics-settings.test.tsx',
             'tests/unit/beta/last-profile-ui.test.tsx',
             'tests/unit/beta/original-acquisition.test.ts',
             'tests/unit/beta/original-auto-diagnostics.test.ts',
@@ -204,13 +190,36 @@ jobs:
             echo '{"sourceSha":"85f7df92d0eccf1de624ab9220d4d8944797f28b","status":"failed"}' > "$CORE10_EVIDENCE/fixture-generation.json"
             exit 1
           fi
+      - name: Generate fixture from pinned Core10 history
+        shell: bash
+        run: |
+          if git cat-file -e 5708e0baf5cdc896559fab5172dc13805531ba33^{commit} > "$CORE10_EVIDENCE/core10-source-commit-check.stdout" 2> "$CORE10_EVIDENCE/core10-source-commit-check.stderr"; then
+            echo '{"recipeSha":"5708e0baf5cdc896559fab5172dc13805531ba33","payloadSha":"cc3bc937c4196d1a6a838b10a82018dc37d66480","status":"source-available"}' > "$CORE10_EVIDENCE/core10-fixture-generation.json"
+          else
+            echo '{"recipeSha":"5708e0baf5cdc896559fab5172dc13805531ba33","payloadSha":"cc3bc937c4196d1a6a838b10a82018dc37d66480","status":"failed"}' > "$CORE10_EVIDENCE/core10-fixture-generation.json"
+            echo "Checkout is missing pinned Core10 recipe 5708e0baf5cdc896559fab5172dc13805531ba33" >&2
+            exit 1
+          fi
+          if bun scripts/dev/beta-core10-fixture.ts --out "$CORE10_EVIDENCE/core10-source" > "$CORE10_EVIDENCE/core10-generate.stdout" 2> "$CORE10_EVIDENCE/core10-generate.stderr"; then
+            cat "$CORE10_EVIDENCE/core10-generate.stdout"
+            CORE10_GENERATION_OUTPUT="$CORE10_EVIDENCE/core10-generate.stdout"
+            export CORE10_GENERATION_OUTPUT
+            CORE10_FIXTURE_PATH=$(node -e 'const assert=require("node:assert/strict");const result=JSON.parse(require("node:fs").readFileSync(process.env.CORE10_GENERATION_OUTPUT,"utf8"));assert.equal(result.recipeSha,"5708e0baf5cdc896559fab5172dc13805531ba33");assert.equal(result.payloadSha,"cc3bc937c4196d1a6a838b10a82018dc37d66480");assert.ok(typeof result.fixture==="string"&&result.fixture.length>0);process.stdout.write(result.fixture);')
+            echo "EXOMIND_CORE_SCHEMA10_FIXTURE=$CORE10_FIXTURE_PATH" >> "$GITHUB_ENV"
+            echo '{"recipeSha":"5708e0baf5cdc896559fab5172dc13805531ba33","payloadSha":"cc3bc937c4196d1a6a838b10a82018dc37d66480","status":"passed"}' > "$CORE10_EVIDENCE/core10-fixture-generation.json"
+          else
+            cat "$CORE10_EVIDENCE/core10-generate.stdout"
+            cat "$CORE10_EVIDENCE/core10-generate.stderr" >&2
+            echo '{"recipeSha":"5708e0baf5cdc896559fab5172dc13805531ba33","payloadSha":"cc3bc937c4196d1a6a838b10a82018dc37d66480","status":"failed"}' > "$CORE10_EVIDENCE/core10-fixture-generation.json"
+            exit 1
+          fi
       - name: Select current sources after archived fixture compilation
         shell: bash
         run: |
           # Archived and current local packages can share Cargo artifact paths.
           # Refresh the current entrypoints before validating this checkout.
           touch crates/exomind-core/src/lib.rs crates/exomind-beta-host/src/lib.rs
-      - name: Run Core10 lifecycle and pinned Core8 migration regressions
+      - name: Run Core11 lifecycle, period and pinned Core8/Core10 migration regressions
         shell: bash
         run: |
           node --input-type=module <<'NODE'
@@ -220,7 +229,9 @@ jobs:
           import { join } from 'node:path';
 
           const evidence = process.env.CORE10_EVIDENCE;
-          const fixture = join(evidence, 'fixture/synthetic/archive');
+          const core8Fixture = join(evidence, 'fixture/synthetic/archive');
+          const core10Fixture = process.env.EXOMIND_CORE_SCHEMA10_FIXTURE;
+          assert.ok(core10Fixture, 'The pinned Core10 fixture path must come from the generator CLI result');
           const cases = [
             {
               name: 'core-lifecycle-lib',
@@ -242,7 +253,7 @@ jobs:
               expected: [
                 'stale_automatic_queue_pages_cannot_reanimate_released_or_retained_bytes',
                 'reclaim_deadline_uses_host_clock_and_expiry_never_deletes_automatically',
-                'replication_negotiates_the_current_core10_schema',
+                'replication_negotiates_the_current_core11_schema',
               ],
             },
             {
@@ -276,54 +287,13 @@ jobs:
               ],
             },
             {
-              name: 'host-core8-core9-hello-rejection',
-              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'sync_hello_is_rejected_before_core10_fact_exchange', '--', '--test-threads=1'],
+              name: 'host-core8-core9-core10-hello-rejection',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'sync_hello_is_rejected_before_core11_fact_exchange', '--', '--test-threads=1'],
               expected: [
-                'core8_sync_hello_is_rejected_before_core10_fact_exchange',
-                'core9_sync_hello_is_rejected_before_core10_fact_exchange',
+                'core8_sync_hello_is_rejected_before_core11_fact_exchange',
+                'core9_sync_hello_is_rejected_before_core11_fact_exchange',
+                'core10_sync_hello_is_rejected_before_core11_fact_exchange',
               ],
-            },
-            {
-              name: 'host-user-range-export',
-              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'user_export', '--', '--test-threads=1'],
-              expected: [
-                'event_selection_keeps_only_the_exact_fact_inside_one_profile_and_highwater',
-                'block_selection_expands_all_referencing_nodes_through_highwater_only',
-                'selected_originals_report_local_state_without_exposing_local_paths',
-                'incomplete_block_scan_is_explained_instead_of_reported_as_missing_or_complete',
-                'output_limit_does_not_masquerade_as_scan_limit',
-                'a_cross_profile_fact_is_rejected_instead_of_silently_joined',
-              ],
-            },
-            {
-              name: 'host-user-range-export-corrections',
-              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'user_export_corrections', '--', '--test-threads=1'],
-              expected: [
-                'default_correction_derivation_freezes_profile_target_digest_and_highwater',
-                'cross_profile_correction_is_rejected_before_it_can_be_joined',
-                'correction_target_page_must_use_the_frozen_highwater',
-                'missing_target_scope_cannot_look_like_an_uncorrected_complete_capture',
-                'an_unresolved_target_is_kept_as_metadata_without_exporting_its_corrected_text',
-                'explicit_correction_opt_out_is_visible_and_does_not_read_corrections',
-                'incomplete_correction_scan_reports_its_cursor_and_keeps_found_rows_separate',
-                'scan_and_result_budgets_are_accounted_separately',
-                'markdown_encoding_budget_fails_explicitly_without_returning_a_cut_document',
-                'manifest_encoding_budget_fails_explicitly',
-              ],
-            },
-            {
-              name: 'core-record-organization',
-              args: ['test', '--locked', '-p', 'exomind-core', '--test', 'record_organization', '--', '--test-threads=1'],
-              expected: [
-                'corrected_text_search_returns_the_unchanged_capture_with_its_exact_tag',
-                'correction_target_page_is_bounded_and_keeps_its_highwater',
-                'correction_rejects_agent_context_cross_profile_targets_and_wrong_digests',
-              ],
-            },
-            {
-              name: 'host-http-record-organization',
-              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'record_organization', '--', '--test-threads=1'],
-              expected: ['scoped_http_tag_search_and_correction_roles_are_explicit'],
             },
             {
               name: 'core-summary-currentness',
@@ -333,7 +303,35 @@ jobs:
                 'pre_snapshot_and_unmatched_corrections_do_not_change_review_coverage',
                 'replicated_post_snapshot_correction_is_detected_with_lower_receiver_local_seq',
                 'replicated_prefreeze_correction_is_not_stale_with_higher_receiver_local_seq',
+                'prefreeze_matching_corrections_keep_original_and_each_concurrent_fact',
+                'prefreeze_unresolved_conflicting_out_of_range_and_other_profile_corrections_are_excluded',
+                'prefreeze_budget_exclusion_lists_correction_without_sending_its_text',
+                'bounded_correction_scan_does_not_let_digest_conflicts_exhaust_the_matching_target_budget',
+                'bounded_correction_scan_does_not_read_conflicting_bodies_into_its_input_byte_budget',
+                'bounded_correction_scan_has_a_total_candidate_limit_across_selected_captures',
+                'bounded_correction_scan_keeps_other_targets_after_one_target_reaches_its_limit',
               ],
+            },
+            {
+              name: 'core-correction-matching-index-plan',
+              args: ['test', '--locked', '-p', 'exomind-core', '--lib', 'correction_candidates_seek_profile_target_digest_and_snapshot_without_sorting', '--', '--test-threads=1'],
+              expected: ['correction_candidates_seek_profile_target_digest_and_snapshot_without_sorting'],
+            },
+            {
+              name: 'core-old-raw-summary-preservation',
+              args: ['test', '--locked', '-p', 'exomind-core', '--lib', 'genuine_legacy_summary_snapshot_fixture_stays_valid_without_rewriting_raw_body', '--', '--test-threads=1'],
+              expected: ['genuine_legacy_summary_snapshot_fixture_stays_valid_without_rewriting_raw_body'],
+              fixture: 'core10',
+            },
+            {
+              name: 'host-original-and-corrections-model-material',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'review_v4_model_material_contains_original_and_each_prefreeze_correction', '--', '--test-threads=1'],
+              expected: ['review_v4_model_material_contains_original_and_each_prefreeze_correction'],
+            },
+            {
+              name: 'core-external-summary-source-boundary',
+              args: ['test', '--locked', '-p', 'exomind-core', '--lib', 'external_summary_evidence_rejects_internal_correction_source_kind', '--', '--test-threads=1'],
+              expected: ['external_summary_evidence_rejects_internal_correction_source_kind'],
             },
             {
               name: 'core-replication',
@@ -368,7 +366,105 @@ jobs:
                 '--', '--ignored', '--exact', '--test-threads=1',
               ],
               expected: ['core8_upgrade_preserves_receipts_origin_positions_and_verified_proofs'],
-              fixture: true,
+              fixture: 'core8',
+            },
+            {
+              name: 'core-period-library',
+              args: ['test', '--locked', '-p', 'exomind-core', '--lib', 'timeline_period::tests', '--', '--test-threads=1'],
+              expected: [
+                'an_over_budget_period_read_returns_no_page_and_leaves_legacy_reads_available',
+                'period_body_byte_budget_returns_no_partial_page_and_does_not_poison_reads',
+                'timeblock_period_position_uses_effective_time_while_record_keeps_occurred_time',
+              ],
+            },
+            {
+              name: 'core-period-integration',
+              args: ['test', '--locked', '-p', 'exomind-core', '--test', 'timeline_period', '--', '--test-threads=1'],
+              expected: [
+                'period_reads_four_typed_facts_and_same_window_intervals_without_writes',
+                'half_open_boundaries_cover_day_month_and_dst_repeated_hour_with_tag_and_search',
+                'fixed_profile_snapshot_pages_do_not_repeat_omit_or_admit_late_records',
+              ],
+            },
+            {
+              name: 'host-period-http',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'timeline_period_http', '--', '--test-threads=1'],
+              expected: ['period_route_composes_window_tag_and_search_and_keeps_legacy_read'],
+            },
+            {
+              name: 'core10-schema11-summary-migration',
+              args: [
+                'test', '--locked', '-p', 'exomind-core', '--test', 'schema11_migration',
+                'pinned_core10_database_upgrades_without_rewriting_facts_or_receipts',
+                '--', '--ignored', '--exact', '--test-threads=1',
+              ],
+              expected: ['pinned_core10_database_upgrades_without_rewriting_facts_or_receipts'],
+              fixture: 'core10',
+            },
+
+            {
+              name: 'host-grant-management',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'grant_management', '--', '--test-threads=1'],
+              expected: [
+                'metadata_is_profile_scoped_and_contains_no_credentials_or_profile_content',
+                'native_human_sessions_are_not_external_agent_management_entries',
+                'management_roles_keep_their_existing_capabilities_and_never_issue_human',
+                'revocation_denies_new_requests_while_another_grant_reads_the_old_receipt',
+                'stable_grant_id_recovers_metadata_without_minting_a_second_token',
+              ],
+            },
+            {
+              name: 'host-user-range-export',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'user_export', '--', '--test-threads=1'],
+              expected: [
+                'event_selection_keeps_only_the_exact_fact_inside_one_profile_and_highwater',
+                'block_selection_expands_all_referencing_nodes_through_highwater_only',
+                'selected_originals_report_local_state_without_exposing_local_paths',
+                'incomplete_block_scan_is_explained_instead_of_reported_as_missing_or_complete',
+                'output_limit_does_not_masquerade_as_scan_limit',
+                'a_cross_profile_fact_is_rejected_instead_of_silently_joined',
+              ],
+            },
+            {
+              name: 'host-user-range-export-corrections',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'user_export_corrections', '--', '--test-threads=1'],
+              expected: [
+                'default_correction_derivation_freezes_profile_target_digest_and_highwater',
+                'cross_profile_correction_is_rejected_before_it_can_be_joined',
+                'correction_target_page_must_use_the_frozen_highwater',
+                'missing_target_scope_cannot_look_like_an_uncorrected_complete_capture',
+                'an_unresolved_target_is_kept_as_metadata_without_exporting_its_corrected_text',
+                'explicit_correction_opt_out_is_visible_and_does_not_read_corrections',
+                'incomplete_correction_scan_reports_its_cursor_and_keeps_found_rows_separate',
+                'scan_and_result_budgets_are_accounted_separately',
+                'markdown_encoding_budget_fails_explicitly_without_returning_a_cut_document',
+                'manifest_encoding_budget_fails_explicitly',
+              ],
+            },
+            {
+              name: 'core-record-organization',
+              args: ['test', '--locked', '-p', 'exomind-core', '--test', 'record_organization', '--', '--test-threads=1'],
+              expected: [
+                'tag_query_matches_one_normalized_tag_and_composes_with_literal_search',
+                'tag_filter_uses_exact_bound_values_and_rejects_invalid_boundaries',
+                'sparse_tag_pages_keep_one_highwater_without_gaps_or_duplicates',
+                'tag_query_stays_inside_the_writer_profile_scope',
+                'correction_adds_a_human_fact_without_changing_its_target_and_replays_receipt',
+                'correction_rejects_agent_context_cross_profile_targets_and_wrong_digests',
+                'correction_keeps_missing_reference_and_surfaces_later_digest_conflict',
+                'corrected_text_search_returns_the_unchanged_capture_with_its_exact_tag',
+                'correction_target_page_is_bounded_and_keeps_its_highwater',
+                'exact_correction_source_is_profile_scoped_and_preserves_the_original',
+                'exact_correction_source_reports_an_unresolved_target_then_a_digest_conflict',
+              ],
+            },
+            {
+              name: 'host-http-record-organization',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'record_organization', '--', '--test-threads=1'],
+              expected: [
+                'scoped_http_tag_search_and_correction_roles_are_explicit',
+                'exact_correction_http_read_is_scoped_and_returns_null_only_for_absence',
+              ],
             },
           ];
           const summary = [];
@@ -394,7 +490,11 @@ jobs:
           assert.equal(compile.status, 0, 'Core integration compile-only gate failed');
           for (const item of cases) {
             const env = { ...process.env, CARGO_TERM_COLOR: 'never' };
-            if (item.fixture) env.EXOMIND_CORE_SCHEMA8_FIXTURE = fixture;
+            if (item.fixture === 'core8') env.EXOMIND_CORE_SCHEMA8_FIXTURE = core8Fixture;
+            if (item.fixture === 'core10') {
+              env.EXOMIND_CORE_SCHEMA10_FIXTURE = core10Fixture;
+              env.EXOMIND_PREFREEZE_FIXTURE_DIR = core10Fixture;
+            }
             const result = spawnSync('cargo', item.args, {
               cwd: process.cwd(), env, encoding: 'utf8', timeout: 600000,
               maxBuffer: 32 * 1024 * 1024, windowsHide: true,
@@ -437,5 +537,6 @@ jobs:
             ${{ runner.temp }}/exomind-contract-evidence
             ${{ runner.temp }}/exomind-contract-evidence-originals.json
             ${{ runner.temp }}/exomind-core10-lifecycle-evidence
+            ${{ runner.temp }}/exomind-core8-evidence
           if-no-files-found: warn
           retention-days: 7

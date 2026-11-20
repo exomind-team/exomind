@@ -1,7 +1,7 @@
 //! B3 portable DTO contract. Executors/tickets below are deliberately not wire DTOs.
 use crate::{
-    CommandId, DeviceId, EventId, OriginCursor, OriginIdentity, OriginalId, OriginalRef, ProfileId,
-    Receipt, TimeblockId,
+    CommandId, CorrectionRecord, DeviceId, EventId, OriginCursor, OriginIdentity, OriginalId,
+    OriginalRef, ProfileId, Receipt, TimeblockId,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -305,6 +305,16 @@ pub struct SummaryReconcileResult {
     pub has_more: bool,
 }
 
+/// Internal-only correction material with per-origin ordering. This is not an
+/// ExternalSummary source DTO; snapshot refs continue to carry only id/kind/digest.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SummaryCorrectionInput {
+    pub fact: CorrectionRecord,
+    pub origin: OriginIdentity,
+    pub cursor: OriginCursor,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "record", deny_unknown_fields)]
 pub enum SummaryInputRecord {
@@ -312,6 +322,8 @@ pub enum SummaryInputRecord {
     Capture(crate::EventRecord),
     #[serde(rename = "timeblock/1")]
     Timeblock(crate::TimeblockNodeRecord),
+    #[serde(rename = "correction/1")]
+    Correction(SummaryCorrectionInput),
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct SummaryInputRecords {

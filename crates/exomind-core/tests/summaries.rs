@@ -1212,3 +1212,593 @@ fn remote_metadata_stays_unread_by_default_and_explicit_missing_original_never_c
     ));
     assert_eq!(counts(&b), before);
 }
+fn prefreeze_model_record(records: &serde_json::Value, id: EventId) -> &serde_json::Value {
+    let id = id.to_string();
+    records.as_array().unwrap().iter().find(|item| {
+        let event_id = if item["kind"].as_str() == Some("correction/1") {
+            item["record"]["fact"]["event_id"].as_str()
+        } else {
+            item["record"]["event_id"].as_str()
+        };
+        event_id == Some(id.as_str())
+    }).unwrap_or_else(|| panic!("missing frozen model record {id}"))
+}
+
+#[test]
+fn prefreeze_matching_corrections_keep_original_and_each_concurrent_fact() {
+    let (_left_root, _right_root, core, peer, profile) = pair();
+    let (block, _) = start(&core, profile);
+    let target = capture(&core, profile, "Original capture wording remains immutable.");
+    let core_context = core.local_human(profile).unwrap();
+    let original = core.events(&core_context, profile).unwrap().into_iter()
+        .find(|event| event.event_id == target).unwrap();
+    sync(&core, &peer, profile);
+
+    // Both writers saw the same original but did not see one another's edit.
+    let core_correction = core.record_correction(
+        &core_context,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 1_600,
+            target_event_id: target,
+            target_digest: original.digest.clone(),
+            corrected_text: "Core-origin correction statement.".into(),
+        },
+    ).unwrap();
+    let peer_context = peer.local_human(profile).unwrap();
+    let peer_correction = peer.record_correction(
+        &peer_context,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 1_600,
+            target_event_id: target,
+            target_digest: original.digest.clone(),
+            corrected_text: "Concurrent peer correction statement.".into(),
+        },
+    ).unwrap();
+    assert_ne!(core.device_id(), peer.device_id());
+    sync(&peer, &core, profile);
+    end(&core, profile, block);
+
+    let executor = core.local_summary_executor();
+    assert_eq!(core.reconcile_summary_triggers(&executor).unwrap().created.len(), 1);
+    let task = one(&core, profile);
+    core.summary_wait_for_configuration(&executor, profile, task.task_id).unwrap();
+    let work = core.begin_summary_attempt(&executor, &begin(&core, profile, &one(&core, profile))).unwrap();
+    let input = core.summary_input_records(&executor, &work.ticket).unwrap();
+
+    let original_ref = work.snapshot.sources.iter()
+        .find(|source| source.event_id == target).unwrap();
+    assert_eq!(original_ref.kind, "capture");
+    assert_eq!(original_ref.digest, original.digest);
+    for receipt in [&core_correction, &peer_correction] {
+        let source = work.snapshot.sources.iter()
+            .find(|source| source.event_id == receipt.event_id)
+            .expect("each matching correction is a separately frozen source");
+        assert_eq!(source.kind, "correction/1");
+        assert_eq!(source.digest, receipt.event_digest);
+    }
+
+    let serialized = serde_json::to_value(&input.records).unwrap();
+    let original_model_record = prefreeze_model_record(&serialized, target);
+    assert_eq!(original_model_record["kind"].as_str(), Some("capture"));
+    assert_eq!(
+        original_model_record["record"]["text"].as_str(),
+        Some("Original capture wording remains immutable.")
+    );
+    assert_eq!(original_model_record["record"]["digest"].as_str(), Some(original.digest.as_str()));
+
+    let core_model_record = prefreeze_model_record(&serialized, core_correction.event_id);
+    let peer_model_record = prefreeze_model_record(&serialized, peer_correction.event_id);
+    for (item, receipt, device) in [
+        (core_model_record, &core_correction, core.device_id().to_string()),
+        (peer_model_record, &peer_correction, peer.device_id().to_string()),
+    ] {
+        assert_eq!(item["kind"].as_str(), Some("correction/1"));
+        assert_eq!(item["record"]["fact"]["target_event_id"].as_str(), Some(target.to_string().as_str()));
+        assert_eq!(item["record"]["fact"]["target_digest"].as_str(), Some(original.digest.as_str()));
+        assert_eq!(item["record"]["fact"]["digest"].as_str(), Some(receipt.event_digest.as_str()));
+        assert_eq!(item["record"]["fact"]["device_id"].as_str(), Some(device.as_str()));
+        assert_eq!(item["record"]["fact"]["occurred_at_ms"].as_i64(), Some(1_600));
+        assert!(item["record"]["cursor"]["seq"].as_u64().unwrap() > 0);
+        let origin_device = item["record"]["origin"]["device_id"].as_str().unwrap();
+        let origin_epoch = item["record"]["origin"]["restoration_epoch"].as_str().unwrap();
+        let origin_seq = item["record"]["cursor"]["seq"].as_u64().unwrap();
+        let frozen_head = work.snapshot.origin_heads.iter().find(|head| {
+            head.origin.device_id.to_string() == origin_device
+                && head.origin.restoration_epoch.to_string() == origin_epoch
+        }).expect("correction origin is represented in the frozen heads");
+        assert!(frozen_head.cursor.seq >= origin_seq);
+    }
+    assert_ne!(
+        core_model_record["record"]["fact"]["event_id"],
+        peer_model_record["record"]["fact"]["event_id"],
+        "concurrent correction facts remain distinct; the provider material does not pick a winner"
+    );
+
+    for (source, record) in work.snapshot.sources.iter().zip(&input.records) {
+        let value = serde_json::to_value(record).unwrap();
+        let id = source.event_id.to_string();
+        let record_id = if source.kind == "correction/1" {
+            value["record"]["fact"]["event_id"].as_str()
+        } else {
+            value["record"]["event_id"].as_str()
+        };
+        assert_eq!(record_id, Some(id.as_str()), "model record order follows frozen source order");
+        assert_eq!(value["kind"].as_str(), Some(source.kind.as_str()));
+    }
+    assert_eq!(input.encoded_bytes, work.snapshot.input_encoded_bytes);
+    assert!(input.encoded_bytes <= MAX_SUMMARY_INPUT_BYTES as u64);
+}
+
+#[test]
+fn prefreeze_unresolved_conflicting_out_of_range_and_other_profile_corrections_are_excluded() {
+    let (_left_root, _right_root, core, _peer, profile) = pair();
+    let other_profile = core.create_profile("Synthetic other profile").unwrap();
+    let (block, _) = start(&core, profile);
+    let target = capture(&core, profile, "Selected original.");
+    let context = core.local_human(profile).unwrap();
+    let original = core.events(&context, profile).unwrap().into_iter()
+        .find(|event| event.event_id == target).unwrap();
+
+    let foreign_root = tempfile::tempdir().unwrap();
+    let foreign = Core::open(foreign_root.path()).unwrap();
+    foreign.provision_profile(profile, "P").unwrap();
+    foreign.provision_profile(other_profile, "Synthetic other profile").unwrap();
+
+    let conflict_digest = "0".repeat(64);
+    assert_ne!(conflict_digest, original.digest);
+    let foreign_p = foreign.local_human(profile).unwrap();
+    let conflict = foreign.record_correction(
+        &foreign_p,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 1_650,
+            target_event_id: target,
+            target_digest: conflict_digest,
+            corrected_text: "MUST_NOT_REACH_MODEL_DIGEST_CONFLICT".into(),
+        },
+    ).unwrap();
+    let unresolved_target = EventId::new();
+    let unresolved = foreign.record_correction(
+        &foreign_p,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 1_660,
+            target_event_id: unresolved_target,
+            target_digest: "d".repeat(64),
+            corrected_text: "MUST_NOT_REACH_MODEL_UNRESOLVED".into(),
+        },
+    ).unwrap();
+    let foreign_q = foreign.local_human(other_profile).unwrap();
+    let other_scope = foreign.record_correction(
+        &foreign_q,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: other_profile,
+            occurred_at_ms: 1_670,
+            target_event_id: target,
+            target_digest: original.digest.clone(),
+            corrected_text: "MUST_NOT_REACH_MODEL_OTHER_PROFILE".into(),
+        },
+    ).unwrap();
+
+    end(&core, profile, block);
+    let outside = CaptureCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: profile,
+        occurred_at_ms: 50_000,
+        text: "Outside the frozen capture range.".into(),
+        tags: vec![],
+        originals: vec![],
+    };
+    let outside_receipt = core.submit(&context, &outside).unwrap();
+    let outside_correction = core.record_correction(
+        &context,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 50_100,
+            target_event_id: outside.event_id,
+            target_digest: outside_receipt.event_digest,
+            corrected_text: "MUST_NOT_REACH_MODEL_OUT_OF_RANGE".into(),
+        },
+    ).unwrap();
+
+    sync(&foreign, &core, profile);
+    sync(&foreign, &core, other_profile);
+    let query = EventQuery { limit: 100, ..Default::default() };
+    let p_corrections = core.corrections_page(&context, profile, &query).unwrap();
+    assert_eq!(
+        p_corrections.items.iter().find(|item| item.record.event_id == conflict.event_id).unwrap().target_state,
+        CorrectionTargetState::DigestConflict
+    );
+    assert_eq!(
+        p_corrections.items.iter().find(|item| item.record.event_id == unresolved.event_id).unwrap().target_state,
+        CorrectionTargetState::Unresolved
+    );
+    let q_context = core.local_human(other_profile).unwrap();
+    assert_eq!(
+        core.corrections_page(&q_context, other_profile, &query).unwrap()
+            .items.iter().find(|item| item.record.event_id == other_scope.event_id).unwrap().target_state,
+        CorrectionTargetState::Unresolved
+    );
+
+    let executor = core.local_summary_executor();
+    assert_eq!(core.reconcile_summary_triggers(&executor).unwrap().created.len(), 1);
+    let task = one(&core, profile);
+    core.summary_wait_for_configuration(&executor, profile, task.task_id).unwrap();
+    let work = core.begin_summary_attempt(&executor, &begin(&core, profile, &one(&core, profile))).unwrap();
+    for excluded in [conflict.event_id, unresolved.event_id, other_scope.event_id, outside_correction.event_id] {
+        assert!(!work.snapshot.sources.iter().any(|source| source.event_id == excluded));
+    }
+    let input = core.summary_input_records(&executor, &work.ticket).unwrap();
+    let serialized = serde_json::to_value(&input.records).unwrap().to_string();
+    for marker in [
+        "MUST_NOT_REACH_MODEL_DIGEST_CONFLICT",
+        "MUST_NOT_REACH_MODEL_UNRESOLVED",
+        "MUST_NOT_REACH_MODEL_OTHER_PROFILE",
+        "MUST_NOT_REACH_MODEL_OUT_OF_RANGE",
+    ] {
+        assert!(!serialized.contains(marker), "excluded material {marker} entered the provider input");
+    }
+}
+
+#[test]
+fn prefreeze_budget_exclusion_lists_correction_without_sending_its_text() {
+    let root = tempfile::tempdir().unwrap();
+    let core = Core::open(root.path()).unwrap();
+    let profile = core.create_profile("Synthetic budget profile").unwrap();
+    let (block, _) = start(&core, profile);
+    let target = capture(&core, profile, "Small original capture.");
+    let context = core.local_human(profile).unwrap();
+    let original = core.events(&context, profile).unwrap().into_iter()
+        .find(|event| event.event_id == target).unwrap();
+
+    let first_text = "A".repeat(110_000);
+    let second_text = "B".repeat(110_000);
+    let first = core.record_correction(
+        &context,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 1_600,
+            target_event_id: target,
+            target_digest: original.digest.clone(),
+            corrected_text: first_text,
+        },
+    ).unwrap();
+    let second = core.record_correction(
+        &context,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 1_700,
+            target_event_id: target,
+            target_digest: original.digest,
+            corrected_text: second_text,
+        },
+    ).unwrap();
+    end(&core, profile, block);
+
+    let executor = core.local_summary_executor();
+    assert_eq!(core.reconcile_summary_triggers(&executor).unwrap().created.len(), 1);
+    let task = one(&core, profile);
+    core.summary_wait_for_configuration(&executor, profile, task.task_id).unwrap();
+    let work = core.begin_summary_attempt(&executor, &begin(&core, profile, &one(&core, profile))).unwrap();
+
+    assert!(work.snapshot.coverage.input_byte_limit);
+    assert!(work.snapshot.sources.iter().any(|source| source.event_id == first.event_id));
+    assert!(!work.snapshot.sources.iter().any(|source| source.event_id == second.event_id));
+    assert!(work.snapshot.coverage.omitted_source_ids.contains(&second.event_id));
+
+    let input = core.summary_input_records(&executor, &work.ticket).unwrap();
+    let serialized = serde_json::to_value(&input.records).unwrap().to_string();
+    assert!(serialized.contains(&"A".repeat(110_000)));
+    assert!(!serialized.contains(&"B".repeat(110_000)));
+    assert!(input.encoded_bytes <= MAX_SUMMARY_INPUT_BYTES as u64);
+    assert!(input.records.len() == work.snapshot.sources.len());
+}
+
+fn append_prefreeze_corrections(
+    core: &Core,
+    profile: ProfileId,
+    target: EventId,
+    target_digest: &str,
+    count: usize,
+    text_prefix: &str,
+) -> Vec<Receipt> {
+    let context = core.local_human(profile).unwrap();
+    (0..count)
+        .map(|index| {
+            core.record_correction(
+                &context,
+                &RecordCorrectionCommand {
+                    command_id: CommandId::new(),
+                    event_id: EventId::new(),
+                    profile_id: profile,
+                    occurred_at_ms: 1_600 + index as i64,
+                    target_event_id: target,
+                    target_digest: target_digest.to_owned(),
+                    corrected_text: format!("{text_prefix}-{index}"),
+                },
+            )
+            .unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn bounded_correction_scan_accepts_a_match_after_63_same_target_digest_conflicts() {
+    // Conflicting target digests must not exhaust the matching-fact budget.
+    let (_left_root, _right_root, core, peer, profile) = pair();
+    let (block, _) = start(&core, profile);
+    let target = capture(&core, profile, "Original with bounded conflict candidates.");
+    let core_context = core.local_human(profile).unwrap();
+    let original = core.events(&core_context, profile).unwrap().into_iter()
+        .find(|event| event.event_id == target).unwrap();
+    let conflicting_digest = "0".repeat(64);
+    assert_ne!(conflicting_digest, original.digest);
+
+    let valid = core.record_correction(
+        &core_context,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 1_900,
+            target_event_id: target,
+            target_digest: original.digest,
+            corrected_text: "VALID_MATCH_AFTER_63_CONFLICTS".into(),
+        },
+    ).unwrap();
+    let conflicts = append_prefreeze_corrections(
+        &peer,
+        profile,
+        target,
+        &conflicting_digest,
+        63,
+        "BOUNDED_CONFLICT_BEFORE_VALID",
+    );
+    sync(&peer, &core, profile);
+    end(&core, profile, block);
+
+    let executor = core.local_summary_executor();
+    assert_eq!(core.reconcile_summary_triggers(&executor).unwrap().created.len(), 1);
+    let task = one(&core, profile);
+    core.summary_wait_for_configuration(&executor, profile, task.task_id).unwrap();
+    let work = core.begin_summary_attempt(
+        &executor,
+        &begin(&core, profile, &one(&core, profile)),
+    ).unwrap();
+
+    assert!(!work.snapshot.coverage.page_limit);
+    assert!(!work.snapshot.coverage.input_byte_limit);
+    let valid_source = work.snapshot.sources.iter()
+        .find(|source| source.event_id == valid.event_id)
+        .expect("the matching correction fits inside the raw-candidate budget");
+    assert_eq!(valid_source.kind, "correction/1");
+    assert_eq!(valid_source.digest, valid.event_digest);
+    for conflict in &conflicts {
+        assert!(!work.snapshot.sources.iter().any(|source| source.event_id == conflict.event_id));
+    }
+    let input = core.summary_input_records(&executor, &work.ticket).unwrap();
+    let serialized = serde_json::to_value(&input.records).unwrap().to_string();
+    assert!(serialized.contains("VALID_MATCH_AFTER_63_CONFLICTS"));
+    assert!(!serialized.contains("BOUNDED_CONFLICT_BEFORE_VALID"));
+}
+
+#[test]
+fn bounded_correction_scan_does_not_let_digest_conflicts_exhaust_the_matching_target_budget() {
+    let (_left_root, _right_root, core, peer, profile) = pair();
+    let (block, _) = start(&core, profile);
+    let target = capture(&core, profile, "Original at the per-target scan boundary.");
+    let core_context = core.local_human(profile).unwrap();
+    let original = core.events(&core_context, profile).unwrap().into_iter()
+        .find(|event| event.event_id == target).unwrap();
+    let conflicting_digest = "0".repeat(64);
+    assert_ne!(conflicting_digest, original.digest);
+
+    let valid = core.record_correction(
+        &core_context,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 1_950,
+            target_event_id: target,
+            target_digest: original.digest,
+            corrected_text: "VALID_MATCH_AFTER_SCAN_BOUNDARY".into(),
+        },
+    ).unwrap();
+    append_prefreeze_corrections(
+        &peer,
+        profile,
+        target,
+        &conflicting_digest,
+        64,
+        "BOUNDARY_CONFLICT_BEFORE_VALID",
+    );
+    sync(&peer, &core, profile);
+    end(&core, profile, block);
+
+    let executor = core.local_summary_executor();
+    assert_eq!(core.reconcile_summary_triggers(&executor).unwrap().created.len(), 1);
+    let task = one(&core, profile);
+    core.summary_wait_for_configuration(&executor, profile, task.task_id).unwrap();
+    let work = core.begin_summary_attempt(
+        &executor,
+        &begin(&core, profile, &one(&core, profile)),
+    ).unwrap();
+
+    assert!(!work.snapshot.coverage.page_limit);
+    assert!(work.snapshot.sources.iter().any(|source| source.event_id == valid.event_id));
+    assert!(!work.snapshot.coverage.omitted_source_ids.contains(&valid.event_id));
+    let corrections = core.corrections_page_for_target(
+        &core_context,
+        profile,
+        &EventQuery { limit: 100, ..Default::default() },
+        target,
+    ).unwrap();
+    assert!(corrections.items.iter().any(|item| {
+        item.record.event_id == valid.event_id
+            && item.target_state == CorrectionTargetState::DigestMatches
+    }));
+    let input = core.summary_input_records(&executor, &work.ticket).unwrap();
+    let serialized = serde_json::to_value(&input.records).unwrap().to_string();
+    assert!(serialized.contains("VALID_MATCH_AFTER_SCAN_BOUNDARY"));
+}
+
+#[test]
+fn bounded_correction_scan_has_a_total_candidate_limit_across_selected_captures() {
+    // Matching candidates share one budget across the selected captures.
+    let (_left_root, _right_root, core, peer, profile) = pair();
+    let (block, _) = start(&core, profile);
+    let targets = (0..5)
+        .map(|index| capture(&core, profile, &format!("Original target {index}.")))
+        .collect::<Vec<_>>();
+    let events = core.events(&core.local_human(profile).unwrap(), profile).unwrap();
+    let digests = targets.iter().map(|id| {
+        events.iter().find(|event| event.event_id == *id).unwrap().digest.clone()
+    }).collect::<Vec<_>>();
+    let conflicting_digest = "f".repeat(64);
+    let context = core.local_human(profile).unwrap();
+    let valid = core.record_correction(
+        &context,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 1_950,
+            target_event_id: targets[4],
+            target_digest: digests[4].clone(),
+            corrected_text: "VALID_AFTER_GLOBAL_CANDIDATE_LIMIT".into(),
+        },
+    ).unwrap();
+    for index in 0..4 {
+        assert_ne!(conflicting_digest, digests[index]);
+        append_prefreeze_corrections(
+            &peer,
+            profile,
+            targets[index],
+            &digests[index],
+            64,
+            &format!("GLOBAL_CONFLICT_TARGET_{index}"),
+        );
+    }
+    sync(&peer, &core, profile);
+    end(&core, profile, block);
+
+    let executor = core.local_summary_executor();
+    assert_eq!(core.reconcile_summary_triggers(&executor).unwrap().created.len(), 1);
+    let task = one(&core, profile);
+    core.summary_wait_for_configuration(&executor, profile, task.task_id).unwrap();
+    let work = core.begin_summary_attempt(
+        &executor,
+        &begin(&core, profile, &one(&core, profile)),
+    ).unwrap();
+
+    assert!(work.snapshot.coverage.page_limit);
+    assert!(!work.snapshot.sources.iter().any(|source| source.event_id == valid.event_id));
+    let input = core.summary_input_records(&executor, &work.ticket).unwrap();
+    let serialized = serde_json::to_value(&input.records).unwrap().to_string();
+    assert!(!serialized.contains("VALID_AFTER_GLOBAL_CANDIDATE_LIMIT"));
+}
+
+#[test]
+fn bounded_correction_scan_does_not_read_conflicting_bodies_into_its_input_byte_budget() {
+    let (_left_root, _right_root, core, peer, profile) = pair();
+    let (block, _) = start(&core, profile);
+    let target = capture(&core, profile, "Original before the candidate byte cap.");
+    let context = core.local_human(profile).unwrap();
+    let original = core.events(&context, profile).unwrap().into_iter()
+        .find(|event| event.event_id == target).unwrap();
+    let conflicting_digest = "e".repeat(64);
+    assert_ne!(conflicting_digest, original.digest);
+    let large_conflict = "C".repeat(110_000);
+
+    let valid = core.record_correction(
+        &context,
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 1_950,
+            target_event_id: target,
+            target_digest: original.digest,
+            corrected_text: "VALID_AFTER_CANDIDATE_BYTE_LIMIT".into(),
+        },
+    ).unwrap();
+    for index in 0..2 {
+        peer.record_correction(
+            &peer.local_human(profile).unwrap(),
+            &RecordCorrectionCommand {
+                command_id: CommandId::new(),
+                event_id: EventId::new(),
+                profile_id: profile,
+                occurred_at_ms: 1_600 + index,
+                target_event_id: target,
+                target_digest: conflicting_digest.clone(),
+                corrected_text: format!("{large_conflict}-{index}"),
+            },
+        ).unwrap();
+    }
+    sync(&peer, &core, profile);
+    end(&core, profile, block);
+
+    let executor = core.local_summary_executor();
+    assert_eq!(core.reconcile_summary_triggers(&executor).unwrap().created.len(), 1);
+    let task = one(&core, profile);
+    core.summary_wait_for_configuration(&executor, profile, task.task_id).unwrap();
+    let work = core.begin_summary_attempt(
+        &executor,
+        &begin(&core, profile, &one(&core, profile)),
+    ).unwrap();
+
+    assert!(!work.snapshot.coverage.input_byte_limit);
+    assert!(work.snapshot.sources.iter().any(|source| source.event_id == valid.event_id));
+    let input = core.summary_input_records(&executor, &work.ticket).unwrap();
+    let serialized = serde_json::to_value(&input.records).unwrap().to_string();
+    assert!(serialized.contains("VALID_AFTER_CANDIDATE_BYTE_LIMIT"));
+}
+
+#[test]
+fn bounded_correction_scan_keeps_other_targets_after_one_target_reaches_its_limit() {
+    let (_left, _right, core, peer, profile) = pair();
+    let (block, _) = start(&core, profile);
+    let dense_target = capture(&core, profile, "Dense target must not starve another capture.");
+    let other_target = capture(&core, profile, "Other capture still has correction scan budget.");
+    let human = core.local_human(profile).unwrap();
+    let events = core.events(&human, profile).unwrap();
+    let dense = events.iter().find(|record| record.event_id == dense_target).unwrap();
+    let other = events.iter().find(|record| record.event_id == other_target).unwrap();
+    let correction = core.record_correction(&human, &RecordCorrectionCommand {
+        command_id: CommandId::new(), event_id: EventId::new(), profile_id: profile,
+        occurred_at_ms: 1_600, target_event_id: other_target, target_digest: other.digest.clone(),
+        corrected_text: "OTHER_TARGET_REMAINS_ELIGIBLE".into(),
+    }).unwrap();
+    append_prefreeze_corrections(&peer, profile, dense_target, &dense.digest, 65, "DENSE_TARGET_MATCH");
+    sync(&peer, &core, profile);
+    end(&core, profile, block);
+    let executor = core.local_summary_executor();
+    assert_eq!(core.reconcile_summary_triggers(&executor).unwrap().created.len(), 1);
+    let task = one(&core, profile);
+    core.summary_wait_for_configuration(&executor, profile, task.task_id).unwrap();
+    let work = core.begin_summary_attempt(&executor, &begin(&core, profile, &one(&core, profile))).unwrap();
+    assert!(work.snapshot.coverage.page_limit);
+    assert!(work.snapshot.sources.iter().any(|source| source.event_id == correction.event_id),
+        "one capture's per-target limit must not consume the remaining global budget");
+}

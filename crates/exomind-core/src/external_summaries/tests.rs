@@ -737,3 +737,42 @@ fn external_fact_cannot_publish_a_private_original_by_knowing_its_metadata() {
         .unwrap();
     assert_eq!(links, 0);
 }
+#[test]
+fn external_summary_evidence_rejects_internal_correction_source_kind() {
+    let (_directory, core, profile, agent, mut command) = fixture();
+    let producer = core.local_external_summary_producer(profile, agent).unwrap();
+    let source = command.sources[0].clone();
+    let receipt = core.record_correction(
+        &core.local_human(profile).unwrap(),
+        &RecordCorrectionCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: profile,
+            occurred_at_ms: 2_001,
+            target_event_id: source.event_id,
+            target_digest: source.digest,
+            corrected_text: "Synthetic internal-only correction.".into(),
+        },
+    ).unwrap();
+    command.command_id = CommandId::new();
+    command.event_id = EventId::new();
+    command.occurred_at_ms = 2_002;
+    command.observed_through = core.events_page(
+        &core.local_human(profile).unwrap(),
+        profile,
+        &EventQuery::default(),
+    ).unwrap().highwater;
+    command.sources = vec![SummarySourceRef {
+        event_id: receipt.event_id,
+        kind: "correction/1".into(),
+        digest: receipt.event_digest,
+    }];
+    command.evidence = vec![receipt.event_id];
+
+    let before = counts(&core);
+    assert!(matches!(
+        core.append_external_summary(&producer, &command),
+        Err(CoreError::InvalidExternalSummary(_))
+    ));
+    assert_eq!(counts(&core), before);
+}

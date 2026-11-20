@@ -28,17 +28,17 @@ pub use local_sources::{
 pub use model_config::{
     SummaryModelConfiguration, SummaryModelConfigurationCommand, SummaryModelSecretUpdate,
 };
-pub use summary_jobs::SummaryServiceStatus;
 pub use originals::HostOriginalReadPermit;
-#[cfg(test)]
-mod original_tests;
+pub use summary_jobs::SummaryServiceStatus;
+pub(crate) mod original_lifecycle;
 #[cfg(test)]
 mod original_read_permit_tests;
+#[cfg(test)]
+mod original_tests;
 mod originals;
-pub(crate) mod original_lifecycle;
 mod originals_http;
-mod record_organization;
 mod peers;
+mod record_organization;
 pub use peers::{
     ApprovePeerInvitationReplacement, CreatePeerInvitation, DEFAULT_ORIGINAL_AUTO_BYTES,
     DeviceIdentityInfo, IssuedPeerInvitation, MAX_ORIGINAL_AUTO_BYTES, MIN_ORIGINAL_AUTO_BYTES,
@@ -57,14 +57,15 @@ pub mod diagnostics;
 #[cfg(test)]
 mod stop_tests;
 mod storage;
-pub mod user_export;
 mod timeblocks;
 mod timeblocks_http;
-pub use timeblocks::{DeadlineEnvelope, HostClock, HostClockSample, ServiceStatus};
+mod timeline_period;
+pub mod user_export;
 pub use original_lifecycle::{
-    DEFAULT_ORIGINAL_RECLAIM_WINDOW, OriginalLifecycleHostStatus,
-    OriginalLifecycleRemoteSource, RemoteOriginalProbeState,
+    DEFAULT_ORIGINAL_RECLAIM_WINDOW, OriginalLifecycleHostStatus, OriginalLifecycleRemoteSource,
+    RemoteOriginalProbeState,
 };
+pub use timeblocks::{DeadlineEnvelope, HostClock, HostClockSample, ServiceStatus};
 
 use exomind_core::{
     AgentId, CaptureCommand, CommandId, Core, CoreError, DeviceId, EventPage, EventQuery,
@@ -75,11 +76,11 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,
-    time::Duration,
     sync::{
         Mutex, MutexGuard,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 use storage::{Persistence, token, token_hash};
 use uuid::Uuid;
@@ -311,7 +312,9 @@ pub struct HostCapabilities {
     pub max_original_chunk_bytes: usize,
     pub timeblocks: bool,
     pub typed_timeline: bool,
+    pub timeline_period: bool,
     pub summary_jobs: bool,
+    pub correction_source: bool,
 }
 
 struct Resources {
@@ -362,11 +365,7 @@ impl BetaHost {
         root: &Path,
         clock: std::sync::Arc<dyn HostClock>,
     ) -> Result<Self, HostError> {
-        Self::open_with_clock_and_recovery_window(
-            root,
-            clock,
-            DEFAULT_ORIGINAL_RECLAIM_WINDOW,
-        )
+        Self::open_with_clock_and_recovery_window(root, clock, DEFAULT_ORIGINAL_RECLAIM_WINDOW)
     }
 
     /// Opens a Host with an adjustable engineering default. Each reclaim stores
@@ -469,7 +468,9 @@ impl BetaHost {
                 max_original_chunk_bytes: exomind_core::MAX_ORIGINAL_CHUNK_BYTES,
                 timeblocks: true,
                 typed_timeline: true,
+                timeline_period: true,
                 summary_jobs: true,
+                correction_source: true,
             },
         })
     }

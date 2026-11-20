@@ -33,6 +33,49 @@ fn correction(
 }
 
 #[test]
+fn exact_correction_source_is_profile_scoped_and_preserves_the_original() {
+    let root = tempfile::tempdir().unwrap();
+    let core = Core::open(root.path()).unwrap();
+    let profile = core.create_profile("exact correction source").unwrap();
+    let other = core.create_profile("other source scope").unwrap();
+    let human = core.local_human(profile).unwrap();
+    let original = capture(profile, "Original stays unchanged.", &[]);
+    let receipt = core.submit(&human, &original).unwrap();
+    let command = correction(profile, original.event_id, &receipt.event_digest, "Independent correction.");
+    let changed = core.record_correction(&human, &command).unwrap();
+    let source = core.correction_event(&human, profile, changed.event_id).unwrap().unwrap();
+    assert_eq!(source.record.event_id, changed.event_id);
+    assert_eq!(source.record.digest, changed.event_digest);
+    assert_eq!(source.record.corrected_text, "Independent correction.");
+    assert_eq!(source.target_state, CorrectionTargetState::DigestMatches);
+    assert!(source.record.local_seq > receipt.local_seq);
+    assert!(core.correction_event(&human, profile, original.event_id).unwrap().is_none());
+    assert!(core.correction_event(&human, profile, EventId::new()).unwrap().is_none());
+    assert!(core.correction_event(&core.local_human(other).unwrap(), other, changed.event_id).unwrap().is_none());
+    assert!(matches!(core.correction_event(&human, other, changed.event_id), Err(CoreError::ScopeMismatch)));
+    let unchanged = core.events(&human, profile).unwrap().into_iter().find(|row| row.event_id == original.event_id).unwrap();
+    assert_eq!(unchanged.text, original.text);
+    assert_eq!(unchanged.digest, receipt.event_digest);
+}
+
+#[test]
+fn exact_correction_source_reports_an_unresolved_target_then_a_digest_conflict() {
+    let root = tempfile::tempdir().unwrap();
+    let core = Core::open(root.path()).unwrap();
+    let profile = core.create_profile("unresolved source").unwrap();
+    let human = core.local_human(profile).unwrap();
+    let mut original = capture(profile, "An original arrived later.", &[]);
+    let command = correction(profile, original.event_id, &"a".repeat(64), "Preserve this independent claim.");
+    let changed = core.record_correction(&human, &command).unwrap();
+    assert_eq!(core.correction_event(&human, profile, changed.event_id).unwrap().unwrap().target_state, CorrectionTargetState::Unresolved);
+    original.command_id = CommandId::new();
+    core.submit(&human, &original).unwrap();
+    let source = core.correction_event(&human, profile, changed.event_id).unwrap().unwrap();
+    assert_eq!(source.target_state, CorrectionTargetState::DigestConflict);
+    assert_eq!(source.record.corrected_text, command.corrected_text);
+}
+
+#[test]
 fn corrected_text_search_returns_the_unchanged_capture_with_its_exact_tag() {
     let root = tempfile::tempdir().unwrap();
     let core = Core::open(root.path()).unwrap();

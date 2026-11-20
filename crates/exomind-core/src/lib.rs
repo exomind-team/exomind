@@ -10,8 +10,8 @@ mod fact_encoding;
 mod identity;
 mod manifests;
 mod migrations;
-mod original_query;
 pub(crate) mod original_lifecycle;
+mod original_query;
 mod originals;
 mod record_organization;
 mod replication;
@@ -25,13 +25,13 @@ pub use identity::{
     TimeblockId,
 };
 pub use manifests::OriginalAvailability;
-pub use original_query::MissingOriginalsPage;
 pub use original_lifecycle::{
-    OriginalBytesState, OriginalLifecycleAction, OriginalLifecycleCommand,
-    OriginalLifecycleFollowup, OriginalLifecycleFollowupPage,
-    OriginalLifecycleFollowupResolution, OriginalLifecycleClock, OriginalLifecycleRecord, OriginalLifecycleStatus,
-    OriginalReadPermit, DEFAULT_ORIGINAL_RECLAIM_WINDOW_MS, ORIGINAL_LIFECYCLE_FACT_TYPE,
+    DEFAULT_ORIGINAL_RECLAIM_WINDOW_MS, ORIGINAL_LIFECYCLE_FACT_TYPE, OriginalBytesState,
+    OriginalLifecycleAction, OriginalLifecycleClock, OriginalLifecycleCommand,
+    OriginalLifecycleFollowup, OriginalLifecycleFollowupPage, OriginalLifecycleFollowupResolution,
+    OriginalLifecycleRecord, OriginalLifecycleStatus, OriginalReadPermit,
 };
+pub use original_query::MissingOriginalsPage;
 pub use originals::{
     BeginStageCommand, MAX_CAPTURE_ORIGINALS, MAX_ORIGINAL_CHUNK_BYTES, OriginalChunk, OriginalRef,
     OriginalRestoreRetry, StageState, StageStatus, VerificationProof, VerificationTicket,
@@ -48,7 +48,7 @@ pub use replication::{
 };
 use serde::{Deserialize, Serialize};
 pub use store::Core;
-pub const CORE_SCHEMA_VERSION: i64 = 10;
+pub const CORE_SCHEMA_VERSION: i64 = 11;
 /// Durable UTF-8 JSON fact encoding, independent of the smaller wire-page
 /// budget. Includes worst-case escaping of all existing capture input limits.
 pub const MAX_FACT_BYTES: usize = 2 * 1024 * 1024;
@@ -93,6 +93,8 @@ pub enum CoreError {
     ProfileConflict,
     #[error("invalid event query: {0}")]
     InvalidQuery(&'static str),
+    #[error("timeline period read exceeded its candidate or body-byte budget")]
+    TimelinePeriodBudgetExceeded,
     #[error("invalid replication operation: {0}")]
     InvalidReplication(&'static str),
     #[error("encoded fact exceeds {max_bytes} bytes")]

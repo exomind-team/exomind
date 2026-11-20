@@ -11,8 +11,8 @@ use axum::{
     routing::{delete, get, post, put},
 };
 use exomind_core::{
-    CaptureCommand, CommandId, CoreError, CorrectionPage, EventPage, EventQuery,
-    MAX_EVENT_TAG_BYTES, ProfileId, ProfileInfo, Receipt, RecordCorrectionCommand,
+    CaptureCommand, CommandId, CoreError, CorrectionEntry, CorrectionPage, EventId, EventPage,
+    EventQuery, MAX_EVENT_TAG_BYTES, ProfileId, ProfileInfo, Receipt, RecordCorrectionCommand,
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -155,6 +155,11 @@ impl IntoResponse for HostError {
                 StatusCode::FORBIDDEN,
                 "untrusted_origin",
                 "Request host or origin rejected",
+            ),
+            Self::Core(CoreError::TimelinePeriodBudgetExceeded) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "timeline_period_budget_exceeded",
+                "Requested period exceeds the bounded read budget; narrow the time window",
             ),
             Self::InvalidRequest
             | Self::Core(
@@ -566,6 +571,21 @@ async fn corrections(
     ))
 }
 
+async fn correction_event(
+    State(host): State<Arc<BetaHost>>,
+    headers: HeaderMap,
+    path: Result<Path<(ProfileId, EventId)>, PathRejection>,
+) -> Result<Json<Option<CorrectionEntry>>, HostError> {
+    let token = bearer(&headers)?;
+    let Path((profile, event_id)) = path.map_err(|_| HostError::InvalidRequest)?;
+    Ok(Json(
+        work(host, move |host| {
+            host.correction_event(&host.authenticate(&token)?, profile, event_id)
+        })
+        .await?,
+    ))
+}
+
 async fn receipt(
     State(host): State<Arc<BetaHost>>,
     headers: HeaderMap,
@@ -598,6 +618,10 @@ fn router(host: Arc<BetaHost>, address: SocketAddr, frontend_origins: Vec<String
         .route(
             "/beta/v1/profiles/:profile/corrections",
             get(corrections).post(correct),
+        )
+        .route(
+            "/beta/v1/profiles/:profile/corrections/:event",
+            get(correction_event),
         )
         .route("/beta/v1/profiles/:profile/receipts/:command", get(receipt))
         .merge(crate::agent_access_http::router())

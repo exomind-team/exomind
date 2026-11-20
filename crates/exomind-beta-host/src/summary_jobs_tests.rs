@@ -802,3 +802,110 @@ async fn explicit_live_model_review_uses_only_synthetic_frozen_sources() {
     assert!(output.read_original_ids.is_empty());
     assert!(!output.model.include_suggestions);
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn review_v4_model_material_contains_original_and_each_prefreeze_correction() {
+    let server = mock(0).await;
+    let (_directory, host, owner, human, profile, _) = setup();
+    let block = TimeblockId::new();
+    action(
+        &host,
+        &human,
+        profile,
+        json!({
+            "kind":"start",
+            "block_id":block,
+            "name":"Synthetic correction review",
+            "note":"",
+            "timer":{"mode":"count_up"}
+        }),
+    );
+
+    let occurred_at_ms = host.timeblock_snapshot(&human, profile).unwrap().clock.server_now_ms;
+    let capture = CaptureCommand {
+        command_id: CommandId::new(),
+        event_id: exomind_core::EventId::new(),
+        profile_id: profile,
+        occurred_at_ms,
+        text: "Original provider-visible capture.".into(),
+        tags: vec![],
+        originals: vec![],
+    };
+    let capture_receipt = host.capture(&human, &capture).unwrap();
+    let correction = exomind_core::RecordCorrectionCommand {
+        command_id: CommandId::new(),
+        event_id: exomind_core::EventId::new(),
+        profile_id: profile,
+        occurred_at_ms: occurred_at_ms + 1,
+        target_event_id: capture.event_id,
+        target_digest: capture_receipt.event_digest.clone(),
+        corrected_text: "Separate provider-visible correction.".into(),
+    };
+    let correction_receipt = host.record_correction(&human, &correction).unwrap();
+
+    action(&host, &human, profile, json!({"kind":"end_action","block_id":block}));
+    action(
+        &host,
+        &human,
+        profile,
+        json!({
+            "kind":"submit_feedback",
+            "block_id":block,
+            "feedback":{"kind":"text","text":"Synthetic feedback"}
+        }),
+    );
+    host.start_services().unwrap();
+    let waiting = wait_task(&host, &human, profile, SummaryState::WaitingConfiguration, Duration::from_secs(8)).await;
+    configure(&host, &owner, profile, &server.base, None);
+    let done = wait_task(&host, &human, profile, SummaryState::Succeeded, Duration::from_secs(8)).await;
+    assert_eq!(done.task_id, waiting.task_id);
+
+    let artifacts = host.summary_artifacts_page(&human, profile, done.task_id, None, 25).unwrap();
+    assert_eq!(artifacts.items.len(), 1);
+    assert_eq!(artifacts.items[0].output.model.prompt_template, "exomind-summary/v4");
+    assert!(artifacts.items[0].snapshot.sources.iter().any(|source| {
+        source.event_id == capture.event_id && source.digest == capture_receipt.event_digest
+    }));
+    assert!(artifacts.items[0].snapshot.sources.iter().any(|source| {
+        source.event_id == correction_receipt.event_id && source.kind == "correction/1"
+    }));
+
+    let request = server.requests.lock().unwrap()[0].clone();
+    let system = request["messages"][0]["content"].as_str().unwrap();
+    assert!(system.contains("不根据数组顺序或本地序号宣布唯一真值"));
+    let material: Value = serde_json::from_str(request["messages"][1]["content"].as_str().unwrap()).unwrap();
+    let records = material["records"].as_array().unwrap();
+    let capture_id = capture.event_id.to_string();
+    let correction_id = correction.event_id.to_string();
+    let capture_record = records.iter().find(|item| {
+        item["kind"].as_str() == Some("capture")
+            && item["record"]["event_id"].as_str() == Some(capture_id.as_str())
+    }).unwrap();
+    assert_eq!(capture_record["record"]["text"].as_str(), Some("Original provider-visible capture."));
+    let correction_record = records.iter().find(|item| {
+        item["kind"].as_str() == Some("correction/1")
+            && item["record"]["fact"]["event_id"].as_str() == Some(correction_id.as_str())
+    }).unwrap();
+    assert_eq!(
+        correction_record["record"]["fact"]["target_event_id"].as_str(),
+        Some(capture_id.as_str())
+    );
+    assert_eq!(
+        correction_record["record"]["fact"]["target_digest"].as_str(),
+        Some(capture_receipt.event_digest.as_str())
+    );
+    assert_eq!(
+        correction_record["record"]["fact"]["corrected_text"].as_str(),
+        Some("Separate provider-visible correction.")
+    );
+    assert_eq!(
+        correction_record["record"]["origin"]["device_id"].as_str(),
+        Some(correction_record["record"]["fact"]["device_id"].as_str().unwrap())
+    );
+    let allowed = material["allowed_evidence_event_ids"].as_array().unwrap();
+    assert!(allowed.iter().any(|id| id.as_str() == Some(capture_id.as_str())));
+    assert!(allowed.iter().any(|id| id.as_str() == Some(correction_id.as_str())));
+    assert_eq!(records.iter().filter(|item| {
+        item["record"]["event_id"].as_str() == Some(capture_id.as_str())
+    }).count(), 1);
+    host.stop().unwrap();
+}

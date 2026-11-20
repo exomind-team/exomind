@@ -465,3 +465,53 @@ async fn export_bundle_rejects_cross_profile_reads_and_owner_authority() {
     );
     stop(fixture).await;
 }
+#[tokio::test]
+async fn agent_bundle_keeps_corrections_in_the_known_excluded_fact_boundary() {
+    let fixture = fixture().await;
+    let writer = fixture.host.native_human_session(&fixture.owner, fixture.profile).unwrap();
+    let capture = CaptureCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: fixture.profile,
+        occurred_at_ms: 1,
+        text: "Synthetic bundle capture.".into(),
+        tags: vec![],
+        originals: vec![],
+    };
+    let capture_receipt = fixture.host.capture(&writer, &capture).unwrap();
+    let correction = exomind_core::RecordCorrectionCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: fixture.profile,
+        occurred_at_ms: 2,
+        target_event_id: capture.event_id,
+        target_digest: capture_receipt.event_digest,
+        corrected_text: "SYNTHETIC_CORRECTION_MUST_NOT_ENTER_AGENT_BUNDLE".into(),
+    };
+    let correction_receipt = fixture.host.record_correction(&writer, &correction).unwrap();
+
+    let response = bundle(
+        &fixture,
+        json!({
+            "after_local_seq":0,
+            "through":null,
+            "before":null,
+            "max_pages":4,
+            "max_bytes":131072,
+            "include_original_ids":[]
+        }),
+    ).await;
+    assert_eq!(response.status(), 200);
+    let value: Value = response.json().await.unwrap();
+    let facts = value["facts"].as_array().unwrap();
+    assert!(facts.iter().any(|fact| fact["fact_id"] == capture.event_id.to_string()));
+    assert!(!facts.iter().any(|fact| fact["fact_id"] == correction_receipt.event_id.to_string()));
+    assert!(value["coverage"]["known_excluded_fact_types"].as_array().unwrap()
+        .iter().any(|kind| kind.as_str() == Some("correction/1")));
+    assert!(!value["coverage"]["supported_fact_types"].as_array().unwrap()
+        .iter().any(|kind| kind.as_str() == Some("correction/1")));
+    assert!(!serde_json::to_string(&value).unwrap().contains(
+        "SYNTHETIC_CORRECTION_MUST_NOT_ENTER_AGENT_BUNDLE"
+    ));
+    stop(fixture).await;
+}

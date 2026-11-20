@@ -259,3 +259,111 @@ async fn scoped_http_tag_search_and_correction_roles_are_explicit() {
 
     server.stop().await.unwrap();
 }
+
+#[tokio::test]
+async fn exact_correction_http_read_is_scoped_and_returns_null_only_for_absence() {
+    let (_directory, host, server, url) = server().await;
+    let owner = host.owner_session().unwrap();
+    let profile = ProfileId::new();
+    let other_profile = ProfileId::new();
+    host.provision_profile(&owner, profile, "synthetic P")
+        .unwrap();
+    host.provision_profile(&owner, other_profile, "synthetic Q")
+        .unwrap();
+    let human = grant(&host, &owner, profile, GrantKind::Human);
+    let observer = grant(&host, &owner, profile, GrantKind::Observer);
+    let agent = grant(&host, &owner, profile, GrantKind::AgentNote);
+    let correction_id = EventId::new();
+    let target_id = EventId::new();
+    let correction = json!({
+        "command_id": CommandId::new(),
+        "event_id": correction_id,
+        "occurred_at_ms": 1_794_000_000_003_i64,
+        "target_event_id": target_id,
+        "target_digest": "a".repeat(64),
+        "corrected_text": "an independent correction whose target is not present"
+    });
+    let http = client();
+    let written: Value = http
+        .post(format!("{url}/beta/v1/profiles/{profile}/corrections"))
+        .bearer_auth(&human)
+        .json(&correction)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(written["event_id"], correction_id.to_string());
+
+    let capabilities: Value = http
+        .get(format!("{url}/beta/v1/hello"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(capabilities["capabilities"]["correction_source"], true);
+
+    let exact: Value = http
+        .get(format!("{url}/beta/v1/profiles/{profile}/corrections/{correction_id}"))
+        .bearer_auth(&observer)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(exact["record"]["profile_id"], profile.to_string());
+    assert_eq!(exact["record"]["event_id"], correction_id.to_string());
+    assert_eq!(exact["record"]["target_event_id"], target_id.to_string());
+    assert_eq!(exact["record"]["corrected_text"], correction["corrected_text"]);
+    assert_eq!(exact["target_state"], "unresolved");
+
+    let agent_exact: Value = http
+        .get(format!("{url}/beta/v1/profiles/{profile}/corrections/{correction_id}"))
+        .bearer_auth(&agent)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(agent_exact, exact);
+
+    let missing: Value = http
+        .get(format!("{url}/beta/v1/profiles/{profile}/corrections/{}", EventId::new()))
+        .bearer_auth(&observer)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(missing.is_null());
+
+    let cross_profile = http
+        .get(format!("{url}/beta/v1/profiles/{other_profile}/corrections/{correction_id}"))
+        .bearer_auth(&observer)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cross_profile.status(), StatusCode::FORBIDDEN);
+    assert!(matches!(
+        host.correction_event(&owner, profile, correction_id),
+        Err(exomind_beta_host::HostError::Forbidden)
+    ));
+
+    server.stop().await.unwrap();
+}

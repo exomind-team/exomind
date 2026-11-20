@@ -2,11 +2,16 @@ mod model;
 mod projection;
 mod scheduler_schema;
 mod store;
+mod timeline_period_schema;
 pub use model::*;
 pub use projection::project_timeblocks;
 pub(crate) use scheduler_schema::{migrate as migrate_scheduler, validate as validate_scheduler};
 pub(crate) use store::rebuild_after_import;
 pub(crate) use store::summary_anchor;
+pub use store::timeline_period::TimelinePeriodQuery;
+pub(crate) use timeline_period_schema::{
+    migrate as migrate_timeline_period_schema, validate as validate_timeline_period_schema,
+};
 
 pub(crate) fn validate_import_node(node: &TimeblockNodeRecord) -> Result<(), crate::CoreError> {
     use crate::CoreError;

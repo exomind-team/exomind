@@ -1,6 +1,7 @@
 use crate::{BetaHost, GrantKind, HostError, Session, context, resources};
 use exomind_core::{
-    CorrectionPage, EventId, EventPage, EventQuery, ProfileId, Receipt, RecordCorrectionCommand,
+    CorrectionEntry, CorrectionPage, EventId, EventPage, EventQuery, ProfileId, Receipt,
+    RecordCorrectionCommand,
 };
 
 impl BetaHost {
@@ -35,6 +36,23 @@ impl BetaHost {
         Ok(resources.core.record_correction(&context, command)?)
     }
 
+    /// Read one exact correction for a granted profile. Read grants can inspect
+    /// the immutable fact; the owner session has no implicit profile data grant.
+    pub fn correction_event(
+        &self,
+        session: &Session,
+        profile: ProfileId,
+        event_id: EventId,
+    ) -> Result<Option<CorrectionEntry>, HostError> {
+        let state = self.active_state()?;
+        let resources = resources(&state)?;
+        let authority = self.profile_authority(resources, session, profile, false)?;
+        let context = context(&resources.core, &authority)?;
+        Ok(resources
+            .core
+            .correction_event(&context, profile, event_id)?)
+    }
+
     pub fn corrections_page(
         &self,
         session: &Session,
@@ -59,6 +77,8 @@ impl BetaHost {
         let resources = resources(&state)?;
         let authority = self.profile_authority(resources, session, profile, false)?;
         let context = context(&resources.core, &authority)?;
-        Ok(resources.core.corrections_page_for_target(&context, profile, query, target_event_id)?)
+        Ok(resources
+            .core
+            .corrections_page_for_target(&context, profile, query, target_event_id)?)
     }
 }

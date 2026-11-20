@@ -456,6 +456,63 @@ impl Core {
         Ok(receipt)
     }
 
+    /// Read one correction by its exact event identity within the supplied
+    /// profile. The event primary key bounds this lookup to at most one row.
+    /// Its stored local sequence is authoritative; no remote cursor is involved.
+    pub fn correction_event(
+        &self,
+        context: &WriterContext,
+        profile: ProfileId,
+        event_id: EventId,
+    ) -> Result<Option<CorrectionEntry>, CoreError> {
+        self.check_scope(context, profile)?;
+        let connection = self.connection()?;
+        let row: Option<(i64, String, String, String, String)> = connection
+            .query_row(
+                "SELECT local_seq,profile_id,kind,digest,body FROM events WHERE event_id=?1",
+                [event_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((sequence, stored_profile, kind, stored_digest, body)) = row else {
+            return Ok(None);
+        };
+        if stored_profile != profile.to_string() || kind != CORRECTION_FACT_TYPE {
+            return Ok(None);
+        }
+
+        let mut record: CorrectionRecord = serde_json::from_str(&body)?;
+        if record.profile_id != profile
+            || record.event_id != event_id
+            || record.digest != stored_digest
+            || record.validate().is_err()
+        {
+            return Err(CoreError::RecoveryRequired);
+        }
+        record.local_seq = u64::try_from(sequence).map_err(|_| CoreError::RecoveryRequired)?;
+        if record.local_seq == 0 {
+            return Err(CoreError::RecoveryRequired);
+        }
+        let target_state = correction_target_state(
+            &connection,
+            profile,
+            record.target_event_id,
+            &record.target_digest,
+        )?;
+        Ok(Some(CorrectionEntry {
+            record,
+            target_state,
+        }))
+    }
+
     /// Read correction facts with target resolution derived from this profile's
     /// current local event set. Resolution never rewrites the correction fact.
     pub fn corrections_page(

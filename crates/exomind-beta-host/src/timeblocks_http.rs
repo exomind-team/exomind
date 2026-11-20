@@ -14,7 +14,7 @@ use axum::{
 use exomind_core::{
     CommandId, EventId, EventQuery, IntervalPage, IntervalQuery, ProfileId, Receipt,
     TimeblockAction, TimeblockCommand, TimeblockNodePage, TimeblockRevision, TimeblockSnapshot,
-    TimelinePage,
+    TimelinePage, TimelinePeriodQuery,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -42,6 +42,30 @@ impl ReadQuery {
             through: self.through,
             limit: self.limit.unwrap_or(100),
             search: self.q,
+        }
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeriodReadQuery {
+    from_ms: i64,
+    to_ms: i64,
+    before: Option<u64>,
+    through: Option<u64>,
+    limit: Option<usize>,
+    q: Option<String>,
+    tag: Option<String>,
+}
+impl PeriodReadQuery {
+    fn query(self) -> TimelinePeriodQuery {
+        TimelinePeriodQuery {
+            from_ms: self.from_ms,
+            to_ms: self.to_ms,
+            before: self.before,
+            through: self.through,
+            limit: self.limit.unwrap_or(100),
+            search: self.q,
+            tag: self.tag,
         }
     }
 }
@@ -123,6 +147,23 @@ async fn timeline(
         .await?,
     ))
 }
+async fn timeline_period(
+    State(host): State<Arc<BetaHost>>,
+    headers: HeaderMap,
+    path: ProfilePath,
+    query: Result<Query<PeriodReadQuery>, QueryRejection>,
+) -> Result<Json<TimelinePage>, HostError> {
+    let token = bearer(&headers)?;
+    let Path(profile) = path.map_err(|_| HostError::InvalidRequest)?;
+    let Query(query) = query.map_err(|_| HostError::InvalidRequest)?;
+    let query = query.query();
+    Ok(Json(
+        work(host, move |host| {
+            host.timeline_period_page(&host.authenticate(&token)?, profile, &query)
+        })
+        .await?,
+    ))
+}
 async fn intervals(
     State(host): State<Arc<BetaHost>>,
     headers: HeaderMap,
@@ -161,4 +202,8 @@ pub(crate) fn router() -> Router<Arc<BetaHost>> {
             get(intervals),
         )
         .route("/beta/v1/profiles/:profile/timeline", get(timeline))
+        .route(
+            "/beta/v1/profiles/:profile/timeline/period",
+            get(timeline_period),
+        )
 }

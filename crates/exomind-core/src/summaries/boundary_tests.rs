@@ -615,3 +615,67 @@ fn portable_artifact_kind_matching_result_remains_internal_current() {
     assert!(artifacts.items[0].current);
     assert_eq!(artifacts.items[0].event_id, original.event_id);
 }
+#[test]
+fn genuine_legacy_summary_snapshot_fixture_stays_valid_without_rewriting_raw_body() {
+    use sha2::{Digest, Sha256};
+    use std::{env, fs, path::PathBuf};
+
+    let fixture_dir = PathBuf::from(
+        env::var_os("EXOMIND_PREFREEZE_FIXTURE_DIR")
+            .expect("run the old-baseline generator and point at its raw fixture directory"),
+    );
+    let body_path = fixture_dir.join("summary-body.json");
+    let raw_body = fs::read(&body_path).unwrap();
+    let stored_digest = fs::read_to_string(fixture_dir.join("summary-digest.txt")).unwrap();
+    let stored_digest = stored_digest.trim_end();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture_dir.join("manifest.json")).unwrap()).unwrap();
+
+    let body_digest = format!("{:x}", Sha256::digest(&raw_body));
+    assert_eq!(
+        manifest["artifact_body_sha256"].as_str(),
+        Some(body_digest.as_str()),
+        "raw body SHA is separate provenance; it is not the domain artifact digest"
+    );
+    assert_eq!(
+        manifest["artifact_digest"].as_str(),
+        Some(stored_digest)
+    );
+    assert_eq!(
+        manifest["baseline_commit"].as_str(),
+        Some("5708e0baf5cdc896559fab5172dc13805531ba33")
+    );
+    assert_eq!(
+        manifest["core10_payload_commit"].as_str(),
+        Some("cc3bc937c4196d1a6a838b10a82018dc37d66480")
+    );
+
+    // Decode the exact stored body, including its digest and bookkeeping fields.
+    // Production computed_digest() hashes canonical_fact_bytes(), not these raw
+    // storage bytes; do not compare the domain digest to the body SHA.
+    let record: SummaryArtifactRecord = serde_json::from_slice(&raw_body).unwrap();
+    assert_eq!(record.digest.as_str(), stored_digest);
+    facts::snapshot(&record.snapshot).unwrap();
+    record.validate().unwrap();
+    assert_eq!(record.computed_digest().unwrap(), stored_digest);
+    let snapshot = &record.snapshot;
+    assert_eq!(
+        snapshot.digest,
+        manifest["snapshot_digest"].as_str().unwrap()
+    );
+    assert_eq!(
+        fs::read_to_string(fixture_dir.join("snapshot-digest.txt")).unwrap().trim_end(),
+        snapshot.digest
+    );
+
+    let capture_id: EventId = manifest["capture_event_id"].as_str().unwrap().parse().unwrap();
+    let correction_id: EventId = manifest["correction_event_id"].as_str().unwrap().parse().unwrap();
+    assert!(snapshot.sources.iter().any(|source| {
+        source.event_id == capture_id && source.kind == "capture"
+    }));
+    assert!(!snapshot.sources.iter().any(|source| source.event_id == correction_id));
+
+    // This test only reads the exact legacy body bytes; it does not create a new DTO
+    // and serialize it in place of the historical artifact.
+    assert_eq!(fs::read(body_path).unwrap(), raw_body);
+}

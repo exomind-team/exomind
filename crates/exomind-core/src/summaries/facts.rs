@@ -50,7 +50,7 @@ pub(super) fn snapshot(value: &SummarySourceSnapshot) -> Result<(), CoreError> {
     }
     let mut ids = std::collections::HashSet::new();
     for source in &value.sources {
-        if !matches!(source.kind.as_str(), "capture" | "timeblock/1")
+        if !matches!(source.kind.as_str(), "capture" | "timeblock/1" | "correction/1")
             || !sha(&source.digest)
             || !ids.insert(source.event_id)
         {

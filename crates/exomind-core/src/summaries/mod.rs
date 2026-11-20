@@ -7,6 +7,7 @@ mod facts;
 mod model;
 mod projection;
 mod schema;
+mod source_index;
 mod sources;
 mod store;
 use crate::{
@@ -18,6 +19,7 @@ pub use model::*;
 use rusqlite::{Transaction, params};
 pub(crate) use schema::index as index_import;
 pub(crate) use schema::{migrate, provision, validate as validate_schema};
+pub(crate) use source_index::{migrate as migrate_source_index, validate as validate_source_index};
 #[derive(Debug, Clone)]
 pub(crate) struct BlockAnchor {
     pub creator_event_id: EventId,

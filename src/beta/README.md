@@ -73,8 +73,11 @@ Android 系统选择器期间的进程回收、导出持久结果及重新选址
 snapshot digest 或 selection，也不会因读取触发模型重跑。冻结后针对已选 capture 的
 有效更正，同样会更新这个提示；只匹配同档案、目标 ID 和原 digest。跨设备比较使用
 `origin_heads` 中的来源/epoch/sequence，不能用两个数据库的 `local_seq` 相比。Core10
-目标索引缩小查询范围，单个目标更正很多时成本仍会增长。冻结前的更正是否纳入模型输入，
-与这一当前性修复分开处理；本切片没有改变 provider 输入、复制 schema 或 Agent bundle。
+目标索引缩小查询范围。Core11 已按用户决定将冻结前的原文与匹配更正分别放入新回顾
+材料，旧摘要保值；匹配索引、候选/正文预算及精确来源读取边界见
+[Core11 合同](../../docs/development/beta-core11-history-and-review.md)。外部 Agent summary
+和 bundle 的既有证据/排除合同保留，完整历史需分页读取。冻结 Beta19 仍为 Core10，
+这些源码能力须随下一匹配候选另做实测。
 
 ## 最容易误读的名称
 

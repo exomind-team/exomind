@@ -179,7 +179,7 @@ fn actual_schema_four_pending_start_and_resume_keep_their_accepted_intents_after
     let bytes = fs::read(fixture.join("original.bin")).unwrap();
     let core = Core::open(&root).unwrap();
     let now = stamp(&core, &expected["clock"]);
-    assert_eq!(CORE_SCHEMA_VERSION, 10);
+    assert_eq!(CORE_SCHEMA_VERSION, 11);
     let database = Connection::open(core.database_path()).unwrap();
     assert_eq!(
         database

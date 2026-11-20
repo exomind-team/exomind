@@ -196,7 +196,7 @@ fn reclaim_deadline_uses_host_clock_and_expiry_never_deletes_automatically() {
 }
 
 #[test]
-fn replication_negotiates_the_current_core10_schema() {
-    assert_eq!(exomind_core::CORE_SCHEMA_VERSION, 10);
-    assert_eq!(crate::PEER_CORE_SCHEMA, 10);
+fn replication_negotiates_the_current_core11_schema() {
+    assert_eq!(exomind_core::CORE_SCHEMA_VERSION, 11);
+    assert_eq!(crate::PEER_CORE_SCHEMA, 11);
 }

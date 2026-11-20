@@ -1,48 +1,124 @@
 use super::{facts, model::*};
-use crate::{CoreError, EventId, EventRecord, ProfileId, TimeblockNodeRecord};
-use rusqlite::{params, Connection, OptionalExtension};
-use std::collections::BTreeMap;
+use crate::{
+    CoreError, CorrectionRecord, EventId, EventRecord, OriginCursor, OriginIdentity, ProfileId,
+    TimeblockNodeRecord,
+};
+use rusqlite::{Connection, OptionalExtension, params};
+use std::collections::{BTreeMap, HashMap};
+
+const MAX_CORRECTIONS_PER_CAPTURE: usize = 64;
+const MAX_CORRECTION_CANDIDATES_PER_SUMMARY: usize = 256;
+const MAX_CORRECTION_CANDIDATE_BYTES_PER_SUMMARY: usize = MAX_SUMMARY_INPUT_BYTES;
+
+fn decode_record(
+    connection: &Connection,
+    p: ProfileId,
+    id: EventId,
+    kind: &str,
+    stored_digest: &str,
+    body: &str,
+) -> Result<SummaryInputRecord, CoreError> {
+    match kind {
+        "capture" => {
+            let mut value: EventRecord = serde_json::from_str(body)?;
+            if value.event_id != id
+                || value.profile_id != p
+                || value.digest != stored_digest
+                || value.computed_digest()? != stored_digest
+            {
+                return Err(CoreError::RecoveryRequired);
+            }
+            value.local_seq = 0;
+            Ok(SummaryInputRecord::Capture(value))
+        }
+        "timeblock/1" => {
+            let mut value: TimeblockNodeRecord = serde_json::from_str(body)?;
+            if value.event_id != id
+                || value.profile_id != p
+                || value.digest != stored_digest
+                || value.computed_digest()? != stored_digest
+            {
+                return Err(CoreError::RecoveryRequired);
+            }
+            value.local_seq = 0;
+            Ok(SummaryInputRecord::Timeblock(value))
+        }
+        "correction/1" => {
+            let mut fact: CorrectionRecord = serde_json::from_str(body)?;
+            if fact.event_id != id
+                || fact.profile_id != p
+                || fact.digest != stored_digest
+                || fact.validate().is_err()
+            {
+                return Err(CoreError::RecoveryRequired);
+            }
+            let (origin, cursor) = correction_origin(connection, p, id, &fact)?;
+            fact.local_seq = 0;
+            Ok(SummaryInputRecord::Correction(SummaryCorrectionInput {
+                fact,
+                origin,
+                cursor,
+            }))
+        }
+        _ => Err(facts::invalid("source is not original input")),
+    }
+}
 
 pub(super) fn record(
     connection: &Connection,
     p: ProfileId,
     id: EventId,
 ) -> Result<Option<SummaryInputRecord>, CoreError> {
-    let row:Option<(String,Option<String>)>=connection.query_row("SELECT kind,CASE WHEN length(CAST(body AS BLOB))<=?3 THEN body END FROM events WHERE profile_id=?1 AND event_id=?2",params![p.to_string(),id.to_string(),crate::MAX_FACT_BYTES],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-    row.map(|(kind, body)| {
+    let row: Option<(String, String, Option<String>)> = connection
+        .query_row(
+            "SELECT kind,digest,CASE WHEN typeof(body)='text' AND length(CAST(body AS BLOB))<=?3 THEN body END FROM events WHERE profile_id=?1 AND event_id=?2",
+            params![p.to_string(), id.to_string(), crate::MAX_FACT_BYTES],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    row.map(|(kind, stored_digest, body)| {
         let body = body.ok_or(CoreError::RecoveryRequired)?;
-        match kind.as_str() {
-            "capture" => {
-                let mut value: EventRecord = serde_json::from_str(&body)?;
-                if value.event_id != id
-                    || value.profile_id != p
-                    || value.computed_digest()? != value.digest
-                {
-                    return Err(CoreError::RecoveryRequired);
-                }
-                value.local_seq = 0;
-                Ok(SummaryInputRecord::Capture(value))
-            }
-            "timeblock/1" => {
-                let mut value: TimeblockNodeRecord = serde_json::from_str(&body)?;
-                if value.event_id != id
-                    || value.profile_id != p
-                    || value.computed_digest()? != value.digest
-                {
-                    return Err(CoreError::RecoveryRequired);
-                }
-                value.local_seq = 0;
-                Ok(SummaryInputRecord::Timeblock(value))
-            }
-            _ => Err(facts::invalid("source is not original input")),
-        }
+        decode_record(connection, p, id, &kind, &stored_digest, &body)
     })
     .transpose()
 }
+
+fn correction_origin(
+    connection: &Connection,
+    profile: ProfileId,
+    event_id: EventId,
+    fact: &CorrectionRecord,
+) -> Result<(OriginIdentity, OriginCursor), CoreError> {
+    let row: Option<(String, String, u64, String)> = connection
+        .query_row(
+            "SELECT origin_device,restoration_epoch,origin_seq,chain_hash FROM origin_entries WHERE profile_id=?1 AND event_id=?2 AND fact_type='correction/1' AND digest=?3",
+            params![profile.to_string(), event_id.to_string(), fact.digest.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    let (device, epoch, seq, hash) = row.ok_or(CoreError::RecoveryRequired)?;
+    let origin = OriginIdentity {
+        profile_id: profile,
+        device_id: device.parse()?,
+        restoration_epoch: uuid::Uuid::parse_str(&epoch)?,
+    };
+    let cursor = OriginCursor { seq, hash };
+    if origin.device_id != fact.device_id
+        || origin.restoration_epoch.is_nil()
+        || cursor.seq == 0
+        || cursor.seq > MAX_SUMMARY_SAFE_COUNTER
+        || !facts::sha(&cursor.hash)
+    {
+        return Err(CoreError::RecoveryRequired);
+    }
+    Ok((origin, cursor))
+}
+
 pub(super) fn identity(value: &SummaryInputRecord) -> (EventId, &str, &str) {
     match value {
         SummaryInputRecord::Capture(v) => (v.event_id, "capture", &v.digest),
         SummaryInputRecord::Timeblock(v) => (v.event_id, "timeblock/1", &v.digest),
+        SummaryInputRecord::Correction(v) => (v.fact.event_id, "correction/1", &v.fact.digest),
     }
 }
 pub(super) fn freeze(
@@ -63,7 +139,9 @@ pub(super) fn freeze(
     // the initial wall range. Captures use the explicit, frozen range. Never
     // feed job/status/result facts back to the model implicitly.
     let block_json = serde_json::to_string(&selection.block_ids)?;
-    let mut query=connection.prepare("SELECT e.event_id,e.kind,e.digest,length(CAST(e.body AS BLOB)) FROM events e JOIN (SELECT event_id FROM summary_capture_sources WHERE profile_id=?1 AND occurred_at_ms BETWEEN ?2 AND ?3 UNION SELECT event_id FROM summary_block_sources WHERE profile_id=?1 AND block_id IN (SELECT value FROM json_each(?4))) selected ON selected.event_id=e.event_id WHERE e.profile_id=?1 AND e.local_seq<=?5 ORDER BY e.local_seq,e.event_id LIMIT 1001")?;
+    let mut query = connection.prepare(
+        "SELECT e.event_id,e.kind,e.digest,length(CAST(e.body AS BLOB)),e.local_seq FROM events e JOIN (SELECT event_id FROM summary_capture_sources WHERE profile_id=?1 AND occurred_at_ms BETWEEN ?2 AND ?3 UNION SELECT event_id FROM summary_block_sources WHERE profile_id=?1 AND block_id IN (SELECT value FROM json_each(?4))) selected ON selected.event_id=e.event_id WHERE e.profile_id=?1 AND e.local_seq<=?5 ORDER BY e.local_seq,e.event_id LIMIT 1001",
+    )?;
     let rows = query.query_map(
         params![
             p.to_string(),
@@ -78,6 +156,7 @@ pub(super) fn freeze(
                 r.get::<_, String>(1)?,
                 r.get::<_, String>(2)?,
                 r.get::<_, usize>(3)?,
+                r.get::<_, u64>(4)?,
             ))
         },
     )?;
@@ -90,8 +169,10 @@ pub(super) fn freeze(
     let mut input_byte_limit = false;
     let mut omitted = vec![];
     let mut materials = BTreeMap::<String, crate::OriginalRef>::new();
+    let mut selected_captures = Vec::<(EventId, String, i64, u64)>::new();
+    let mut source_order = HashMap::<EventId, (u64, String)>::new();
     for row in rows {
-        let (id, kind, digest, body_bytes) = row?;
+        let (id, kind, digest, body_bytes, local_seq) = row?;
         let id: EventId = id.parse()?;
         selected_count += 1;
         if selected_count > MAX_SUMMARY_SOURCES {
@@ -116,6 +197,17 @@ pub(super) fn freeze(
         bytes += encoded;
         match &value {
             SummaryInputRecord::Capture(event) => {
+                if event.occurred_at_ms < selection.from_ms
+                    || event.occurred_at_ms > selection.to_ms
+                {
+                    return Err(CoreError::RecoveryRequired);
+                }
+                selected_captures.push((
+                    event.event_id,
+                    event.digest.clone(),
+                    event.occurred_at_ms,
+                    local_seq,
+                ));
                 for original in &event.originals {
                     materials.insert(original.original_id.to_string(), original.clone());
                 }
@@ -140,13 +232,129 @@ pub(super) fn freeze(
                     feedback_ids.push(id);
                 }
             }
+            SummaryInputRecord::Correction(_) => {}
         }
         sources.push(SummarySourceRef {
             event_id: id,
             kind,
             digest,
         });
+        source_order.insert(id, (local_seq, id.to_string()));
     }
+
+    let mut correction_candidates_scanned = 0usize;
+    let mut correction_candidate_bytes = 0usize;
+    let profile_text = p.to_string();
+    let mut stop_correction_scan = false;
+    let correction_query = super::source_index::candidates_sql();
+    let mut candidates = connection.prepare(&correction_query)?;
+    for (target_id, target_digest, occurred_at_ms, _target_local_seq) in &selected_captures {
+        if correction_candidates_scanned >= MAX_CORRECTION_CANDIDATES_PER_SUMMARY {
+            page_limit = true;
+            break;
+        }
+        if *occurred_at_ms < selection.from_ms || *occurred_at_ms > selection.to_ms {
+            continue;
+        }
+        if sources.len() >= MAX_SUMMARY_SOURCES {
+            page_limit = true;
+            break;
+        }
+        let remaining_global =
+            MAX_CORRECTION_CANDIDATES_PER_SUMMARY - correction_candidates_scanned;
+        let target_limit = MAX_CORRECTIONS_PER_CAPTURE.min(remaining_global);
+        let query_limit = (target_limit + 1) as i64;
+        let rows = candidates.query_map(
+            params![
+                profile_text.as_str(),
+                target_id.to_string(),
+                target_digest,
+                through,
+                query_limit
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, usize>(1)?,
+                    row.get::<_, u64>(2)?,
+                ))
+            },
+        )?;
+        let mut target_candidates_scanned = 0usize;
+        for row in rows {
+            let (stored_event, body_bytes, local_seq) = row?;
+            let id: EventId = stored_event.parse()?;
+            // One metadata-only lookahead establishes incompleteness. It never
+            // loads a body, and a dense target does not stop the next target.
+            if target_candidates_scanned >= MAX_CORRECTIONS_PER_CAPTURE {
+                page_limit = true;
+                omitted.push(id);
+                break;
+            }
+            if correction_candidates_scanned >= MAX_CORRECTION_CANDIDATES_PER_SUMMARY {
+                page_limit = true;
+                omitted.push(id);
+                stop_correction_scan = true;
+                break;
+            }
+            target_candidates_scanned += 1;
+            correction_candidates_scanned += 1;
+            if body_bytes > crate::MAX_FACT_BYTES {
+                return Err(CoreError::RecoveryRequired);
+            }
+            let next_scan_bytes = correction_candidate_bytes.checked_add(body_bytes);
+            if next_scan_bytes.is_none_or(|next| next > MAX_CORRECTION_CANDIDATE_BYTES_PER_SUMMARY)
+            {
+                input_byte_limit = true;
+                omitted.push(id);
+                continue;
+            }
+            correction_candidate_bytes = next_scan_bytes.ok_or(CoreError::RecoveryRequired)?;
+            let value = record(connection, p, id)?.ok_or(CoreError::RecoveryRequired)?;
+            let SummaryInputRecord::Correction(correction) = &value else {
+                return Err(CoreError::RecoveryRequired);
+            };
+            if correction.fact.profile_id != p
+                || correction.fact.target_event_id != *target_id
+                || correction.fact.target_digest.as_str() != target_digest.as_str()
+            {
+                return Err(CoreError::RecoveryRequired);
+            }
+            if sources.len() >= MAX_SUMMARY_SOURCES {
+                page_limit = true;
+                omitted.push(id);
+                stop_correction_scan = true;
+                break;
+            }
+
+            let encoded = serde_json::to_vec(&value)?.len();
+            if bytes
+                .checked_add(encoded)
+                .is_none_or(|next| next > MAX_SUMMARY_INPUT_BYTES)
+            {
+                input_byte_limit = true;
+                omitted.push(id);
+                continue;
+            }
+            bytes += encoded;
+            sources.push(SummarySourceRef {
+                event_id: id,
+                kind: "correction/1".into(),
+                digest: correction.fact.digest.clone(),
+            });
+            source_order.insert(id, (local_seq, id.to_string()));
+        }
+        if stop_correction_scan {
+            break;
+        }
+    }
+    sources.sort_by_key(|source| {
+        source_order
+            .get(&source.event_id)
+            .cloned()
+            .unwrap_or((u64::MAX, source.event_id.to_string()))
+    });
+
     let mut material_rows = vec![];
     for (_, original) in materials {
         let selected = selection
@@ -250,6 +458,28 @@ pub(super) fn input(
         let (id, kind, digest) = identity(&value);
         if id != source.event_id || kind != source.kind || digest != source.digest {
             return Err(facts::invalid("frozen source changed"));
+        }
+        if let SummaryInputRecord::Correction(correction) = &value {
+            let selected_capture_matches = snapshot.sources.iter().any(|candidate| {
+                candidate.kind == "capture"
+                    && candidate.event_id == correction.fact.target_event_id
+                    && candidate.digest == correction.fact.target_digest
+            });
+            let origin_head = snapshot
+                .origin_heads
+                .iter()
+                .find(|head| head.origin == correction.origin);
+            if !selected_capture_matches
+                || correction.fact.profile_id != p
+                || correction.fact.device_id != correction.origin.device_id
+                || correction.origin.profile_id != p
+                || correction.cursor.seq == 0
+                || correction.cursor.seq > MAX_SUMMARY_SAFE_COUNTER
+                || !facts::sha(&correction.cursor.hash)
+                || origin_head.is_none_or(|head| head.cursor.seq < correction.cursor.seq)
+            {
+                return Err(facts::invalid("correction outside frozen source heads"));
+            }
         }
         bytes = bytes
             .checked_add(serde_json::to_vec(&value)?.len())

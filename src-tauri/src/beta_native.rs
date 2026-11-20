@@ -8,16 +8,16 @@ mod deadlines;
 mod desktop_settings;
 #[path = "beta_native_diagnostics.rs"]
 mod diagnostics;
-#[path = "beta_native_open_cache.rs"]
-mod open_cache;
-#[path = "beta_native_original_lifecycle.rs"]
-mod original_lifecycle;
 #[path = "beta_native_export.rs"]
 mod export;
 #[path = "beta_native_grants.rs"]
 mod grants;
 #[path = "beta_native_sources.rs"]
 mod local_sources;
+#[path = "beta_native_open_cache.rs"]
+mod open_cache;
+#[path = "beta_native_original_lifecycle.rs"]
+mod original_lifecycle;
 #[path = "beta_overlay.rs"]
 mod overlay;
 #[path = "beta_native_peers.rs"]
@@ -41,8 +41,9 @@ use exomind_core::{
     BeginStageCommand, CaptureCommand, CommandId, CoreError, EventPage, EventQuery, IntervalPage,
     IntervalQuery, OriginalChunk, OriginalId, ProfileId, ProfileInfo, Receipt, StageId,
     StageStatus, TimeblockCommand, TimeblockNodePage, TimeblockSnapshot, TimelinePage,
+    TimelinePeriodQuery,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
@@ -195,6 +196,10 @@ impl From<HostError> for Failure {
             HostError::LocalSourceBusy => {
                 ("local_source_busy", "本机文件校验正在处理中，请稍后重试")
             }
+            HostError::Core(CoreError::TimelinePeriodBudgetExceeded) => (
+                "timeline_period_budget_exceeded",
+                "窗口记录较多，请缩小时间范围",
+            ),
             HostError::Core(CoreError::FactTooLarge { .. }) => {
                 ("invalid_request", "本次记录过大，请分条保存")
             }
@@ -692,6 +697,32 @@ async fn beta_timeblock_intervals(
     .await
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeTimelinePeriodQuery {
+    from_ms: i64,
+    to_ms: i64,
+    before: Option<u64>,
+    through: Option<u64>,
+    limit: Option<usize>,
+    search: Option<String>,
+    tag: Option<String>,
+}
+
+impl NativeTimelinePeriodQuery {
+    fn into_core(self) -> TimelinePeriodQuery {
+        TimelinePeriodQuery {
+            from_ms: self.from_ms,
+            to_ms: self.to_ms,
+            before: self.before,
+            through: self.through,
+            limit: self.limit.unwrap_or(100),
+            search: self.search,
+            tag: self.tag,
+        }
+    }
+}
+
 #[tauri::command]
 async fn beta_timeline_page(
     window: WebviewWindow,
@@ -704,6 +735,23 @@ async fn beta_timeline_page(
         state
             .host
             .timeline_page(&state.human(profile_id)?, profile_id, &query)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn beta_timeline_period_page(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    query: NativeTimelinePeriodQuery,
+) -> Result<TimelinePage, Failure> {
+    trusted_window(&window, state.inner())?;
+    let query = query.into_core();
+    work(state.inner(), move |state| {
+        state
+            .host
+            .timeline_period_page(&state.human(profile_id)?, profile_id, &query)
     })
     .await
 }
@@ -943,8 +991,8 @@ fn report_startup_failure(app: &AppHandle, error: &HostError) {
     log::error!("Beta storage startup failed: {error}");
     #[cfg(target_os = "windows")]
     {
-        use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
         use windows::core::PCWSTR;
+        use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
         let reason = match error {
             HostError::RootInUse => {
                 "这份资料正在由另一个外心 Beta 实例使用，请先退出该实例再重试。"
@@ -1213,12 +1261,14 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             beta_events_page,
             records::beta_events_page_with_tag,
             records::beta_record_correction,
+            records::beta_correction_event,
             records::beta_corrections_page,
             beta_timeblock_command,
             beta_timeblock_snapshot,
             beta_timeblock_nodes,
             beta_timeblock_intervals,
             beta_timeline_page,
+            beta_timeline_period_page,
             beta_deadline_envelope,
             deadlines::beta_deadline_alert_status,
             deadlines::beta_deadline_alert_request_permission,
@@ -1474,12 +1524,10 @@ mod tests {
             Some("{\"draft\":\"retained local text\"}")
         );
         let human = reopened.native_human_session(&owner, profile).unwrap();
-        assert!(
-            reopened
-                .events_page(&human, profile, &EventQuery::default())
-                .unwrap()
-                .items
-                .is_empty()
-        );
+        assert!(reopened
+            .events_page(&human, profile, &EventQuery::default())
+            .unwrap()
+            .items
+            .is_empty());
     }
 }

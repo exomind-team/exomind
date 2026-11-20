@@ -291,7 +291,7 @@ fn initialize_transaction(
     let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
     let application: i64 =
         transaction.pragma_query_value(None, "application_id", |row| row.get(0))?;
-    if ![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, SCHEMA_VERSION].contains(&version) {
+    if ![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, SCHEMA_VERSION].contains(&version) {
         return Err(CoreError::UnsupportedSchema(version));
     }
     if application != 0 && application != APPLICATION_ID {
@@ -414,6 +414,13 @@ fn initialize_transaction(
         crate::original_lifecycle::migrate_schema(&transaction)?;
     } else {
         crate::original_lifecycle::validate_schema(&transaction)?;
+    }
+    if version < 11 {
+        crate::timeblocks::migrate_timeline_period_schema(&transaction)?;
+        crate::summaries::migrate_source_index(&transaction)?;
+    } else {
+        crate::timeblocks::validate_timeline_period_schema(&transaction)?;
+        crate::summaries::validate_source_index(&transaction)?;
     }
     if transaction
         .prepare("PRAGMA foreign_key_check")?

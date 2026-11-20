@@ -50,7 +50,17 @@ Beta 的 Core/Host/Native/UI 边界按上面的当前入口读取，不把下表
 
 ## 当前阶段
 
-2026-11-19 最新内部候选为 **Beta18／6018／Core9**，冻结 payload `66124154`、recipe
+2026-11-20 的冻结候选为 **Beta19／6019／Core10**，payload `cc3bc937`、recipe
+`5708e0ba`，四平台仅构建成功。平板全新安装由用户点击系统确认后完成；该次不算
+保数据升级。隔离 PC 与平板经指定 EasyTier 地址双向记录、跨端计时与反馈已实测。
+624 KiB 原件的自动开关与 8 MiB 上限均正常，但一次加入后接收端缺返拨地址；反向
+管理操作后同一原件到达且 SHA 一致。代理连接的 Host 回归已取得对应行为红灯，修复
+与新候选验收继续推进，不能宣称完整同步已通过。工作区 Core11 的窗口读取、更正
+材料及精确来源合同见 [Core11 维护说明](development/beta-core11-history-and-review.md)。
+档案往返包和 monitor 日用适配仍在实现；视频预览已延后，授权的视频原件字节读取
+仍在本轮范围。完整剩余项以 [持续完成计划](plans/2026-11-19-beta16-frozen-and-beta-completion.md)为准。
+
+2026-11-19 历史候选 **Beta18／6018／Core9**，冻结 payload `66124154`、recipe
 `b8d896e9`；四平台仅构建与该 payload 的 Source Contracts 已通过。导出中断恢复在系统
 选择器前记录任务，重启后可查证／重新选址；源码 591 项 Beta 回归、完整类型及 Windows
 Native 检查通过。精确 Windows 候选已验证身份、既有记录／原件保值、真实 Ctrl+Enter
@@ -63,7 +73,7 @@ Beta 签名、6018 与非签名包内容已核验；API35 x86_64 已验证保数
 [导出恢复合同](development/beta-original-export-recovery.md)，完整剩余任务仍按
 [持续完成计划](plans/2026-11-19-beta16-frozen-and-beta-completion.md)核对。
 
-2026-11-19内部Beta16冻结来源`85f7df92`、6016：四平台仅构建已齐，Windows精确候选启动/持久化9项、真实独立浮窗11项通过；双ABI APK本机身份/签名/hash检查及历史Beta证书重签完成，Android运行/升级尚待。后续文本预览源码`95c37dc0`已提交推送，前端384项、Edge32场景、生产Web打包和新前端/冻结Native兼容联调9项通过，源码门禁CI成功；这些增量未进入冻结Beta16包。完整需求矩阵已取回，诊断后台/界面、单件附件恢复和来源/路由反例继续按Luna分工推进。当前状态、精确产物和剩余可执行队列以[Beta16与持续完成计划](plans/2026-11-19-beta16-frozen-and-beta-completion.md)为准。默认Alpha配置仍保留Alpha05，不据此否定独立Beta配置或实际Native版本；无物理设备不等于模拟器或实现工作全部阻塞。
+2026-11-19内部Beta16冻结来源`85f7df92`、6016：四平台仅构建已齐；Windows启动/持久化9项、独立浮窗11项、API35 x86_64自有AVD原生UI记录/重启等6项通过，双ABI APK身份/签名/hash已核验。物理设备、升级与完整叙事另验。冻结后的文本预览、来源/路由回归、诊断后台及单件附件恢复已提交推送，最新源码门禁CI成功；诊断34项、授权后台4项、Settings集成13项及媒体/授权前端60项分别通过。工作区Core9标签/只增更正已做合成Core8升级与严格peer schema拒绝验证，Native/完整UI续验；录音、回收/释放等继续由Luna实现。这些增量未进入Beta16二进制，不将源码与旧候选证据混用。精确产物、原始需求矩阵和剩余队列见[持续完成计划](plans/2026-11-19-beta16-frozen-and-beta-completion.md)。默认Alpha配置保留Alpha05是有意隔离；无物理设备不阻止模拟器、合成夹具及本地实现推进。
 
 2026-11-19追加EasyTier现场修复：Beta13旧路由仍指Wi-Fi，新邀请缺覆盖地址；平板peer TCP可达，缓存过期假设已撤回（现有2秒接口刷新）。Beta15源码`a9553d93`增加保持原邀请/TLS pin的备用拨号路由，网络11项、Web371项/Edge28场景、Native检查通过，固定Windows EXE构建及真实双窗9项通过，含消息自动显示/旧档案保留。物理平板加入未验，Android未构建。Luna调查T3连接/peer-link完成，区分远程环境视图与外心多主本地副本。全量进展见[Beta09以来盘点](plans/2026-11-19-beta09-beta14-work-audit.md)、[覆盖网络记录](plans/2026-11-19-beta15-overlay-network-routes.md)、[T3对照](research/2026-11-19-easytier-t3-connections-and-sync.md)。
 

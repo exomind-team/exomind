@@ -14,6 +14,8 @@ use uuid::Uuid;
 mod alerts;
 #[path = "timeline_read.rs"]
 mod timeline_read;
+#[path = "timeline_period.rs"]
+pub(super) mod timeline_period;
 
 fn hash(value: &impl Serialize) -> Result<String, CoreError> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(value)?)))

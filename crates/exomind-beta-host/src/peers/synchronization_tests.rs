@@ -1355,18 +1355,23 @@ async fn dropping_the_public_sync_future_cancels_and_drains_its_blocking_session
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn core8_sync_hello_is_rejected_before_core10_fact_exchange() {
+async fn core8_sync_hello_is_rejected_before_core11_fact_exchange() {
     assert_old_core_schema_hello_rejected(8).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn core9_sync_hello_is_rejected_before_core10_fact_exchange() {
+async fn core9_sync_hello_is_rejected_before_core11_fact_exchange() {
     assert_old_core_schema_hello_rejected(9).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn core10_sync_hello_is_rejected_before_core11_fact_exchange() {
+    assert_old_core_schema_hello_rejected(10).await;
 }
 
 async fn assert_old_core_schema_hello_rejected(schema: i64) {
     let r = rig().await;
-    assert_eq!(CORE_SCHEMA_VERSION, 10);
+    assert_eq!(CORE_SCHEMA_VERSION, 11);
     let mut listening = listener(&r.b, &r.ob).await;
     let (client, server) = connect(&r.a, &r.oa, &r.b, &r.ob, &mut listening).await;
     let target = r.b.clone();
