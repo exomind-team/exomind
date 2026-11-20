@@ -10,6 +10,29 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByLabel('记录历史')).toHaveAttribute('aria-busy', 'false');
 });
 
+test('grant card keeps its identity readable beside reachable actions on a narrow screen',async({page})=>{
+  await page.setViewportSize({width:375,height:667});
+  await page.goto('/tests/e2e/fixtures/beta-agent-grants.html');
+  await activate(page,page.getByRole('button',{name:'管理 Agent 授权',exact:true}));
+  const card=page.getByRole('article');
+  await activate(page,card.getByRole('button',{name:'查证凭据',exact:true}));
+  await expect(card.getByRole('button',{name:'复制接入信息',exact:true})).toBeVisible();
+  const heading=card.getByRole('heading',{name:'只读观察者',exact:true});
+  const geometry=await heading.evaluate(element=>{
+    const style=getComputedStyle(element),box=element.getBoundingClientRect();
+    const canvas=document.createElement('canvas'),context=canvas.getContext('2d')!;
+    context.font=[style.fontWeight,style.fontSize,style.fontFamily].join(' ');
+    return {width:box.width,height:box.height,lineHeight:parseFloat(style.lineHeight),textWidth:context.measureText(element.textContent??'').width};
+  });
+  expect(geometry.width).toBeGreaterThanOrEqual(geometry.textWidth-1);
+  expect(geometry.height).toBeLessThanOrEqual(geometry.lineHeight+1);
+  await activate(page,card.getByRole('button',{name:'查看授权 ID 详情',exact:true}));
+  await activate(page,card.getByRole('button',{name:'清除本机接入材料',exact:true}));
+  await expect(page.getByRole('button',{name:'确认清除本机材料',exact:true})).toBeInViewport();
+  const dialog=page.getByRole('dialog').filter({has:page.getByRole('heading',{name:'清除本机接入材料？',exact:true})});
+  expect(await dialog.evaluate(element=>element.scrollWidth-element.clientWidth)).toBeLessThanOrEqual(1);
+});
+
 test('text preview stays literal, wraps long lines and returns to the same draft',async({page},info)=>{
   const input=page.getByRole('textbox',{name:'记录当下'}),draft='文本预览期间继续保留这份草稿。';
   await input.fill(draft);const editor=await input.elementHandle();

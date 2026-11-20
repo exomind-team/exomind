@@ -450,7 +450,7 @@ export function BetaAgentGrantsPanel({
                 key={row.metadata.grant_id}
                 className="rounded-xl border border-border-card bg-card p-4"
               >
-                <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h4 className="text-sm font-semibold">
@@ -564,7 +564,7 @@ export function BetaAgentGrantsPanel({
                   label="查看授权 ID 详情"
                   className="mt-3 border-t border-border-card pt-2"
                 >
-                  <dl className="grid gap-1 sm:grid-cols-[auto_1fr]">
+                  <dl className="grid gap-1 break-all sm:grid-cols-[auto_minmax(0,1fr)]">
                     <dt>Grant ID</dt>
                     <dd>
                       <code>{row.metadata.grant_id}</code>
