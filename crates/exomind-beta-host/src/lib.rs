@@ -57,6 +57,7 @@ pub mod diagnostics;
 #[cfg(test)]
 mod stop_tests;
 mod storage;
+pub mod user_export;
 mod timeblocks;
 mod timeblocks_http;
 pub use timeblocks::{DeadlineEnvelope, HostClock, HostClockSample, ServiceStatus};
