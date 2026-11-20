@@ -19,6 +19,7 @@ import { BetaTextPreview } from './BetaTextPreview';
 import { isTextPreviewCandidate } from './text-preview';
 import { resolveMediaPreviewFormat } from './media-preview';
 import { OriginalTransferDiagnostics } from './OriginalTransferDiagnostics';
+import { BetaOriginalLifecyclePanel } from './BetaOriginalLifecyclePanel';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -63,6 +64,7 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
   const acquisition=client.originalAcquisition;
   const deviceNames=useBetaDeviceNames(deviceId);
   const [status,setStatus]=useState<BetaOriginalTransferStatus|null>(null);
+  const [lifecycleRevision,setLifecycleRevision]=useState(0);
   const [statusError,setStatusError]=useState(false);
   const [expanded,setExpanded]=useState(false);
   const [sources,setSources]=useState<BetaOriginalSources|null>(null);
@@ -93,7 +95,7 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
   useEffect(()=>{if(visible)void inspect(life.current);},[client,acquisition,deviceId,profileId,original.original_id,original.sha256,original.byte_length,original.file_name,original.media_type,visible]);
   useEffect(()=>{
     if(!visible||!acquisition?.observe)return;const owner=life.current;let observing=true,stop:(()=>void)|undefined;
-    void acquisition.observe(profileId,original.original_id,()=>{if(observing&&current(owner))void inspect(owner);}).then(unlisten=>{if(observing&&current(owner)){stop=unlisten;void inspect(owner);}else unlisten();}).catch(()=>{/* Explicit status checks remain available if the host event channel is unavailable. */});
+    void acquisition.observe(profileId,original.original_id,()=>{if(observing&&current(owner)){setLifecycleRevision(value=>value+1);void inspect(owner);}}).then(unlisten=>{if(observing&&current(owner)){stop=unlisten;void inspect(owner);}else unlisten();}).catch(()=>{/* Explicit status checks remain available if the host event channel is unavailable. */});
     return()=>{observing=false;stop?.();};
   },[client,acquisition,deviceId,profileId,original.original_id,original.sha256,visible]);
   const running=fetching||!!status&&originalTransferActive(status);
@@ -187,6 +189,7 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
       <div className="min-w-0 flex-1"><p className="break-all text-xs font-medium">{original.file_name}</p><p className="text-[10px] text-muted">{formatBytes(original.byte_length)}</p></div>
       <Button variant="ghost" size="icon" aria-label={`下载 ${original.file_name}`} disabled={exporting||!readable||!client.originalExports&&original.byte_length>MAX_BASIC_DOWNLOAD_BYTES} onClick={onDownload}><Download size={14}/></Button>
     </div>
+    <BetaOriginalLifecyclePanel profileId={profileId} originalId={original.original_id} fileName={original.file_name} visible={visible} revision={lifecycleRevision} />
     {opening&&<p role="status" className="text-xs text-muted">正在准备系统打开…</p>}
     {acquisition&&<div className="mt-1 space-y-1 text-xs text-muted"><p role="status">{label}</p>
       {running&&<><p role="status">{transferLabel}</p>{status&&<Progress className="h-1 w-full" aria-label={`原件获取进度 ${original.file_name}`} value={status.next_offset} max={Math.max(1,status.byte_length)}/>}</>}
