@@ -472,6 +472,11 @@ jobs:
               expected: ['review_v4_model_material_contains_original_and_each_prefreeze_correction'],
             },
             {
+              name: 'sdk-real-host-summary-history',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'monitor_summary_http', '--', '--test-threads=1'],
+              expected: ['sdk_reads_both_summary_feeds_from_real_host_with_restart_continuation'],
+            },
+            {
               name: 'core-external-summary-source-boundary',
               args: ['test', '--locked', '-p', 'exomind-core', '--lib', 'external_summary_evidence_rejects_internal_correction_source_kind', '--', '--test-threads=1'],
               expected: ['external_summary_evidence_rejects_internal_correction_source_kind'],

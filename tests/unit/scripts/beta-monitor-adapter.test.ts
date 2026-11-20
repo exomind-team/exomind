@@ -180,6 +180,7 @@ function replyIdentity(
     profileId?: string;
     grantKind?: 'observer' | 'agent_note' | 'human';
     agentId?: string | null;
+    allowed?: string[];
   } = {},
 ) {
   const protocol = options.protocol ?? 'exomind-beta/1';
@@ -202,7 +203,7 @@ function replyIdentity(
       profile_id: profileId,
       grant_kind: grantKind,
       agent_id: agentId,
-      allowed: [
+      allowed: options.allowed ?? [
         ...READ_CAPABILITIES,
         'timeline_read',
         ...(grantKind === 'agent_note' ? ['capture_append_agent_note'] : []),
@@ -320,6 +321,59 @@ function currentTimeblock(phase: 'running' | 'paused' | 'feedback_pending' | 'co
 
 function emptyPage(call: Call, response: ServerResponse, highwater: number) {
   page(call, response, [], highwater);
+}
+
+function pageAtFixedSnapshot(call: Call, response: ServerResponse, items: any[], latestHighwater: number) {
+  const requestedThrough = call.url.searchParams.get('through');
+  const through = requestedThrough === null ? latestHighwater : Number(requestedThrough);
+  const beforeValue = call.url.searchParams.get('before');
+  const before = beforeValue === null ? Number.MAX_SAFE_INTEGER : Number(beforeValue);
+  const limit = Math.min(100, Math.max(1, Number(call.url.searchParams.get('limit') ?? '100')));
+  const remaining = items.filter((item) => sequenceOf(item) <= through && sequenceOf(item) < before);
+  const itemsInPage = remaining.slice(0, limit);
+  const nextBefore = remaining.length > itemsInPage.length ? sequenceOf(itemsInPage[itemsInPage.length - 1]) : null;
+  json(response, { items: itemsInPage, next_before: nextBefore, highwater: through });
+}
+
+function typedSummaryItem(
+  sequence: number,
+  kind: 'summary/1' | 'agent_summary/1',
+  overrides: Record<string, any> = {},
+) {
+  const eventId = uuid(kind === 'summary/1' ? '40000000' : '50000000', sequence);
+  const record =
+    kind === 'summary/1'
+      ? {
+          event_id: eventId,
+          profile_id: PROFILE_ID,
+          device_id: DEVICE_ID,
+          author_id: DEVICE_ID,
+          task_id: uuid('41000000', sequence),
+          run_id: uuid('42000000', sequence),
+          attempt_id: uuid('43000000', sequence),
+          artifact_kind: 'daily',
+          snapshot: { through: Math.max(0, sequence - 1), source_kind: 'local_summary' },
+          output: { narrative: 'model summary ' + sequence, evidence: [], read_original_ids: [] },
+          supersedes_artifact_id: null,
+          occurred_at_ms: 1_800_000_000_000 - sequence * 1000,
+          digest: digest('summary:' + sequence),
+          local_seq: sequence,
+          source_extension: { raw: true },
+        }
+      : {
+          event_id: eventId,
+          profile_id: PROFILE_ID,
+          device_id: DEVICE_ID,
+          producer_agent_id: AGENT_ID,
+          occurred_at_ms: 1_800_000_000_000 - sequence * 1000,
+          snapshot: { source_kind: 'external_agent', external: true },
+          narrative: 'external summary ' + sequence,
+          evidence: [],
+          digest: digest('agent-summary:' + sequence),
+          local_seq: sequence,
+          source_extension: { raw: true },
+        };
+  return { kind, record: { ...record, ...overrides } };
 }
 
 function noLegacyPaths(calls: Call[]) {
@@ -543,6 +597,10 @@ describe('production Beta monitor adapter contract', () => {
       expect(snapshot.agentMessages).toEqual([captures.find((item) => item.author_kind === 'agent_note')]);
       expect(snapshot.agentMessages[0]?.text).toBe('synthetic agent note');
       expect(snapshot.through).toBe(304);
+      expect(snapshot.cursor.complete).toBe(true);
+      expect(snapshot).not.toHaveProperty('feeds.summaries');
+      expect(snapshot).not.toHaveProperty('feeds.agentSummaries');
+      expect(host.calls.some((call) => call.url.pathname.endsWith('/timeline'))).toBe(false);
 
       const accessCheck = host.calls.find((call) => call.url.pathname.endsWith('/access/check'));
       const requiredCapabilities = (accessCheck?.body as any).required;
@@ -2136,6 +2194,360 @@ describe('production Beta monitor adapter contract', () => {
           : ['501', '501', '501', '501', '501', '501'];
         expect(reads.map((call) => call.through)).toEqual(expectedThrough);
       }
+    } finally {
+      await monitor.stop();
+    }
+  });
+
+  it('reads typed summary and agent-summary feeds across four pages under one highwater and resumes after restart', async () => {
+    const originalFacts = Array.from({ length: 501 }, (_, index) => {
+      const sequence = 501 - index;
+      const kind: 'summary/1' | 'agent_summary/1' = sequence % 2 === 0 ? 'summary/1' : 'agent_summary/1';
+      return typedSummaryItem(sequence, kind);
+    });
+    const lateFact = typedSummaryItem(502, 'agent_summary/1');
+    let highwater = 501;
+    let timelineFacts = [...originalFacts];
+    const timelineReads: Array<{ before: string | null; through: string | null }> = [];
+    const host = await startHost((call, response) => {
+      if (replyIdentity(call, response, { grantKind: 'agent_note', agentId: AGENT_ID })) return;
+      const profilePath = '/beta/v1/profiles/' + PROFILE_ID;
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/events') {
+        pageAtFixedSnapshot(call, response, [], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/corrections') {
+        pageAtFixedSnapshot(call, response, [], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/timeblocks/nodes') {
+        pageAtFixedSnapshot(call, response, [], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/timeline') {
+        timelineReads.push({
+          before: call.url.searchParams.get('before'),
+          through: call.url.searchParams.get('through'),
+        });
+        pageAtFixedSnapshot(call, response, timelineFacts, highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/timeblocks/current') {
+        json(response, currentTimeblock('completed'));
+        return;
+      }
+      json(response, { error: { code: 'not_found' } }, 404);
+    });
+    const module = await import(adapterUrl.href);
+    const create = module.createBetaMonitorAdapter;
+    const directory = mkdtempSync(join(tmpdir(), 'exomind-beta-monitor-boundary-'));
+    temporaryDirectories.push(directory);
+    const statePath = join(directory, 'monitor-state.json');
+    const firstStore = module.createFileStateStore(statePath);
+    const firstMonitor = create({
+      handoff: nativeHandoff(host.apiBaseUrl, { kind: 'agent_note', agentId: AGENT_ID }),
+      target: target(host.apiBaseUrl),
+      stateStore: firstStore,
+    });
+
+    try {
+      await firstMonitor.connect();
+      const first = await firstMonitor.readHistory({ maxPages: 10000, includeSummaryFeeds: true });
+      expect(first.cursor.complete).toBe(true);
+      expect(first.coverage.full_history_complete).toBe(false);
+      expect(first.feeds.summaries.pages).toHaveLength(4);
+      expect(first.feeds.agentSummaries.pages).toHaveLength(4);
+      expect(first.feeds.summaries).toMatchObject({
+        available: true,
+        through: 501,
+        before: null,
+        next_before: 102,
+        complete: false,
+      });
+      expect(first.feeds.agentSummaries).toMatchObject({
+        available: true,
+        through: 501,
+        before: null,
+        next_before: 102,
+        complete: false,
+      });
+      expect(first.feeds.summaries.records).toEqual(
+        originalFacts.slice(0, 400).filter((item) => item.kind === 'summary/1'),
+      );
+      expect(first.feeds.agentSummaries.records).toEqual(
+        originalFacts.slice(0, 400).filter((item) => item.kind === 'agent_summary/1'),
+      );
+      expect(first.feeds.summaries.pages[0]?.items).toEqual(originalFacts.slice(0, 100));
+      expect(first.feeds.agentSummaries.records[0]?.record.producer_agent_id).toBe(AGENT_ID);
+      expect(first.feeds.agentSummaries.records[0]?.record).not.toHaveProperty('author_kind');
+      expect(first.feeds.agentSummaries.records[0]?.record).not.toHaveProperty('trusted_local');
+      expect(first.feeds.summaries.records[0]?.record.author_id).toBe(DEVICE_ID);
+      expect(first.feeds.summaries.records[0]?.record).not.toHaveProperty('author_kind');
+
+      timelineFacts = [lateFact, ...timelineFacts];
+      highwater = 502;
+      await firstMonitor.stop();
+
+      const resumedStore = module.createFileStateStore(statePath);
+      const resumedMonitor = create({
+        handoff: nativeHandoff(host.apiBaseUrl, { kind: 'agent_note', agentId: AGENT_ID }),
+        target: target(host.apiBaseUrl),
+        stateStore: resumedStore,
+      });
+      try {
+        await resumedMonitor.connect();
+        const second = await resumedMonitor.readHistory({ maxPages: 1, includeSummaryFeeds: true });
+        const third = await resumedMonitor.readHistory({ maxPages: 1, includeSummaryFeeds: true });
+        expect(second.through).toBe(501);
+        expect(third.through).toBe(501);
+        expect(second.feeds.summaries).toMatchObject({ before: 102, next_before: 2, complete: false });
+        expect(third.feeds.summaries).toMatchObject({ before: 2, next_before: null, complete: true });
+        expect(second.feeds.agentSummaries.complete).toBe(false);
+        expect(third.feeds.agentSummaries.complete).toBe(true);
+        expect(third.coverage.full_history_complete).toBe(true);
+        expect(timelineReads.slice(0, 6)).toEqual([
+          { before: null, through: '501' },
+          { before: '402', through: '501' },
+          { before: '302', through: '501' },
+          { before: '202', through: '501' },
+          { before: '102', through: '501' },
+          { before: '2', through: '501' },
+        ]);
+
+        const allSummaryFacts = [
+          ...first.feeds.summaries.records,
+          ...second.feeds.summaries.records,
+          ...third.feeds.summaries.records,
+        ];
+        const allAgentSummaryFacts = [
+          ...first.feeds.agentSummaries.records,
+          ...second.feeds.agentSummaries.records,
+          ...third.feeds.agentSummaries.records,
+        ];
+        expect(allSummaryFacts).toEqual(originalFacts.filter((item) => item.kind === 'summary/1'));
+        expect(allAgentSummaryFacts).toEqual(originalFacts.filter((item) => item.kind === 'agent_summary/1'));
+        expect(allSummaryFacts.length + allAgentSummaryFacts.length).toBe(501);
+
+        const fresh = await resumedMonitor.readHistory({
+          maxPages: 1,
+          includeSummaryFeeds: true,
+          fresh: true,
+        });
+        expect(fresh.through).toBe(502);
+        expect(fresh.feeds.agentSummaries.records).toContainEqual(lateFact);
+        expect(timelineReads[6]).toEqual({ before: null, through: '502' });
+        expect(host.calls.some((call) => call.method === 'POST' && !call.url.pathname.endsWith('/access/check'))).toBe(
+          false,
+        );
+      } finally {
+        await resumedMonitor.stop();
+      }
+    } finally {
+      await firstMonitor.stop();
+    }
+  });
+
+  it('reports missing timeline_read as an explicit partial summary scope without fallback', async () => {
+    const highwater = 20;
+    const host = await startHost((call, response) => {
+      if (replyIdentity(call, response, { allowed: READ_CAPABILITIES })) return;
+      const profilePath = '/beta/v1/profiles/' + PROFILE_ID;
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/events') {
+        pageAtFixedSnapshot(call, response, [], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/corrections') {
+        pageAtFixedSnapshot(call, response, [], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/timeblocks/nodes') {
+        pageAtFixedSnapshot(call, response, [], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/timeblocks/current') {
+        json(response, currentTimeblock('completed'));
+        return;
+      }
+      json(response, { error: { code: 'not_found' } }, 404);
+    });
+    const create = await loadFactory();
+    const monitor = create({
+      handoff: nativeHandoff(host.apiBaseUrl),
+      target: target(host.apiBaseUrl),
+      stateStore: memoryStateStore(),
+    });
+
+    try {
+      await monitor.connect();
+      const snapshot = await monitor.readHistory({ includeSummaryFeeds: true });
+      expect(snapshot.cursor.complete).toBe(true);
+      expect(snapshot.coverage.full_history_complete).toBe(false);
+      expect(snapshot.feeds.summaries).toMatchObject({
+        available: false,
+        complete: false,
+        missing_capability: 'timeline_read',
+      });
+      expect(snapshot.feeds.agentSummaries).toMatchObject({
+        available: false,
+        complete: false,
+        missing_capability: 'timeline_read',
+      });
+      expect(host.calls.some((call) => call.method === 'GET' && call.url.pathname.endsWith('/timeline'))).toBe(false);
+      expect(host.calls.some((call) => call.url.pathname.includes('/export-bundle'))).toBe(false);
+      expect(host.calls.some((call) => /\/(?:health|version|act\/|eventlog)(?:\/|$)/.test(call.url.pathname))).toBe(
+        false,
+      );
+    } finally {
+      await monitor.stop();
+    }
+  });
+
+  it('rejects a summary fact that conflicts with an already-read capture digest', async () => {
+    const highwater = 20;
+    const existingCapture = capture(12);
+    const conflictingSummary = typedSummaryItem(8, 'summary/1', {
+      event_id: existingCapture.event_id,
+      digest: digest('conflicting-summary-body'),
+    });
+    const host = await startHost((call, response) => {
+      if (replyIdentity(call, response)) return;
+      const profilePath = '/beta/v1/profiles/' + PROFILE_ID;
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/events') {
+        pageAtFixedSnapshot(call, response, [existingCapture], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/corrections') {
+        pageAtFixedSnapshot(call, response, [], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/timeblocks/nodes') {
+        pageAtFixedSnapshot(call, response, [], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/timeline') {
+        pageAtFixedSnapshot(call, response, [conflictingSummary], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/timeblocks/current') {
+        json(response, currentTimeblock('completed'));
+        return;
+      }
+      json(response, { error: { code: 'not_found' } }, 404);
+    });
+    const create = await loadFactory();
+    const monitor = create({
+      handoff: nativeHandoff(host.apiBaseUrl),
+      target: target(host.apiBaseUrl),
+      stateStore: memoryStateStore(),
+    });
+
+    try {
+      await monitor.connect();
+      await expect(monitor.readHistory({ includeSummaryFeeds: true })).rejects.toMatchObject({
+        code: 'fact_digest_conflict',
+      });
+      expect(host.calls.some((call) => call.method === 'POST' && !call.url.pathname.endsWith('/access/check'))).toBe(
+        false,
+      );
+    } finally {
+      await monitor.stop();
+    }
+  });
+
+  it('does not restart completed legacy feeds while opt-in timeline pages continue at the same through', async () => {
+    const captures = Array.from({ length: 106 }, (_, index) => capture(106 - index));
+    const timelineFacts = Array.from({ length: 201 }, (_, index) => {
+      const sequence = 307 - index;
+      const kind: 'summary/1' | 'agent_summary/1' = sequence % 2 === 0 ? 'summary/1' : 'agent_summary/1';
+      return typedSummaryItem(sequence, kind);
+    });
+    const highwater = 307;
+    const timelineReads: Array<{ before: string | null; through: string | null }> = [];
+    const host = await startHost((call, response) => {
+      if (replyIdentity(call, response)) return;
+      const profilePath = '/beta/v1/profiles/' + PROFILE_ID;
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/events') {
+        pageAtFixedSnapshot(call, response, captures, highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/corrections') {
+        pageAtFixedSnapshot(call, response, [], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/timeblocks/nodes') {
+        pageAtFixedSnapshot(call, response, [], highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/timeline') {
+        timelineReads.push({
+          before: call.url.searchParams.get('before'),
+          through: call.url.searchParams.get('through'),
+        });
+        pageAtFixedSnapshot(call, response, timelineFacts, highwater);
+        return;
+      }
+      if (call.method === 'GET' && call.url.pathname === profilePath + '/timeblocks/current') {
+        json(response, currentTimeblock('completed'));
+        return;
+      }
+      json(response, { error: { code: 'not_found' } }, 404);
+    });
+    const create = await loadFactory();
+    const monitor = create({
+      handoff: nativeHandoff(host.apiBaseUrl),
+      target: target(host.apiBaseUrl),
+      stateStore: memoryStateStore(),
+    });
+
+    try {
+      await monitor.connect();
+      const legacy = await monitor.readHistory({ maxPages: 1 });
+      expect(legacy.cursor.complete).toBe(false);
+      expect(legacy.feeds.captures.complete).toBe(false);
+      expect(legacy.feeds.captures.records.map(sequenceOf)).toEqual(captures.slice(0, 100).map(sequenceOf));
+      expect(legacy).not.toHaveProperty('coverage');
+      expect(legacy.feeds).not.toHaveProperty('summaries');
+
+      const firstOptIn = await monitor.readHistory({ maxPages: 1, includeSummaryFeeds: true });
+      expect(firstOptIn.through).toBe(highwater);
+      expect(firstOptIn.cursor.complete).toBe(true);
+      expect(firstOptIn.feeds.captures.complete).toBe(true);
+      expect(firstOptIn.feeds.captures.records.map(sequenceOf)).toEqual(captures.slice(100).map(sequenceOf));
+      expect(firstOptIn.feeds.corrections.complete).toBe(true);
+      expect(firstOptIn.timeblocks.nodes.complete).toBe(true);
+      expect(firstOptIn.feeds.summaries).toMatchObject({ through: highwater, next_before: 208, complete: false });
+      expect(firstOptIn.coverage.full_history_complete).toBe(false);
+
+      const secondOptIn = await monitor.readHistory({ maxPages: 1, includeSummaryFeeds: true });
+      expect(secondOptIn.through).toBe(highwater);
+      expect(secondOptIn.feeds.captures.pages).toEqual([]);
+      expect(secondOptIn.feeds.captures.records).toEqual([]);
+      expect(secondOptIn.feeds.captures.complete).toBe(true);
+      expect(secondOptIn.feeds.corrections.pages).toEqual([]);
+      expect(secondOptIn.timeblocks.nodes.pages).toEqual([]);
+      expect(secondOptIn.feeds.summaries).toMatchObject({ before: 208, next_before: 108, complete: false });
+      expect(secondOptIn.coverage.full_history_complete).toBe(false);
+
+      const thirdOptIn = await monitor.readHistory({ maxPages: 1, includeSummaryFeeds: true });
+      expect(thirdOptIn.feeds.captures.pages).toEqual([]);
+      expect(thirdOptIn.feeds.captures.complete).toBe(true);
+      expect(thirdOptIn.feeds.summaries).toMatchObject({ before: 108, next_before: null, complete: true });
+      expect(thirdOptIn.feeds.agentSummaries.complete).toBe(true);
+      expect(thirdOptIn.coverage.full_history_complete).toBe(true);
+
+      const eventReads = host.calls.filter(
+        (call) => call.method === 'GET' && call.url.pathname === '/beta/v1/profiles/' + PROFILE_ID + '/events',
+      );
+      expect(eventReads.map((call) => call.url.searchParams.get('before'))).toEqual([null, '7']);
+      expect(eventReads.map((call) => call.url.searchParams.get('through'))).toEqual([null, String(highwater)]);
+      expect(timelineReads).toEqual([
+        { before: null, through: String(highwater) },
+        { before: '208', through: String(highwater) },
+        { before: '108', through: String(highwater) },
+      ]);
+      expect(host.calls.some((call) => call.method === 'POST' && !call.url.pathname.endsWith('/access/check'))).toBe(
+        false,
+      );
     } finally {
       await monitor.stop();
     }

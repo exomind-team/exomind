@@ -9,6 +9,7 @@ description: Connect an external Agent to ExoMind through its actual HTTP protoc
 
 - **0.6 Beta / `exomind-beta/1`**：先读 [Beta Agent 接入](references/beta-agent-access.md)。使用 broker 提供的精确地址、UUID 档案 P 和低权 grant；核对 `GET /beta/v1/hello` 的协议及设备身份。Beta 不走 `/act/*`，不能用 owner-only `/beta/v1/profiles` 发现档案，也不能把旧 RT 配置、slug、鉴权或 API 当作回退。
   日常 monitor 流程另读 [Beta monitor adapter](references/beta-monitor.md)，使用真实 Native handoff 与显式 target；一次有界 Beta Wait 不继承旧 `/act/await` 语义。
+  读取公开时间线各类历史时显式传 `includeSummaryFeeds: true`，以 `coverage.full_history_complete` 核对完成；旧 `cursor.complete` 仍只表示原三类 feed。
 - **明确指定的旧 Runtime**：继续使用下文的 `/act/*` 优先、raw fallback 路线及原有 references。
 - 目标不明时先根据用户提供的实例信息识别；Beta 探测失败、功能未实现或返回拒绝时，停止该操作并报告事实，不能自动改打另一个旧实例。
 
@@ -40,14 +41,14 @@ description: Connect an external Agent to ExoMind through its actual HTTP protoc
 
 ## 版本与时效性
 
-- 最后更新日期：`2026-11-20`
+- 最后更新日期：`2026-11-21`
 - 更新者：`Codex`
-- 更新内容概要：`维护 Beta/旧 Runtime 分流；新增 production monitor adapter、完整分页/原件读取、有界 Wait、固定 ID 查证及旧 skill 的显式联动边界。`
+- 更新内容概要：`Beta monitor 增加显式摘要聚合、同 through 完成状态续接与 coverage；保持旧调用语义及协议分流。`
 - 旧 Runtime 的历史核验依据（不是本轮 Beta live 结果）：
   - `GET /version` 等 live 版本信息
   - 当前工作区代码与相关路由实现
   - GitHub 对应 issue / PR / 文档信息
-- 核验范围：Beta 生产 adapter 已通过 19 项边界回归及独立 Core10 source Host 的实际 HTTP 历史、三类原件 SHA、AgentNote、Wait、403/401 授权拒绝；最新联调 run `42b75def-b237-4bf3-bd3b-9ea674edd94d` 正常退出并清理。它不代替最终 Native 候选与真机；旧 Runtime 下列基线保持独立。
+- 核验范围：Beta 生产 adapter 通过 23 项边界回归；真实 Core11 source Host 的内部/Agent 摘要 HTTP 续页及适配器重建回归通过（run `90b9ad8e-13dc-482d-b455-10af8e228f7b`，1 项、退出 0、清理确认）。此前独立 Core10 source Host 的三类原件 SHA、AgentNote、Wait、403/401 证据保留。它们不代替最终 Native 候选与真机；旧 Runtime 下列基线保持独立。
 - Beta 源码基线：`2d8c827b7f813ef55f79a26ddb0e444cc9848cd0`，`crates/exomind-beta-host/src/{lib,http,originals_http,timeblocks_http,summary_jobs_http}.rs` 与 `crates/exomind-core/src/{lib,store,originals}.rs`
 - 旧 Runtime 基线提交：`da88bc11`
 - 旧 Runtime 真相源：

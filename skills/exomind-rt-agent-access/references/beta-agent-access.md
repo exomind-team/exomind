@@ -1,11 +1,14 @@
-> 最后更新：`2026-11-20` | 更新者：`Codex` | 更新内容概要：`维护 Beta 分流、实际 HTTP 接入与生产 monitor 的验证范围；保留旧 RT 路线。`
+> 最后更新：`2026-11-21` | 更新者：`Codex` | 更新内容概要：`补充 opt-in 摘要历史及明确 coverage；保留旧调用和旧 RT 路线。`
 
 # Beta Agent 接入：exomind-beta/1
 
-适用于明确的 0.6 Beta 实例。当前协议接线已实现；生产 monitor 还在工作树收束。19 项 SDK
+适用于明确的 0.6 Beta 实例。当前协议接线已实现；生产 monitor 按独立 reference 使用。历史 19 项 SDK
 边界回归与独立 Core10 source Host 的实际 HTTP 组合已通过，后者覆盖完整分页、三类文件
 字节/SHA、AgentNote 与有界 Wait。最终 Native 交接、系统剪贴板及真机分别验收，不能用
 source Host 结果代替冻结 Beta19 或后续候选。日用调用见 [Beta monitor](beta-monitor.md)。
+最新 SDK 聚合另经 23 项边界回归和真实 Core11 Host 摘要 HTTP 接缝验证；要求完整公开
+历史时显式启用 `includeSummaryFeeds: true` 并检查 `coverage.full_history_complete`，
+旧 `cursor.complete` 保持原三类 feed 的含义。
 
 内容：连接与授权 → 分页与来源 → 分类追加与回执 → 原件 → 错误及未实现能力。旧 Runtime 的 `/act/*`、`/eventlog`、slug、匿名 scope 和配置文件均不在此路线使用。
 

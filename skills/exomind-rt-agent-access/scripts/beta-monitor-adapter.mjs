@@ -14,6 +14,19 @@ const MAX_JSON_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_READ_HISTORY_PAGES_PER_FEED = 4;
 const MAX_SEEN_FACTS = 1024;
 const READ_CAPABILITIES = Object.freeze(['events_read', 'timeblocks_read', 'originals_read', 'wait']);
+const SUMMARY_HISTORY_CAPABILITY = 'timeline_read';
+const SUMMARY_HISTORY_KINDS = Object.freeze({
+  summaries: 'summary/1',
+  agentSummaries: 'agent_summary/1',
+});
+const PUBLIC_HISTORY_TYPED_KINDS = Object.freeze([
+  'capture/1',
+  'capture/2',
+  'correction/1',
+  'timeblock/1',
+  'summary/1',
+  'agent_summary/1',
+]);
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 
@@ -136,7 +149,7 @@ function parseState(value) {
   result.pendingWait = value.pendingWait;
   result.runtimeId = runtimeId === null ? null : runtimeId.toLowerCase();
   result.rebuildPending = rebuildPending;
-  for (const name of ['captures', 'corrections', 'nodes']) {
+  for (const name of ['captures', 'corrections', 'nodes', 'timeline']) {
     const feed = value.feeds[name];
     if (feed === undefined) continue;
     if (!isRecord(feed) || !Number.isSafeInteger(feed.through) || feed.through < 0
@@ -188,6 +201,32 @@ function validatePage(page, profileId, expectedThrough) {
   if (page.next_before !== null && lastSequence !== page.next_before) fail('invalid_page_cursor', 'Beta returned a continuation cursor that does not match the page.');
   return page;
 }
+function typedTimelineFeed(feed, kind) {
+  return {
+    ...feed,
+    available: true,
+    source: 'typed_timeline',
+    kind,
+    records: feed.records.filter((item) => item?.kind === kind),
+  };
+}
+
+function unavailableTimelineFeed(through, saved, kind) {
+  const before = saved && !saved.complete && saved.through === through ? saved.nextBefore : null;
+  return {
+    available: false,
+    source: 'typed_timeline',
+    kind,
+    missing_capability: SUMMARY_HISTORY_CAPABILITY,
+    pages: [],
+    records: [],
+    through,
+    before,
+    next_before: before,
+    complete: false,
+  };
+}
+
 function validateOriginalMetadata(value) {
   if (!isRecord(value) || typeof value.original_id !== 'string' || !UUID_PATTERN.test(value.original_id)
     || typeof value.sha256 !== 'string' || !SHA256_PATTERN.test(value.sha256)
@@ -518,8 +557,12 @@ export function createBetaMonitorAdapter({ handoff, target, stateStore, fetchImp
     state.seen[keyPart] = recordDigest;
     trimSeenDigests(state.seen);
   }
-  async function readFeed(name, suffix, through, maxPages, fresh = false, maxResponseBytes = MAX_JSON_RESPONSE_BYTES) {
+  async function readFeed(name, suffix, through, maxPages, fresh = false, maxResponseBytes = MAX_JSON_RESPONSE_BYTES, skipCompletedAtSameThrough = false) {
     const saved = state.feeds[name];
+    // Opt-in aggregate reads must not restart a feed already complete at this snapshot.
+    if (skipCompletedAtSameThrough && !fresh && through !== undefined && saved?.complete && saved.through === through) {
+      return { pages: [], records: [], through, before: null, next_before: null, complete: true };
+    }
     const resumeSnapshot = !fresh && saved && !saved.complete && (through === undefined || through === saved.through);
     let fixedThrough = through ?? (resumeSnapshot ? saved.through : undefined);
     let before = resumeSnapshot ? saved.nextBefore : null;
@@ -566,25 +609,59 @@ export function createBetaMonitorAdapter({ handoff, target, stateStore, fetchImp
 
   async function readSnapshot(options = {}) {
     const maxPages = Math.min(validateReadOptions(options), MAX_READ_HISTORY_PAGES_PER_FEED);
+    if (options.includeSummaryFeeds !== undefined && typeof options.includeSummaryFeeds !== 'boolean') {
+      fail('invalid_read_history_option', 'includeSummaryFeeds must be a boolean.');
+    }
+    const includeSummaryFeeds = options.includeSummaryFeeds === true;
     const maxResponseBytes = validateResponseBudget(options.maxResponseBytes);
     const explicitThrough = options.through;
-    if (explicitThrough !== undefined && (!Number.isSafeInteger(explicitThrough) || explicitThrough < 0)) fail('invalid_through', 'through must be a non-negative local sequence.');
+    if (explicitThrough !== undefined && (!Number.isSafeInteger(explicitThrough) || explicitThrough < 0)) {
+      fail('invalid_through', 'through must be a non-negative local sequence.');
+    }
     let through = explicitThrough;
     const fresh = options.fresh === true;
     if (through === undefined && !fresh) {
-      const incomplete = ['captures', 'corrections', 'nodes'].map((name) => state.feeds[name]).find((feed) => feed && !feed.complete);
+      const candidates = ['captures', 'corrections', 'nodes'];
+      if (includeSummaryFeeds) candidates.push('timeline');
+      const incomplete = candidates.map((name) => state.feeds[name]).find((feed) => feed && !feed.complete);
       if (incomplete) through = incomplete.through;
     }
-    const captures = await readFeed('captures', '/events', through, maxPages, fresh, maxResponseBytes);
+    const captures = await readFeed('captures', '/events', through, maxPages, fresh, maxResponseBytes, includeSummaryFeeds);
     ensureConnected();
     through = captures.through;
-    const corrections = await readFeed('corrections', '/corrections', through, maxPages, fresh, maxResponseBytes);
+    const corrections = await readFeed('corrections', '/corrections', through, maxPages, fresh, maxResponseBytes, includeSummaryFeeds);
     ensureConnected();
-    const nodes = await readFeed('nodes', '/timeblocks/nodes', through, maxPages, fresh, maxResponseBytes);
+    const nodes = await readFeed('nodes', '/timeblocks/nodes', through, maxPages, fresh, maxResponseBytes, includeSummaryFeeds);
     ensureConnected();
-    const current = await jsonRequest('GET', `/profiles/${encodeURIComponent(selectedTarget.profileId)}/timeblocks/current`, { maxResponseBytes });
+
+    let timelineAvailable = false;
+    let summaryHistoryComplete = false;
+    let summaries;
+    let agentSummaries;
+    if (includeSummaryFeeds) {
+      timelineAvailable = Array.isArray(access?.allowed) && access.allowed.includes(SUMMARY_HISTORY_CAPABILITY);
+      if (timelineAvailable) {
+        const timeline = await readFeed('timeline', '/timeline', through, maxPages, fresh, maxResponseBytes, includeSummaryFeeds);
+        ensureConnected();
+        summaries = typedTimelineFeed(timeline, SUMMARY_HISTORY_KINDS.summaries);
+        agentSummaries = typedTimelineFeed(timeline, SUMMARY_HISTORY_KINDS.agentSummaries);
+        summaryHistoryComplete = timeline.complete;
+      } else {
+        const savedTimeline = state.feeds.timeline;
+        summaries = unavailableTimelineFeed(through, savedTimeline, SUMMARY_HISTORY_KINDS.summaries);
+        agentSummaries = unavailableTimelineFeed(through, savedTimeline, SUMMARY_HISTORY_KINDS.agentSummaries);
+      }
+    }
+
+    const current = await jsonRequest(
+      'GET',
+      '/profiles/' + encodeURIComponent(selectedTarget.profileId) + '/timeblocks/current',
+      { maxResponseBytes },
+    );
     ensureConnected();
-    if (!isRecord(current) || current.profile_id !== selectedTarget.profileId) fail('invalid_timeblock_snapshot', 'Beta returned a timeblock snapshot for another profile.');
+    if (!isRecord(current) || current.profile_id !== selectedTarget.profileId) {
+      fail('invalid_timeblock_snapshot', 'Beta returned a timeblock snapshot for another profile.');
+    }
     originals = new Map();
     for (const item of captures.records) {
       const record = recordOf(item);
@@ -593,11 +670,14 @@ export function createBetaMonitorAdapter({ handoff, target, stateStore, fetchImp
         validateOriginalMetadata(original);
         const originalId = original.original_id.toLowerCase();
         const existing = originals.get(originalId);
-        if (existing && (existing.sha256 !== original.sha256 || existing.byte_length !== original.byte_length)) fail('original_reference_conflict', 'The same original ID was returned with conflicting metadata.');
+        if (existing && (existing.sha256 !== original.sha256 || existing.byte_length !== original.byte_length)) {
+          fail('original_reference_conflict', 'The same original ID was returned with conflicting metadata.');
+        }
         originals.set(originalId, original);
       }
     }
     const complete = captures.complete && corrections.complete && nodes.complete;
+    const fullHistoryComplete = includeSummaryFeeds && complete && timelineAvailable && summaryHistoryComplete;
     const rebuilt = state.rebuildPending;
     if (complete) {
       state.cursor = Math.max(state.cursor, through ?? 0);
@@ -606,8 +686,13 @@ export function createBetaMonitorAdapter({ handoff, target, stateStore, fetchImp
       ensureConnected();
     }
     const agentMessages = captures.records.filter((item) => recordOf(item)?.author_kind === 'agent_note');
+    const feeds = { captures, corrections };
+    if (includeSummaryFeeds) {
+      feeds.summaries = summaries;
+      feeds.agentSummaries = agentSummaries;
+    }
     return {
-      feeds: { captures, corrections },
+      feeds,
       timeblocks: { nodes, current },
       agentMessages,
       through,
@@ -619,6 +704,15 @@ export function createBetaMonitorAdapter({ handoff, target, stateStore, fetchImp
         corrections: { through: corrections.through, next_before: corrections.next_before },
         timeblocks: { through: nodes.through, next_before: nodes.next_before },
       },
+      ...(includeSummaryFeeds
+        ? {
+            coverage: {
+              scope: 'beta_public_typed_history',
+              included_typed_kinds: [...PUBLIC_HISTORY_TYPED_KINDS],
+              full_history_complete: fullHistoryComplete,
+            },
+          }
+        : {}),
     };
   }
   function readHistory(options = {}) {

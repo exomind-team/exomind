@@ -1,4 +1,6 @@
-> 最后更新：`2026-11-20` | 更新者：`Codex` | 更新内容概要：`记录 Beta monitor 的有界历史状态、JSON 响应预算与每 feed 页上限。`
+> 最后更新：`2026-11-21` | 更新者：`Codex` | 更新内容概要：`记录显式摘要 feeds、同 through 续页与真实 Host 序列化接缝验证。`
+
+- `2026-11-21` | 更新者：`Codex` | 更新内容概要：`原 readHistory 网络集合与 cursor.complete 保持；includeSummaryFeeds 显式读取 typed timeline，coverage 单独描述六类公开历史。已完成 feed 在同 through 的 opt-in 续读中不重启。个人 monitor 脚本与流程同步。` | 差异反思与依据：`旧流程漏 summary/agent_summary，bundle 不能替代全历史；SDK 23/23（c21d8095-3f82-4f73-aef4-70786ada842e），Core11 source Host 经实际 provider fixture 生成内部摘要及 producer 追加的 Agent 摘要，Observer SDK 跨页/重建后逐条一致（90b9ad8e-13dc-482d-b455-10af8e228f7b，1/1，cleanup true）。首轮夹具 page limit=200 超过现有 100 上限，已修为先取期望摘要再追加 105 条合成记录；该失败不计为产品缺陷。最终候选和真机仍另验。`
 
 # Maintenance
 
