@@ -10,7 +10,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     future::Future,
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -22,8 +22,119 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{OwnedSemaphorePermit, mpsc, oneshot, watch},
 };
-const ALPN: &[u8] = b"exomind-peer-transport/1";
+const ALPN_V1: &[u8] = b"exomind-peer-transport/1";
+const ALPN_V2: &[u8] = b"exomind-peer-transport/2";
+pub(super) const MAX_SERVICE_CANDIDATES: usize = 8;
 pub(super) const MAX_FRAME: usize = 256 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PeerServiceVersion {
+    V1,
+    V2,
+}
+
+fn canonical_service_candidate(address: SocketAddr) -> Option<SocketAddr> {
+    let ip = match address.ip() {
+        IpAddr::V4(ip) => IpAddr::V4(ip),
+        IpAddr::V6(ip) if ip.is_unicast_link_local() => return None,
+        IpAddr::V6(ip) => ip
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V6(ip)),
+    };
+    if address.port() == 0 || ip.is_unspecified() || ip.is_multicast() {
+        return None;
+    }
+    Some(SocketAddr::new(ip, address.port()))
+}
+
+pub(super) fn validate_service_candidates(
+    candidates: &[SocketAddr],
+) -> Result<Vec<SocketAddr>, HostError> {
+    if candidates.len() > MAX_SERVICE_CANDIDATES {
+        return Err(HostError::InvalidRequest);
+    }
+    let mut output = Vec::with_capacity(candidates.len());
+    for address in candidates {
+        let canonical = canonical_service_candidate(*address).ok_or(HostError::InvalidRequest)?;
+        if !output.contains(&canonical) {
+            output.push(canonical);
+        }
+    }
+    Ok(output)
+}
+
+pub(super) fn local_service_candidates(candidates: &[SocketAddr]) -> Vec<SocketAddr> {
+    let mut output: Vec<_> = candidates
+        .iter()
+        .filter_map(|address| canonical_service_candidate(*address))
+        .collect();
+    if output.iter().any(|address| !address.ip().is_loopback()) {
+        output.retain(|address| !address.ip().is_loopback());
+    }
+    output.sort_by_key(|address| {
+        let loopback = address.ip().is_loopback();
+        let family = if address.is_ipv4() { 0 } else { 1 };
+        let private_rank = match address.ip() {
+            IpAddr::V4(ip) if ip.is_private() => 0,
+            IpAddr::V4(_) => 1,
+            IpAddr::V6(ip) if ip.segments()[0] & 0xfe00 == 0xfc00 => 0,
+            IpAddr::V6(_) => 2,
+        };
+        (loopback, private_rank, family, address.to_string())
+    });
+    output.dedup();
+    if output.len() <= MAX_SERVICE_CANDIDATES {
+        return output;
+    }
+    let mut bounded = Vec::with_capacity(MAX_SERVICE_CANDIDATES);
+    for ipv4 in [true, false] {
+        if let Some(address) = output.iter().find(|address| address.is_ipv4() == ipv4) {
+            bounded.push(*address);
+        }
+    }
+    for address in output {
+        if bounded.len() == MAX_SERVICE_CANDIDATES {
+            break;
+        }
+        if !bounded.contains(&address) {
+            bounded.push(address);
+        }
+    }
+    bounded
+}
+
+fn listener_service_candidates(listener: SocketAddr) -> Vec<SocketAddr> {
+    if !listener.ip().is_unspecified() {
+        return local_service_candidates(&[listener]);
+    }
+    let mut candidates: Vec<_> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|interface| {
+            let ip = interface.ip();
+            if ip.is_unspecified()
+                || ip.is_multicast()
+                || (ip.is_ipv4() != listener.is_ipv4())
+                || matches!(ip, IpAddr::V6(value) if value.is_unicast_link_local())
+            {
+                return None;
+            }
+            Some(SocketAddr::new(ip, listener.port()))
+        })
+        .collect();
+    if candidates.is_empty() {
+        candidates.push(SocketAddr::new(
+            if listener.is_ipv4() {
+                IpAddr::V4(Ipv4Addr::LOCALHOST)
+            } else {
+                IpAddr::V6(Ipv6Addr::LOCALHOST)
+            },
+            listener.port(),
+        ));
+    }
+    local_service_candidates(&candidates)
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct PeerPin([u8; 32]);
 impl PeerPin {
@@ -230,7 +341,7 @@ fn server_config(identity: &Identity) -> Result<Arc<ServerConfig>, HostError> {
         .with_cert_resolver(Arc::new(
             rustls::server::AlwaysResolvesServerRawPublicKeys::new(identity.certified.clone()),
         ));
-    config.alpn_protocols = vec![ALPN.to_vec()];
+    config.alpn_protocols = vec![ALPN_V2.to_vec(), ALPN_V1.to_vec()];
     config.send_tls13_tickets = 0;
     config.max_early_data_size = 0;
     Ok(Arc::new(config))
@@ -254,7 +365,7 @@ fn client_config(
         .with_client_cert_resolver(Arc::new(
             rustls::client::AlwaysResolvesClientRawPublicKeys::new(identity.certified.clone()),
         ));
-    config.alpn_protocols = vec![ALPN.to_vec()];
+    config.alpn_protocols = vec![ALPN_V2.to_vec(), ALPN_V1.to_vec()];
     config.enable_early_data = false;
     config.resumption = rustls::client::Resumption::disabled();
     Ok(Arc::new(config))
@@ -264,22 +375,29 @@ fn client_config(
 // profile, member epoch, grant or conversion into the local Session type.
 struct VerifiedTransportPeer {
     pin: PeerPin,
+    service_version: PeerServiceVersion,
 }
 fn verified(
     stream: &tokio_rustls::TlsStream<TcpStream>,
 ) -> Result<VerifiedTransportPeer, HostError> {
     let connection = stream.get_ref().1;
-    if connection.protocol_version() != Some(ProtocolVersion::TLSv1_3)
-        || connection.alpn_protocol() != Some(ALPN)
-    {
+    if connection.protocol_version() != Some(ProtocolVersion::TLSv1_3) {
         return Err(HostError::PeerTls);
     }
+    let service_version = if connection.alpn_protocol() == Some(ALPN_V2) {
+        PeerServiceVersion::V2
+    } else if connection.alpn_protocol() == Some(ALPN_V1) {
+        PeerServiceVersion::V1
+    } else {
+        return Err(HostError::PeerTls);
+    };
     let keys = connection.peer_certificates().ok_or(HostError::PeerTls)?;
     if keys.len() != 1 || !identity::valid_spki(keys[0].as_ref()) {
         return Err(HostError::PeerTls);
     }
     Ok(VerifiedTransportPeer {
         pin: PeerPin::of(keys[0].as_ref()),
+        service_version,
     })
 }
 fn client_handshake_error(error: &std::io::Error, pin_mismatch: bool) -> HostError {
@@ -338,6 +456,8 @@ enum Request {
 pub struct PeerChannel {
     id: uuid::Uuid,
     remote_address: SocketAddr,
+    listener_address: Option<SocketAddr>,
+    service_v2_join: AtomicBool,
     host: Arc<BetaHost>,
     owner: Session,
     peer: VerifiedTransportPeer,
@@ -351,6 +471,20 @@ pub struct PeerChannel {
 impl PeerChannel {
     pub(super) fn binding_id(&self) -> uuid::Uuid {
         self.id
+    }
+    pub(super) fn service_version(&self) -> PeerServiceVersion {
+        self.peer.service_version
+    }
+    pub(super) fn listener_candidates(&self) -> Vec<SocketAddr> {
+        self.listener_address
+            .map(listener_service_candidates)
+            .unwrap_or_default()
+    }
+    pub(super) fn mark_service_v2_join(&self) {
+        self.service_v2_join.store(true, Ordering::Release);
+    }
+    pub(super) fn service_v2_join(&self) -> bool {
+        self.service_v2_join.load(Ordering::Acquire)
     }
     /// A key-possession proof bound to this Host and a still-live transport.
     /// Callers holding the Host gate can use this without acquiring it again.
@@ -451,6 +585,7 @@ fn channel(
     scope: PeerCancellation,
     options: PeerTransportOptions,
     ownership: ConnectionOwnership,
+    listener_address: Option<SocketAddr>,
 ) -> Result<PeerChannel, ChannelAdmissionFailure> {
     let peer = match host
         .qualify_transport(&owner)
@@ -463,7 +598,11 @@ fn channel(
                 "peer_transport_diag runtime={} phase=post_tls tls13={} alpn_match={} peer_key_count={} rejected_tls={}",
                 host.runtime_id,
                 stream.get_ref().1.protocol_version() == Some(ProtocolVersion::TLSv1_3),
-                stream.get_ref().1.alpn_protocol() == Some(ALPN),
+                stream
+                    .get_ref()
+                    .1
+                    .alpn_protocol()
+                    .is_some_and(|alpn| alpn == ALPN_V1 || alpn == ALPN_V2),
                 stream
                     .get_ref()
                     .1
@@ -558,6 +697,8 @@ fn channel(
     Ok(PeerChannel {
         id: uuid::Uuid::new_v4(),
         remote_address,
+        listener_address,
+        service_v2_join: AtomicBool::new(false),
         host,
         owner,
         peer,
@@ -603,9 +744,16 @@ impl PeerTransportListener {
 impl Drop for PeerTransportListener {
     fn drop(&mut self) {
         self.cancel.cancel();
+        self.host.peers.clear_listener_address(self.address);
     }
 }
 impl BetaHost {
+    pub(super) fn active_peer_listener_candidates(&self) -> Vec<SocketAddr> {
+        self.peers
+            .listener_address()
+            .map(listener_service_candidates)
+            .unwrap_or_default()
+    }
     pub async fn listen_peer_transport(
         self: &Arc<Self>,
         owner: &Session,
@@ -662,6 +810,7 @@ impl BetaHost {
             .local_addr()
             .map_err(|_| HostError::PeerTransportUnavailable)?;
         self.qualify_transport(owner)?;
+        self.peers.set_listener_address(address)?;
         let (put, accepted) = mpsc::channel(1);
         let host = self.clone();
         let session = owner.clone();
@@ -708,6 +857,149 @@ impl BetaHost {
                             stop.clone(),
                             options,
                             ownership,
+                            Some(address),
+                        ) {
+                            Ok(channel) => (Ok(channel), None),
+                            Err(failure) => (Err(failure.error), Some(failure.ownership)),
+                        },
+                        Err(error) => (Err(error), Some(ownership)),
+                    };
+                    let _ = bounded(
+                        &host.peers.cancel,
+                        &stop,
+                        &PeerCancellation::new(),
+                        options.handshake_timeout,
+                        async {
+                            sender
+                                .send(result)
+                                .await
+                                .map_err(|_| HostError::PeerTransportUnavailable)
+                        },
+                    )
+                    .await;
+                    drop(failed_ownership);
+                });
+            }
+            drop(socket);
+            drop(lease);
+        });
+        Ok(PeerTransportListener {
+            host: self.clone(),
+            owner: owner.clone(),
+            address,
+            accepted,
+            cancel,
+            options,
+        })
+    }
+    #[cfg(test)]
+    pub(super) async fn listen_peer_transport_v1_for_test(
+        self: &Arc<Self>,
+        owner: &Session,
+        address: SocketAddr,
+        options: PeerTransportOptions,
+    ) -> Result<PeerTransportListener, HostError> {
+        options.validate()?;
+        self.qualify_transport(owner)?;
+        let host = self.clone();
+        let session = owner.clone();
+        let identity = tokio::task::spawn_blocking(move || host.transport_identity(&session))
+            .await
+            .map_err(|_| HostError::StatePoisoned)??;
+        self.qualify_transport(owner)?;
+        let mut config = server_config(&identity)?;
+        Arc::get_mut(&mut config)
+            .ok_or(HostError::PeerTls)?
+            .alpn_protocols = vec![ALPN_V1.to_vec()];
+        let lease = self.peers.register(true)?;
+        let cancel = PeerCancellation::new();
+        let socket = bounded(
+            &self.peers.cancel,
+            &cancel,
+            &PeerCancellation::new(),
+            options.handshake_timeout,
+            async {
+                if address.is_ipv6() {
+                    let socket = socket2::Socket::new(
+                        socket2::Domain::IPV6,
+                        socket2::Type::STREAM,
+                        Some(socket2::Protocol::TCP),
+                    )
+                    .map_err(|_| HostError::PeerTransportUnavailable)?;
+                    socket
+                        .set_only_v6(false)
+                        .map_err(|_| HostError::PeerTransportUnavailable)?;
+                    socket
+                        .set_nonblocking(true)
+                        .map_err(|_| HostError::PeerTransportUnavailable)?;
+                    socket
+                        .bind(&address.into())
+                        .map_err(|_| HostError::PeerTransportUnavailable)?;
+                    socket
+                        .listen(16)
+                        .map_err(|_| HostError::PeerTransportUnavailable)?;
+                    TcpListener::from_std(socket.into())
+                        .map_err(|_| HostError::PeerTransportUnavailable)
+                } else {
+                    TcpListener::bind(address)
+                        .await
+                        .map_err(|_| HostError::PeerTransportUnavailable)
+                }
+            },
+        )
+        .await?;
+        let address = socket
+            .local_addr()
+            .map_err(|_| HostError::PeerTransportUnavailable)?;
+        self.qualify_transport(owner)?;
+        self.peers.set_listener_address(address)?;
+        let (put, accepted) = mpsc::channel(1);
+        let host = self.clone();
+        let session = owner.clone();
+        let stop = cancel.clone();
+        tokio::spawn(async move {
+            loop {
+                let stream = tokio::select! {biased;_=host.peers.cancel.cancelled()=>break,_=stop.cancelled()=>break,result=socket.accept()=>match result{Ok((stream,_))=>stream,Err(_)=>break}};
+                let Ok(permit) = host.peers.connections.clone().try_acquire_owned() else {
+                    drop(stream);
+                    continue;
+                };
+                let Ok(connection) = host.peers.register(false) else {
+                    drop(stream);
+                    break;
+                };
+                let host = host.clone();
+                let owner = session.clone();
+                let stop = stop.clone();
+                let sender = put.clone();
+                let acceptor = tokio_rustls::TlsAcceptor::from(config.clone());
+                tokio::spawn(async move {
+                    let result = bounded(
+                        &host.peers.cancel,
+                        &stop,
+                        &PeerCancellation::new(),
+                        options.handshake_timeout,
+                        async {
+                            acceptor
+                                .accept(stream)
+                                .await
+                                .map_err(|_| HostError::PeerTls)
+                        },
+                    )
+                    .await;
+                    let ownership = ConnectionOwnership {
+                        _permit: permit,
+                        _lease: connection,
+                    };
+                    let (result, failed_ownership) = match result {
+                        Ok(stream) => match channel(
+                            host.clone(),
+                            owner,
+                            stream.into(),
+                            stop.clone(),
+                            options,
+                            ownership,
+                            Some(address),
                         ) {
                             Ok(channel) => (Ok(channel), None),
                             Err(failure) => (Err(failure.error), Some(failure.ownership)),
@@ -803,6 +1095,7 @@ impl BetaHost {
                 _permit: permit,
                 _lease: lease,
             },
+            None,
         )
         .map_err(|failure| failure.error)
     }

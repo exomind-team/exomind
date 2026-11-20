@@ -10,6 +10,7 @@ pub(crate) const AUTH_VERSION: i64 = 5;
 const LAYOUT: &str = "exomind-peer-membership/1";
 pub(super) const MAX_JSON: usize = 16384;
 pub(super) const MAX_MEMBERS: i64 = 256;
+pub(super) const MAX_MEMBER_PROFILE_PAGE: usize = 16;
 pub(super) const MAX_INVITATIONS: i64 = 128;
 pub(super) const MAX_JOINS: i64 = 256;
 const SCHEMAS: &[(&str, &str)] = &[
@@ -300,6 +301,75 @@ pub(super) fn members(
         let member: StoredMember = parse(row.get(1).map_err(corrupt)?)?;
         validate_member(&member.record)?;
         if member.record.profile_id != profile || member.record.device_id.to_string() != id {
+            return Err(HostError::PeerMembershipRecoveryRequired);
+        }
+        output.push(member.record);
+    }
+    Ok(output)
+}
+pub(super) fn all_members(connection: &Connection) -> Result<Vec<PeerMember>, HostError> {
+    validate(connection)?;
+    let mut statement = connection
+        .prepare("SELECT CASE WHEN length(profile_id)=36 THEN profile_id END,CASE WHEN length(device_id)=36 THEN device_id END,CASE WHEN length(body)<=16384 THEN body END FROM peer_members ORDER BY profile_id,device_id LIMIT 257")
+        .map_err(unavailable)?;
+    let mut rows = statement.query([]).map_err(unavailable)?;
+    let mut output = Vec::new();
+    while let Some(row) = rows.next().map_err(unavailable)? {
+        if output.len() >= MAX_MEMBERS as usize {
+            return Err(HostError::PeerMembershipRecoveryRequired);
+        }
+        let profile_key: String = row
+            .get::<_, Option<String>>(0)
+            .map_err(corrupt)?
+            .ok_or(HostError::PeerMembershipRecoveryRequired)?;
+        let profile_id: exomind_core::ProfileId = profile_key.parse().map_err(corrupt)?;
+        let device_key: String = row
+            .get::<_, Option<String>>(1)
+            .map_err(corrupt)?
+            .ok_or(HostError::PeerMembershipRecoveryRequired)?;
+        let device_id: exomind_core::DeviceId = device_key.parse().map_err(corrupt)?;
+        let member: StoredMember = parse(row.get::<_, Option<String>>(2).map_err(corrupt)?)?;
+        validate_member(&member.record)?;
+        if member.record.profile_id != profile_id
+            || member.record.device_id != device_id
+            || member.record.profile_id.to_string() != profile_key
+            || member.record.device_id.to_string() != device_key
+        {
+            return Err(HostError::PeerMembershipRecoveryRequired);
+        }
+        output.push(member.record);
+    }
+    Ok(output)
+}
+pub(super) fn member_profiles_page(
+    connection: &Connection,
+    device: exomind_core::DeviceId,
+    after: Option<exomind_core::ProfileId>,
+) -> Result<Vec<PeerMember>, HostError> {
+    validate(connection)?;
+    let mut statement = connection
+        .prepare("SELECT CASE WHEN length(profile_id)=36 THEN profile_id END,CASE WHEN length(body)<=16384 THEN body END FROM peer_members WHERE device_id=?1 AND (?2 IS NULL OR profile_id>?2) ORDER BY profile_id LIMIT ?3")
+        .map_err(unavailable)?;
+    let mut rows = statement
+        .query(params![
+            device.to_string(),
+            after.map(|profile| profile.to_string()),
+            MAX_MEMBER_PROFILE_PAGE as i64
+        ])
+        .map_err(unavailable)?;
+    let mut output = Vec::new();
+    while let Some(row) = rows.next().map_err(unavailable)? {
+        let profile_key: String = row
+            .get::<_, Option<String>>(0)
+            .map_err(corrupt)?
+            .ok_or(HostError::PeerMembershipRecoveryRequired)?;
+        let profile_id: exomind_core::ProfileId = profile_key.parse().map_err(corrupt)?;
+        let member: StoredMember = parse(row.get::<_, Option<String>>(1).map_err(corrupt)?)?;
+        validate_member(&member.record)?;
+        if member.record.profile_id != profile_id
+            || member.record.profile_id.to_string() != profile_key
+            || member.record.device_id != device
+        {
             return Err(HostError::PeerMembershipRecoveryRequired);
         }
         output.push(member.record);

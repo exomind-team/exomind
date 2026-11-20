@@ -35,13 +35,17 @@ pub use membership::*;
 mod pairing;
 mod transport;
 use crate::{BetaHost, HostError, Session};
-use exomind_core::{Core, OriginPage, OriginPageProof, OriginPageQuery, OriginProvenanceKey, ProfileId};
+use exomind_core::{
+    Core, OriginPage, OriginPageProof, OriginPageQuery, OriginProvenanceKey, ProfileId,
+};
 pub use identity::DeviceIdentityInfo;
 pub(crate) use identity::Identity;
 use std::{
+    net::SocketAddr,
     sync::{Arc, Condvar, Mutex},
     time::{Duration, Instant},
 };
+
 pub(crate) fn sign_archive_origin_page(
     identity: &Identity,
     core: &Core,
@@ -108,6 +112,7 @@ pub(crate) fn load_identity(
 struct Counts {
     jobs: usize,
     listener: bool,
+    listener_address: Option<SocketAddr>,
 }
 pub(crate) struct Runtime {
     cancel: PeerCancellation,
@@ -141,6 +146,7 @@ impl Runtime {
         counts.jobs += 1;
         if listener {
             counts.listener = true;
+            counts.listener_address = None;
         }
         Ok(Lease {
             runtime: self.clone(),
@@ -149,6 +155,27 @@ impl Runtime {
     }
     pub(crate) fn request_stop(&self) {
         self.cancel.cancel();
+    }
+    pub(crate) fn set_listener_address(&self, address: SocketAddr) -> Result<(), HostError> {
+        let mut counts = self.counts.lock().map_err(|_| HostError::StatePoisoned)?;
+        if !counts.listener {
+            return Err(HostError::PeerTransportUnavailable);
+        }
+        counts.listener_address = Some(address);
+        Ok(())
+    }
+    pub(crate) fn listener_address(&self) -> Option<SocketAddr> {
+        self.counts
+            .lock()
+            .ok()
+            .and_then(|counts| counts.listener_address)
+    }
+    pub(crate) fn clear_listener_address(&self, address: SocketAddr) {
+        if let Ok(mut counts) = self.counts.lock() {
+            if counts.listener_address == Some(address) {
+                counts.listener_address = None;
+            }
+        }
     }
     pub(crate) fn wait_empty(&self, timeout: Duration) -> Result<(), HostError> {
         let end = Instant::now() + timeout;
@@ -177,6 +204,7 @@ impl Drop for Lease {
         counts.jobs -= 1;
         if self.listener {
             counts.listener = false;
+            counts.listener_address = None;
         }
         self.runtime.idle.notify_all();
     }

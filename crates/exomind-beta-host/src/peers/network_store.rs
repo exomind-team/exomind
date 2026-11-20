@@ -25,7 +25,7 @@ pub struct PeerNetworkSettings {
     pub enabled: bool,
     pub preferred_port: u16,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Route {
     pub profile: ProfileId,
     pub device: DeviceId,
@@ -72,11 +72,16 @@ pub(super) fn validate(connection: &Connection) -> Result<(), HostError> {
             |r| r.get(0),
         )
         .map_err(unavailable)?;
-    let singleton_count:i64=connection.query_row("SELECT count(*) FROM peer_network_settings",[],|row|row.get(0)).map_err(unavailable)?;
+    let singleton_count: i64 = connection
+        .query_row("SELECT count(*) FROM peer_network_settings", [], |row| {
+            row.get(0)
+        })
+        .map_err(unavailable)?;
     if layout.as_deref() != Some(LAYOUT)
         || !(0..=1).contains(&enabled)
         || !(0..=65535).contains(&port)
-        || singleton_count!=1 || count != actual
+        || singleton_count != 1
+        || count != actual
         || !(0..=MAX_ROUTES).contains(&count)
     {
         return Err(HostError::PeerSyncRecoveryRequired);

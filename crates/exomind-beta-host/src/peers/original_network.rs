@@ -561,7 +561,7 @@ impl PeerNetwork {
                 // remote I/O, so private/unreferenced IDs never leave here.
                 let result=tokio::select!{biased;
                     _=network_cancel.cancelled()=>Err(HostError::PeerCancelled),
-                    result=worker.fetch_sessions(profile,peer,original,&job.cancel,before,&job.completion,&admission,false)=>result,
+                    result=worker.fetch_sessions(profile,peer,original,&job.cancel,&network_cancel,generation,before,&job.completion,&admission,false)=>result,
                 };
                 if self.shared.lock().map_err(|_|HostError::StatePoisoned)?.generation!=generation{Err(HostError::PeerCancelled)}else{result}
             }=>result,
@@ -680,6 +680,8 @@ impl Worker {
         peer: DeviceId,
         original: OriginalId,
         cancel: &PeerCancellation,
+        network_cancel: &PeerCancellation,
+        generation: u64,
         expected: OriginalRef,
         completion: &Arc<TransferCompletion>,
         admission: &Arc<OriginalAdmission>,
@@ -794,7 +796,24 @@ impl Worker {
                         if value.original != expected {
                             return Err(HostError::Core(exomind_core::CoreError::OriginalConflict));
                         }
-                        self.promote(profile, peer, endpoint)?;
+                        if network_cancel.is_cancelled()
+                            || self
+                                .shared
+                                .lock()
+                                .map_err(|_| HostError::StatePoisoned)?
+                                .generation
+                                != generation
+                        {
+                            return Err(HostError::PeerCancelled);
+                        }
+                        self.promote(
+                            profile,
+                            peer,
+                            endpoint,
+                            pin,
+                            member.generation,
+                            network_cancel,
+                        )?;
                         partial = Some(value);
                         break;
                     }

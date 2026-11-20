@@ -118,6 +118,24 @@ impl BetaHost {
         claim_id: Uuid,
         channel: PeerChannel,
     ) -> Result<PeerJoinStatus, HostError> {
+        self.join_peer_profile_over_transport_with_candidates(owner, invitation, claim_id, channel)
+            .await
+            .map(|(status, _)| status)
+    }
+
+    pub(super) async fn join_peer_profile_over_transport_with_candidates(
+        self: &Arc<Self>,
+        owner: &Session,
+        invitation: &PeerInvitation,
+        claim_id: Uuid,
+        channel: PeerChannel,
+    ) -> Result<
+        (
+            PeerJoinStatus,
+            Option<super::service::PeerServiceNegotiation>,
+        ),
+        HostError,
+    > {
         if channel.binding_pin(self)?
             != PeerPin::from_sha256(&invitation.offer.issuer.fingerprint_sha256)?
         {
@@ -125,6 +143,7 @@ impl BetaHost {
             // Do this before serializing or sending the one-use secret.
             return Err(HostError::PeerPinMismatch);
         }
+        let expected_peer = invitation.offer.issuer.device_id;
         let channel = Arc::new(channel);
         let owner = owner.clone();
         let invitation = invitation.clone();
@@ -155,7 +174,8 @@ impl BetaHost {
         })
         .await?;
         send(&channel, &Request::Finished { acknowledgement }).await?;
-        Ok(status)
+        let negotiation = super::service::read_join_service_ack(&channel, expected_peer).await?;
+        Ok((status, negotiation))
     }
 
     /// Handle one join exchange. Only the invitation claim endpoint is exposed
@@ -202,14 +222,16 @@ impl BetaHost {
                 return Err(reject(&channel, HostError::InvalidRequest).await);
             }
         };
-        match step(self, &channel, move |host, channel| {
+        let status = match step(self, &channel, move |host, channel| {
             host.acknowledge_peer_ready_verified(channel, &acknowledgement)
         })
         .await
         {
-            Ok(status) => Ok(status),
-            Err(error) => Err(reject(&channel, error).await),
-        }
+            Ok(status) => status,
+            Err(error) => return Err(reject(&channel, error).await),
+        };
+        super::service::send_join_service_ack(&channel, status.issuer_device_id).await?;
+        Ok(status)
     }
 }
 

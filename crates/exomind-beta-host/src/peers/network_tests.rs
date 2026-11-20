@@ -636,11 +636,19 @@ async fn no_discovery_memo_detects_received_origin_on_either_endpoint() {
     };
     let pin = a.device_identity(&oa).unwrap().fingerprint_sha256;
     let mut memo = None;
+    let member_generation = c
+        .peer_members(&oc, p)
+        .unwrap()
+        .into_iter()
+        .find(|member| member.device_id == a.device_id)
+        .unwrap()
+        .generation;
     for _ in 0..4 {
         let value = worker
             .transfer_attempt(
                 &route,
                 &pin,
+                member_generation,
                 PeerCancellation::new(),
                 0,
                 c.local_history_fingerprint(&oc, p).unwrap(),
@@ -659,6 +667,7 @@ async fn no_discovery_memo_detects_received_origin_on_either_endpoint() {
         .transfer_attempt(
             &route,
             &pin,
+            member_generation,
             PeerCancellation::new(),
             0,
             c.local_history_fingerprint(&oc, p).unwrap(),
@@ -714,6 +723,7 @@ async fn no_discovery_memo_detects_received_origin_on_either_endpoint() {
         .transfer_attempt(
             &route,
             &pin,
+            member_generation,
             PeerCancellation::new(),
             0,
             c.local_history_fingerprint(&oc, p).unwrap(),
@@ -735,6 +745,7 @@ async fn no_discovery_memo_detects_received_origin_on_either_endpoint() {
                 .transfer_attempt(
                     &route,
                     &pin,
+                    member_generation,
                     PeerCancellation::new(),
                     0,
                     c.local_history_fingerprint(&oc, p).unwrap(),
@@ -753,6 +764,7 @@ async fn no_discovery_memo_detects_received_origin_on_either_endpoint() {
                 .transfer_attempt(
                     &route,
                     &pin,
+                    member_generation,
                     PeerCancellation::new(),
                     0,
                     c.local_history_fingerprint(&oc, p).unwrap(),
@@ -806,6 +818,7 @@ async fn no_discovery_memo_detects_received_origin_on_either_endpoint() {
             .transfer_attempt(
                 &route,
                 &pin,
+                member_generation,
                 PeerCancellation::new(),
                 0,
                 c.local_history_fingerprint(&oc, p).unwrap(),
@@ -1317,3 +1330,346 @@ async fn tcp_eof_keeps_original_listener_generation_and_signed_join_available() 
 
 #[path = "f5_peer_network_probe_tests.rs"]
 mod f5_peer_network_probe_tests;
+
+#[path = "peer_return_route_follow_up_tests.rs"]
+mod peer_return_route_follow_up_tests;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn invalid_discovery_advertisements_never_write_peer_routes() {
+    let (_ra, a, oa) = host();
+    let (_rb, b, ob) = host();
+    let (_rc, c, oc) = host();
+    let profile = pair_hosts(&a, &oa, &b, &ob).await;
+    pair_into_profile(&a, &oa, &c, &oc, profile).await;
+    let b_pin = b.device_identity(&ob).unwrap().fingerprint_sha256;
+    let c_pin = c.device_identity(&oc).unwrap().fingerprint_sha256;
+    let c_generation = a
+        .peer_members(&oa, profile)
+        .unwrap()
+        .into_iter()
+        .find(|member| member.device_id == c.device_id)
+        .unwrap()
+        .generation;
+    a.revoke_peer_member(&oa, profile, c.device_id, c_generation)
+        .unwrap();
+
+    let network = PeerNetwork::new(a.clone(), oa.clone()).unwrap();
+    let worker = network.worker();
+    let generation = {
+        let mut state = network.shared.lock().unwrap();
+        state.generation = 1;
+        state.generation
+    };
+    let source: std::net::SocketAddr = "127.0.0.1:53101".parse().unwrap();
+    let valid_port = 53301;
+    let announcement = |device_id, fingerprint_sha256: String, listen_port| Announcement {
+        protocol: "exomind-discovery/1".into(),
+        device_id,
+        fingerprint_sha256,
+        listen_port,
+    };
+
+    // A matching pin may create only an in-memory, expiring candidate.
+    worker
+        .remember_announcement(
+            announcement(b.device_id, b_pin.clone(), valid_port),
+            source,
+            generation,
+        )
+        .unwrap();
+    let unknown = DeviceId::new();
+    worker
+        .remember_announcement(
+            announcement(unknown, b_pin.clone(), valid_port + 1),
+            source,
+            generation,
+        )
+        .unwrap();
+    worker
+        .remember_announcement(
+            announcement(b.device_id, String::new(), valid_port + 2),
+            source,
+            generation,
+        )
+        .unwrap();
+    worker
+        .remember_announcement(
+            announcement(c.device_id, c_pin.clone(), valid_port + 3),
+            source,
+            generation,
+        )
+        .unwrap();
+    worker
+        .remember_announcement(
+            announcement(b.device_id, c_pin, valid_port + 4),
+            source,
+            generation,
+        )
+        .unwrap();
+
+    let (valid_candidate, unknown_candidate, revoked_candidate, b_candidates) = {
+        let state = network.shared.lock().unwrap();
+        let b_candidates = state
+            .candidates
+            .get(&b.device_id)
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|value| value.endpoint)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        (
+            b_candidates.contains(&std::net::SocketAddr::new(source.ip(), valid_port)),
+            state.candidates.contains_key(&unknown),
+            state.candidates.contains_key(&c.device_id),
+            b_candidates,
+        )
+    };
+    let durable_routes_empty = a.peer_routes(&oa).unwrap().is_empty();
+
+    drop(network);
+    stopped(a).await;
+    stopped(b).await;
+    stopped(c).await;
+
+    assert!(
+        valid_candidate,
+        "a ready member with its pinned identity can be a volatile candidate"
+    );
+    assert_eq!(
+        b_candidates.len(),
+        1,
+        "bad identity advertisements must not replace the valid candidate"
+    );
+    assert!(
+        !unknown_candidate,
+        "unknown devices cannot create route candidates"
+    );
+    assert!(
+        !revoked_candidate,
+        "revoked members cannot create route candidates"
+    );
+    assert!(
+        durable_routes_empty,
+        "advertisements alone cannot write durable routes, even with a valid pin"
+    );
+}
+
+fn spawn_loopback_byte_proxy(
+    listener: tokio::net::TcpListener,
+    upstream_address: std::net::SocketAddr,
+    cancel: PeerCancellation,
+) -> tokio::task::JoinHandle<Result<bool, std::io::Error>> {
+    tokio::spawn(async move {
+        let (mut downstream, _) = tokio::select! {
+            _ = cancel.cancelled() => return Ok(false),
+            accepted = listener.accept() => accepted?,
+        };
+        let socket = tokio::net::TcpSocket::new_v4()?;
+        socket.bind("127.0.0.1:0".parse().unwrap())?;
+        let mut upstream = socket.connect(upstream_address).await?;
+        tokio::select! {
+            _ = cancel.cancelled() => Ok(false),
+            copied = tokio::io::copy_bidirectional(&mut downstream, &mut upstream) => {
+                copied.map(|_| true)
+            }
+        }
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn loopback_proxy_sync_exchanges_facts_both_ways_but_suppresses_self_source_route() {
+    let (_ra, a, oa) = host();
+    let (_rb, b, ob) = host();
+    let profile = pair_hosts(&a, &oa, &b, &ob).await;
+    record(&a, &oa, profile, "receiver fact before proxied sync");
+    record(&b, &ob, profile, "source fact before proxied sync");
+
+    let mut listener_a = a
+        .listen_peer_transport(&oa, "127.0.0.1:0".parse().unwrap(), transport_options())
+        .await
+        .unwrap();
+    let listen_port = listener_a.addr().port();
+    let address_a = listener_a.addr();
+    let address_b: std::net::SocketAddr = format!("127.0.0.2:{listen_port}").parse().unwrap();
+    let mut listener_b = b
+        .listen_peer_transport(&ob, address_b, transport_options())
+        .await
+        .unwrap();
+    for (host, owner) in [(&a, &oa), (&b, &ob)] {
+        host.save_peer_network_settings(
+            owner,
+            PeerNetworkSettings {
+                enabled: false,
+                preferred_port: listen_port,
+            },
+        )
+        .unwrap();
+    }
+
+    let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_address = proxy_listener.local_addr().unwrap();
+    let proxy_cancel = PeerCancellation::new();
+    let mut proxy_task = spawn_loopback_byte_proxy(proxy_listener, address_a, proxy_cancel.clone());
+
+    let accepting_host = a.clone();
+    let accepting_owner = oa.clone();
+    let mut accept_task = tokio::spawn(async move {
+        let incoming = listener_a.accept(PeerCancellation::new()).await?;
+        let observed_source = incoming.remote_address();
+        let outcome = accepting_host
+            .accept_peer_service(&accepting_owner, incoming)
+            .await?;
+        Ok::<_, HostError>((observed_source, outcome))
+    });
+
+    let pin_a = PeerPin::from_sha256(&a.device_identity(&oa).unwrap().fingerprint_sha256).unwrap();
+    let client_sync = match b
+        .connect_peer_transport(
+            &ob,
+            proxy_address,
+            pin_a,
+            transport_options(),
+            PeerCancellation::new(),
+        )
+        .await
+    {
+        Ok(channel) => match b
+            .select_peer_service(
+                &ob,
+                &channel,
+                PeerServiceKind::Sync,
+                Some(profile),
+                Some(a.device_id),
+                listen_port,
+            )
+            .await
+        {
+            Ok(()) => b
+                .synchronize_peer_profile_over_transport(
+                    &ob,
+                    profile,
+                    a.device_id,
+                    channel,
+                    PeerSyncOptions::default(),
+                )
+                .await
+                .is_ok(),
+            Err(_) => false,
+        },
+        Err(_) => false,
+    };
+
+    let mut observed_source = None;
+    let mut server_sync = false;
+    let server_finished =
+        match tokio::time::timeout(Duration::from_secs(12), &mut accept_task).await {
+            Ok(Ok(Ok((
+                observed,
+                crate::PeerServiceOutcome::Synchronized {
+                    profile_id,
+                    device_id,
+                    ..
+                },
+            )))) => {
+                observed_source = Some(observed);
+                server_sync = profile_id == profile && device_id == b.device_id;
+                true
+            }
+            Ok(Ok(Ok(_))) | Ok(Ok(Err(_))) | Ok(Err(_)) => true,
+            Err(_) => false,
+        };
+    if !server_finished {
+        accept_task.abort();
+        let _ = accept_task.await;
+    }
+
+    let proxy_completed = match tokio::time::timeout(Duration::from_secs(5), &mut proxy_task).await
+    {
+        Ok(Ok(Ok(forwarded))) => forwarded,
+        Ok(Ok(Err(_))) | Ok(Err(_)) => false,
+        Err(_) => {
+            proxy_cancel.cancel();
+            proxy_task.abort();
+            let _ = proxy_task.await;
+            false
+        }
+    };
+
+    let observed_self_loopback = observed_source
+        .is_some_and(|source| source.ip().is_loopback() && source.port() != listen_port);
+    let facts_bidirectional =
+        facts(&a, &oa, profile) == facts(&b, &ob, profile) && facts(&a, &oa, profile).len() == 2;
+    let route_absent = a
+        .peer_routes(&oa)
+        .unwrap()
+        .iter()
+        .all(|route| route.profile != profile || route.device != b.device_id);
+
+    // The fixture knows this listener candidate. The service /1 header sends
+    // only its port, so the receiver cannot learn this endpoint from the stream.
+    let pin_b = PeerPin::from_sha256(&b.device_identity(&ob).unwrap().fingerprint_sha256).unwrap();
+    let mut accept_candidate = tokio::spawn(async move {
+        match listener_b.accept(PeerCancellation::new()).await {
+            Ok(channel) => channel.close().await,
+            Err(error) => Err(error),
+        }
+    });
+    let candidate_dialable = match a
+        .connect_peer_transport(
+            &oa,
+            address_b,
+            pin_b,
+            transport_options(),
+            PeerCancellation::new(),
+        )
+        .await
+    {
+        Ok(channel) => channel.close().await.is_ok(),
+        Err(_) => false,
+    };
+    let candidate_accepted =
+        match tokio::time::timeout(Duration::from_secs(5), &mut accept_candidate).await {
+            Ok(Ok(Ok(()))) => true,
+            Ok(Ok(Err(_))) | Ok(Err(_)) => false,
+            Err(_) => {
+                accept_candidate.abort();
+                let _ = accept_candidate.await;
+                false
+            }
+        };
+
+    proxy_cancel.cancel();
+    stopped(a).await;
+    stopped(b).await;
+
+    assert!(
+        client_sync,
+        "the pinned proxied service session must synchronize"
+    );
+    assert!(
+        server_sync,
+        "the receiver must complete the same profile sync"
+    );
+    assert!(
+        proxy_completed,
+        "the local byte proxy must carry the complete TLS stream"
+    );
+    assert!(
+        observed_self_loopback,
+        "the receiver should observe its own loopback IP and an ephemeral TCP source port"
+    );
+    assert!(
+        facts_bidirectional,
+        "both peers' facts must cross the authenticated stream"
+    );
+    assert!(
+        route_absent,
+        "same preferred/listen port plus a self loopback observation is filtered as a self route"
+    );
+    assert!(
+        candidate_dialable && candidate_accepted,
+        "a fresh pinned TLS connection to the source's distinct loopback listener must work"
+    );
+}

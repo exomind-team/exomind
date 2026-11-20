@@ -2213,3 +2213,572 @@ async fn restore_retry_rotates_per_original_and_does_not_globally_defer_other_re
     stop(r.b).await;
     stop(third).await;
 }
+
+fn expected_manual_peer_shutdown(error: &crate::HostError) -> bool {
+    matches!(
+        error,
+        crate::HostError::PeerCancelled
+            | crate::HostError::PeerTransportUnavailable
+            | crate::HostError::Stopped
+    )
+}
+
+fn spawn_manual_peer_service(
+    host: Arc<crate::BetaHost>,
+    owner: crate::Session,
+    mut listener: PeerTransportListener,
+) -> (
+    crate::PeerCancellation,
+    tokio::task::JoinHandle<Result<(), crate::HostError>>,
+) {
+    let cancel = crate::PeerCancellation::new();
+    let stop = cancel.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            match listener.accept(stop.clone()).await {
+                Ok(channel) => {
+                    if let Err(error) = host.accept_peer_service(&owner, channel).await {
+                        if stop.is_cancelled() && expected_manual_peer_shutdown(&error) {
+                            break;
+                        }
+                        return Err(error);
+                    }
+                }
+                Err(crate::HostError::PeerTimeout | crate::HostError::PeerTls) => {}
+                Err(error) if stop.is_cancelled() && expected_manual_peer_shutdown(&error) => break,
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    });
+    (cancel, task)
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn one_way_invitation_learns_return_route_and_auto_fetches_without_second_claim() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let tablet_root = tempdir().unwrap();
+    let pc_root = tempdir().unwrap();
+    let (tablet, tablet_owner) = open(&tablet_root);
+    let (pc, pc_owner) = open(&pc_root);
+    let profile = ProfileId::new();
+    tablet
+        .provision_profile(&tablet_owner, profile, "one-way original route")
+        .unwrap();
+    for (host, owner) in [(&tablet, &tablet_owner), (&pc, &pc_owner)] {
+        host.save_peer_network_settings(
+            owner,
+            crate::PeerNetworkSettings {
+                enabled: false,
+                preferred_port: 0,
+            },
+        )
+        .unwrap();
+    }
+
+    // The inviter is a plain Host listener, with no discovery socket. The only
+    // return address it can learn from this Join is the authenticated service
+    // header's listener port paired with the observed TCP peer IP.
+    let mut issuer_listener = tablet
+        .listen_peer_transport(
+            &tablet_owner,
+            "127.0.0.1:0".parse().unwrap(),
+            transport(),
+        )
+        .await
+        .unwrap();
+    let issuer_address = issuer_listener.addr();
+    let invitation = tablet
+        .create_peer_invitation(
+            &tablet_owner,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: profile,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![issuer_address],
+                ttl_seconds: 120,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+    let accepting_host = tablet.clone();
+    let accepting_owner = tablet_owner.clone();
+    let accept = tokio::spawn(async move {
+        let channel = issuer_listener
+            .accept(crate::PeerCancellation::new())
+            .await
+            .unwrap();
+        let tcp_source = channel.remote_address();
+        let outcome = accepting_host
+            .accept_peer_service(&accepting_owner, channel)
+            .await
+            .unwrap();
+        (tcp_source, outcome)
+    });
+
+    let pc_network = crate::PeerNetwork::new(pc.clone(), pc_owner.clone()).unwrap();
+    pc_network.set_enabled(true).await.unwrap();
+    let pc_listener = pc_network
+        .local_addresses()
+        .unwrap()
+        .into_iter()
+        .find(|address| address.ip().is_loopback())
+        .unwrap();
+    let joined = pc_network
+        .join_with_route(&invitation, Uuid::new_v4(), Some(issuer_address))
+        .await
+        .unwrap();
+    let (tcp_source, join_outcome) = tokio::time::timeout(Duration::from_secs(6), accept)
+        .await
+        .unwrap()
+        .unwrap();
+    let join_ready = joined.state == crate::PeerJoinState::Ready
+        && matches!(
+            join_outcome,
+            crate::PeerServiceOutcome::Joined(status)
+                if status.state == crate::PeerJoinState::Ready
+        );
+
+    let learned_endpoint = std::net::SocketAddr::new(tcp_source.ip(), pc_listener.port());
+    let route_learned_from_join = tablet.peer_routes(&tablet_owner).unwrap().iter().any(|route| {
+        route.profile == profile
+            && route.device == pc.device_id
+            && route.endpoints.contains(&learned_endpoint)
+    });
+    let listener_port_not_tcp_source_port =
+        learned_endpoint.port() == pc_listener.port() && learned_endpoint.port() != tcp_source.port();
+
+    let member_generation = |host: &crate::BetaHost, owner: &crate::Session, peer| {
+        host.peer_members(owner, profile)
+            .unwrap()
+            .into_iter()
+            .find(|member| member.device_id == peer)
+            .map(|member| member.generation)
+    };
+    let generations_before = (
+        member_generation(&tablet, &tablet_owner, pc.device_id),
+        member_generation(&pc, &pc_owner, tablet.device_id),
+    );
+
+    let bytes: Vec<u8> = (0..64 * 1024)
+        .map(|index| ((index * 131 + 17) % 256) as u8)
+        .collect();
+    let original = seed(&pc, profile, &bytes, true);
+    let page = {
+        let state = pc.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        core.export_origin_page(
+            &core.local_human(profile).unwrap(),
+            profile,
+            &OriginPageQuery::default(),
+        )
+        .unwrap()
+    };
+    {
+        let state = tablet.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        let context = core
+            .trusted_replica_context(profile, pc.device_id, page.origin.restoration_epoch, 1)
+            .unwrap();
+        core.import_origin_page(&context, &page).unwrap();
+    }
+    let metadata_present = matches!(
+        availability(&tablet, profile, original.original_id),
+        OriginalAvailability::Missing { original: missing } if missing == original
+    );
+
+    let prior_policy = tablet.original_auto_policy(&tablet_owner).unwrap();
+    tablet
+        .configure_original_auto_policy(
+            &tablet_owner,
+            &crate::OriginalAutoPolicyCommand {
+                command_id: Uuid::new_v4(),
+                expected_revision: prior_policy.revision,
+                enabled: true,
+                max_bytes: 1024 * 1024,
+            },
+        )
+        .unwrap();
+
+    // End the Join controller and its stream before the download. The source
+    // later serves on the learned listener port without a discovery publisher;
+    // auto acquisition must open a fresh pinned TLS connection.
+    pc_network.stop().await.unwrap();
+    let source_listener = pc
+        .listen_peer_transport(&pc_owner, learned_endpoint, transport())
+        .await
+        .unwrap();
+    let (source_cancel, source_task) =
+        spawn_manual_peer_service(pc.clone(), pc_owner.clone(), source_listener);
+    let tablet_network = crate::PeerNetwork::new(tablet.clone(), tablet_owner.clone()).unwrap();
+    tablet_network.set_enabled(true).await.unwrap();
+    let retrieved = tokio::time::timeout(Duration::from_secs(18), async {
+        loop {
+            if tablet_network
+                .original_status(profile, original.original_id)
+                .is_ok_and(|status| status.availability == "complete")
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .is_ok();
+    let bytes_match = retrieved && original_bytes(&tablet, profile, original.original_id) == bytes;
+    let policy_after = tablet.original_auto_policy(&tablet_owner).unwrap();
+    let generations_after = (
+        member_generation(&tablet, &tablet_owner, pc.device_id),
+        member_generation(&pc, &pc_owner, tablet.device_id),
+    );
+
+    // Product outcomes above are captured before requesting expected shutdown.
+    source_cancel.cancel();
+    tablet_network.stop().await.unwrap();
+    let source_server_error = match source_task.await {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => Some(error.to_string()),
+        Err(error) => Some(format!("manual service task join failed: {error}")),
+    };
+    drop((tablet_network, pc_network));
+    stop(tablet).await;
+    stop(pc).await;
+
+    assert!(source_server_error.is_none(), "unexpected manual service failure: {source_server_error:?}");
+    assert!(join_ready, "the single original invitation must establish a ready member");
+    assert!(
+        route_learned_from_join,
+        "the invitee's authenticated listener address must be learned by the inviter"
+    );
+    assert!(
+        listener_port_not_tcp_source_port,
+        "the return route must use the advertised listener port, never the TCP source port"
+    );
+    assert!(
+        metadata_present,
+        "the test must expose the referenced original as metadata with missing local bytes"
+    );
+    assert!(
+        retrieved,
+        "a fresh auto-acquisition session must use the learned return route"
+    );
+    assert!(bytes_match, "the automatically fetched bytes must match the invited peer");
+    assert_eq!(generations_after, generations_before, "route use must not rejoin or regrant");
+    assert!(policy_after.enabled);
+    assert_eq!(policy_after.max_bytes, 1024 * 1024);
+}
+
+fn spawn_proxy_for_join(
+    listener: tokio::net::TcpListener,
+    upstream_address: std::net::SocketAddr,
+    cancel: crate::PeerCancellation,
+) -> tokio::task::JoinHandle<Result<bool, std::io::Error>> {
+    tokio::spawn(async move {
+        let (mut downstream, _) = tokio::select! {
+            _ = cancel.cancelled() => return Ok(false),
+            accepted = listener.accept() => accepted?,
+        };
+        let socket = tokio::net::TcpSocket::new_v4()?;
+        // The upstream side intentionally originates at the receiver's own
+        // loopback IP; this is a Host TCP fixture, not a fake peer client.
+        socket.bind("127.0.0.1:0".parse().unwrap())?;
+        let mut upstream = socket.connect(upstream_address).await?;
+        tokio::select! {
+            _ = cancel.cancelled() => Ok(false),
+            copied = tokio::io::copy_bidirectional(&mut downstream, &mut upstream) => {
+                copied.map(|_| true)
+            }
+        }
+    })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proxied_single_invitation_auto_fetches_through_authenticated_return_candidate() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let tablet_root = tempdir().unwrap();
+    let pc_root = tempdir().unwrap();
+    let (tablet, tablet_owner) = open(&tablet_root);
+    let (pc, pc_owner) = open(&pc_root);
+    let profile = ProfileId::new();
+    tablet
+        .provision_profile(&tablet_owner, profile, "proxied return route")
+        .unwrap();
+
+    let mut issuer_listener = tablet
+        .listen_peer_transport(
+            &tablet_owner,
+            "127.0.0.1:0".parse().unwrap(),
+            transport(),
+        )
+        .await
+        .unwrap();
+    let listen_port = issuer_listener.addr().port();
+    let issuer_address = issuer_listener.addr();
+    let pc_candidate: std::net::SocketAddr =
+        format!("127.0.0.2:{listen_port}").parse().unwrap();
+    // Fixture topology: two actual Host TLS listeners use different loopback
+    // IPs and one port. The normal Join API sends only the current service /1
+    // header; this expected-red case requires the peer candidate to be carried
+    // in the authenticated service exchange, not guessed from the TCP source.
+    let mut pc_listener = pc
+        .listen_peer_transport(&pc_owner, pc_candidate, transport())
+        .await
+        .unwrap();
+    for (host, owner) in [(&tablet, &tablet_owner), (&pc, &pc_owner)] {
+        host.save_peer_network_settings(
+            owner,
+            crate::PeerNetworkSettings {
+                enabled: false,
+                preferred_port: listen_port,
+            },
+        )
+        .unwrap();
+    }
+    let invitation = tablet
+        .create_peer_invitation(
+            &tablet_owner,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: profile,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![issuer_address],
+                ttl_seconds: 120,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+
+    let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap();
+    let proxy_address = proxy_listener.local_addr().unwrap();
+    let proxy_cancel = crate::PeerCancellation::new();
+    let mut proxy_task =
+        spawn_proxy_for_join(proxy_listener, issuer_address, proxy_cancel.clone());
+
+    let accepting_host = tablet.clone();
+    let accepting_owner = tablet_owner.clone();
+    let mut accept_task = tokio::spawn(async move {
+        let channel = issuer_listener
+            .accept(crate::PeerCancellation::new())
+            .await?;
+        let observed_source = channel.remote_address();
+        let outcome = accepting_host
+            .accept_peer_service(&accepting_owner, channel)
+            .await?;
+        Ok::<_, crate::HostError>((observed_source, outcome))
+    });
+
+    let claim_id = Uuid::new_v4();
+    let issuer_pin =
+        PeerPin::from_sha256(&tablet.device_identity(&tablet_owner).unwrap().fingerprint_sha256)
+            .unwrap();
+    let joiner_result = async {
+        let channel = pc
+            .connect_peer_transport(
+                &pc_owner,
+                proxy_address,
+                issuer_pin,
+                transport(),
+                crate::PeerCancellation::new(),
+            )
+            .await?;
+        pc.select_peer_service(
+            &pc_owner,
+            &channel,
+            crate::PeerServiceKind::Join,
+            None,
+            None,
+            listen_port,
+        )
+        .await?;
+        pc.join_peer_profile_over_transport(&pc_owner, &invitation, claim_id, channel)
+            .await
+    }
+    .await;
+    let joiner_ready = joiner_result
+        .as_ref()
+        .is_ok_and(|status| status.state == crate::PeerJoinState::Ready && status.remote_ready_observed);
+    let accept_result = tokio::time::timeout(Duration::from_secs(6), &mut accept_task).await;
+    let mut observed_source = None;
+    let mut inviter_ready = false;
+    let accept_finished = match accept_result {
+        Ok(Ok(Ok((observed, crate::PeerServiceOutcome::Joined(status))))) => {
+            observed_source = Some(observed);
+            inviter_ready = status.state == crate::PeerJoinState::Ready;
+            true
+        }
+        Ok(Ok(Ok(_))) | Ok(Ok(Err(_))) | Ok(Err(_)) => true,
+        Err(_) => false,
+    };
+    if !accept_finished {
+        accept_task.abort();
+        let _ = accept_task.await;
+    }
+    let proxy_completed = match tokio::time::timeout(Duration::from_secs(5), &mut proxy_task).await {
+        Ok(Ok(Ok(forwarded))) => forwarded,
+        Ok(Ok(Err(_))) | Ok(Err(_)) => false,
+        Err(_) => {
+            proxy_cancel.cancel();
+            proxy_task.abort();
+            let _ = proxy_task.await;
+            false
+        }
+    };
+
+    let observed_self = observed_source
+        .is_some_and(|source| source.ip() == std::net::Ipv4Addr::LOCALHOST && source.port() != listen_port);
+    let route_learned = tablet.peer_routes(&tablet_owner).unwrap().iter().any(|route| {
+        route.profile == profile
+            && route.device == pc.device_id
+            && route.endpoints.contains(&pc_candidate)
+    });
+    let member_generation = |host: &crate::BetaHost, owner: &crate::Session, peer| {
+        host.peer_members(owner, profile)
+            .unwrap()
+            .into_iter()
+            .find(|member| member.device_id == peer)
+            .map(|member| member.generation)
+    };
+    let generations_after_join = (
+        member_generation(&tablet, &tablet_owner, pc.device_id),
+        member_generation(&pc, &pc_owner, tablet.device_id),
+    );
+
+    // A direct pinned TLS handshake proves the source candidate is reachable.
+    // No service header is selected, so this probe does not teach or persist it.
+    let pc_pin =
+        PeerPin::from_sha256(&pc.device_identity(&pc_owner).unwrap().fingerprint_sha256).unwrap();
+    let (candidate_client, candidate_server) = tokio::join!(
+        tablet.connect_peer_transport(
+            &tablet_owner,
+            pc_candidate,
+            pc_pin,
+            transport(),
+            crate::PeerCancellation::new(),
+        ),
+        pc_listener.accept(crate::PeerCancellation::new())
+    );
+    let candidate_dialable = match candidate_client {
+        Ok(channel) => channel.close().await.is_ok(),
+        Err(_) => false,
+    };
+    let candidate_accepted = match candidate_server {
+        Ok(channel) => channel.close().await.is_ok(),
+        Err(_) => false,
+    };
+
+    let bytes: Vec<u8> = (0..64 * 1024)
+        .map(|index| ((index * 131 + 29) % 256) as u8)
+        .collect();
+    let original = seed(&pc, profile, &bytes, true);
+    let page = {
+        let state = pc.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        core.export_origin_page(
+            &core.local_human(profile).unwrap(),
+            profile,
+            &OriginPageQuery::default(),
+        )
+        .unwrap()
+    };
+    {
+        let state = tablet.active_state().unwrap();
+        let core = &crate::resources(&state).unwrap().core;
+        let context = core
+            .trusted_replica_context(profile, pc.device_id, page.origin.restoration_epoch, 1)
+            .unwrap();
+        core.import_origin_page(&context, &page).unwrap();
+    }
+    let metadata_missing_locally = matches!(
+        availability(&tablet, profile, original.original_id),
+        OriginalAvailability::Missing { original: missing } if missing == original
+    );
+
+    let prior_policy = tablet.original_auto_policy(&tablet_owner).unwrap();
+    tablet
+        .configure_original_auto_policy(
+            &tablet_owner,
+            &crate::OriginalAutoPolicyCommand {
+                command_id: Uuid::new_v4(),
+                expected_revision: prior_policy.revision,
+                enabled: true,
+                max_bytes: 1024 * 1024,
+            },
+        )
+        .unwrap();
+    tablet
+        .save_peer_network_settings(
+            &tablet_owner,
+            crate::PeerNetworkSettings {
+                enabled: false,
+                preferred_port: 0,
+            },
+        )
+        .unwrap();
+
+    let (source_cancel, source_task) =
+        spawn_manual_peer_service(pc.clone(), pc_owner.clone(), pc_listener);
+    let tablet_network = crate::PeerNetwork::new(tablet.clone(), tablet_owner.clone()).unwrap();
+    tablet_network.set_enabled(true).await.unwrap();
+    let auto_retrieved = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            if tablet_network
+                .original_status(profile, original.original_id)
+                .is_ok_and(|status| status.availability == "complete")
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .is_ok();
+    let bytes_match = auto_retrieved
+        && original_bytes(&tablet, profile, original.original_id) == bytes;
+    let auto_queue = tablet_network.original_auto_queue_status().unwrap();
+    let missing_route_wait_is_explained = auto_retrieved
+        || (auto_queue.deferred && auto_queue.last_error_code == Some("original_source_waiting"));
+    let route_learned_after_auto = tablet.peer_routes(&tablet_owner).unwrap().iter().any(|route| {
+        route.profile == profile
+            && route.device == pc.device_id
+            && route.endpoints.contains(&pc_candidate)
+    });
+    let generations_after_auto = (
+        member_generation(&tablet, &tablet_owner, pc.device_id),
+        member_generation(&pc, &pc_owner, tablet.device_id),
+    );
+
+    // The Join stream and direct candidate probe have ended; the desired fetch
+    // must be a new automatic TLS dial, and cleanup errors stay separately typed.
+    source_cancel.cancel();
+    tablet_network.stop().await.unwrap();
+    let source_server_error = match source_task.await {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => Some(error.to_string()),
+        Err(error) => Some(format!("manual service task join failed: {error}")),
+    };
+    drop(tablet_network);
+    stop(tablet).await;
+    stop(pc).await;
+
+    let behavior_passed = joiner_ready
+        && inviter_ready
+        && proxy_completed
+        && observed_self
+        && candidate_dialable
+        && candidate_accepted
+        && route_learned
+        && route_learned_after_auto
+        && metadata_missing_locally
+        && auto_retrieved
+        && bytes_match
+        && missing_route_wait_is_explained
+        && generations_after_auto == generations_after_join
+        && source_server_error.is_none();
+    assert!(
+        behavior_passed,
+        "one signed Join through a self-addressing byte proxy must publish a bounded return candidate and auto-fetch over a fresh pinned TLS session without regrant; joiner_ready={joiner_ready}, inviter_ready={inviter_ready}, proxy_completed={proxy_completed}, observed_self={observed_self}, candidate_dialable={candidate_dialable}, route_after_join={route_learned}, metadata_missing={metadata_missing_locally}, auto_retrieved={auto_retrieved}, bytes_match={bytes_match}, queue={auto_queue:?}, route_after_auto={route_learned_after_auto}, wait_explained={missing_route_wait_is_explained}, generations={generations_after_join:?}->{generations_after_auto:?}, service_error={source_server_error:?}"
+    );
+}

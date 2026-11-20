@@ -1,6 +1,7 @@
 //! Bounded local-reference scanner. No Self/PeerNetwork Arc is retained by its
 //! workers; Core availability, not metadata ACKs, is the byte truth.
 use super::*;
+use std::collections::VecDeque;
 use tokio::task::JoinSet;
 const CAP: usize = 256;
 const RESTORE_RETRY_DELAY_MS: u64 = 5_000;
@@ -12,10 +13,18 @@ pub struct OriginalAutoQueueStatus {
     pub deferred: bool,
     pub last_error_code: Option<&'static str>,
 }
+struct CachedProfilePage {
+    after: OriginalId,
+    local_member_generation: u64,
+    touched: u64,
+}
 pub(in crate::peers::network) struct AutoQueue {
     started: Instant,
-    profile_cursor: usize,
-    pages: HashMap<ProfileId, Option<OriginalId>>,
+    profile_cursor: Option<ProfileId>,
+    profile_batch: VecDeque<(ProfileId, u64)>,
+    profile_seen: HashMap<ProfileId, u64>,
+    pages: HashMap<ProfileId, CachedProfilePage>,
+    page_clock: u64,
     retry: HashMap<(ProfileId, OriginalId), Instant>,
     sources: HashMap<(ProfileId, OriginalId), usize>,
     defer_until: Option<Instant>,
@@ -38,8 +47,11 @@ impl AutoQueue {
     pub(in crate::peers::network) fn new() -> Self {
         Self {
             started: Instant::now(),
-            profile_cursor: 0,
+            profile_cursor: None,
+            profile_batch: VecDeque::new(),
+            profile_seen: HashMap::new(),
             pages: HashMap::new(),
+            page_clock: 0,
             retry: HashMap::new(),
             sources: HashMap::new(),
             defer_until: None,
@@ -165,21 +177,18 @@ impl AutoQueue {
             return Ok(());
         }
         let routes = worker.routes()?;
-        let mut profiles = routes.iter().map(|r| r.profile).collect::<Vec<_>>();
-        profiles.sort_by_key(ToString::to_string);
-        profiles.dedup();
-        if profiles.is_empty() {
+        // A bounded membership page excludes Solo profiles and continues over
+        // later ticks, so unrelated Core profile count cannot consume the scan.
+        let Some((profile, local_member_generation)) = self.next_profile(worker)? else {
             return Ok(());
-        }
-        self.pages.retain(|p, _| profiles.contains(p));
-        let profile = profiles[self.profile_cursor % profiles.len()];
-        self.profile_cursor = self.profile_cursor.wrapping_add(1);
-        if !self.pages.contains_key(&profile) && self.pages.len() >= CAP {
-            worker.auto_deferred()?;
+        };
+        let Some(peers) =
+            worker.metadata_original_sources(profile, local_member_generation, &routes)?
+        else {
+            self.remove_page(profile);
             return Ok(());
-        }
-        let peers = worker.metadata_original_sources(profile, &routes)?;
-        let after = self.pages.get(&profile).copied().flatten();
+        };
+        let after = self.page_after(profile, local_member_generation);
         let page = {
             let state = worker.host.active_state()?;
             worker.host.owner(&worker.owner)?;
@@ -187,7 +196,11 @@ impl AutoQueue {
             r.core
                 .missing_originals_page(&r.core.local_human(profile)?, profile, after, 100)?
         };
-        self.pages.insert(profile, page.next_after);
+        if let Some(after) = page.next_after {
+            self.remember_page(profile, local_member_generation, after);
+        } else {
+            self.remove_page(profile);
+        }
         worker
             .shared
             .lock()
@@ -246,8 +259,7 @@ impl AutoQueue {
                     continue;
                 }
                 if peers.is_empty() {
-                    let mut state =
-                        worker.shared.lock().map_err(|_| HostError::StatePoisoned)?;
+                    let mut state = worker.shared.lock().map_err(|_| HostError::StatePoisoned)?;
                     state.auto_deferred = true;
                     state.auto_error = Some("original_source_waiting");
                     break;
@@ -284,11 +296,7 @@ impl AutoQueue {
             let backoff = {
                 let state = worker.host.active_state()?;
                 let r = crate::resources(&state)?;
-                original_auto_store::backoff(
-                    &r.persistence.auth,
-                    profile,
-                    original.original_id,
-                )?
+                original_auto_store::backoff(&r.persistence.auth, profile, original.original_id)?
             };
             let deadline = self
                 .retry
@@ -324,6 +332,85 @@ impl AutoQueue {
         }
         Ok(())
     }
+    fn next_profile(&mut self, worker: &Worker) -> Result<Option<(ProfileId, u64)>, HostError> {
+        if let Some(profile) = self.profile_batch.pop_front() {
+            return Ok(Some(profile));
+        }
+        let members = worker.local_membership_profiles_after(self.profile_cursor)?;
+        if members.is_empty() {
+            self.profile_cursor = None;
+            let seen = &self.profile_seen;
+            self.pages
+                .retain(|profile, page| seen.get(profile) == Some(&page.local_member_generation));
+            self.profile_seen.clear();
+            return Ok(None);
+        }
+        self.profile_cursor = members.last().map(|member| member.profile_id);
+        for member in members {
+            let profile = member.profile_id;
+            if member.device_id == worker.host.device_id
+                && !member.revoked
+                && member.state == PeerJoinState::Ready
+                && member.capabilities.read_originals
+            {
+                self.profile_seen.insert(profile, member.generation);
+                if self
+                    .pages
+                    .get(&profile)
+                    .is_some_and(|page| page.local_member_generation != member.generation)
+                {
+                    self.remove_page(profile);
+                }
+                self.profile_batch.push_back((profile, member.generation));
+            } else {
+                self.remove_page(profile);
+            }
+        }
+        Ok(self.profile_batch.pop_front())
+    }
+    fn page_after(
+        &mut self,
+        profile: ProfileId,
+        local_member_generation: u64,
+    ) -> Option<OriginalId> {
+        self.page_clock = self.page_clock.wrapping_add(1);
+        let touched = self.page_clock;
+        let page = self.pages.get_mut(&profile)?;
+        if page.local_member_generation != local_member_generation {
+            return None;
+        }
+        page.touched = touched;
+        Some(page.after)
+    }
+    fn remember_page(
+        &mut self,
+        profile: ProfileId,
+        local_member_generation: u64,
+        after: OriginalId,
+    ) {
+        self.page_clock = self.page_clock.wrapping_add(1);
+        if !self.pages.contains_key(&profile) && self.pages.len() >= CAP {
+            if let Some(oldest) = self
+                .pages
+                .iter()
+                .min_by_key(|(_, page)| page.touched)
+                .map(|(profile, _)| *profile)
+            {
+                self.pages.remove(&oldest);
+            }
+        }
+        self.pages.insert(
+            profile,
+            CachedProfilePage {
+                after,
+                local_member_generation,
+                touched: self.page_clock,
+            },
+        );
+    }
+    fn remove_page(&mut self, profile: ProfileId) {
+        self.pages.remove(&profile);
+    }
     fn advance_source(&mut self, key: (ProfileId, OriginalId)) {
         if self.sources.len() >= CAP && !self.sources.contains_key(&key) {
             if let Some(stale) = self
@@ -350,8 +437,9 @@ impl Worker {
     fn metadata_original_sources(
         &self,
         p: ProfileId,
+        local_member_generation: u64,
         routes: &[Route],
-    ) -> Result<Vec<DeviceId>, HostError> {
+    ) -> Result<Option<Vec<DeviceId>>, HostError> {
         let members = self.host.peer_members(&self.owner, p)?;
         let Some(local) = members.iter().find(|m| {
             m.device_id == self.host.device_id
@@ -359,14 +447,20 @@ impl Worker {
                 && m.state == PeerJoinState::Ready
                 && m.capabilities.read_originals
         }) else {
-            return Ok(vec![]);
+            return Ok(None);
         };
+        if local.generation != local_member_generation {
+            return Ok(None);
+        }
         let own = self.host.local_origin_state(&self.owner, p)?;
         let state = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
         let mut peers = vec![];
         for route in routes.iter().filter(|r| r.profile == p) {
             let Some(member) = members.iter().find(|m| {
-                m.device_id == route.device && !m.revoked && m.state == PeerJoinState::Ready
+                m.device_id == route.device
+                    && !m.revoked
+                    && m.state == PeerJoinState::Ready
+                    && m.capabilities.read_originals
             }) else {
                 continue;
             };
@@ -396,7 +490,7 @@ impl Worker {
                 peers.push(route.device);
             }
         }
-        Ok(peers)
+        Ok(Some(peers))
     }
     async fn auto_attempt(
         &self,
@@ -541,7 +635,7 @@ impl Worker {
             _=job.cancel.cancelled()=>Err(HostError::PeerCancelled),
             _=network_cancel.cancelled()=>Err(HostError::PeerCancelled),
             _=self.host.peers.cancel.cancelled()=>Err(HostError::Stopped),
-            result=self.fetch_sessions(p,peer,id,&job.cancel,original.clone(),&job.completion,&admission,true)=>result,
+            result=self.fetch_sessions(p,peer,id,&job.cancel,&network_cancel,generation,original.clone(),&job.completion,&admission,true)=>result,
         };
         let mut disposition = Disposition::Skipped;
         match self.host.active_state() {
@@ -585,7 +679,9 @@ impl Worker {
                                                     policy_revision,
                                                     intent_revision,
                                                 )? {
-                                                    Some(retry) => Disposition::Retry(retry.delay_ms),
+                                                    Some(retry) => {
+                                                        Disposition::Retry(retry.delay_ms)
+                                                    }
                                                     None => Disposition::Skipped,
                                                 }
                                             }

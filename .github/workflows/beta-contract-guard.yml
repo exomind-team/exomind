@@ -370,6 +370,8 @@ jobs:
                 'restore_pending_bypasses_auto_size_limit_after_host_restart_without_a_view',
                 'restore_hash_mismatch_waits_for_host_retry_and_keeps_core_request_ids',
                 'restore_retry_rotates_per_original_and_does_not_globally_defer_other_restores',
+                'one_way_invitation_learns_return_route_and_auto_fetches_without_second_claim',
+                'proxied_single_invitation_auto_fetches_through_authenticated_return_candidate',
               ],
             },
             {
@@ -378,6 +380,19 @@ jobs:
               expected: [
                 'peer_network_stop_cancels_probe_after_remote_receives_probe_frame',
                 'stop_and_restart_retain_incoming_scope_until_its_blocking_work_drains',
+                'shared_profile_after_256_healthy_solo_profiles_is_fetched_by_controlled_ticks',
+                'v1_only_peer_alpn_completes_pinned_signed_join',
+              ],
+            },
+            {
+              name: 'host-authenticated-return-routes',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'service::route_tests', '--', '--test-threads=1'],
+              expected: [
+                'a_new_authenticated_inbound_candidate_survives_a_full_stale_route_cache',
+                'authenticated_route_write_rejects_wrong_pin_stale_generation_and_cancelled_scope',
+                'route_merge_keeps_recent_success_then_new_pinned_candidates_and_caps_the_tail',
+                'service_candidates_are_bounded_deduplicated_and_keep_native_ipv6',
+                'service_headers_keep_v1_strict_and_negotiate_v2_only_on_v2_transport',
               ],
             },
             {

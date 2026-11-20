@@ -105,6 +105,8 @@ struct Shared {
     auto_error: Option<&'static str>,
     #[cfg(test)]
     auto_yields: usize,
+    #[cfg(test)]
+    auto_tick_paused: bool,
 }
 struct Running {
     cancel: PeerCancellation,
@@ -317,6 +319,8 @@ impl PeerNetwork {
                 auto_error: None,
                 #[cfg(test)]
                 auto_yields: 0,
+                #[cfg(test)]
+                auto_tick_paused: false,
             })),
             originals: Arc::new(original_network::OriginalJobs::default()),
             restore_wake: Arc::new(tokio::sync::Notify::new()),
@@ -324,6 +328,14 @@ impl PeerNetwork {
     }
     pub fn wake_original_restore_scan(&self) {
         self.restore_wake.notify_one();
+    }
+    #[cfg(test)]
+    fn pause_auto_ticks_for_test(&self) -> Result<(), HostError> {
+        self.shared
+            .lock()
+            .map_err(|_| HostError::StatePoisoned)?
+            .auto_tick_paused = true;
+        Ok(())
     }
     fn worker(&self) -> Worker {
         Worker {
@@ -642,11 +654,12 @@ impl PeerNetwork {
             }
         }
         self.set_enabled(true).await?;
-        let port = self
-            .local_addresses()?
+        let local_addresses = self.local_addresses()?;
+        let port = local_addresses
             .first()
             .ok_or(HostError::PeerTransportUnavailable)?
             .port();
+        let service_candidates = super::transport::local_service_candidates(&local_addresses);
         let pin = PeerPin::from_sha256(&offer.issuer.fingerprint_sha256)?;
         let (cancel, generation) = {
             let running = self.lifecycle.lock().await;
@@ -688,21 +701,27 @@ impl PeerNetwork {
                 }
             };
             self.host
-                .select_peer_service(
+                .select_peer_service_with_candidates(
                     &self.owner,
                     &channel,
                     PeerServiceKind::Join,
                     None,
                     None,
                     port,
+                    &service_candidates,
                 )
                 .await?;
             match self
                 .host
-                .join_peer_profile_over_transport(&self.owner, invitation, claim, channel)
+                .join_peer_profile_over_transport_with_candidates(
+                    &self.owner,
+                    invitation,
+                    claim,
+                    channel,
+                )
                 .await
             {
-                Ok(status) => {
+                Ok((status, negotiation)) => {
                     if self
                         .shared
                         .lock()
@@ -712,20 +731,59 @@ impl PeerNetwork {
                     {
                         return Err(HostError::PeerCancelled);
                     }
-                    let mut routes = vec![*endpoint];
+                    if status.profile_id != offer.profile_id
+                        || status.issuer_device_id != offer.issuer.device_id
+                    {
+                        return Err(HostError::PeerMembershipDenied);
+                    }
+                    let member = self
+                        .host
+                        .peer_members(&self.owner, status.profile_id)?
+                        .into_iter()
+                        .find(|member| {
+                            member.device_id == offer.issuer.device_id
+                                && !member.revoked
+                                && member.state == PeerJoinState::Ready
+                                && member.pin == offer.issuer.fingerprint_sha256
+                        })
+                        .ok_or(HostError::PeerMembershipDenied)?;
+                    let mut route_candidates = match negotiation {
+                        Some(negotiation) => {
+                            if negotiation.peer_device_id != offer.issuer.device_id {
+                                return Err(HostError::PeerMembershipDenied);
+                            }
+                            negotiation.candidates
+                        }
+                        None => vec![],
+                    };
                     for candidate in &offer.candidates {
-                        if routes.len() < super::network_store::MAX_ROUTE_ENDPOINTS
-                            && !routes.contains(candidate)
+                        if route_candidates.len() >= super::network_store::MAX_ROUTE_ENDPOINTS {
+                            break;
+                        }
+                        if !candidate.ip().is_ipv4()
+                            && matches!(candidate.ip(), IpAddr::V6(ip) if ip.is_unicast_link_local())
                         {
-                            routes.push(*candidate);
+                            continue;
+                        }
+                        if super::network_store::validate_endpoints(&[*candidate]).is_ok()
+                            && !route_candidates.contains(candidate)
+                        {
+                            route_candidates.push(*candidate);
                         }
                     }
-                    self.host.save_peer_routes(
+                    let saved = self.host.save_authenticated_peer_routes(
                         &self.owner,
                         status.profile_id,
                         offer.issuer.device_id,
-                        routes,
+                        pin,
+                        member.generation,
+                        &route_candidates,
+                        Some(*endpoint),
+                        Some(&cancel),
                     )?;
+                    if !saved && cancel.is_cancelled() {
+                        return Err(HostError::PeerCancelled);
+                    }
                     let mut shared = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
                     if shared.generation != generation {
                         return Err(HostError::PeerCancelled);
@@ -774,51 +832,109 @@ impl PeerNetwork {
     }
 }
 impl Worker {
+    fn memberships(&self) -> Result<Vec<super::PeerMember>, HostError> {
+        let state = self.host.active_state()?;
+        self.host.owner(&self.owner)?;
+        let resources = crate::resources(&state)?;
+        super::membership_store::all_members(&resources.persistence.auth)
+    }
+    fn local_membership_profiles_after(
+        &self,
+        after: Option<ProfileId>,
+    ) -> Result<Vec<super::PeerMember>, HostError> {
+        let state = self.host.active_state()?;
+        self.host.owner(&self.owner)?;
+        let resources = crate::resources(&state)?;
+        super::membership_store::member_profiles_page(
+            &resources.persistence.auth,
+            self.host.device_id,
+            after,
+        )
+    }
+    #[cfg(test)]
+    fn auto_ticks_paused_for_test(&self) -> bool {
+        self.shared
+            .lock()
+            .map(|state| state.auto_tick_paused)
+            .unwrap_or(false)
+    }
     fn routes(&self) -> Result<Vec<Route>, HostError> {
         let saved = self.host.peer_routes(&self.owner)?;
-        let mut ready = vec![];
-        for profile in self.host.profiles(&self.owner)? {
-            for member in self.host.peer_members(&self.owner, profile.profile_id)? {
-                if member.device_id != self.host.device_id
+        let ready = self
+            .memberships()?
+            .into_iter()
+            .filter(|member| {
+                member.device_id != self.host.device_id
                     && !member.revoked
                     && member.state == PeerJoinState::Ready
-                {
-                    ready.push((profile.profile_id, member.device_id, member.pin));
-                }
-            }
-        }
+            })
+            .collect::<Vec<_>>();
+        let ready_by_pair = ready
+            .iter()
+            .map(|member| ((member.profile_id, member.device_id), member))
+            .collect::<HashMap<_, _>>();
         let mut state = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
         let at = Instant::now();
         state.candidates.retain(|_, values| {
             values.retain(|c| c.expires > at);
             !values.is_empty()
         });
-        let mut output = vec![];
-        for (profile, device, pin) in ready {
+        let mut output = Vec::with_capacity(saved.len());
+        let mut routed = HashSet::new();
+        for route in &saved {
+            let key = (route.profile, route.device);
+            let Some(member) = ready_by_pair.get(&key) else {
+                continue;
+            };
+            routed.insert(key);
             let mut endpoints = vec![];
-            if let Some(values) = state.candidates.get(&device) {
-                endpoints.extend(values.iter().filter(|c| c.pin == pin).map(|c| c.endpoint));
+            if let Some(values) = state.candidates.get(&route.device) {
+                endpoints.extend(
+                    values
+                        .iter()
+                        .filter(|candidate| candidate.pin == member.pin)
+                        .map(|candidate| candidate.endpoint),
+                );
             }
-            if let Some(route) = saved
-                .iter()
-                .find(|r| r.profile == profile && r.device == device)
-            {
-                for address in &route.endpoints {
-                    if !endpoints.contains(address) {
-                        endpoints.push(*address);
-                    }
+            for address in &route.endpoints {
+                if !endpoints.contains(address) {
+                    endpoints.push(*address);
                 }
             }
             endpoints.retain(|a| !state.addresses.contains(a));
             endpoints.truncate(8);
             if !endpoints.is_empty() {
                 output.push(Route {
-                    profile,
-                    device,
+                    profile: route.profile,
+                    device: route.device,
                     endpoints,
                 });
             }
         }
+        for member in &ready {
+            let key = (member.profile_id, member.device_id);
+            if routed.contains(&key) {
+                continue;
+            }
+            let Some(values) = state.candidates.get(&member.device_id) else {
+                continue;
+            };
+            let mut endpoints = values
+                .iter()
+                .filter(|candidate| candidate.pin == member.pin)
+                .map(|candidate| candidate.endpoint)
+                .collect::<Vec<_>>();
+            endpoints.retain(|address| !state.addresses.contains(address));
+            endpoints.truncate(8);
+            if !endpoints.is_empty() {
+                output.push(Route {
+                    profile: member.profile_id,
+                    device: member.device_id,
+                    endpoints,
+                });
+            }
+        }
+        output.sort_by_key(|route| (route.profile.to_string(), route.device.to_string()));
         Ok(output)
     }
     fn remember_announcement(
@@ -836,22 +952,17 @@ impl Worker {
         {
             return Ok(());
         }
-        let mut matching = vec![];
-        for profile in self.host.profiles(&self.owner)? {
-            if self
-                .host
-                .peer_members(&self.owner, profile.profile_id)?
-                .iter()
-                .any(|m| {
-                    m.device_id == value.device_id
-                        && !m.revoked
-                        && m.state == PeerJoinState::Ready
-                        && m.pin == value.fingerprint_sha256
-                })
-            {
-                matching.push((profile.profile_id, value.device_id));
-            }
-        }
+        let matching = self
+            .memberships()?
+            .into_iter()
+            .filter(|member| {
+                member.device_id == value.device_id
+                    && !member.revoked
+                    && member.state == PeerJoinState::Ready
+                    && member.pin == value.fingerprint_sha256
+            })
+            .map(|member| (member.profile_id, member.device_id))
+            .collect::<Vec<_>>();
         if matching.is_empty() {
             return Ok(());
         }
@@ -1060,23 +1171,21 @@ impl Worker {
         profile: ProfileId,
         device: DeviceId,
         endpoint: SocketAddr,
+        pin: PeerPin,
+        member_generation: u64,
+        cancel: &PeerCancellation,
     ) -> Result<(), HostError> {
-        let mut values = vec![endpoint];
-        if let Some(route) = self
-            .host
-            .peer_routes(&self.owner)?
-            .into_iter()
-            .find(|r| r.profile == profile && r.device == device)
-        {
-            for address in route.endpoints {
-                if !values.contains(&address) {
-                    values.push(address);
-                }
-            }
-        }
-        values.truncate(8);
-        self.host
-            .save_peer_routes(&self.owner, profile, device, values)
+        let _ = self.host.save_authenticated_peer_routes(
+            &self.owner,
+            profile,
+            device,
+            pin,
+            member_generation,
+            &[],
+            Some(endpoint),
+            Some(cancel),
+        )?;
+        Ok(())
     }
     async fn attempt(
         &self,
@@ -1128,7 +1237,16 @@ impl Worker {
             id,
         };
         let result = self
-            .transfer_attempt(&route, &member.pin, cancel, generation, own, memo, force)
+            .transfer_attempt(
+                &route,
+                &member.pin,
+                member.generation,
+                cancel,
+                generation,
+                own,
+                memo,
+                force,
+            )
             .await;
         let result = match result {
             Ok(Some(value)) => self
@@ -1143,6 +1261,7 @@ impl Worker {
         &self,
         route: &Route,
         pin: &str,
+        member_generation: u64,
         cancel: PeerCancellation,
         generation: u64,
         own: String,
@@ -1198,7 +1317,14 @@ impl Worker {
                                         generation,
                                         &probe,
                                     );
-                                    self.promote(route.profile, route.device, *endpoint)?;
+                                    self.promote(
+                                        route.profile,
+                                        route.device,
+                                        *endpoint,
+                                        pin,
+                                        member_generation,
+                                        &cancel,
+                                    )?;
                                     if saved.peer_runtime_id == Some(probe.runtime_id)
                                         && (!saved.can_receive
                                             || saved
@@ -1262,7 +1388,14 @@ impl Worker {
                     PeerSyncOptions::default(),
                 )
                 .await?;
-            self.promote(route.profile, route.device, *endpoint)?;
+            self.promote(
+                route.profile,
+                route.device,
+                *endpoint,
+                pin,
+                member_generation,
+                &cancel,
+            )?;
             return Ok(Some(value));
         }
         Err(last)
@@ -1292,9 +1425,14 @@ impl Worker {
                 _=cancel.cancelled()=>break,
                 _=self.host.peers.cancel.cancelled()=>break,
                 _=self.restore_wake.notified()=>{
+                    #[cfg(test)]
+                    if !self.auto_ticks_paused_for_test() {
+                        if let Err(error)=auto.tick(&self,&cancel,generation,&mut auto_jobs,true){if let Ok(mut state)=self.shared.lock(){state.auto_deferred=true;state.auto_error=Some(error_code(&error));}}
+                    }
+                    #[cfg(not(test))]
                     if let Err(error)=auto.tick(&self,&cancel,generation,&mut auto_jobs,true){if let Ok(mut state)=self.shared.lock(){state.auto_deferred=true;state.auto_error=Some(error_code(&error));}}
                 },
-                result=listener.accept(cancel.clone())=>{match result {Ok(channel)=>{if incoming.track_channel(&channel).is_err(){drop(channel);break;}if incoming_jobs.len()>=8{drop(channel);continue;}let network=self.clone();let completion=incoming.clone();let lease=match self.host.peers.register(false){Ok(l)=>l,Err(_)=>break};incoming_jobs.spawn(async move{let _lease=lease;if let Ok(outcome)=network.host.accept_peer_service_owned(&network.owner,channel,Some(completion)).await{network.incoming(generation,outcome);}});},Err(HostError::PeerTimeout|HostError::PeerTls)=>{},Err(_)=>break}},
+                result=listener.accept(cancel.clone())=>{match result {Ok(channel)=>{if incoming.track_channel(&channel).is_err(){drop(channel);break;}if incoming_jobs.len()>=8{drop(channel);continue;}let network=self.clone();let completion=incoming.clone();let route_cancel=cancel.clone();let lease=match self.host.peers.register(false){Ok(l)=>l,Err(_)=>break};incoming_jobs.spawn(async move{let _lease=lease;if let Ok(outcome)=network.host.accept_peer_service_owned_scoped(&network.owner,channel,Some(completion),Some(route_cancel)).await{network.incoming(generation,outcome);}});},Err(HostError::PeerTimeout|HostError::PeerTls)=>{},Err(_)=>break}},
                 received=async{match &udp {Some(socket)=>socket.recv_from(&mut packet).await,None=>std::future::pending().await}}=>{
                     if let Ok((n,source))=received{if n<=1024{if let Ok(value)=serde_json::from_slice::<Announcement>(&packet[..n]){let _=self.remember_announcement(value,source,generation);}}}
                 },
@@ -1304,6 +1442,11 @@ impl Worker {
                     if jobs.len()>=2{continue;}if let Ok(mut routes)=self.routes(){if !routes.is_empty(){let mut state=match self.shared.lock(){Ok(s)=>s,Err(_)=>return};let count=routes.len();routes.rotate_left(state.route_cursor%count);state.route_cursor=state.route_cursor.wrapping_add(1);routes.sort_by_key(|r|!state.forced.contains(&(r.profile,r.device)));}for route in routes {if jobs.len()>=2{break;}let key=(route.profile,route.device);let force;{let mut state=match self.shared.lock(){Ok(s)=>s,Err(_)=>return};force=state.forced.remove(&key);if state.progress.get(&key).is_some_and(|p|p.busy||(!force&&p.retry.is_some_and(|at|at>Instant::now()))){continue;}}
                         let network=self.clone();let cancel=cancel.clone();jobs.spawn(async move{let _=network.attempt(route,cancel,generation,force).await;});
                     }}
+                    #[cfg(test)]
+                    if !self.auto_ticks_paused_for_test() {
+                        if let Err(error)=auto.tick(&self,&cancel,generation,&mut auto_jobs,false){if let Ok(mut state)=self.shared.lock(){state.auto_deferred=true;state.auto_error=Some(error_code(&error));}}
+                    }
+                    #[cfg(not(test))]
                     if let Err(error)=auto.tick(&self,&cancel,generation,&mut auto_jobs,false){if let Ok(mut state)=self.shared.lock(){state.auto_deferred=true;state.auto_error=Some(error_code(&error));}}
                 },
                 result=auto_jobs.join_next(),if !auto_jobs.is_empty()=>{if let Some(result)=result{auto.completed(result,&self);}},
