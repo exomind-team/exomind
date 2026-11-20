@@ -7,6 +7,12 @@ import {
 } from '@/beta/media-preview';
 
 describe('verified media preview policy', () => {
+  it('defers video preview before probing a codec or reading media', () => {
+    const canPlayType = vi.fn(() => 'probably');
+    expect(evaluateMediaPreview({ fileName: 'clip.mp4', mediaType: 'video/mp4', byteLength: 1024, canPlayType }))
+      .toMatchObject({ kind: 'video-deferred' });
+    expect(canPlayType).not.toHaveBeenCalled();
+  });
   it.each([
     ['voice.wav', 'audio/wav', { kind: 'audio', mimeType: 'audio/wav' }],
     ['voice.mp3', 'audio/mpeg', { kind: 'audio', mimeType: 'audio/mpeg' }],
@@ -50,11 +56,11 @@ describe('verified media preview policy', () => {
 
   it('keeps browser codec uncertainty as an explicit unsupported decision', () => {
     expect(evaluateMediaPreview({
-      fileName: 'clip.mp4',
-      mediaType: 'video/mp4',
+      fileName: 'voice.m4a',
+      mediaType: 'audio/mp4',
       byteLength: 1024,
       canPlayType: () => '',
-    })).toMatchObject({ kind: 'unsupported-browser', format: { kind: 'video', mimeType: 'video/mp4' } });
+    })).toMatchObject({ kind: 'unsupported-browser', format: { kind: 'audio', mimeType: 'audio/mp4' } });
   });
 
   it('treats nonstandard capability results as unsupported', () => {
@@ -69,13 +75,13 @@ describe('verified media preview policy', () => {
   it('passes an explicit codec declaration to canPlayType and falls back when that codec is unknown', () => {
     const canPlayType = vi.fn((mimeType: string) => mimeType.includes('codec-that-does-not-exist') ? '' : 'probably');
     const plan = evaluateMediaPreview({
-      fileName: 'clip.mp4',
-      mediaType: 'video/mp4; codecs="codec-that-does-not-exist"',
+      fileName: 'voice.m4a',
+      mediaType: 'audio/mp4; codecs="codec-that-does-not-exist"',
       byteLength: 1024,
       canPlayType,
     });
 
-    expect(canPlayType).toHaveBeenCalledWith('video/mp4; codecs="codec-that-does-not-exist"');
+    expect(canPlayType).toHaveBeenCalledWith('audio/mp4; codecs="codec-that-does-not-exist"');
     expect(plan.kind).toBe('unsupported-browser');
   });
 

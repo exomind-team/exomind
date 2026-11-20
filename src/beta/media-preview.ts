@@ -8,6 +8,7 @@ export type MediaPreviewFormat = {
 export type MediaPreviewPlan =
   | { kind: 'supported'; format: MediaPreviewFormat }
   | { kind: 'unsupported-format'; message: string }
+  | { kind: 'video-deferred'; message: string }
   | { kind: 'unsupported-browser'; format: MediaPreviewFormat; message: string }
   | { kind: 'invalid-size'; message: string }
   | { kind: 'empty'; message: string }
@@ -89,6 +90,7 @@ export function evaluateMediaPreview({ fileName, mediaType, byteLength, canPlayT
 }): MediaPreviewPlan {
   const format = resolveMediaPreviewFormat(fileName, mediaType);
   if (!format) return { kind: 'unsupported-format', message: '此格式暂不支持音视频预览' };
+  if (format.kind === 'video') return { kind: 'video-deferred', message: '视频请使用系统打开或下载原件' };
   if (!Number.isSafeInteger(byteLength) || byteLength < 0) {
     return { kind: 'invalid-size', message: '原件大小信息无效；未读取原件' };
   }

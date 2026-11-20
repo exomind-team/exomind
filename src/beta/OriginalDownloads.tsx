@@ -175,7 +175,7 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
     {readable && <BetaImagePreview identity={`${deviceId}:${profileId}:${original.original_id}:${original.sha256}`} sourceScope={client} visible={visible} inline fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={() => collectOriginalDownload(client, profileId, original)} />}
     <div className="flex items-center gap-2"><Tooltip content={client.originalOpener?readable?'使用系统打开':'自动获取原件后用系统打开':'系统打开需要独立应用；仍可下载原件'}><Button size="icon" variant="ghost" className="shrink-0" aria-label={`打开 ${original.file_name}`}  disabled={!client.originalOpener||!readable&&!acquisition?.fetchAny||opening||running} onClick={()=>{void(readable?openOriginal():findOriginal(true));}}><FileText size={16} className="text-brand-accent" aria-hidden="true" /></Button></Tooltip>
       {readable&&isTextPreviewCandidate(original.file_name,original.media_type)&&<BetaTextPreview identity={JSON.stringify([deviceId,profileId,original.original_id,original.sha256,original.byte_length])} sourceScope={client} visible={visible} fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={()=>collectOriginalDownload(client,profileId,original)}/>}
-      {readable && mediaFormat && <div className="min-w-0 flex-[0_1_auto] space-y-1">
+      {readable && mediaFormat?.kind === 'audio' && <div className="min-w-0 flex-[0_1_auto] space-y-1">
         <BetaMediaPreview
           identity={JSON.stringify([deviceId, profileId, original.original_id, original.sha256, original.byte_length, original.file_name, original.media_type])}
           sourceScope={client}

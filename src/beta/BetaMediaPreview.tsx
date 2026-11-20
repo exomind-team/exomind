@@ -382,7 +382,7 @@ export function BetaMediaPreview({ identity, sourceScope, visible = true, fileNa
       >
         <DialogHeader className="pr-8 text-left">
           <DialogTitle className="break-all text-base">{fileName}</DialogTitle>
-          <DialogDescription>{`只读${plan.kind === 'supported' && plan.format.kind === 'video' ? '视频' : '音频'}预览 · 原件保持不变`}</DialogDescription>
+          <DialogDescription>只读音频预览 · 原件保持不变</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           {bound?.status === 'loading' && <p role="status" className="text-sm text-muted">正在读取并校验本机原件…</p>}
@@ -391,30 +391,7 @@ export function BetaMediaPreview({ identity, sourceScope, visible = true, fileNa
             <Button type="button" variant="outline" size="sm" onClick={() => setRevision(value => value + 1)}>重试预览</Button>
           </div>}
           {readyState && owner && <>
-            {plan.kind === 'supported' && plan.format.kind === 'video'
-              ? <video
-                  ref={element => bindMediaElement(owner, element)}
-                  data-testid="beta-media-element"
-                  aria-label={`视频原件 ${fileName}`}
-                  className="aspect-video max-h-[60dvh] w-full rounded-xl border border-border-page bg-surface object-contain"
-                  src={owner.url}
-                  controls={false}
-                  playsInline
-                  preload="metadata"
-                  onLoadedMetadata={event => onLoadedMetadata(owner, event.currentTarget)}
-                  onTimeUpdate={event => onTimeUpdate(owner, event.currentTarget)}
-                  onPlay={event => onPlay(owner, event.currentTarget)}
-                  onPlaying={event => onPlaying(owner, event.currentTarget)}
-                  onWaiting={event => onWaiting(owner, event.currentTarget)}
-                  onPause={event => onPause(owner, event.currentTarget)}
-                  onEnded={event => {
-                    if (!owns(owner, event.currentTarget)) return;
-                    updatePlayback(owner, 'ended');
-                    onTimeUpdate(owner, event.currentTarget);
-                  }}
-                  onError={event => onMediaError(owner, event.currentTarget)}
-                />
-              : <div className="flex min-h-8 items-center gap-2 text-xs text-muted">
+            <div className="flex min-h-8 items-center gap-2 text-xs text-muted">
                   <Music2 size={16} className="shrink-0 text-brand-accent" aria-hidden="true" />
                   <span>本机音频原件</span>
                   <audio
@@ -438,7 +415,7 @@ export function BetaMediaPreview({ identity, sourceScope, visible = true, fileNa
                     }}
                     onError={event => onMediaError(owner, event.currentTarget)}
                   />
-                </div>}
+                </div>
 
             <div className="flex min-h-6 items-center justify-between gap-3 text-xs text-secondary" role="group" aria-label="媒体播放状态">
               <p data-testid="beta-media-playback-status" role="status" aria-live="polite" className="min-w-0 truncate">{playbackLabel(readyState)}</p>

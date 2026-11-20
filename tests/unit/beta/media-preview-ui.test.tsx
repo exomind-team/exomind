@@ -73,6 +73,17 @@ function syntheticWav(): Uint8Array {
 }
 
 describe('explicit verified media preview', () => {
+  it('keeps video originals downloadable without offering an inline preview', () => {
+    const readRange = vi.fn();
+    const client = { ...fakeClient(), originals: { readRange } as unknown as BetaOriginalClient };
+    render(<OriginalDownloads client={client} profileId="profile-current" deviceId="device-current" originals={[{
+      original_id: 'video-original', file_name: 'clip.webm', media_type: 'video/webm',
+      byte_length: 8, sha256: 'a'.repeat(64),
+    }]} />);
+    expect(screen.queryByRole('button', { name: '预览视频 clip.webm' })).toBeNull();
+    expect(screen.getByRole('button', { name: '下载 clip.webm' })).toBeEnabled();
+    expect(readRange).not.toHaveBeenCalled();
+  });
   it('reads only after an explicit click and does not autoplay or expose native media controls', async () => {
     const props = previewProps();
     render(<BetaMediaPreview {...props} />);
@@ -92,17 +103,16 @@ describe('explicit verified media preview', () => {
     expect(screen.getByRole('button', { name: '播放' })).toBeInTheDocument();
   });
 
-  it('keeps video inside the real video element with custom controls and a local Blob URL', async () => {
+  it('defers video without reading bytes or creating a playback object', () => {
     const props = previewProps({ fileName: 'clip.webm', mediaType: 'video/webm' });
     render(<BetaMediaPreview {...props} />);
     fireEvent.click(previewButton('video', 'clip.webm'));
 
-    const media = await screen.findByTestId('beta-media-element') as HTMLMediaElement;
-    expect(media.tagName).toBe('VIDEO');
-    expect(media.getAttribute('src')).toBe('blob:media-1');
-    expect(media).not.toHaveAttribute('controls');
-    expect(media.autoplay).toBe(false);
-    expect(screen.getByRole('button', { name: '播放' })).toBeInTheDocument();
+    expect(previewButton('video', 'clip.webm')).toBeDisabled();
+    expect(props.load).not.toHaveBeenCalled();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('beta-media-element')).toBeNull();
+    expect(screen.getByText(/^视频请使用系统打开或下载原件/)).toBeInTheDocument();
   });
 
   it('reports metadata, time updates, seeking, volume, pause, and ended from media event callbacks', async () => {
