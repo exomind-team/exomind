@@ -39,7 +39,7 @@ export default {
           foreground: "hsl(var(--popover-foreground))",
         },
         card: {
-          DEFAULT: "hsl(var(--card))",
+          DEFAULT: "hsl(var(--bg-card))",
           foreground: "hsl(var(--card-foreground))",
         },
         brand: {
@@ -55,12 +55,8 @@ export default {
           foreground: "hsl(var(--warning-foreground) / <alpha-value>)",
         },
         // 语义化颜色 - 文字（按视觉重要性）
-        primary: "hsl(var(--text-primary))",
         strong: "hsl(var(--text-strong))",
-        secondary: "hsl(var(--text-secondary))",
-        muted: "hsl(var(--text-muted))",
         // 语义化颜色 - 背景
-        card: "hsl(var(--bg-card))",
         surface: "hsl(var(--bg-surface))",
         page: {
           DEFAULT: "hsl(var(--page-bg))",
@@ -84,6 +80,13 @@ export default {
         // 用户消息气泡
         'user-bubble': "#B24D2F",
         'user-bubble-text': "#FAFAF9",
+      },
+      // Text aliases only override the DEFAULT text leaf. Keep the control
+      // palettes and their foregrounds available to background/border utilities.
+      textColor: {
+        primary: { DEFAULT: "hsl(var(--text-primary))" },
+        secondary: { DEFAULT: "hsl(var(--text-secondary))" },
+        muted: { DEFAULT: "hsl(var(--text-muted))" },
       },
       borderRadius: {
         lg: "var(--radius)",

@@ -26,6 +26,8 @@ on:
       - 'src/ui/app/components/**'
       - 'src/components/ui/**'
       - 'vitest.config.ts'
+      - 'tailwind.config.js'
+      - 'src/index.css'
       - 'tests/setup.ts'
       - 'scripts/dev/supervised-command*'
       - 'tests/unit/beta/**'
@@ -102,6 +104,7 @@ jobs:
             'tests/unit/beta/message-integration.test.tsx',
             'tests/unit/beta/diagnostics-client.test.ts',
             'tests/unit/beta/diagnostics-state.test.ts',
+            'tests/unit/beta/control-color-contract.test.tsx',
             'tests/unit/beta/diagnostics-panel.test.tsx',
             'tests/unit/beta/diagnostics-settings.test.tsx',
             'tests/unit/beta/last-profile-ui.test.tsx',
