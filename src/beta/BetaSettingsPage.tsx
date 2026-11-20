@@ -22,6 +22,8 @@ import { BetaSettingsPanels, createBetaSettingsRegistry } from './settings-regis
 import { useBetaDesktopAdaptiveEnabled } from './preferences';
 import { BetaDiagnosticsEntry } from './BetaDiagnosticsPanel';
 import { createBetaDiagnosticsClient, type BetaDiagnosticsClient } from './diagnostics-client';
+import { BetaAgentGrantsEntry } from './BetaAgentGrantsPanel';
+import { createAgentGrantsClient } from './agent-grants-client';
 
 export function BetaSettingsPage({ profileName, profileId='', deviceId='', summaryModel, onDisconnect, onManageProfile, endpoint, deadlineAlerts, visible=true, diagnosticsClient }: { profileName: string; profileId?:string; deviceId?:string; summaryModel?:SummaryModelConfigurationService|null; onDisconnect?: () => void; onManageProfile?: () => void; endpoint?: string; deadlineAlerts?: BetaDeadlineAlertsClient | null; visible?:boolean; diagnosticsClient?:BetaDiagnosticsClient|null }) {
   const wide = useIsDesktop();
@@ -40,8 +42,11 @@ export function BetaSettingsPage({ profileName, profileId='', deviceId='', summa
   const [nativeAlerts] = useState(() => isTauri() ? nativeBetaDeadlineAlertsClient() : null);
   const [modelHost] = useState(() => document.createElement('div'));
   const [diagnosticsHost] = useState(() => document.createElement('div'));
+  const [agentGrantsHost] = useState(() => document.createElement('div'));
   const [nativeDiagnostics] = useState(() => createBetaDiagnosticsClient());
+  const [nativeAgentGrants] = useState(() => isTauri() ? createAgentGrantsClient(invoke) : null);
   const [diagnosticsMounted,setDiagnosticsMounted] = useState(false);
+  const [agentGrantsMounted,setAgentGrantsMounted] = useState(false);
   const diagnostics = diagnosticsClient === undefined ? nativeDiagnostics : diagnosticsClient;
   const alerts = deadlineAlerts === undefined ? nativeAlerts : deadlineAlerts;
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -91,11 +96,14 @@ export function BetaSettingsPage({ profileName, profileId='', deviceId='', summa
         location: <BetaRuntimeLocation endpoint={endpoint}/>,
         diagnostics: diagnosticsHost,
         onDiagnosticsMount: setDiagnosticsMounted,
+        agentGrants: agentGrantsHost,
+        onAgentGrantsMount: setAgentGrantsMounted,
       }}>
         {desktopLayout ? <DesktopSettingsLayout items={items} ctx={ctx}/> : <MobileSettingsLayout items={items} ctx={ctx}/>}
       </BetaSettingsPanels.Provider>
       {createPortal(<SummaryModelSettings service={summaryModel??null} deviceId={deviceId} profileId={profileId} profileName={profileName}/>, modelHost, 'beta-settings-model')}
       {createPortal(<BetaDiagnosticsEntry client={diagnostics} visible={visible&&diagnosticsMounted}/>, diagnosticsHost, 'beta-settings-diagnostics')}
+      {createPortal(<BetaAgentGrantsEntry client={nativeAgentGrants} profileId={profileId || null} profileName={profileName || null} visible={visible&&agentGrantsMounted}/>, agentGrantsHost, 'beta-settings-agent-grants')}
     </div>
   </PageShell>;
 }

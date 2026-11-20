@@ -84,6 +84,93 @@ pub(super) struct GrantCredentialReleaseResult {
     pub credential_state: GrantCredentialState,
 }
 
+#[derive(Serialize)]
+struct AgentAccessHandoff<'a> {
+    protocol: &'static str,
+    api_base_url: &'a str,
+    api: HandoffApi,
+    device: HandoffDevice<'a>,
+    profile: HandoffProfile<'a>,
+    grant: HandoffGrant,
+    credential: HandoffCredential<'a>,
+    network: HandoffNetwork,
+}
+
+#[derive(Serialize)]
+struct HandoffApi {
+    hello: &'static str,
+    access_check: &'static str,
+    authorization_header: &'static str,
+}
+
+#[derive(Serialize)]
+struct HandoffDevice<'a> {
+    device_id: &'a str,
+}
+
+#[derive(Serialize)]
+struct HandoffProfile<'a> {
+    profile_id: &'a str,
+    display_name: &'a str,
+}
+
+#[derive(Serialize)]
+struct HandoffGrant {
+    grant_id: Uuid,
+    kind: GrantKind,
+    agent_id: Option<AgentId>,
+}
+
+#[derive(Serialize)]
+struct HandoffCredential<'a> {
+    scheme: &'static str,
+    token: &'a str,
+}
+
+#[derive(Serialize)]
+struct HandoffNetwork {
+    listener_scope: &'static str,
+    remote_clients_reachable: bool,
+}
+
+fn agent_access_handoff_json(
+    metadata: &GrantMetadata,
+    profile_name: &str,
+    device_id: &str,
+    api_base_url: &str,
+    token: &str,
+) -> Result<String, ()> {
+    let profile_id = metadata.profile_id.to_string();
+    let payload = AgentAccessHandoff {
+        protocol: "exomind-beta/1",
+        api_base_url,
+        api: HandoffApi {
+            hello: "GET /hello",
+            access_check: "POST /profiles/{profile_id}/access/check",
+            authorization_header: "Authorization: Bearer <credential.token>",
+        },
+        device: HandoffDevice { device_id },
+        profile: HandoffProfile {
+            profile_id: &profile_id,
+            display_name: profile_name,
+        },
+        grant: HandoffGrant {
+            grant_id: metadata.grant_id,
+            kind: metadata.kind,
+            agent_id: metadata.agent_id,
+        },
+        credential: HandoffCredential {
+            scheme: "Bearer",
+            token,
+        },
+        network: HandoffNetwork {
+            listener_scope: "loopback_only",
+            remote_clients_reachable: false,
+        },
+    };
+    serde_json::to_string_pretty(&payload).map_err(|_| ())
+}
+
 #[derive(Clone, PartialEq, Eq)]
 struct GrantIntent {
     grant_id: Uuid,
@@ -674,7 +761,7 @@ fn vault_failure(error: VaultError) -> Failure {
         ),
         VaultError::CopyFailed => failure(
             "grant_clipboard_failed",
-            "复制结果未确认；凭据材料仍保留，可重试复制",
+            "复制结果未确认；本机接入材料仍保留，可重试复制接入信息",
         ),
         VaultError::Poisoned | VaultError::ReservationMissing => failure(
             "grant_credential_unavailable",
@@ -814,13 +901,13 @@ pub(super) async fn beta_grant_revoke(
     .await
 }
 
-/// Copies a still-active grant token through Native clipboard support.
+/// Copies the selected profile's scoped Agent handoff through Native clipboard support.
 ///
 /// The token is never returned to the renderer. A failed clipboard call keeps
 /// the vault entry available for an explicit retry; success retains it until
 /// release, revocation, or application shutdown.
 #[tauri::command]
-pub(super) async fn beta_grant_copy_credential(
+pub(super) async fn beta_grant_copy_access_info(
     window: WebviewWindow,
     app: AppHandle,
     state: State<'_, Arc<NativeState>>,
@@ -829,19 +916,68 @@ pub(super) async fn beta_grant_copy_credential(
     credential_handle: Uuid,
 ) -> Result<GrantCredentialCopyResult, Failure> {
     trusted_window(&window, state.inner())?;
+    let api_base_url = {
+        let server = state.server.lock().await;
+        let Some(server) = server.as_ref() else {
+            return Err(failure(
+                "listener_unavailable",
+                "本机 Beta API 尚未就绪；接入信息未复制",
+            ));
+        };
+        let address = server.addr();
+        if !address.ip().is_loopback() {
+            return Err(failure(
+                "listener_unavailable",
+                "本机 Beta API 未绑定回环地址；接入信息未复制",
+            ));
+        }
+        format!("http://{address}/beta/v1")
+    };
     grant_work(state.inner(), move |state| {
+        let host_status = state.host.status().map_err(Failure::from)?;
+        if !host_status.running {
+            return Err(Failure::from(HostError::Stopped));
+        }
         let metadata = state
             .host
             .grant_metadata_for_profile_id(&state.owner, profile_id, grant_id)
             .map_err(Failure::from)?;
         if metadata.revoked {
             let _ = state.grant_credentials.release_grant(profile_id, grant_id);
-            return Err(failure("grant_revoked", "此授权已撤销，不能再复制凭据"));
+            return Err(failure("grant_revoked", "此授权已撤销，不能再复制接入信息"));
         }
+        let selected_profile = state
+            .host
+            .profiles(&state.owner)
+            .map_err(Failure::from)?
+            .into_iter()
+            .find(|profile| profile.profile_id == profile_id)
+            .ok_or_else(|| failure("invalid_request", "当前档案信息不可用；接入信息未复制"))?;
+        let device_id = host_status.device_id.to_string();
         state
             .grant_credentials
             .copy_with(profile_id, grant_id, credential_handle, |text| {
-                app.clipboard().write_text(text).map_err(|_| ())
+                let handoff = agent_access_handoff_json(
+                    &metadata,
+                    &selected_profile.display_name,
+                    &device_id,
+                    &api_base_url,
+                    text,
+                )
+                .map_err(|_| {
+                    log::warn!("Beta Agent handoff serialization failed");
+                })?;
+                app.clipboard().write_text(&handoff).map_err(|error| {
+                    // The pinned Windows arboard errors contain static platform
+                    // context and OS failure text, never the text being copied.
+                    #[cfg(windows)]
+                    log::warn!("Beta Agent clipboard write failed: {error}");
+                    #[cfg(not(windows))]
+                    {
+                        let _ = error;
+                        log::warn!("Beta Agent clipboard write failed");
+                    }
+                })
             })
             .map_err(vault_failure)?;
         Ok(GrantCredentialCopyResult {
@@ -897,6 +1033,42 @@ mod tests {
             kind: GrantKind::Observer,
             agent_id: None,
         }
+    }
+
+    #[test]
+    fn copied_handoff_contains_real_beta_scope_and_keeps_bearer_out_of_ipc_result() {
+        let intent = intent(ProfileId::new());
+        let grant = metadata(&intent);
+        let bearer = "a".repeat(64);
+        let json = agent_access_handoff_json(
+            &grant,
+            "Synthetic profile",
+            "synthetic-device-id",
+            "http://127.0.0.1:19191/beta/v1",
+            &bearer,
+        )
+        .unwrap();
+        let handoff: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(handoff["protocol"], "exomind-beta/1");
+        assert_eq!(handoff["api_base_url"], "http://127.0.0.1:19191/beta/v1");
+        assert_eq!(handoff["device"]["device_id"], "synthetic-device-id");
+        assert_eq!(
+            handoff["profile"]["profile_id"],
+            intent.profile_id.to_string()
+        );
+        assert_eq!(handoff["profile"]["display_name"], "Synthetic profile");
+        assert_eq!(handoff["grant"]["kind"], "observer");
+        assert_eq!(handoff["credential"]["token"], bearer);
+        assert_eq!(handoff["network"]["remote_clients_reachable"], false);
+
+        let renderer_result = GrantCredentialCopyResult {
+            credential_handle: Uuid::new_v4(),
+            credential_state: GrantCredentialState::Copied,
+            material_retained: true,
+        };
+        let renderer_json = serde_json::to_string(&renderer_result).unwrap();
+        assert!(!renderer_json.contains(&bearer));
+        assert!(renderer_json.contains("credential_handle"));
     }
 
     #[test]
@@ -1035,15 +1207,24 @@ mod tests {
                 .unwrap(),
             GrantCredentialState::Available
         );
+        let endpoint = "http://127.0.0.1:19191/beta/v1";
+        let copied = std::cell::RefCell::new(None);
         assert!(vault
-            .copy_with(profile, intent.grant_id, handle, |text| {
-                if text.len() == 64 {
-                    Ok(())
-                } else {
-                    Err(())
-                }
+            .copy_with(profile, intent.grant_id, handle, |token| {
+                let handoff = agent_access_handoff_json(
+                    &metadata(&intent),
+                    "Synthetic clipboard retry",
+                    "synthetic-device",
+                    endpoint,
+                    token,
+                )?;
+                *copied.borrow_mut() = Some(handoff);
+                Ok(())
             })
             .is_ok());
+        let copied = copied.into_inner().unwrap();
+        assert!(copied.contains(endpoint));
+        assert!(copied.contains("exomind-beta/1"));
         assert_eq!(
             vault
                 .state_for_handle(profile, intent.grant_id, handle)

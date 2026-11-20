@@ -1179,7 +1179,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             grants::beta_grant_issue,
             grants::beta_grant_recover,
             grants::beta_grant_revoke,
-            grants::beta_grant_copy_credential,
+            grants::beta_grant_copy_access_info,
             grants::beta_grant_release_credential,
             beta_summary_model_configuration,
             beta_configure_summary_model,

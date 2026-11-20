@@ -24,20 +24,43 @@ Renderer 只能取得 metadata 与 opaque handle，不能取得 bearer。
 同一 ID 已存在不会再次签发 token。进程重启或材料已释放后，仍可看到授权 metadata，
 但不能从 token hash 恢复原凭据。需要新凭据时，明确撤销旧授权后重新签发。
 
-复制由 Native 显式写入系统剪贴板；失败保留材料供重试，成功也保留到显式释放、
-关闭面板、切档或应用停止。释放材料不撤销授权，不清理用户剪贴板。
+复制由 Native 显式写入系统剪贴板；失败保留材料供重试，成功也保留到显式清除本机材料、
+撤销授权或应用停止。关闭面板、切档只停止观察，不销毁 Native 中的材料，
+重新打开后可按原 grant ID 查证并继续复制。清除材料不撤销授权，不清理用户剪贴板。
 撤销会拒绝后续请求及失去提交资格的在途动作；不会删除已接受的事实、回执或他端副本。
 
-当前复制入口交付凭据；API 端点与用途仍由运行位置入口查看。完整接入信息的一步交接、
-真实外部 Agent 使用，以及尚未实现的 Wait/server export bundle，须继续分别验收，
-不能仅凭“凭据已复制”宣称 Agent 已连接。
+“复制接入信息”由 Native 将 `exomind-beta/1`、运行中的实际 `/beta/v1` 地址、设备 ID、
+当前档案真实显示名/UUID、grant ID/角色/Agent ID 与 bearer 凭据组合为 JSON，并直接写入
+系统剪贴板。Renderer 仍只拿 opaque handle 和 metadata；复制失败保留材料供同一 handle 重试。
+listener 仅绑定 loopback，其他设备不能直接访问该 API。复制成功只确认剪贴板写入，不代表
+外部 Agent 已连接或已读取。
+
+Host 的 `access/check` 现在把 `wait` 与 `export_bundle` 列为真实支持能力。Wait 只等待
+同一档案的 profile local sequence 前进，最多 30 秒、全 Host 同时最多 4 个请求；它不模拟
+旧 Runtime 的 `/act/await` 条件语义。Export bundle 固定 Core timeline highwater，按请求页数和
+JSON 字节预算返回明确 coverage；默认仅原件 metadata，只有显式选择并通过 lifecycle permit
+与 hash 校验的原件才附字节。这是受限的 Beta Agent bundle，不是 Markdown/目录导出或全备份。
+
+Wait/bundle 的 HTTP 回归已通过并提交。接入信息、授权 UI 与真实剪贴板/候选验收分别记录；
+不能仅凭“接入信息已复制”或模块源码存在宣称 Agent 已连接。
 
 ## 接口与回归
 
 Host 的 `grant_management` 负责按档案筛选、固定 ID 签发和撤销。
-Native 六个 `beta_grant_*` 命令负责可信窗口、关闭态和 vault 材料所有权。
-Settings 显隐只关闭管理视图与释放其材料，不撤销业务权限。
+Native `beta_grant_*` 命令负责可信窗口、关闭态、vault 材料所有权与接入 JSON 的系统剪贴板交付。
+Settings 默认只显示「管理 Agent 授权」入口，打开后才读取列表。显隐只关闭观察，材料由
+Native 的有界 vault 持有。清除本机接入材料是独立确认动作；其回执未确认时不假报已清除。
+旧凭据材料不可得不禁止为其他 Agent 创建独立授权；当前签发回执未知时仍先查证同一 ID。
+旧视图的迟到回执不能关闭新档案的表单，或把已由新视图查证完成的意图重新改为未知。
 
 回归覆盖档案隔离、角色、未知回执不重发、复制失败恢复、容量预留、材料释放与撤销差异，
 以及内部 Human 与外部 Agent 管理分离。Windows Native 单测的剪贴板回调用合成替身；
 它不替代真实系统剪贴板和完整用户叙事验收。
+
+前端 client/state/panel/Settings 四组共 38 项通过；Native 授权与接入信息组 7 项通过。
+视图关闭/迟到成功错误销毁材料、旧未知结果覆盖新确认，以及旧材料全局阻止新授权，均有
+先失败再通过的回归。共享 ledger 的版本检查和观察通知防止旧回执回退新状态；撤销状态
+在迟到签发与列表结果中保持单调。退出应用清除 vault 仍保留原授权，和关闭管理界面分别处理。
+
+电脑真实窗口已观察到系统剪贴板 AccessDenied，普通剪贴板写入也失败；正向复制仍待可用
+交互环境验证，不能用合成回调通过代替它。该环境错误不应销毁已有材料或再次签发授权。
