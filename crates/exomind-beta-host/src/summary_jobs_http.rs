@@ -1,5 +1,5 @@
 use crate::{
-    BetaHost, HostError, SummaryServiceStatus,
+    BetaHost, HostError, SummaryMaterialConsent, SummaryServiceStatus,
     http::{bearer, work},
 };
 use axum::{
@@ -29,6 +29,18 @@ struct TaskQuery {
 struct ArtifactQuery {
     before: Option<u64>,
     limit: Option<usize>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MaterialRequest {
+    command: SummaryRequestCommand,
+    consent: SummaryMaterialConsent,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MaterialControl {
+    command: SummaryControlCommand,
+    consent: SummaryMaterialConsent,
 }
 async fn tasks(
     State(host): State<Arc<BetaHost>>,
@@ -139,6 +151,52 @@ async fn selection(
         .await?,
     ))
 }
+async fn material_request(
+    State(host): State<Arc<BetaHost>>,
+    headers: HeaderMap,
+    path: Result<Path<ProfileId>, PathRejection>,
+    body: Result<Json<MaterialRequest>, JsonRejection>,
+) -> Result<Json<Receipt>, HostError> {
+    let token = bearer(&headers)?;
+    let Path(profile) = path.map_err(|_| HostError::InvalidRequest)?;
+    let Json(input) = body.map_err(|_| HostError::InvalidRequest)?;
+    if input.command.profile_id != profile {
+        return Err(HostError::Forbidden);
+    }
+    Ok(Json(
+        work(host, move |host| {
+            host.request_summary_with_material_consent(
+                &host.authenticate(&token)?,
+                &input.command,
+                &input.consent,
+            )
+        })
+        .await?,
+    ))
+}
+async fn material_control(
+    State(host): State<Arc<BetaHost>>,
+    headers: HeaderMap,
+    path: Result<Path<ProfileId>, PathRejection>,
+    body: Result<Json<MaterialControl>, JsonRejection>,
+) -> Result<Json<Receipt>, HostError> {
+    let token = bearer(&headers)?;
+    let Path(profile) = path.map_err(|_| HostError::InvalidRequest)?;
+    let Json(input) = body.map_err(|_| HostError::InvalidRequest)?;
+    if input.command.profile_id != profile {
+        return Err(HostError::Forbidden);
+    }
+    Ok(Json(
+        work(host, move |host| {
+            host.control_summary_with_material_consent(
+                &host.authenticate(&token)?,
+                &input.command,
+                &input.consent,
+            )
+        })
+        .await?,
+    ))
+}
 async fn status(
     State(host): State<Arc<BetaHost>>,
     headers: HeaderMap,
@@ -173,6 +231,14 @@ pub(crate) fn router() -> Router<Arc<BetaHost>> {
         .route(
             "/beta/v1/profiles/:profile/summaries/controls",
             post(control),
+        )
+        .route(
+            "/beta/v1/profiles/:profile/summaries/material-requests",
+            post(material_request),
+        )
+        .route(
+            "/beta/v1/profiles/:profile/summaries/material-controls",
+            post(material_control),
         )
         .route(
             "/beta/v1/profiles/:profile/timeblocks/:block/summary-selection",

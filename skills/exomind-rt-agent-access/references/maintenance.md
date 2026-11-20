@@ -4,6 +4,8 @@
 
 # Maintenance
 
+- `2026-11-21` | 更新者：`Codex` | 更新内容概要：`说明 Human-only material request/control envelope、全局 summary_originals 能力与独立本机外发同意；普通 Agent 范围保持。` | 依据：`Host facade/Rust原件permit与SHA路径、真实HTTP低权403/跨P/wire回归、精确图片两HTTP入口及provider digest通过；Core wire保持11，Native90和当前Web源码验证通过。尚不代表冻结候选或真实模型质量签收。`
+
 ## 何时读取
 
 - 任务明确是“更新这个 skill”

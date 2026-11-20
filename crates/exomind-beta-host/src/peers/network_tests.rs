@@ -1673,3 +1673,199 @@ async fn loopback_proxy_sync_exchanges_facts_both_ways_but_suppresses_self_sourc
         "a fresh pinned TLS connection to the source's distinct loopback listener must work"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nearby_discovery_is_visible_bounded_and_never_becomes_peer_access() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_ra, a, oa) = host();
+    let (_rb, b, ob) = host();
+    let profile = ProfileId::new();
+    a.provision_profile(&oa, profile, "private profile name")
+        .unwrap();
+
+    let service = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let service_address = service.local_addr().unwrap();
+    let pin = b.device_identity(&ob).unwrap().fingerprint_sha256;
+    let network = PeerNetwork::new(a.clone(), oa.clone()).unwrap();
+    network.set_enabled(true).await.unwrap();
+
+    let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let announcement = Announcement {
+        protocol: "exomind-discovery/1".into(),
+        device_id: b.device_id,
+        fingerprint_sha256: pin.clone(),
+        listen_port: service_address.port(),
+    };
+    let bytes = serde_json::to_vec(&announcement).unwrap();
+    let target = SocketAddr::from((Ipv4Addr::LOCALHOST, discovery_port()));
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut nearby = Vec::new();
+    loop {
+        socket.send_to(&bytes, target).await.unwrap();
+        nearby = network.nearby_candidates().unwrap();
+        if nearby
+            .iter()
+            .any(|candidate| candidate.device_id == b.device_id)
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "an unpaired device advertisement must become a visible nearby candidate"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let candidate = nearby
+        .iter()
+        .find(|candidate| candidate.device_id == b.device_id)
+        .unwrap();
+    assert_eq!(candidate.addresses, vec![service_address.to_string()]);
+    assert_eq!(candidate.verification_state, "unverified");
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    assert!(candidate.expires_at_ms > now_ms);
+    assert!(candidate.expires_at_ms <= now_ms + 30_000);
+
+    let candidate_json = serde_json::to_value(candidate).unwrap();
+    assert_eq!(
+        candidate_json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec![
+            "addresses",
+            "device_id",
+            "expires_at_ms",
+            "verification_state"
+        ]
+    );
+    assert!(
+        a.peer_members(&oa, profile)
+            .unwrap()
+            .iter()
+            .all(|member| member.device_id != b.device_id)
+    );
+    assert!(
+        a.peer_routes(&oa)
+            .unwrap()
+            .iter()
+            .all(|route| route.device != b.device_id)
+    );
+    assert!(
+        !network
+            .shared
+            .lock()
+            .unwrap()
+            .progress
+            .contains_key(&(profile, b.device_id))
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(120), service.accept())
+            .await
+            .is_err(),
+        "discovery must not probe or read an unpaired service"
+    );
+
+    let generation = network.shared.lock().unwrap().generation;
+    let worker = network.worker();
+    let source = socket.local_addr().unwrap();
+    let expires_before = candidate.expires_at_ms;
+    for _ in 0..3 {
+        worker
+            .remember_announcement(
+                Announcement {
+                    protocol: "exomind-discovery/1".into(),
+                    device_id: b.device_id,
+                    fingerprint_sha256: pin.clone(),
+                    listen_port: service_address.port(),
+                },
+                source,
+                generation,
+            )
+            .unwrap();
+    }
+    nearby = network.nearby_candidates().unwrap();
+    let refreshed = nearby
+        .iter()
+        .find(|candidate| candidate.device_id == b.device_id)
+        .unwrap();
+    assert_eq!(refreshed.addresses.len(), 1);
+    assert!(refreshed.expires_at_ms >= expires_before);
+
+    for port in 41000..41008 {
+        worker
+            .remember_announcement(
+                Announcement {
+                    protocol: "exomind-discovery/1".into(),
+                    device_id: b.device_id,
+                    fingerprint_sha256: pin.clone(),
+                    listen_port: port,
+                },
+                source,
+                generation,
+            )
+            .unwrap();
+    }
+    let bounded = network.nearby_candidates().unwrap();
+    assert_eq!(
+        bounded
+            .iter()
+            .find(|candidate| candidate.device_id == b.device_id)
+            .unwrap()
+            .addresses
+            .len(),
+        MAX_DEVICE_CANDIDATES
+    );
+
+    let source = SocketAddr::from((Ipv4Addr::LOCALHOST, 53102));
+    for index in 0..(MAX_CANDIDATE_DEVICES - 1) {
+        worker
+            .remember_announcement(
+                Announcement {
+                    protocol: "exomind-discovery/1".into(),
+                    device_id: DeviceId::new(),
+                    fingerprint_sha256: pin.clone(),
+                    listen_port: 40_000 + index as u16,
+                },
+                source,
+                generation,
+            )
+            .unwrap();
+    }
+    let overflow = DeviceId::new();
+    worker
+        .remember_announcement(
+            Announcement {
+                protocol: "exomind-discovery/1".into(),
+                device_id: overflow,
+                fingerprint_sha256: pin,
+                listen_port: 49_999,
+            },
+            source,
+            generation,
+        )
+        .unwrap();
+    nearby = network.nearby_candidates().unwrap();
+    assert_eq!(nearby.len(), MAX_CANDIDATE_DEVICES);
+    assert!(
+        nearby
+            .iter()
+            .all(|candidate| candidate.device_id != overflow)
+    );
+
+    tokio::time::sleep(CANDIDATE_TTL + Duration::from_millis(50)).await;
+    assert!(
+        network.nearby_candidates().unwrap().is_empty(),
+        "expired candidates must disappear when read"
+    );
+
+    network.stop().await.unwrap();
+    drop(network);
+    stopped(a).await;
+    stopped(b).await;
+}

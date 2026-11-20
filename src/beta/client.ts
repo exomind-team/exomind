@@ -32,6 +32,7 @@ export interface BetaStatus {
     typed_timeline?: boolean;
     timeline_period?: boolean;
     summary_jobs?: boolean;
+    summary_originals?: boolean;
     correction_source?: boolean;
   };
 }
@@ -107,6 +108,9 @@ function status(value: unknown): BetaStatus {
     }
     if (capabilities.correction_source !== undefined && typeof capabilities.correction_source !== 'boolean') {
       throw new BetaApiError('invalid_response', '服务的更正来源能力声明无效');
+    }
+    if (capabilities.summary_originals !== undefined && typeof capabilities.summary_originals !== 'boolean') {
+      throw new BetaApiError('invalid_response', '服务的原件外发能力声明无效');
     }
   }
   return item as unknown as BetaStatus;

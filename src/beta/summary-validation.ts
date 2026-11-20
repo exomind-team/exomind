@@ -1,6 +1,7 @@
 import { BetaApiError } from './api-error';
 import type { BetaReceipt } from './client';
 import type { BetaOriginal } from './original-types';
+import type { SummaryMaterialConsent } from './summary-types';
 import { MAX_SUMMARY_ATTEMPTS,MAX_SUMMARY_CONFLICTS,MAX_SUMMARY_CONTROL_HEADS,MAX_SUMMARY_INPUT_ENCODED_BYTES,MAX_SUMMARY_PAGE_SIZE,MAX_SUMMARY_SAFE_COUNTER,MAX_SUMMARY_SOURCES,type SummaryArtifactKind,type SummaryArtifactPage,type SummaryArtifactRecord,type SummaryArtifactView,type SummaryAttemptView,type SummaryControlAction,type SummaryControlCommand,type SummaryCoverage,type SummaryMaterial,type SummaryModelMetadata,type SummaryOriginHead,type SummaryOutput,type SummaryRequestCommand,type SummaryRunView,type SummarySelection,type SummaryServiceStatus,type SummarySourceRef,type SummarySourceSnapshot,type SummaryState,type SummaryTaskPage,type SummaryTaskView } from './summary-types';
 
 const encoder=new TextEncoder();
@@ -17,6 +18,10 @@ function text(value:unknown,max:number,min=0):string{
   const bytes=encoder.encode(value).length;if(bytes<min||bytes>max)return invalid();return value;
 }
 export function summaryUuid(value:unknown):string{if(typeof value!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value)||value==='00000000-0000-0000-0000-000000000000')return invalid();return value;}
+export function validateSummaryMaterialConsent(value:unknown):SummaryMaterialConsent{
+  const raw=object(value,['provider_config_revision','max_original_bytes']);
+  return{provider_config_revision:summaryUuid(raw.provider_config_revision),max_original_bytes:integer(raw.max_original_bytes,1,256*1024)};
+}
 function hash(value:unknown):string{if(typeof value!=='string'||!/^[a-f0-9]{64}$/.test(value))return invalid();return value;}
 function integer(value:unknown,min=0,max=MAX_SUMMARY_SAFE_COUNTER):number{if(!Number.isSafeInteger(value)||Number(value)<min||Number(value)>max)return invalid();return Number(value);}
 function boolean(value:unknown):boolean{if(typeof value!=='boolean')return invalid();return value;}

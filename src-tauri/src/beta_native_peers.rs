@@ -1,8 +1,8 @@
 //! Main-window owner management. Invitation secrets stay out of logs and URLs.
 use super::{Failure, NativeState, trusted_window, work};
 use exomind_beta_host::{
-    HostError, OriginalTransferResult, PEER_CORE_SCHEMA, PEER_PROTOCOL, PeerInvitation,
-    PeerNetworkStatus, PeerOriginalStatus, PeerSyncResult,
+    HostError, NearbyPeerCandidate, OriginalTransferResult, PEER_CORE_SCHEMA, PEER_PROTOCOL,
+    PeerInvitation, PeerNetworkStatus, PeerOriginalStatus, PeerSyncResult,
 };
 use exomind_core::{DeviceId, OriginalId, ProfileId};
 use serde::Serialize;
@@ -77,6 +77,15 @@ pub(super) async fn beta_peer_status(
     trusted_window(&window, state.inner())?;
     work(state.inner(), move |state| state.peers.status(profile_id)).await
 }
+#[tauri::command]
+pub(super) async fn beta_peer_nearby_candidates(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+) -> Result<Vec<NearbyPeerCandidate>, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), |state| state.peers.nearby_candidates()).await
+}
+
 #[tauri::command]
 pub(super) async fn beta_peer_set_enabled(
     window: WebviewWindow,

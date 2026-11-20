@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { BetaApiError } from './api-error';
 import type { BetaStatus } from './client';
-import type { SummaryClient,SummaryControlCommand,SummaryRequestCommand } from './summary-types';
+import type { SummaryClient,SummaryControlCommand,SummaryRequestCommand,SummaryMaterialRequest,SummaryMaterialControl } from './summary-types';
+import { validateSummaryMaterialConsent } from './summary-validation';
 import { summaryUuid,validateSummaryArtifactPage,validateSummaryControlCommand,validateSummaryPageLimit,validateSummaryReceipt,validateSummaryRequestCommand,validateSummarySelection,validateSummaryServiceStatus,validateSummaryTask,validateSummaryTaskPage } from './summary-validation';
 
 type NativeCall=<T>(command:string,args?:Record<string,unknown>)=>Promise<T>;
@@ -12,12 +13,18 @@ interface Operations {
   selection(profileId:string,blockId:string):Promise<unknown>;
   request(command:SummaryRequestCommand):Promise<unknown>;
   control(command:SummaryControlCommand):Promise<unknown>;
+  materialRequest(input:SummaryMaterialRequest):Promise<unknown>;
+  materialControl(input:SummaryMaterialControl):Promise<unknown>;
   status?():Promise<unknown>;
 }
 function invalidQuery():never{throw new BetaApiError('invalid_summary_request','回顾查询参数无效，未发送');}
 const failureMessages:Record<string,string>={
   invalid_summary_response:'回顾响应与请求范围尚未确认，请刷新后重试',invalid_summary_request:'回顾请求无效，未声明已提交',
   summary_service_changed:'本机服务已变化，旧回顾结果未应用，请重新连接',unsupported_summaries:'当前服务尚未提供回顾任务能力',
+  unsupported_summary_originals:'当前服务尚未提供原件外发确认能力，请更新后重试',
+  model_configuration_conflict:'模型配置已变化，请重新核对原件和本次外发同意',
+  model_configuration_unavailable:'模型配置暂不可用，请恢复配置后重新确认原件外发',
+  model_configuration_recovery_required:'模型配置需要恢复，请处理后重新确认原件外发',
   unauthorized:'当前授权已失效，请重新授权',forbidden:'当前授权不允许此回顾操作',summary_forbidden:'当前授权不允许此回顾操作',
   summary_conflict:'回顾归属或控制已变化，请刷新后再操作',summary_stale:'此回顾执行已失效，旧结果不会发布',summary_blocked:'此回顾需要先处理来源或控制状态',
   summary_not_found:'本机尚未找到此回顾任务或结果',not_found:'本机尚未找到请求内容',stopped:'本机服务已停止',clock_unavailable:'本机时钟尚未确认，此操作未执行',
@@ -33,16 +40,17 @@ function safeFailure(error:unknown):BetaApiError{
 function beforeCursor(value:number|null):number|null{if(value!==null&&(!Number.isSafeInteger(value)||value<0))return invalidQuery();return value;}
 function client(identity:()=>Promise<BetaStatus>,operations:Operations):SummaryClient{
   let bound:{device:string;runtime:string}|null=null;let changed=false;
-  async function check(){
+  async function check(originals=false){
     const value=await identity();let device:string,runtime:string;
     try{if(!value||value.protocol!=='exomind-beta/1'||value.running!==true)throw new Error('Unavailable');device=summaryUuid(value.device_id);runtime=summaryUuid(value.runtime_id);}
     catch{changed=true;throw new BetaApiError('summary_service_changed','本机服务身份尚未确认，请重新连接后读取回顾');}
     if(changed||bound&&(device!==bound.device||runtime!==bound.runtime)){changed=true;throw new BetaApiError('summary_service_changed','本机服务已变化，旧回顾结果未应用，请重新连接');}
     bound={device,runtime};
     if(value.capabilities?.summary_jobs!==true)throw new BetaApiError('unsupported_summaries','当前服务尚未提供回顾任务能力');
+    if(originals&&value.capabilities?.summary_originals!==true)throw new BetaApiError('unsupported_summary_originals',failureMessages.unsupported_summary_originals);
     return bound;
   }
-  async function stable<T>(read:()=>Promise<unknown>,parse:(value:unknown)=>T):Promise<T>{try{const before=await check();const value=await read();const after=await check();if(before.device!==after.device||before.runtime!==after.runtime)throw new BetaApiError('summary_service_changed','本机服务已变化，旧回顾结果未应用，请重新连接');return parse(value);}catch(error){throw safeFailure(error);}}
+  async function stable<T>(read:()=>Promise<unknown>,parse:(value:unknown)=>T,originals=false):Promise<T>{try{const before=await check(originals);const value=await read();const after=await check(originals);if(before.device!==after.device||before.runtime!==after.runtime)throw new BetaApiError('summary_service_changed','本机服务已变化，旧回顾结果未应用，请重新连接');return parse(value);}catch(error){throw safeFailure(error);}}
   const result:SummaryClient={
     async tasks(profileId,after=null,limit=25){summaryUuid(profileId);if(after!==null)summaryUuid(after);validateSummaryPageLimit(limit);return stable(()=>operations.tasks(profileId,after,limit),value=>validateSummaryTaskPage(value,profileId,after,limit));},
     async task(profileId,taskId){summaryUuid(profileId);summaryUuid(taskId);return stable(()=>operations.task(profileId,taskId),value=>validateSummaryTask(value,profileId,taskId));},
@@ -50,6 +58,8 @@ function client(identity:()=>Promise<BetaStatus>,operations:Operations):SummaryC
     async blockSelection(profileId,blockId){summaryUuid(profileId);summaryUuid(blockId);return stable(()=>operations.selection(profileId,blockId),value=>{const selection=validateSummarySelection(value);if(selection.block_ids.length!==1||selection.block_ids[0]!==blockId||selection.selected_original_ids.length)throw new BetaApiError('invalid_summary_response','时间块范围与请求不一致，未选择任何原件');return selection;});},
     async request(command){const frozen=validateSummaryRequestCommand(command);return stable(()=>operations.request(frozen),value=>validateSummaryReceipt(value,frozen));},
     async control(command){const frozen=validateSummaryControlCommand(command);return stable(()=>operations.control(frozen),value=>validateSummaryReceipt(value,frozen));},
+    async requestWithMaterialConsent(input){const command=validateSummaryRequestCommand(input.command),consent=validateSummaryMaterialConsent(input.consent);if(!command.selection.selected_original_ids.length)invalidQuery();return stable(()=>operations.materialRequest({command,consent}),value=>validateSummaryReceipt(value,command),true);},
+    async controlWithMaterialConsent(input){const command=validateSummaryControlCommand(input.command),consent=validateSummaryMaterialConsent(input.consent);if(command.action.kind==='cancel'||command.action.kind==='queue_update'&&!command.action.selection.selected_original_ids.length)invalidQuery();return stable(()=>operations.materialControl({command,consent}),value=>validateSummaryReceipt(value,command),true);},
   };
   if(operations.status)result.serviceStatus=()=>stable(()=>operations.status!(),validateSummaryServiceStatus);
   return result;
@@ -61,6 +71,8 @@ export function nativeSummaryClient(call:NativeCall=invoke,identity:()=>Promise<
     artifacts:(profileId,taskId,before,limit)=>call('beta_summary_artifacts',{profileId,taskId,before,limit}),
     selection:(profileId,blockId)=>call('beta_summary_block_selection',{profileId,blockId}),
     request:command=>call('beta_request_summary',{command}),control:command=>call('beta_control_summary',{command}),
+    materialRequest:input=>call('beta_request_summary_with_material_consent',{command:input.command,consent:input.consent}),
+    materialControl:input=>call('beta_control_summary_with_material_consent',{command:input.command,consent:input.consent}),
     status:()=>call('beta_summary_service_status'),
   });
 }
@@ -68,7 +80,7 @@ export interface SummaryWebIO {
   identity():Promise<BetaStatus>;
   /** Scoped human/observer JSON request, relative to /beta/v1. The adapter does
    * not mint a grant or silently promote a rejected request to owner authority. */
-  json(profileId:string,path:string,method:'GET'|'POST',body?:SummaryRequestCommand|SummaryControlCommand):Promise<unknown>;
+  json(profileId:string,path:string,method:'GET'|'POST',body?:SummaryRequestCommand|SummaryControlCommand|SummaryMaterialRequest|SummaryMaterialControl):Promise<unknown>;
   ownerJson?(path:string,method:'GET'):Promise<unknown>;
 }
 export function webSummaryClient(io:SummaryWebIO):SummaryClient{
@@ -81,6 +93,8 @@ export function webSummaryClient(io:SummaryWebIO):SummaryClient{
     selection:(profile,block)=>io.json(profile,`${base(profile)}/timeblocks/${encodeURIComponent(block)}/summary-selection`,'GET'),
     request:command=>io.json(command.profile_id,`${base(command.profile_id)}/summaries/requests`,'POST',command),
     control:command=>io.json(command.profile_id,`${base(command.profile_id)}/summaries/controls`,'POST',command),
+    materialRequest:input=>io.json(input.command.profile_id,`${base(input.command.profile_id)}/summaries/material-requests`,'POST',input),
+    materialControl:input=>io.json(input.command.profile_id,`${base(input.command.profile_id)}/summaries/material-controls`,'POST',input),
     ...(io.ownerJson?{status:()=>io.ownerJson!('/summary-service','GET')}:{}),
   });
 }

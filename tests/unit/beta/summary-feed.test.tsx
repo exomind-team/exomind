@@ -57,4 +57,28 @@ describe('summary/1 feed and qualified history rendering',()=>{
     await waitFor(()=>expect(api.control).toHaveBeenCalledTimes(1));expect(api.control.mock.calls[0][0]).toMatchObject({expected_control_heads:remote.control_heads,expected_owner_control_event_id:remote.owner_control_event_id,action:{kind:'take_over_for_self',resume_cancelled:false}});
     await waitFor(()=>expect(screen.getByRole('button',{name:'刷新所选任务'})).toBeEnabled());api.task.mockResolvedValue({...remote,state:'cancelled'});fireEvent.click(screen.getByRole('button',{name:'刷新所选任务'}));await waitFor(()=>expect(screen.getAllByText('回顾已取消').length).toBeGreaterThan(0));expect(screen.queryByRole('button',{name:'接管到本机并开启新一轮'})).not.toBeInTheDocument();expect(screen.queryByRole('button',{name:'恢复已取消的回顾（新一轮）'})).not.toBeInTheDocument();
   });
+  it('requires renewed provider consent before retrying a task that already selected originals',async()=>{
+    const api=summaries(),base=fakeClient();
+    const original={original_id:O,sha256:'a'.repeat(64),byte_length:68,file_name:'retained.png',media_type:'image/png'};
+    const selectedRange={...task().selection,selected_original_ids:[O]};
+    const selected={...task(),state:'failed' as const,selection:selectedRange,current_run:{...task().current_run!,snapshot:{...snapshot(),selection:selectedRange,materials:[{original,selected:true,read_state:'verified_available' as const}]}}};
+    api.tasks.mockResolvedValue({items:[selected],next_after:null});api.task.mockResolvedValue(selected);
+    const controlWithMaterialConsent=vi.fn(async(input:{command:Parameters<SummaryClient['control']>[0];consent:{provider_config_revision:string;max_original_bytes:number}})=>receipt(input.command));
+    const summariesWithConsent={...api,controlWithMaterialConsent};
+    const summaryModel={read:vi.fn(async()=>({profile_id:P,revision:N,enabled:true,include_suggestions:false,base_url:'https://synthetic.invalid/v1',model:'synthetic-vision',has_api_key:true,max_output_tokens:2048,timeout_ms:10000})),save:vi.fn(async()=>{throw Error('not part of this test');})};
+    const client={...base,status:async()=>({protocol:'exomind-beta/1',device_id:D,runtime_id:R,running:true,capabilities:{summary_originals:true}}),summaries:summariesWithConsent,summaryModel,timelinePeriodPage:vi.fn(async()=>({items:[{kind:'capture' as const,record:{event_id:E,profile_id:P,device_id:D,author_id:D,author_kind:'human' as const,occurred_at_ms:1500,text:'Synthetic retained original',tags:[],digest:'b'.repeat(64),local_seq:1,originals:[original]}}],next_before:null,highwater:1}))};
+    render(<BetaSummaryTasksPanel intentJournal={memoryIntentJournal()} open onOpenChange={vi.fn()} client={client} deviceId={D} profileId={P} target={null} revision={0} now={now} dateMode={dateMode} onConfigure={vi.fn()} onChanged={vi.fn()}/>);
+    fireEvent.click(await screen.findByRole('button',{name:/回顾 ·/}));
+    fireEvent.click(await screen.findByRole('button',{name:'重试生成'}));
+    const confirm=screen.getByRole('button',{name:'确认重试新一轮'});
+    expect(confirm).toBeDisabled();
+    expect(controlWithMaterialConsent).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'核对本轮外发原件'}));
+    await screen.findByText(/retained\.png/);
+    fireEvent.click(screen.getByRole('checkbox',{name:/同意.*所选原件.*发送/}));
+    fireEvent.click(confirm);
+    await waitFor(()=>expect(controlWithMaterialConsent).toHaveBeenCalledTimes(1));
+    expect(api.control).not.toHaveBeenCalled();
+    expect(controlWithMaterialConsent.mock.calls[0][0]).toMatchObject({command:{task_id:T},consent:{provider_config_revision:N,max_original_bytes:68}});
+  });
 });

@@ -15,6 +15,7 @@ const LOCKED_ANDROID_VERSION_CODES: Readonly<Partial<Record<string, number>>> = 
   '0.6.0-beta19': 6019,
   '0.6.0-beta20': 6020,
   '0.6.0-beta21': 6021,
+  '0.6.0-beta22': 6022,
 };
 
 export type BetaBuildRequestErrorCode =

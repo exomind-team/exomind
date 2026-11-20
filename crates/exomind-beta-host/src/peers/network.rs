@@ -73,6 +73,15 @@ pub struct PeerNetworkStatus {
     pub local_addresses: Vec<String>,
     pub peers: Vec<PeerConnectionView>,
 }
+
+/// An expiring presence/address hint; it is not verified identity or profile access.
+#[derive(Debug, Clone, Serialize)]
+pub struct NearbyPeerCandidate {
+    pub device_id: DeviceId,
+    pub addresses: Vec<String>,
+    pub expires_at_ms: i64,
+    pub verification_state: &'static str,
+}
 #[derive(Clone, Default)]
 struct Progress {
     busy: bool,
@@ -94,12 +103,19 @@ struct Candidate {
     pin: String,
     expires: Instant,
 }
+/// Kept separate from trusted route candidates and never consumed by sync work.
+struct NearbyCandidate {
+    addresses: Vec<SocketAddr>,
+    expires: Instant,
+}
 struct Shared {
     generation: u64,
     addresses: Vec<SocketAddr>,
     progress: HashMap<(ProfileId, DeviceId), Progress>,
     forced: HashSet<(ProfileId, DeviceId)>,
     candidates: HashMap<DeviceId, Vec<Candidate>>,
+    // Unverified advertisements stay outside route selection and auto-sync.
+    nearby: HashMap<DeviceId, NearbyCandidate>,
     route_cursor: usize,
     auto_deferred: bool,
     auto_error: Option<&'static str>,
@@ -314,6 +330,7 @@ impl PeerNetwork {
                 progress: HashMap::new(),
                 forced: HashSet::new(),
                 candidates: HashMap::new(),
+                nearby: HashMap::new(),
                 route_cursor: 0,
                 auto_deferred: false,
                 auto_error: None,
@@ -422,6 +439,7 @@ impl PeerNetwork {
             state.addresses = endpoints(listener.addr());
             state.progress.clear();
             state.candidates.clear();
+            state.nearby.clear();
             state.auto_deferred = false;
             state.auto_error = None;
             #[cfg(test)]
@@ -466,6 +484,7 @@ impl PeerNetwork {
             state.generation = state.generation.saturating_add(1);
             state.addresses.clear();
             state.candidates.clear();
+            state.nearby.clear();
             for value in state.progress.values_mut() {
                 value.busy = false;
                 value.busy_id = None;
@@ -597,6 +616,41 @@ impl PeerNetwork {
             peers,
         })
     }
+    /// Returns only bounded, unverified discovery hints; no profile is inspected.
+    pub fn nearby_candidates(&self) -> Result<Vec<NearbyPeerCandidate>, HostError> {
+        self.host.qualify_transport(&self.owner)?;
+        let mut state = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
+        let at = Instant::now();
+        state.nearby.retain(|_, candidate| candidate.expires > at);
+
+        let wall_now = now();
+        let mut output = state
+            .nearby
+            .iter()
+            .map(|(device_id, candidate)| {
+                let remaining_ms = candidate
+                    .expires
+                    .saturating_duration_since(at)
+                    .as_millis()
+                    .min(i64::MAX as u128) as i64;
+                let mut addresses = candidate
+                    .addresses
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>();
+                addresses.sort();
+                NearbyPeerCandidate {
+                    device_id: *device_id,
+                    addresses,
+                    expires_at_ms: wall_now.saturating_add(remaining_ms),
+                    verification_state: "unverified",
+                }
+            })
+            .collect::<Vec<_>>();
+        output.sort_by_key(|candidate| candidate.device_id.to_string());
+        Ok(output)
+    }
+
     pub fn local_addresses(&self) -> Result<Vec<SocketAddr>, HostError> {
         Ok(self
             .shared
@@ -788,6 +842,8 @@ impl PeerNetwork {
                     if shared.generation != generation {
                         return Err(HostError::PeerCancelled);
                     }
+                    shared.nearby.remove(&offer.issuer.device_id);
+
                     shared
                         .forced
                         .insert((status.profile_id, offer.issuer.device_id));
@@ -963,15 +1019,39 @@ impl Worker {
             })
             .map(|member| (member.profile_id, member.device_id))
             .collect::<Vec<_>>();
-        if matching.is_empty() {
-            return Ok(());
-        }
         let address = SocketAddr::new(source.ip(), value.listen_port);
         let mut state = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
         if state.generation != generation || state.addresses.contains(&address) {
             return Ok(());
         }
         let at = Instant::now();
+        state.nearby.retain(|_, candidate| candidate.expires > at);
+        if matching.is_empty() {
+            // Presence never becomes a route, forced sync, membership, or grant.
+            if let Some(candidate) = state.nearby.get_mut(&value.device_id) {
+                if !candidate.addresses.contains(&address) {
+                    if candidate.addresses.len() >= MAX_DEVICE_CANDIDATES {
+                        return Ok(());
+                    }
+                    candidate.addresses.push(address);
+                    candidate.addresses.sort();
+                }
+                candidate.expires = at + CANDIDATE_TTL;
+                return Ok(());
+            }
+            if state.nearby.len() >= MAX_CANDIDATE_DEVICES {
+                return Ok(());
+            }
+            state.nearby.insert(
+                value.device_id,
+                NearbyCandidate {
+                    addresses: vec![address],
+                    expires: at + CANDIDATE_TTL,
+                },
+            );
+            return Ok(());
+        }
+        state.nearby.remove(&value.device_id);
         state.candidates.retain(|_, values| {
             values.retain(|c| c.expires > at);
             !values.is_empty()
@@ -1035,6 +1115,7 @@ impl Worker {
                 self.touch((status.profile_id, peer), generation);
                 if let Ok(mut state) = self.shared.lock() {
                     if state.generation == generation {
+                        state.nearby.remove(&peer);
                         state.forced.insert((status.profile_id, peer));
                     }
                 }

@@ -13,11 +13,13 @@ import { useBetaNow } from './date-clock';
 import { useBetaViewActive } from './view-activity';
 import { errorMessage } from './drafts';
 import { useBetaDateDisplayMode } from './preferences';
-import type { BetaInvitation, BetaInvitationPreview, BetaPeer, BetaPeerStatus, BetaPeersClient } from './peers-client';
+import type { BetaNearbyCandidate, BetaInvitation, BetaInvitationPreview, BetaPeer, BetaPeerStatus, BetaPeersClient } from './peers-client';
+import { BetaNearbyDevices } from './NearbyDeviceCandidates';
 import { BetaDeviceName } from './BetaDeviceName';
 import { useBetaDeviceNames } from './device-names';
 
 type Life = { active: boolean };
+type NearbySelection = { device_id: string; address: string };
 function peerState(peer: BetaPeer): string {
   if (peer.member_state === 'revoked') return '授权已撤销';
   if (peer.member_state === 'pending') return '正在完成加入确认';
@@ -45,6 +47,8 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   const currentScope = useRef(scope); currentScope.current = scope;
   const lifecycle = useRef<Life | null>(null);
   const [status, setStatus] = useState<BetaPeerStatus | null>(null);
+  const [nearby, setNearby] = useState<BetaNearbyCandidate[]>([]);
+  const [nearbyError, setNearbyError] = useState('');
   const [error, setError] = useState('');
   const [statusError, setStatusError] = useState('');
   const [notice, setNotice] = useState('');
@@ -52,6 +56,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   const [created, setCreated] = useState<BetaInvitation | null>(null);
   const [invitationText, setInvitationText] = useState('');
   const [dialAddress, setDialAddress] = useState('');
+  const [nearbySelection, setNearbySelection] = useState<NearbySelection | null>(null);
   const [showDialAddress, setShowDialAddress] = useState(false);
   const [preview, setPreview] = useState<BetaInvitationPreview | null>(null);
   const [pendingJoin, setPendingJoin] = useState<string | null>(null);
@@ -61,6 +66,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   const eventsChanged = useRef(onEventsChanged); eventsChanged.current = onEventsChanged;
   const observedSync = useRef<string | null>(null);
   const readSequence = useRef(0);
+  const nearbyReadSequence = useRef(0);
   const observing = useBetaViewActive(visible);
   const now = useBetaNow(observing); const dateMode = useBetaDateDisplayMode();
   const isCurrent = (life: Life) => life.active && lifecycle.current === life && currentScope.current === scope;
@@ -79,9 +85,28 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
     if (confirmed && confirmed !== observedSync.current) eventsChanged.current?.(profileId);
     observedSync.current = confirmed;
   }
+  async function refreshNearby(life: Life) {
+    if (!peers) return;
+    const sequence = ++nearbyReadSequence.current;
+    let result: BetaNearbyCandidate[];
+    try { result = await peers.nearbyCandidates(); }
+    catch (failure) { if (!isCurrent(life) || sequence !== nearbyReadSequence.current) return; throw failure; }
+    if (!isCurrent(life) || sequence !== nearbyReadSequence.current) return;
+    setNearby(result);
+    setNearbyError('');
+  }
+  function selectNearbyCandidate(candidate: BetaNearbyCandidate, address: string) {
+    setNearbySelection({ device_id: candidate.device_id, address });
+    setDialAddress(address);
+    setShowDialAddress(true);
+    setPreview(null);
+    setPendingJoin(null);
+    inputRevision.current++;
+    setNotice('候选地址只用于尝试连接；仍需检查完整邀请并明确确认加入。');
+  }
   useEffect(() => {
     const life: Life = { active: true }; lifecycle.current = life;
-    setStatus(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setInvitationText(''); setDialAddress(''); setShowDialAddress(false); setPendingJoin(null); setRevoke(null); observedSync.current = null; inputRevision.current++;
+    setStatus(null); setNearby([]); setNearbyError(''); setNearbySelection(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setInvitationText(''); setDialAddress(''); setShowDialAddress(false); setPendingJoin(null); setRevoke(null); observedSync.current = null; inputRevision.current++;
     return () => { life.active = false; if (operationFlight.current === life) operationFlight.current = null; };
   }, [scope]);
   useEffect(() => {
@@ -89,9 +114,13 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
     if (!observing || !life) return;
     let timer: ReturnType<typeof setTimeout> | undefined; let stopped = false;
     const poll = async () => {
-      try { await refresh(life); }
-      catch (failure) { if (isCurrent(life)) setStatusError(errorMessage(failure)); }
-      if (!stopped && isCurrent(life) && peers && profileId) timer = setTimeout(() => { void poll(); }, 2000);
+      if (profileId) {
+        try { await refresh(life); }
+        catch (failure) { if (isCurrent(life)) setStatusError(errorMessage(failure)); }
+      }
+      try { await refreshNearby(life); }
+      catch (failure) { if (isCurrent(life)) setNearbyError(errorMessage(failure)); }
+      if (!stopped && isCurrent(life) && peers) timer = setTimeout(() => { void poll(); }, 2000);
     };
     void poll();
     return () => { stopped = true; if (timer) clearTimeout(timer); };
@@ -111,6 +140,9 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   async function join(life: Life) {
     if (!peers || !preview) return;
     const expected = preview; const text = invitationText.trim(); const revision = inputRevision.current;
+    if (nearbySelection && nearbySelection.device_id !== expected.issuer_device_id) {
+      throw new Error('所选设备与完整邀请中的身份不一致，未加入档案');
+    }
     const address = dialAddress.trim();
     const result = await (address ? peers.joinInvitation(text, address) : peers.joinInvitation(text));
     if (!isCurrent(life) || revision !== inputRevision.current) return;
@@ -129,9 +161,34 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
       <SettingsSection title={profileName || '加入档案'}>
         {status ? <SettingRow icon={<Waypoints className="size-4 text-muted"/>} label="设备同步" right={<Switch aria-label="设备同步" checked={status.network_enabled} disabled={!!operation || !!statusError} onCheckedChange={enabled => void perform('network', async life => {
           await peers.setEnabled(enabled); if (!isCurrent(life)) return; await refresh(life);
+          if (enabled) await refreshNearby(life); else setNearby([]);
         })}/>}/> : <p role="status" className="px-4 py-4 text-sm text-secondary">{profileId ? '正在读取设备状态…' : '粘贴另一设备的邀请，加入已有档案；也可以先创建本机档案。'}</p>}
         {status && <p className="px-4 pb-4 text-xs leading-relaxed text-muted">{status.network_enabled ? '已授权设备会自动连接与补齐。记录和原件分别确认。' : '同步已关闭，本机记录仍可继续保存。'}</p>}
         {status && <details className="px-4 pb-4 text-xs text-muted"><summary className="cursor-pointer">本机设备与同步地址</summary><dl className="mt-3 space-y-3 select-text"><div><dt>设备身份</dt><dd className="break-all">{status.device_id}</dd></div><div><dt>当前同步地址</dt><dd data-testid="beta-local-sync-addresses" className="mt-1 space-y-1 break-all">{status.local_addresses.length ? status.local_addresses.map(address => <p key={address}>{address}</p>) : status.network_enabled ? '尚未确认可用的同步地址' : '设备同步已关闭'}</dd></div></dl><p className="mt-3">这些地址供已授权设备连接；本机 HTTP 服务地址可在「当下」标题上方查看。</p></details>}
+      </SettingsSection>
+      <SettingsSection title="潜在设备">
+        <BetaNearbyDevices
+          candidates={nearby}
+          emptyMessage={status?.network_enabled
+            ? '暂未发现附近设备。收到广播也不代表身份已验证。'
+            : profileId
+              ? '打开上方“设备同步”后，才会接收附近设备广播。'
+              : '暂未发现附近设备。开启设备同步后可被动发现；发现不会授权档案。'}
+          disabled={!!operation}
+          onSelect={selectNearbyCandidate}
+        />
+        {nearbyError && <p role="alert" className="px-4 pb-4 text-sm text-destructive">附近设备状态暂未更新：{nearbyError}</p>}
+        {!profileId && <div className="flex flex-wrap gap-2 px-4 pb-4"><Button variant="outline" size="sm" disabled={!!operation} onClick={() => void perform('network', async life => {
+          await peers.setEnabled(true);
+          if (!isCurrent(life)) return;
+          await refreshNearby(life);
+          setNotice('设备同步与附近发现已开启；这不会授权其他设备。');
+        })}>开启设备同步与发现</Button><Button variant="outline" size="sm" disabled={!!operation} onClick={() => void perform('network', async life => {
+          await peers.setEnabled(false);
+          if (!isCurrent(life)) return;
+          await refreshNearby(life);
+          setNotice('设备同步与附近发现已关闭。');
+        })}>关闭设备同步与发现</Button></div>}
       </SettingsSection>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {statusError && <p role="alert" className="text-sm text-destructive">状态暂未更新：{statusError}{status ? '。以下保留上次确认结果。' : ''}</p>}
@@ -151,10 +208,16 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
       <SettingsSection title="加入已有档案">
         <div className="space-y-3 px-4 py-4">
           <label htmlFor="beta-peer-invitation" className="text-sm font-medium text-foreground">另一设备的完整邀请</label>
-          <Textarea id="beta-peer-invitation" value={invitationText} maxLength={32768} placeholder="粘贴完整邀请" className="min-h-24 text-xs" onChange={event => { setInvitationText(event.target.value); setPreview(null); setPendingJoin(null); setDialAddress(''); setShowDialAddress(false); inputRevision.current++; }}/>
+          {nearbySelection && <p role="status" className="break-all text-xs text-secondary">{'已选择设备 ' + nearbySelection.device_id + ' · 候选地址 ' + nearbySelection.address + '。仍需检查完整邀请并明确确认加入。'}</p>}
+          <Textarea id="beta-peer-invitation" value={invitationText} maxLength={32768} placeholder="粘贴完整邀请" className="min-h-24 text-xs" onChange={event => { setInvitationText(event.target.value); setPreview(null); setPendingJoin(null); if (!nearbySelection) { setDialAddress(''); setShowDialAddress(false); } inputRevision.current++; }}/>
           <Button variant="outline" disabled={!!operation || !invitationText.trim()} onClick={() => void perform('inspect', async life => {
             const revision = inputRevision.current; const result = await peers.inspectInvitation(invitationText.trim());
-            if (isCurrent(life) && revision === inputRevision.current) setPreview(result);
+            if (!isCurrent(life) || revision !== inputRevision.current) return;
+            if (nearbySelection && nearbySelection.device_id !== result.issuer_device_id) {
+              setNearbySelection(null); setDialAddress(''); setShowDialAddress(false);
+              setNotice('所选候选设备与完整邀请的身份不一致，已清除候选地址。');
+            }
+            setPreview(result);
           })}><Link2 size={14}/>{operation === 'inspect' ? '正在检查…' : '检查邀请'}</Button>
           {preview && <div className="space-y-3 rounded-xl bg-surface p-3 text-sm">
             <p className="font-medium text-foreground">加入「{preview.profile_name}」</p>
@@ -164,7 +227,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
             <Button variant="ghost" size="sm" aria-expanded={showDialAddress} onClick={()=>setShowDialAddress(true)}>更换连接地址</Button>
             {showDialAddress && <div className="space-y-2">
               <label htmlFor="beta-peer-dial-address" className="text-xs font-medium">其他连接地址</label>
-              <Input id="beta-peer-dial-address" value={dialAddress} maxLength={256} placeholder="设备 IP:端口" onChange={event=>{setDialAddress(event.target.value);inputRevision.current++;}}/>
+              <Input id="beta-peer-dial-address" value={dialAddress} maxLength={256} placeholder="设备 IP:端口" onChange={event=>{setNearbySelection(null);setDialAddress(event.target.value);inputRevision.current++;}}/>
               <p className="text-xs leading-relaxed text-secondary">邀请地址不可达时，可填写发起设备的 EasyTier 等网络地址。留空使用邀请地址；仍核对原邀请的设备身份与授权。</p>
             </div>}
             {!preview.compatible && <p className="text-sm text-destructive">两端版本暂不兼容，请更新后重新获取邀请。</p>}

@@ -1,6 +1,7 @@
 //! One bounded Chat Completions call. Task ownership, persistent cancellation,
 //! retry eligibility and evidence validation belong to the Host/Core worker.
 //! A cancelled HTTP future does not promise cancellation of upstream billing.
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use reqwest::{Client, Url, header::HeaderValue, redirect::Policy};
 use serde::{Deserialize, Serialize};
 use std::{net::IpAddr, time::Duration};
@@ -45,23 +46,47 @@ impl ModelCallError {
     }
 }
 
+pub(crate) struct ModelImage {
+    pub media_type: String,
+    pub bytes: Vec<u8>,
+}
+
 pub(crate) struct ModelInput {
     pub system: String,
     /// Frozen, explicitly scoped textual material only. Never paths or URLs to
     /// originals that a provider could fetch without a user's material choice.
     pub material: String,
+    pub images: Vec<ModelImage>,
 }
 pub(crate) fn request_body(
     settings: &SummaryProviderSettings,
     input: &ModelInput,
 ) -> serde_json::Value {
+    let user_content = if input.images.is_empty() {
+        serde_json::Value::String(input.material.clone())
+    } else {
+        let mut content = Vec::with_capacity(input.images.len() + 1);
+        content.push(serde_json::json!({"type":"text","text":input.material}));
+        for image in &input.images {
+            let data_url = format!(
+                "data:{};base64,{}",
+                image.media_type,
+                STANDARD.encode(&image.bytes)
+            );
+            content.push(serde_json::json!({
+                "type":"image_url",
+                "image_url":{"url":data_url}
+            }));
+        }
+        serde_json::Value::Array(content)
+    };
     serde_json::json!({
         "model": settings.model,
         "stream": false,
         "max_tokens": settings.max_output_tokens,
         "messages": [
             {"role":"system","content":input.system},
-            {"role":"user","content":input.material}
+            {"role":"user","content":user_content}
         ]
     })
 }
@@ -163,7 +188,17 @@ pub(crate) async fn complete(
     mut cancel: watch::Receiver<bool>,
 ) -> Result<ModelReply, ModelCallError> {
     let endpoint = settings.endpoint()?;
-    if input.system.len().saturating_add(input.material.len()) > MAX_MODEL_INPUT_BYTES {
+    let body = request_body(settings, input);
+    let encoded_body =
+        serde_json::to_vec(&body).map_err(|_| ModelCallError::InvalidConfiguration)?;
+    // Keep the established v4 text-only bound exactly. The media path accounts
+    // for the complete multimodal JSON envelope, including base64 expansion.
+    let measured = if input.images.is_empty() {
+        input.system.len().saturating_add(input.material.len())
+    } else {
+        encoded_body.len()
+    };
+    if measured > MAX_MODEL_INPUT_BYTES {
         return Err(ModelCallError::InputTooLarge);
     }
     // Proxy configuration must not make a local Magpie/Ollama gateway depend
@@ -183,7 +218,7 @@ pub(crate) async fn complete(
         .build()
         .map_err(|_| ModelCallError::InvalidConfiguration)?;
     let operation = async {
-        let mut request = client.post(endpoint).json(&request_body(settings, input));
+        let mut request = client.post(endpoint).json(&body);
         if let Some(key) = &settings.api_key {
             request = request.bearer_auth(key);
         }

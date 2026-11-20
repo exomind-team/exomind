@@ -11,7 +11,7 @@ const R='44444444-4444-4444-8444-444444444444';
 const B='55555555-5555-4555-8555-555555555555';
 const status=(profile=P):BetaPeerStatus=>({runtime_id:R,device_id:D,profile_id:profile,network_enabled:false,local_addresses:[],peers:[]});
 function peers(){return{
-  status:vi.fn(async(profile:string)=>status(profile)),setEnabled:vi.fn(async()=>{}),
+  status:vi.fn(async(profile:string)=>status(profile)),nearbyCandidates:vi.fn<BetaPeersClient['nearbyCandidates']>(async()=>[]),setEnabled:vi.fn(async()=>{}),
   createInvitation:vi.fn(async()=>({invitation_text:'opaque-secret',invitation_id:B,expires_at_ms:2000,local_addresses:[]})),
   inspectInvitation:vi.fn(async()=>({profile_id:P,profile_name:'目标档案',issuer_device_id:B,fingerprint_sha256:'a'.repeat(64),expires_at_ms:2000,compatible:true})),
   joinInvitation:vi.fn<BetaPeersClient['joinInvitation']>(async()=>({profile_id:P,peer_device_id:B,state:'pending'})),
@@ -108,5 +108,83 @@ describe('Beta device joining UI',()=>{
     fireEvent.change(input,{target:{value:'new-invitation'}});
     await act(async()=>{flight.resolve({profile_id:P,peer_device_id:B,state:'ready'});await flight.promise;});
     expect(joined).not.toHaveBeenCalled();expect(input).toHaveValue('new-invitation');expect(screen.queryByText('加入「目标档案」')).not.toBeInTheDocument();
+  });
+});
+
+describe('Nearby device selection',()=>{
+  it('can explicitly stop discovery again before joining or creating a profile',async()=>{
+    const client=peers();
+    render(<BetaPeersPage {...props} profileId="" profileName="" peers={client} onJoined={vi.fn(async()=>{})}/>);
+    fireEvent.click(screen.getByRole('button',{name:'开启设备同步与发现'}));
+    await waitFor(()=>expect(client.setEnabled).toHaveBeenCalledWith(true));
+    await screen.findByText('设备同步与附近发现已开启；这不会授权其他设备。');
+    fireEvent.click(screen.getByRole('button',{name:'关闭设备同步与发现'}));
+    await waitFor(()=>expect(client.setEnabled).toHaveBeenCalledWith(false));
+    expect(client.status).not.toHaveBeenCalled();
+    expect(client.createInvitation).not.toHaveBeenCalled();
+    expect(client.joinInvitation).not.toHaveBeenCalled();
+  });
+  it('uses a selected address only after the full invitation is checked and confirmed',async()=>{
+    const address='127.0.0.1:43344';
+    const client=peers();
+    client.nearbyCandidates.mockResolvedValue([{
+      device_id:B,addresses:[address],expires_at_ms:Date.now()+20_000,verification_state:'unverified',
+    }]);
+    client.joinInvitation.mockResolvedValueOnce({profile_id:P,peer_device_id:B,state:'ready'});
+    const joined=vi.fn(async()=>{});
+    render(<BetaPeersPage {...props} peers={client} onJoined={joined}/>);
+
+    expect(await screen.findByText('潜在设备')).toBeInTheDocument();
+    expect(screen.getByText('未验证 · 发现不会授权此设备访问档案')).toBeInTheDocument();
+    const invitation=screen.getByLabelText('另一设备的完整邀请');
+    fireEvent.click(screen.getByRole('button',{name:/选择设备/}));
+    expect(await screen.findByText(/已选择设备.*候选地址.*127\.0\.0\.1:43344/)).toBeInTheDocument();
+    expect(client.inspectInvitation).not.toHaveBeenCalled();
+    expect(client.joinInvitation).not.toHaveBeenCalled();
+
+    fireEvent.change(invitation,{target:{value:'opaque-secret'}});
+    expect(screen.getByText(/已选择设备.*候选地址.*127\.0\.0\.1:43344/)).toBeInTheDocument();
+    expect(client.inspectInvitation).not.toHaveBeenCalled();
+    expect(client.joinInvitation).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button',{name:'检查邀请'}));
+    expect(await screen.findByText('加入「目标档案」')).toBeInTheDocument();
+    expect(client.inspectInvitation).toHaveBeenCalledWith('opaque-secret');
+    expect(client.joinInvitation).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button',{name:'确认加入档案'}));
+    await waitFor(()=>expect(client.joinInvitation).toHaveBeenCalledWith('opaque-secret',address));
+    await waitFor(()=>expect(joined).toHaveBeenCalledWith(P));
+  });
+
+  it('clears a selected address when the inspected invitation names another device',async()=>{
+    const address='127.0.0.1:43344';
+    const otherIssuer='66666666-6666-4666-8666-666666666666';
+    const client=peers();
+    client.nearbyCandidates.mockResolvedValue([{
+      device_id:B,addresses:[address],expires_at_ms:Date.now()+20_000,verification_state:'unverified',
+    }]);
+    client.inspectInvitation.mockResolvedValueOnce({
+      profile_id:P,profile_name:'目标档案',issuer_device_id:otherIssuer,
+      fingerprint_sha256:'a'.repeat(64),expires_at_ms:Date.now()+20_000,compatible:true,
+    });
+    client.joinInvitation.mockResolvedValueOnce({profile_id:P,peer_device_id:otherIssuer,state:'ready'});
+    const joined=vi.fn(async()=>{});
+    render(<BetaPeersPage {...props} peers={client} onJoined={joined}/>);
+
+    expect(await screen.findByText('潜在设备')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:/选择设备/}));
+    const invitation=screen.getByLabelText('另一设备的完整邀请');
+    fireEvent.change(invitation,{target:{value:'opaque-secret'}});
+    expect(screen.getByText(/已选择设备.*候选地址.*127\.0\.0\.1:43344/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button',{name:'检查邀请'}));
+    expect(await screen.findByText('加入「目标档案」')).toBeInTheDocument();
+    expect(screen.queryByText(/已选择设备.*候选地址.*127\.0\.0\.1:43344/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button',{name:'确认加入档案'}));
+    await waitFor(()=>expect(client.joinInvitation).toHaveBeenCalled());
+    expect(client.joinInvitation.mock.calls[0]).toEqual(['opaque-secret']);
+    await waitFor(()=>expect(joined).toHaveBeenCalledWith(P));
   });
 });

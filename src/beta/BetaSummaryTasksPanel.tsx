@@ -11,6 +11,7 @@ import type { BetaClient } from './client';
 import type { SummaryArtifactRecord,SummarySourceRef,SummaryTaskView } from './summary-types';
 import type { LocalIntentJournal } from './local-intent-journal';
 import { BetaManualSummaryDialog } from './BetaManualSummaryDialog';
+import { SummaryOriginalSelection, emptyOriginalChoice, type SummaryOriginalChoice } from './SummaryOriginalSelection';
 
 interface Slot {client:BetaClient;deviceId:string;profileId:string;owner:SummaryTasksController;active:boolean}
 export function BetaSummaryTasksPanel({open,onOpenChange,client,deviceId,profileId,target,revision,now,dateMode,onConfigure,onChanged,onOpenSource,intentJournal,onOwner}:{open:boolean;onOpenChange:(open:boolean)=>void;client:BetaClient;deviceId:string;profileId:string;target:SummaryArtifactRecord|null;revision:number;now:number;dateMode:EventDateDisplayMode;onConfigure:()=>void;onChanged:()=>void;onOpenSource?:(source:SummarySourceRef)=>void;intentJournal?:LocalIntentJournal;onOwner?:(owner:SummaryTasksController)=>void}){
@@ -24,6 +25,10 @@ export function BetaSummaryTasksPanel({open,onOpenChange,client,deviceId,profile
 }
 function TaskPanelBody({client,owner,open,target,revision,now,dateMode,canConfigure,onConfigure,onOpenSource}:{client:BetaClient;owner:SummaryTasksController;open:boolean;target:SummaryArtifactRecord|null;revision:number;now:number;dateMode:EventDateDisplayMode;canConfigure:boolean;onConfigure:()=>void;onOpenSource?:(source:SummarySourceRef)=>void}){
   const state=useSyncExternalStore(owner.subscribe,owner.snapshot);const [confirm,setConfirm]=useState<{kind:SummaryControlKind;task:SummaryTaskView;recoveryOnly?:boolean}|null>(null);
+  const [confirmedOriginals,setConfirmedOriginals]=useState<{confirmation:typeof confirm;choice:SummaryOriginalChoice}|null>(null);
+  const originalChoice=confirmedOriginals?.confirmation===confirm?confirmedOriginals.choice:emptyOriginalChoice();
+  const needsMaterialConsent=!!confirm&&confirm.kind!=='cancel'&&!!confirm.task.selection.selected_original_ids.length;
+  const materialConsentReady=!needsMaterialConsent||!!originalChoice.consent&&originalChoice.ids.length===confirm!.task.selection.selected_original_ids.length&&confirm!.task.selection.selected_original_ids.every(id=>originalChoice.ids.includes(id));
   const [manualOpen,setManualOpen]=useState(false);
   useEffect(()=>{if(!open)return;void owner.loadTasks();if(target)void owner.selectTask(target.task_id,target);else if(owner.snapshot().detail)void owner.refreshSelected();},[owner,open,target?.event_id]);
   useEffect(()=>{if(open&&owner.snapshot().detail)void owner.refreshSelected();},[owner,open,revision]);
@@ -63,8 +68,11 @@ function TaskPanelBody({client,owner,open,target,revision,now,dateMode,canConfig
     </div></div>
     <Dialog open={!!confirm} onOpenChange={value=>{if(!value)setConfirm(null);}}><DialogContent><DialogHeader><DialogTitle>{confirm?.kind==='cancel'?'取消生成':confirm?.kind==='resume'?'明确恢复已取消的回顾':confirm?.kind==='takeover'?'明确接管到本机并开启新一轮':confirm?.kind==='update'?'更新另存一个版本':'重试生成（新一轮）'}</DialogTitle><DialogDescription>{confirm?.kind==='cancel'?'将保存取消控制，使旧执行失去后续提交资格；已发出的供应商请求能否停止计费由上游决定。':confirm?.kind==='resume'?'这是明确恢复已取消任务，将开启新一轮；原始记录与旧结果保留。':confirm?.kind==='takeover'?'将改变生成归属到本机并创建新执行。原设备可能稍后才收到控制；已发出的上游调用及计费由供应商决定。不会自动恢复已取消任务。':confirm?.kind==='update'?'将沿用任务当前范围和已选择的原件生成新版本，不覆盖原文，也不替换正在阅读的旧版本。':'将创建新执行轮次，不复用此前的执行资格；原文与旧结果保留。'}</DialogDescription></DialogHeader>
       {confirm&&<p className="text-xs text-muted">范围内时间块 {confirm.task.selection.block_ids.length} 个 · 已选择原件 {confirm.task.selection.selected_original_ids.length} 件；不会自动选择新原件。</p>}
+      {needsMaterialConsent&&confirm&&(client.summaryModel&&client.timelinePeriodPage&&client.summaries?.controlWithMaterialConsent?
+        <SummaryOriginalSelection key={confirm.kind+confirm.task.task_id} client={client} profileId={owner.profileId} selection={confirm.task.selection} retainedIds={confirm.task.selection.selected_original_ids} disabled={false} onChange={choice=>setConfirmedOriginals({confirmation:confirm,choice})}/>:
+        <p role="alert" className="text-xs text-destructive">当前连接尚未提供原件外发确认能力，请更新后重试；取消仍可使用。</p>)}
       {confirm?.recoveryOnly&&<p role="alert" className="text-xs text-destructive">本机确认缓存不可用。本次只重新读取任务并请求取消，不生成、不接管；未知结果仅在此窗口保留同一请求供查证，关闭后不自动重发。</p>}
-      <DialogFooter><Button variant="outline" onClick={()=>setConfirm(null)}>返回</Button><Button onClick={()=>{const item=confirm;if(item){setConfirm(null);if(item.recoveryOnly)void owner.cancelWithoutJournal(item.task.task_id);else void owner.act(item.kind,item.task);}}}>确认{confirm?.kind==='cancel'?'取消':confirm?.kind==='resume'?'恢复':confirm?.kind==='takeover'?'接管并开启新一轮':confirm?.kind==='update'?'更新另存':'重试新一轮'}</Button></DialogFooter>
+      <DialogFooter><Button variant="outline" onClick={()=>setConfirm(null)}>返回</Button><Button disabled={!materialConsentReady} onClick={()=>{const item=confirm;if(item&&materialConsentReady){setConfirm(null);if(item.recoveryOnly)void owner.cancelWithoutJournal(item.task.task_id);else if(needsMaterialConsent&&originalChoice.consent)void owner.act(item.kind,item.task,originalChoice.consent);else void owner.act(item.kind,item.task);}}}>确认{confirm?.kind==='cancel'?'取消':confirm?.kind==='resume'?'恢复':confirm?.kind==='takeover'?'接管并开启新一轮':confirm?.kind==='update'?'更新另存':'重试新一轮'}</Button></DialogFooter>
     </DialogContent></Dialog>
     {manualOpen&&<BetaManualSummaryDialog client={client} profileId={owner.profileId} owner={owner} now={now} dateMode={dateMode} onClose={()=>setManualOpen(false)}/>}
   </div>;

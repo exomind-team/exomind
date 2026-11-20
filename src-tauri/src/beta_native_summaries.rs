@@ -1,4 +1,5 @@
 use super::{Failure, NativeState, trusted_window, work};
+use exomind_beta_host::SummaryMaterialConsent;
 use exomind_core::{
     EventId, ProfileId, Receipt, SummaryArtifactPage, SummaryControlCommand, SummaryRequestCommand,
     SummarySelection, SummaryTaskPage, SummaryTaskView, TimeblockId,
@@ -113,6 +114,40 @@ pub(super) async fn beta_summary_block_selection(
         state
             .host
             .summary_block_selection(&state.human(profile_id)?, profile_id, block_id)
+    })
+    .await
+}
+#[tauri::command]
+pub(super) async fn beta_request_summary_with_material_consent(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    command: SummaryRequestCommand,
+    consent: SummaryMaterialConsent,
+) -> Result<Receipt, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state.host.request_summary_with_material_consent(
+            &state.human(command.profile_id)?,
+            &command,
+            &consent,
+        )
+    })
+    .await
+}
+#[tauri::command]
+pub(super) async fn beta_control_summary_with_material_consent(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    command: SummaryControlCommand,
+    consent: SummaryMaterialConsent,
+) -> Result<Receipt, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| {
+        state.host.control_summary_with_material_consent(
+            &state.human(command.profile_id)?,
+            &command,
+            &consent,
+        )
     })
     .await
 }

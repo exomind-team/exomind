@@ -110,7 +110,7 @@ export function SummaryEvidenceDetails({snapshot,output,conflicts=[],now,dateMod
     <p className="flex flex-wrap gap-1">范围：<EventTimestamp timestamp={snapshot.selection.from_ms} now={now} mode={dateMode}/><span>至</span><EventTimestamp timestamp={snapshot.selection.to_ms} now={now} mode={dateMode}/></p>
     {snapshot.materials.map(material => <p key={material.original.original_id} className="break-all">
       {material.original.file_name}：{materialLabels[material.read_state]} · {material.selected ? '已选择给模型' : '未选择给模型'}
-      {material.selected && material.read_state === 'verified_available' && readOriginals.has(material.original.original_id) ? ' · 本次结果记录为模型已读' : ' · 不作为模型已读内容'}
+      {material.selected && material.read_state === 'verified_available' && readOriginals.has(material.original.original_id) ? ' · 已提供给本次模型请求' : ' · 未作为本次模型请求的原件输入'}
     </p>)}
     <details><summary className="cursor-pointer py-1">来源与快照详情</summary><div className="space-y-2 break-all">
       <p>快照指纹：{snapshot.digest}</p><p>输入编码：{snapshot.input_encoded_bytes} 字节</p>

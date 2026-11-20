@@ -56,6 +56,8 @@ Alpha 组件承担呈现，复用视觉资产不意味着继承旧 Runtime 的�
 |---|---|---|
 | 事实、回执、投影与 schema | `crates/exomind-core/` | Core 对应案例与保护性迁移，不以清库恢复 |
 | 多端时间块与历史 | Host `peers/`、Core replication | [多来源复制合同](../../docs/development/beta-multiorigin-sync.md)，真实 TLS/来源/ACK/重启案例 |
+| 附近未配对设备 | Host `peers/network.rs` 的独立易失候选缓存、Native peers IPC、`BetaPeersPage` | [被动发现边界](../../docs/development/beta-nearby-discovery.md)；候选地址不是身份或访问权限 |
+| 回顾原件与外发同意 | Host summary/material/provider、本机 sidecar、手动压缩及任务确认 UI | [选件与本机外发合同](../../docs/development/beta-summary-originals.md)；源码已接通，旧候选不含此能力 |
 | 浮窗与共享草稿 | `native_workspace.rs`、`beta_overlay.rs`、`overlay/` | Host `tests/native_workspace.rs`、`main-workspace-client`、`presentation-independence` |
 | 原件准备/获取/导出 | `drafts.ts`、Host sources/peers、Native originals/export | 字节/hash、取消/代际、搜索离场、系统打开分别验证 |
 | 反馈与快捷键 | `BetaFocusTimer`、`BetaOverlayPage`、共享反馈Dialog | 固定 Ctrl/Cmd+Enter；草稿 ACK 前快速提交；IME 不误发；编辑不冒充提交忙 |

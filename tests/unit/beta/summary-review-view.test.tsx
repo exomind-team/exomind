@@ -41,7 +41,16 @@ describe('Beta review is a pure Alpha message composition',()=>{
     result.snapshot.materials[0].read_state='verified_available';result.output.read_original_ids=[O];
     const ui=render(<BetaReviewView {...props} task={{...task('succeeded'),latest_artifact_id:A}} artifact={result}/>);
     expect(screen.getByText('达到读取页限，部分材料未纳入')).toBeInTheDocument();expect(screen.getByText('达到材料字节上限，部分记录未纳入')).toBeInTheDocument();expect(screen.getByText('缺少因果来源 1 条')).toBeInTheDocument();expect(screen.getByText('已知其他设备仍有材料待补齐')).toBeInTheDocument();
-    expect(ui.container.textContent).toContain('未选择给模型');expect(ui.container.textContent).toContain('不作为模型已读内容');expect(ui.container.textContent).not.toContain('本次结果记录为模型已读');expect(screen.getByText(/输入用量：0/)).toHaveTextContent('输出用量：供应商未提供');
+    expect(ui.container.textContent).toContain('未选择给模型');expect(ui.container.textContent).toContain('未作为本次模型请求的原件输入');expect(ui.container.textContent).not.toContain('已提供给本次模型请求');expect(screen.getByText(/输入用量：0/)).toHaveTextContent('输出用量：供应商未提供');
+  });
+  it('labels a selected verified original as provided to this request without claiming model understanding',()=>{
+    const result=artifact();result.snapshot.selection.selected_original_ids=[O];
+    result.snapshot.materials[0]={...result.snapshot.materials[0],selected:true,read_state:'verified_available'};
+    result.snapshot.coverage.metadata_only=[];result.snapshot.coverage.unread_originals=[];
+    result.output.read_original_ids=[O];
+    const ui=render(<BetaReviewView {...props} task={{...task('succeeded'),selection:result.snapshot.selection,latest_artifact_id:A}} artifact={result}/>);
+    expect(ui.container.textContent).toContain('已提供给本次模型请求');
+    expect(ui.container.textContent).not.toContain('模型已读');expect(ui.container.textContent).not.toContain('模型已理解');
   });
   it('renders model text as text, denies an unknown citation, and refuses cross-profile artifacts',()=>{
     const result=artifact();result.output.narrative='保留正常叙述\n\n<img src="synthetic" onerror="synthetic()">\n\n保留后续段落';result.output.evidence=[N];const openSource=vi.fn();

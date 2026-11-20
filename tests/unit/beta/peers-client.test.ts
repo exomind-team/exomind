@@ -33,3 +33,29 @@ describe('Native peer management boundary',()=>{
     reply={...status(),device_id:'00000000-0000-0000-0000-000000000000'};await expect(client.status(P)).rejects.toMatchObject({code:'invalid_peer_response'});
   });
 });
+
+describe('Nearby device discovery boundary',()=> {
+  it('reads only short-lived unverified candidates without a profile argument',async()=>{
+    const candidate={device_id:B,addresses:['127.0.0.1:4310'],expires_at_ms:Date.now()+20_000,verification_state:'unverified'};
+    let reply:unknown=[candidate];
+    const call=vi.fn(async(name:string)=>name==='beta_peer_nearby_candidates'?reply:null);
+    const client=nativeBetaPeersClient(call);
+
+    expect(await client.nearbyCandidates()).toEqual([candidate]);
+    expect(call).toHaveBeenCalledWith('beta_peer_nearby_candidates');
+
+    reply=[{...candidate,profile_name:'private profile name'}];
+    await expect(client.nearbyCandidates()).rejects.toMatchObject({code:'invalid_peer_response'});
+    for (const invalid of [
+      [candidate,candidate],
+      [{...candidate,addresses:[candidate.addresses[0],candidate.addresses[0]]}],
+      [{...candidate,addresses:Array.from({length:5},(_,index)=>`127.0.0.1:${4310+index}`)}],
+      [{...candidate,verification_state:'verified'}],
+      [{...candidate,expires_at_ms:0}],
+      Array.from({length:65},()=>candidate),
+    ]) {
+      reply=invalid;
+      await expect(client.nearbyCandidates()).rejects.toMatchObject({code:'invalid_peer_response'});
+    }
+  });
+});

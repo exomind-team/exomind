@@ -1,5 +1,8 @@
+use exomind_core::{
+    BeginStageCommand, OriginalId, StageId, SummaryArtifactKind, SummaryPurpose, SummaryRequestCommand,
+};
 use super::*;
-use crate::{SummaryModelConfigurationCommand, SummaryModelSecretUpdate};
+use crate::{SummaryMaterialConsent, SummaryModelConfigurationCommand, SummaryModelSecretUpdate};
 use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::post};
 use exomind_core::{
     CaptureCommand, CommandId, EventQuery, SummaryControlAction, TimeblockAction, TimeblockCommand,
@@ -38,7 +41,16 @@ async fn mock(mode: usize) -> Mock {
         let number=count.fetch_add(1,Ordering::SeqCst)+1;saved.lock().unwrap().push(body.clone());ready.notify_one();
         if mode==2{return(StatusCode::TOO_MANY_REQUESTS,"Synthetic rate limit").into_response();}
         if mode==1&&number==1{allow.notified().await;}
-        let material:Value=serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+        let user_content = &body["messages"][1]["content"];
+        let material_text = user_content.as_str().map(str::to_owned).unwrap_or_else(|| {
+            user_content
+                .as_array()
+                .and_then(|parts| parts.iter().find(|part| part["type"] == "text"))
+                .and_then(|part| part["text"].as_str())
+                .expect("multimodal request must retain a text material block")
+                .to_owned()
+        });
+        let material: Value = serde_json::from_str(&material_text).unwrap();
         let evidence=if mode==3{Uuid::new_v4().to_string()}else{material["records"][0]["record"]["event_id"].as_str().unwrap().to_owned()};
         let answer=json!({"narrative":"Synthetic evidence-based review","evidence":[evidence]}).to_string();
         Json(json!({"id":format!("synthetic-request-{number}"),"model":"synthetic-reported-model","choices":[{"message":{"content":answer},"finish_reason":"stop"}],"usage":{"prompt_tokens":29,"completion_tokens":13}})).into_response()
@@ -170,6 +182,28 @@ async fn wait_task(
         assert!(
             Instant::now() < end,
             "Summary task did not reach expected state {state:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
+}
+async fn wait_manual_task(
+    host: &BetaHost,
+    human: &Session,
+    p: ProfileId,
+    state: SummaryState,
+    timeout: Duration,
+) -> SummaryTaskView {
+    let end = Instant::now() + timeout;
+    loop {
+        let tasks = host.summary_tasks_page(human, p, None, 25).unwrap();
+        if let Some(task) = tasks.items.into_iter().find(|task| {
+            task.purpose == SummaryPurpose::ManualCompressV1 && task.state == state
+        }) {
+            return task;
+        }
+        assert!(
+            Instant::now() < end,
+            "Manual summary task did not reach expected state {state:?}"
         );
         tokio::time::sleep(Duration::from_millis(40)).await;
     }
@@ -908,4 +942,273 @@ async fn review_v4_model_material_contains_original_and_each_prefreeze_correctio
         item["record"]["event_id"].as_str() == Some(capture_id.as_str())
     }).count(), 1);
     host.stop().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explicitly_selected_image_bytes_reach_the_provider_and_are_recorded() {
+    let server = mock(0).await;
+    let (_directory, host, owner, human, p, _) = setup();
+    let image: [u8; 68] = [
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x04, 0x00, 0x00, 0x00, 0xb5,
+        0x1c, 0x0c, 0x02, 0x00, 0x00, 0x00, 0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0xfc,
+        0xff, 0x1f, 0x00, 0x03, 0x03, 0x02, 0x00, 0xef, 0xa7, 0x98, 0xbf, 0x00, 0x00, 0x00, 0x00,
+        0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+    let original_id = OriginalId::new();
+    let stage_id = StageId::new();
+    host.begin_stage(
+        &human,
+        &BeginStageCommand {
+            stage_id,
+            original_id,
+            profile_id: p,
+            expected_sha256: format!("{:x}", sha2::Sha256::digest(image)),
+            byte_length: image.len() as u64,
+            file_name: "synthetic-pixel.png".into(),
+            media_type: "image/png".into(),
+        },
+    )
+    .unwrap();
+    host.write_stage_chunk(&human, p, stage_id, 0, &image)
+        .unwrap();
+    let original = host.verify_stage(&human, p, stage_id).unwrap().original;
+
+    let block = TimeblockId::new();
+    action(
+        &host,
+        &human,
+        p,
+        json!({"kind":"start","block_id":block,"name":"Selected image","note":"","timer":{"mode":"count_up"}}),
+    );
+    let at = host
+        .timeblock_snapshot(&human, p)
+        .unwrap()
+        .clock
+        .server_now_ms;
+    host.capture(
+        &human,
+        &CaptureCommand {
+            command_id: CommandId::new(),
+            event_id: EventId::new(),
+            profile_id: p,
+            occurred_at_ms: at,
+            text: "Synthetic image source".into(),
+            tags: vec![],
+            originals: vec![original.clone()],
+        },
+    )
+    .unwrap();
+    action(
+        &host,
+        &human,
+        p,
+        json!({"kind":"end_action","block_id":block}),
+    );
+    action(
+        &host,
+        &human,
+        p,
+        json!({"kind":"submit_feedback","block_id":block,"feedback":{"kind":"skipped"}}),
+    );
+
+    let mut selection = host.summary_block_selection(&human, p, block).unwrap();
+    selection.selected_original_ids = vec![original_id];
+    let configured = configure(&host, &owner, p, &server.base, None);
+    let provider_revision = configured.revision.expect("provider config revision");
+    let request = SummaryRequestCommand {
+        command_id: CommandId::new(),
+        event_id: EventId::new(),
+        profile_id: p,
+        purpose: SummaryPurpose::ManualCompressV1,
+        artifact_kind: SummaryArtifactKind::CompressedMessage,
+        selection,
+    };
+    let consent = SummaryMaterialConsent {
+        provider_config_revision: provider_revision,
+        max_original_bytes: image.len() as u64,
+    };
+    let next_revision_value = provider_revision.as_u128().wrapping_add(1);
+    let stale_revision = SummaryMaterialConsent {
+        provider_config_revision: Uuid::from_u128(if next_revision_value == 0 {
+            1
+        } else {
+            next_revision_value
+        }),
+        max_original_bytes: image.len() as u64,
+    };
+    assert!(matches!(
+        host.request_summary_with_material_consent(&human, &request, &stale_revision),
+        Err(HostError::ModelConfigurationConflict)
+    ));
+    assert!(matches!(
+        host.request_summary(&human, &request),
+        Err(HostError::Forbidden)
+    ));
+    let app = crate::serve(host.clone(), "127.0.0.1:0".parse().unwrap())
+        .await.unwrap();
+    let token = host.grant(&owner, crate::GrantRequest {
+        profile_id: p, kind: crate::GrantKind::Human, agent_id: None,
+    }).unwrap().token;
+    let http = reqwest::Client::builder().no_proxy()
+        .timeout(Duration::from_secs(3)).build().unwrap();
+    let hello: Value = http.get(format!("http://{}/beta/v1/hello", app.addr()))
+        .send().await.unwrap().json().await.unwrap();
+    assert_eq!(hello["capabilities"]["summary_originals"], true);
+    let response = http.post(format!(
+        "http://{}/beta/v1/profiles/{p}/summaries/material-requests", app.addr(),
+    )).bearer_auth(&token).json(&json!({"command":&request,"consent":&consent}))
+        .send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    let accepted: exomind_core::Receipt = response.json().await.unwrap();
+    assert_eq!(accepted.command_id, request.command_id);
+    let updated = configure(&host, &owner, p, &server.base, Some(provider_revision));
+    let updated_revision = updated.revision.expect("updated provider revision");
+    host.start_services().unwrap();
+
+    let stale_deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        let status = host.summary_service_status(&owner).unwrap();
+        if status.last_error_code.as_deref() == Some("summary_material_consent_stale") {
+            break;
+        }
+        assert!(
+            Instant::now() < stale_deadline,
+            "stale provider consent was not reported locally"
+        );
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
+    let queued = host
+        .summary_tasks_page(&human, p, None, 25)
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|task| task.purpose == SummaryPurpose::ManualCompressV1)
+        .expect("manual selected-material task remains queued");
+    assert_eq!(queued.state, SummaryState::Queued);
+    assert!(server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|request| request["messages"][1]["content"].as_array().is_none()));
+
+    let too_small = SummaryMaterialConsent {
+        provider_config_revision: updated_revision,
+        max_original_bytes: image.len() as u64 - 1,
+    };
+    let cap_control = control(
+        &queued,
+        SummaryControlAction::QueueUpdate {
+            run_id: Uuid::new_v4(),
+            selection: queued.selection.clone(),
+            supersedes_artifact_id: None,
+        },
+    );
+    host.control_summary_with_material_consent(&human, &cap_control, &too_small)
+        .unwrap();
+    let failed = wait_manual_task(
+        &host,
+        &human,
+        p,
+        SummaryState::Failed,
+        Duration::from_secs(8),
+    )
+    .await;
+    assert_eq!(failed.owner_control_event_id, cap_control.event_id);
+    assert!(server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|request| request["messages"][1]["content"].as_array().is_none()));
+
+    let stale_control = control(
+        &failed,
+        SummaryControlAction::QueueUpdate {
+            run_id: Uuid::new_v4(),
+            selection: failed.selection.clone(),
+            supersedes_artifact_id: None,
+        },
+    );
+    assert!(matches!(
+        host.control_summary_with_material_consent(&human, &stale_control, &consent),
+        Err(HostError::ModelConfigurationConflict)
+    ));
+    let fresh_control = control(
+        &failed,
+        SummaryControlAction::QueueUpdate {
+            run_id: Uuid::new_v4(),
+            selection: failed.selection.clone(),
+            supersedes_artifact_id: None,
+        },
+    );
+    let fresh_consent = SummaryMaterialConsent {
+        provider_config_revision: updated_revision,
+        max_original_bytes: image.len() as u64,
+    };
+    let response = http.post(format!(
+        "http://{}/beta/v1/profiles/{p}/summaries/material-controls", app.addr(),
+    )).bearer_auth(&token).json(&json!({"command":&fresh_control,"consent":&fresh_consent}))
+        .send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    let accepted: exomind_core::Receipt = response.json().await.unwrap();
+    assert_eq!(accepted.command_id, fresh_control.command_id);
+
+    let done = wait_manual_task(
+        &host,
+        &human,
+        p,
+        SummaryState::Succeeded,
+        Duration::from_secs(8),
+    )
+    .await;
+    assert_eq!(done.owner_control_event_id, fresh_control.event_id);
+    assert_eq!(done.state, SummaryState::Succeeded, "{:?}", done.reason);
+    let artifacts = host
+        .summary_artifacts_page(&human, p, done.task_id, None, 25)
+        .unwrap();
+    assert_eq!(artifacts.items.len(), 1);
+    let artifact = &artifacts.items[0];
+    assert_eq!(
+        artifact.snapshot.selection.selected_original_ids,
+        vec![original_id]
+    );
+    assert!(artifact
+        .snapshot
+        .materials
+        .iter()
+        .any(|material| { material.original == original && material.selected }));
+    assert_eq!(artifact.output.read_original_ids, vec![original_id]);
+
+    let request = server
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|request| {
+            request["messages"][1]["content"]
+                .as_array()
+                .is_some_and(|parts| parts.iter().any(|part| part["type"] == "image_url"))
+        })
+        .cloned()
+        .expect("the authorized retry sends the selected image");
+    let content = request["messages"][1]["content"].as_array().unwrap();
+    let image_block = content
+        .iter()
+        .find(|part| part["type"] == "image_url")
+        .expect("selected image bytes must use the provider image input field");
+    assert_eq!(
+        image_block["image_url"]["url"].as_str(),
+        Some("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+nmL8AAAAASUVORK5CYII=")
+    );
+    let request_digest = format!(
+        "{:x}",
+        sha2::Sha256::digest(serde_json::to_vec(&request).unwrap())
+    );
+    assert_eq!(artifact.output.model.request_input_digest, request_digest);
+    assert!(!serde_json::to_string(&request)
+        .unwrap()
+        .contains("synthetic-key"));
+    app.stop().await.unwrap();
 }

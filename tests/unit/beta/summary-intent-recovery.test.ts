@@ -3,16 +3,59 @@ import { BetaApiError } from '@/beta/api-error';
 import { SummaryTasksController } from '@/beta/summary-tasks-controller';
 import { decodeSummaryIntents,summaryIntentKey,SummaryIntentJournal } from '@/beta/summary-intent-journal';
 import type { LocalIntentJournal } from '@/beta/local-intent-journal';
-import type { SummaryClient } from '@/beta/summary-types';
+import type { SummaryClient,SummaryMaterialRequest,SummaryMaterialControl } from '@/beta/summary-types';
 import { deferred } from './fixtures';
 import { memoryIntentJournal } from './timeblock-ui-fixtures';
-import { D,N,P,artifact,control,manyIds,receipt,request,snapshot,task } from './summary-client-fixtures';
+import { D,N,O,P,artifact,control,manyIds,receipt,request,snapshot,task } from './summary-client-fixtures';
 
 function fixture(journal:LocalIntentJournal=memoryIntentJournal()){
   const api={tasks:vi.fn<SummaryClient['tasks']>(async()=>({items:[task()],next_after:null})),task:vi.fn<SummaryClient['task']>(async()=>task()),artifacts:vi.fn<SummaryClient['artifacts']>(async()=>({items:[artifact()],next_before:null,highwater:3})),blockSelection:vi.fn<SummaryClient['blockSelection']>(async()=>snapshot().selection),request:vi.fn<SummaryClient['request']>(async command=>receipt(command)),control:vi.fn<SummaryClient['control']>(async command=>receipt(command))}satisfies SummaryClient;
   const read=vi.fn(async()=>null as ReturnType<typeof receipt>|null);let id=1;const uuid=vi.fn(()=>manyIds(100)[id++]);const owner=new SummaryTasksController(api,D,P,read,uuid,undefined,journal);return{api,read,uuid,owner,journal};
 }
 describe('durable summary creation/control intents',()=>{
+  it('roundtrips local consent and refuses a changed consent attached to the same immutable command',async()=>{
+    const journal=memoryIntentJournal(),store=await SummaryIntentJournal.open(D,P,journal);
+    const command={...request(),selection:{...request().selection,selected_original_ids:[O]}},consent={provider_config_revision:N,max_original_bytes:68};
+    await store.put({operation:'request',kind:'create',command,consent,phase:'unknown',receipt:null});
+    const raw=journal.values.get(summaryIntentKey(D,P))!;
+    expect(decodeSummaryIntents(raw,D,P)[0]).toMatchObject({command,consent});
+    await expect(store.put({operation:'request',kind:'create',command,consent:{...consent,max_original_bytes:69},phase:'unknown',receipt:null})).rejects.toThrow();
+    expect(journal.values.get(summaryIntentKey(D,P))).toBe(raw);await store.close();
+  });
+  it('restores a consented unknown request without dispatch, then explicitly retries its original envelope',async()=>{
+    const journal=memoryIntentJournal(),f=fixture(journal),consent={provider_config_revision:N,max_original_bytes:68};
+    const send=vi.fn(async(input:SummaryMaterialRequest)=>receipt(input.command));
+    Object.assign(f.api,{requestWithMaterialConsent:send});send.mockRejectedValueOnce(new BetaApiError('summary_transport','lost reply'));
+    await f.owner.ready();await f.owner.create('compressed_message',{...snapshot().selection,selected_original_ids:[O]},consent);
+    const original=send.mock.calls[0][0];expect(f.owner.snapshot().requests[0]).toMatchObject({phase:'unknown',consent});
+    await f.owner.close();
+    const next=fixture(journal),retried=vi.fn(async(input:SummaryMaterialRequest)=>receipt(input.command));Object.assign(next.api,{requestWithMaterialConsent:retried});
+    await next.owner.ready();await vi.waitFor(()=>expect(next.owner.snapshot().requests[0].phase).toBe('unknown'));
+    expect(retried).not.toHaveBeenCalled();expect(next.api.request).not.toHaveBeenCalled();
+    await next.owner.retryRequest(next.owner.snapshot().requests[0]);
+    expect(retried).toHaveBeenCalledWith(original);expect(next.uuid).not.toHaveBeenCalled();expect(next.api.request).not.toHaveBeenCalled();
+    await next.owner.close();
+  });
+  it('allows a stale consent rejection to be dismissed before a newly confirmed request',async()=>{
+    const f=fixture(),send=vi.fn(async(_input:SummaryMaterialRequest)=>{throw new BetaApiError('model_configuration_conflict','changed config',409);});
+    Object.assign(f.api,{requestWithMaterialConsent:send});await f.owner.ready();
+    await f.owner.create('compressed_message',{...snapshot().selection,selected_original_ids:[O]},{provider_config_revision:N,max_original_bytes:68});
+    expect(f.owner.snapshot().requests[0].phase).toBe('rejected');
+    await f.owner.dismissRequest(f.owner.snapshot().requests[0]);expect(f.owner.snapshot().requests).toEqual([]);
+    expect(send).toHaveBeenCalledTimes(1);expect(f.api.request).not.toHaveBeenCalled();await f.owner.close();
+  });
+  it('keeps a consented control across reopen and leaves selected-original cancellation on the legacy route',async()=>{
+    const journal=memoryIntentJournal(),f=fixture(journal),consent={provider_config_revision:N,max_original_bytes:68};
+    const send=vi.fn(async(input:SummaryMaterialControl)=>receipt(input.command));Object.assign(f.api,{controlWithMaterialConsent:send});
+    const selected={...task(),state:'failed' as const,selection:{...snapshot().selection,selected_original_ids:[O]}};
+    await f.owner.ready();await f.owner.act('retry',selected);expect(f.uuid).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();expect(f.api.control).not.toHaveBeenCalled();
+    send.mockRejectedValueOnce(new BetaApiError('summary_transport','lost reply'));await f.owner.act('retry',selected,consent);
+    const original=send.mock.calls[0][0];await f.owner.close();
+    const next=fixture(journal),retried=vi.fn(async(input:SummaryMaterialControl)=>receipt(input.command));Object.assign(next.api,{controlWithMaterialConsent:retried});
+    await next.owner.ready();await vi.waitFor(()=>expect(next.owner.snapshot().intents[0].phase).toBe('unknown'));expect(retried).not.toHaveBeenCalled();
+    await next.owner.retryIntent(next.owner.snapshot().intents[0]);expect(retried).toHaveBeenCalledWith(original);expect(next.api.control).not.toHaveBeenCalled();expect(next.uuid).not.toHaveBeenCalled();
+    await next.owner.act('cancel',{...selected,state:'running'});expect(next.api.control).toHaveBeenCalledTimes(1);expect(retried).toHaveBeenCalledTimes(1);await next.owner.close();
+  });
   it('requires durable commit before any paid RPC and fences a late commit on a profile-switch request',async()=>{
     const journal=memoryIntentJournal(),gate=deferred<void>();journal.write.mockImplementationOnce(async(key,raw)=>{await gate.promise;journal.values.set(key,raw);});const f=fixture(journal);await f.owner.ready();
     const pending=f.owner.create('compressed_block',snapshot().selection);await vi.waitFor(()=>expect(journal.write).toHaveBeenCalledTimes(1));expect(f.api.request).not.toHaveBeenCalled();const original=f.owner.snapshot().requests[0].command;

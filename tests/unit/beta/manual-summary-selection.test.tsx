@@ -1,4 +1,5 @@
 import { selectField } from './select-field';
+import { StrictMode } from 'react';
 import { cleanup,fireEvent,render,screen,waitFor } from '@testing-library/react';
 import { afterEach,describe,expect,it,vi } from 'vitest';
 import { ManualSummarySelection } from '@/beta/manual-summary-selection';
@@ -6,7 +7,7 @@ import { BetaManualSummaryDialog } from '@/beta/BetaManualSummaryDialog';
 import { SummaryTasksController } from '@/beta/summary-tasks-controller';
 import type { BetaTimeblockClient,BetaTimeblockNode,BetaTimeblockSnapshot } from '@/beta/timeblocks-types';
 import type { SummaryClient,SummarySelection } from '@/beta/summary-types';
-import { B,D,N,O,P,R,artifact,manyIds,receipt,task } from './summary-client-fixtures';
+import { A,B,D,N,O,P,R,artifact,manyIds,receipt,task } from './summary-client-fixtures';
 import { fakeClient } from './fixtures';
 import { memoryIntentJournal } from './timeblock-ui-fixtures';
 
@@ -48,5 +49,49 @@ describe('authoritative manual compression selection',()=>{
     const f=fixture(),journal=memoryIntentJournal(),base=fakeClient();const operations=new SummaryTasksController(f.summaries,D,P,async()=>null,undefined,undefined,journal);await operations.ready();const closed=vi.fn();render(<BetaManualSummaryDialog client={{...base,timeblocks:f.blocks,summaries:f.summaries}} profileId={P} owner={operations} onClose={closed} now={999999} dateMode="compact"/>);
     expect(screen.getByRole('button',{name:'确认创建总块'})).toBeDisabled();fireEvent.keyDown(screen.getByRole('combobox',{name:'压缩时间块'}),{key:'ArrowDown'});const firstOption=await screen.findByRole('option',{name:'First · 已有反馈事实'});expect(f.summaries.request).not.toHaveBeenCalled();fireEvent.click(firstOption);fireEvent.click(screen.getByRole('button',{name:'核验真实范围'}));await waitFor(()=>expect(screen.getByRole('button',{name:'确认创建总块'})).toBeEnabled());expect(f.summaries.request).not.toHaveBeenCalled();
     await selectField(screen.getByRole('combobox',{name:'压缩派生形式'}),'compressed_message');fireEvent.click(screen.getByRole('button',{name:'确认创建记录'}));await waitFor(()=>expect(f.summaries.request).toHaveBeenCalledTimes(1));expect(f.summaries.request.mock.calls[0][0]).toMatchObject({profile_id:P,purpose:'manual_compress_v1',artifact_kind:'compressed_message',selection:f.anchors.get(B)});expect(journal.write).toHaveBeenCalled();expect(f.blocks.command).not.toHaveBeenCalled();await waitFor(()=>expect(closed).toHaveBeenCalled());expect(operations.snapshot().requests[0].phase).toBe('committed');await operations.close();
+  });
+  it('keeps image selection separate from explicit consent to the displayed provider',async()=>{
+    const f=fixture(),base=fakeClient(),journal=memoryIntentJournal();
+    const original={original_id:A,sha256:'c'.repeat(64),byte_length:68,file_name:'synthetic-pixel.png',media_type:'image/png'};
+    const source={event_id:manyIds(100)[99],profile_id:P,device_id:D,author_id:D,author_kind:'human' as const,occurred_at_ms:15,text:'Synthetic image',tags:[],digest:'a'.repeat(64),local_seq:7,originals:[original]};
+    base.eventsPage.mockResolvedValue({items:[source],next_before:null,highwater:7});
+    const timelinePeriodPage=vi.fn(async()=>({items:[{kind:'capture' as const,record:source}],next_before:null,highwater:7}));
+    const requestWithMaterialConsent=vi.fn(async(input:{command:Parameters<SummaryClient['request']>[0];consent:{provider_config_revision:string;max_original_bytes:number}})=>receipt(input.command));
+    const summaries={...f.summaries,requestWithMaterialConsent};
+    const summaryModel={read:vi.fn(async()=>({profile_id:P,revision:N,enabled:true,include_suggestions:false,base_url:'https://synthetic.invalid/v1',model:'synthetic-vision',has_api_key:true,max_output_tokens:2048,timeout_ms:10000})),save:vi.fn(async()=>{throw Error('not part of this test');})};
+    const operations=new SummaryTasksController(summaries,D,P,async()=>null,undefined,undefined,journal);
+    await operations.ready();
+    render(<BetaManualSummaryDialog client={{...base,status:async()=>({protocol:'exomind-beta/1',device_id:D,runtime_id:R,running:true,capabilities:{summary_originals:true}}),timeblocks:f.blocks,summaries,summaryModel,timelinePeriodPage}} profileId={P} owner={operations} onClose={vi.fn()} now={999999} dateMode="compact"/>);
+    try{
+      await selectField(screen.getByRole('combobox',{name:'压缩时间块'}),B);
+      fireEvent.click(screen.getByRole('button',{name:'核验真实范围'}));
+      await waitFor(()=>expect(screen.getByRole('button',{name:'确认创建总块'})).toBeEnabled());
+      fireEvent.click(screen.getByRole('button',{name:'选择给模型的原件'}));
+      const image=await screen.findByRole('checkbox',{name:/synthetic-pixel\.png/});
+      expect(image).not.toBeChecked();
+      fireEvent.click(image);
+      expect(screen.getByText(/https:\/\/synthetic\.invalid/)).toBeInTheDocument();
+      expect(screen.getByText(/synthetic-vision/)).toBeInTheDocument();
+      const send=screen.getByRole('button',{name:'发送所选原件并创建总块'});
+      expect(send).toBeDisabled();
+      expect(requestWithMaterialConsent).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('checkbox',{name:/同意.*所选原件.*发送/}));
+      fireEvent.click(send);
+      await waitFor(()=>expect(requestWithMaterialConsent).toHaveBeenCalledTimes(1));
+      expect(f.summaries.request).not.toHaveBeenCalled();
+      expect(requestWithMaterialConsent.mock.calls[0][0]).toMatchObject({command:{selection:{selected_original_ids:[A]}},consent:{provider_config_revision:N,max_original_bytes:68}});
+    }finally{await operations.close();}
+  });
+  it('can submit the plain text request after a StrictMode setup and cleanup replay',async()=>{
+    const f=fixture(),base=fakeClient(),operations=new SummaryTasksController(f.summaries,D,P,async()=>null,undefined,undefined,memoryIntentJournal());
+    await operations.ready();
+    render(<StrictMode><BetaManualSummaryDialog client={{...base,timeblocks:f.blocks,summaries:f.summaries}} profileId={P} owner={operations} onClose={vi.fn()} now={999999} dateMode="compact"/></StrictMode>);
+    try{
+      await selectField(screen.getByRole('combobox',{name:'压缩时间块'}),B);
+      fireEvent.click(screen.getByRole('button',{name:'核验真实范围'}));
+      await waitFor(()=>expect(screen.getByRole('button',{name:'确认创建总块'})).toBeEnabled());
+      fireEvent.click(screen.getByRole('button',{name:'确认创建总块'}));
+      await waitFor(()=>expect(f.summaries.request).toHaveBeenCalledTimes(1));
+    }finally{await operations.close();}
   });
 });

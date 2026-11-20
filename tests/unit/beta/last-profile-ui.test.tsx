@@ -59,7 +59,7 @@ describe('Beta reopens the last successfully opened local profile', () => {
   });
   it('remembers an explicitly confirmed joined profile only after it appears locally and opens successfully', async () => {
     const client = fakeClient(); client.profiles.mockResolvedValueOnce(profiles).mockResolvedValue([...profiles, { profile_id: 'joined-p', display_name: 'Joined P' }]);
-    const peers: BetaPeersClient = { status: async profile_id => ({ runtime_id: 'runtime-a', device_id: 'device-a', profile_id, network_enabled: false, local_addresses: [], peers: [] }), setEnabled: async () => {},
+    const peers: BetaPeersClient = { nearbyCandidates: async () => [], status: async profile_id => ({ runtime_id: 'runtime-a', device_id: 'device-a', profile_id, network_enabled: false, local_addresses: [], peers: [] }), setEnabled: async () => {},
       createInvitation: async () => { throw new Error('not part of this test'); }, inspectInvitation: async () => ({ profile_id: 'joined-p', profile_name: 'Joined P', issuer_device_id: 'peer-x', fingerprint_sha256: 'a'.repeat(64), expires_at_ms: Date.now() + 60000, compatible: true }),
       joinInvitation: async () => ({ profile_id: 'joined-p', peer_device_id: 'peer-x', state: 'ready' }), sync: async () => {}, revoke: async () => {} };
     render(<BetaApp client={client} peers={peers} intentJournal={memoryIntentJournal()}/>); await screen.findByRole('textbox', { name: '记录当下' });

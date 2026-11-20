@@ -121,6 +121,10 @@ export interface SummaryArtifactRecord {
   local_seq: number;
 }
 export interface SummaryRequestCommand { command_id: string; event_id: string; profile_id: string; purpose: SummaryPurpose; artifact_kind: SummaryArtifactKind; selection: SummarySelection }
+/** Local Host execution permission. Never part of a Core command or replicated fact. */
+export interface SummaryMaterialConsent { provider_config_revision:string; max_original_bytes:number }
+export interface SummaryMaterialRequest { command:SummaryRequestCommand; consent:SummaryMaterialConsent }
+export interface SummaryMaterialControl { command:SummaryControlCommand; consent:SummaryMaterialConsent }
 export type SummaryControlAction =
   | { kind: 'cancel' }
   | { kind: 'take_over_for_self'; run_id: string; resume_cancelled: boolean }
@@ -144,6 +148,8 @@ export interface SummaryClient {
   blockSelection(profileId:string,blockId:string):Promise<SummarySelection>;
   request(command:SummaryRequestCommand):Promise<BetaReceipt>;
   control(command:SummaryControlCommand):Promise<BetaReceipt>;
+  requestWithMaterialConsent?(input:SummaryMaterialRequest):Promise<BetaReceipt>;
+  controlWithMaterialConsent?(input:SummaryMaterialControl):Promise<BetaReceipt>;
   /** This read requires owner authority. It is absent for scoped-only HTTP IO. */
   serviceStatus?():Promise<SummaryServiceStatus>;
 }

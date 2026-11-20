@@ -1,7 +1,7 @@
 //! Private native UI recovery state. This is neither a Core fact store nor an
 //! HTTP resource. The Host gate owns its connection and all qualification.
 use crate::{BetaHost, HostError, Session, storage};
-use exomind_core::{Core, DeviceId, ProfileId};
+use exomind_core::{Core, DeviceId, EventId, ProfileId};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde::de::IgnoredAny;
 use sha2::{Digest, Sha256};
@@ -21,12 +21,14 @@ const LAYOUT: &str = "exomind-native-local-intent/1";
 const CAPTURE_PREFIX: &str = "exomind:beta:drafts:";
 const TIMEBLOCK_PREFIX: &str = "exomind:beta:timeblocks:";
 const SUMMARY_PREFIX: &str = "exomind:beta:summaries:";
+const SUMMARY_CONSENT_PREFIX: &str = "exomind:beta:summary-consent:";
 const MAX_RAW_BYTES: usize = 8 * 1024 * 1024;
 const MAX_KEY_BYTES: usize = 256;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(250);
 
 pub(crate) struct Store {
     connection: Connection,
+    device_id: DeviceId,
 }
 
 fn corrupt<T>(_: T) -> HostError {
@@ -113,6 +115,26 @@ mod tests {
             host.read_local_intent(&owner, &key).unwrap().as_deref(),
             Some(raw)
         );
+        let consent_event = EventId::new();
+        let consent_raw = r#"{"version":1,"operation":"request","selection_digest":"synthetic"}"#;
+        {
+            let mut store = Store::open(&root, device).unwrap();
+            store
+                .write_summary_material_consent(profile, consent_event, consent_raw)
+                .unwrap();
+        }
+        let consent_key = format!(
+            "{SUMMARY_CONSENT_PREFIX}[\"{}\",\"{}\",\"{}\"]",
+            device, profile, consent_event
+        );
+        assert!(matches!(
+            host.read_local_intent(&owner, &consent_key),
+            Err(HostError::InvalidRequest)
+        ));
+        assert!(matches!(
+            host.write_local_intent(&owner, &consent_key, consent_raw),
+            Err(HostError::InvalidRequest)
+        ));
         let wrong_device = format!(
             "{SUMMARY_PREFIX}{}",
             serde_json::to_string(&[DeviceId::new().to_string(), profile.to_string()]).unwrap()
@@ -143,6 +165,14 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some(raw)
+        );
+        let store = Store::open(&root, device).unwrap();
+        assert_eq!(
+            store
+                .read_summary_material_consent(profile, consent_event)
+                .unwrap()
+                .as_deref(),
+            Some(consent_raw)
         );
         reopened.stop().unwrap();
     }
@@ -338,7 +368,10 @@ impl Store {
             storage::private_path(&anchor, false).map_err(unavailable)?;
         }
         sync_directory(root)?;
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            device_id: device,
+        })
     }
 
     fn validate(connection: &Connection, device: DeviceId) -> Result<(), HostError> {
@@ -397,6 +430,41 @@ impl Store {
         Ok(Some(raw))
     }
 
+    fn material_consent_key(&self, profile: ProfileId, operation: EventId) -> String {
+        format!(
+            "{SUMMARY_CONSENT_PREFIX}[\"{}\",\"{}\",\"{}\"]",
+            self.device_id, profile, operation
+        )
+    }
+
+    /// Host-only execution permission. This namespace is deliberately not
+    /// accepted by the generic Native local-intent read/write API.
+    pub(crate) fn read_summary_material_consent(
+        &self,
+        profile: ProfileId,
+        operation: EventId,
+    ) -> Result<Option<String>, HostError> {
+        self.read(&self.material_consent_key(profile, operation))
+    }
+
+    /// Consent is immutable for one operation identity. A changed selection,
+    /// provider revision or byte budget needs a fresh event ID.
+    pub(crate) fn write_summary_material_consent(
+        &mut self,
+        profile: ProfileId,
+        operation: EventId,
+        raw: &str,
+    ) -> Result<(), HostError> {
+        let key = self.material_consent_key(profile, operation);
+        if key.len() > MAX_KEY_BYTES || raw.len() > MAX_RAW_BYTES || !raw_is_valid(raw) {
+            return Err(HostError::InvalidRequest);
+        }
+        match self.read(&key)? {
+            Some(existing) if existing == raw => Ok(()),
+            Some(_) => Err(HostError::IntentCacheConflict),
+            None => self.write(&key, raw),
+        }
+    }
     fn write(&mut self, key: &str, raw: &str) -> Result<(), HostError> {
         // Never erase an unreadable fixed command by replacing its corrupt row.
         self.read(key)?;

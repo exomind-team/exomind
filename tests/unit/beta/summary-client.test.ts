@@ -1,9 +1,40 @@
 import { describe,expect,it,vi } from 'vitest';
 import { BetaApiError } from '@/beta/api-error';
 import { nativeSummaryClient,webSummaryClient } from '@/beta/summary-client';
-import { A,B,D,E,N,P,R,T,artifact,control,identity,receipt,request,snapshot,task } from './summary-client-fixtures';
+import { A,B,D,E,N,O,P,R,T,artifact,control,identity,receipt,request,snapshot,task } from './summary-client-fixtures';
 
 describe('summary client exact Native/HTTP boundary',()=>{
+  it('uses separate consent envelopes in Native and HTTP without altering the Core commands',async()=>{
+    const command={...request(),selection:{...request().selection,selected_original_ids:[O]}},consent={provider_config_revision:N,max_original_bytes:68};
+    const action={...control(),action:{kind:'take_over_for_self' as const,run_id:R,resume_cancelled:false}};
+    const hello=async()=>({...identity(),capabilities:{summary_jobs:true,summary_originals:true}});
+    const call=vi.fn(async(_name:string,args?:Record<string,unknown>)=>receipt(args!.command as ReturnType<typeof request>));
+    const native=nativeSummaryClient(call as Parameters<typeof nativeSummaryClient>[0],hello);
+    await native.requestWithMaterialConsent!({command,consent});await native.controlWithMaterialConsent!({command:action,consent});
+    expect(call).toHaveBeenCalledWith('beta_request_summary_with_material_consent',{command,consent});
+    expect(call).toHaveBeenCalledWith('beta_control_summary_with_material_consent',{command:action,consent});
+    const json=vi.fn(async(_profile:string,_path:string,_method:string,input?:unknown)=>receipt((input as {command:ReturnType<typeof request>}).command));
+    const web=webSummaryClient({identity:hello,json});await web.requestWithMaterialConsent!({command,consent});await web.controlWithMaterialConsent!({command:action,consent});
+    expect(json).toHaveBeenCalledWith(P,`/profiles/${P}/summaries/material-requests`,'POST',{command,consent});
+    expect(json).toHaveBeenCalledWith(P,`/profiles/${P}/summaries/material-controls`,'POST',{command:action,consent});
+    expect(command).not.toHaveProperty('consent');expect(action).not.toHaveProperty('consent');
+  });
+  it('rejects missing capability or invalid consent before sending and preserves the legacy text route',async()=>{
+    const call=vi.fn(async(_name:string,args?:Record<string,unknown>)=>receipt(args!.command as ReturnType<typeof request>));
+    const api=nativeSummaryClient(call as Parameters<typeof nativeSummaryClient>[0],async()=>identity());
+    const command={...request(),selection:{...request().selection,selected_original_ids:[O]}},consent={provider_config_revision:N,max_original_bytes:68};
+    await expect(api.requestWithMaterialConsent!({command,consent})).rejects.toMatchObject({code:'unsupported_summary_originals'});
+    expect(call).not.toHaveBeenCalled();
+    const ready=nativeSummaryClient(call as Parameters<typeof nativeSummaryClient>[0],async()=>({...identity(),capabilities:{summary_jobs:true,summary_originals:true}}));
+    await expect(ready.requestWithMaterialConsent!({command,consent:{...consent,max_original_bytes:262145}})).rejects.toThrow();
+    expect(call).not.toHaveBeenCalled();
+    await api.request(request());expect(call).toHaveBeenCalledWith('beta_request_summary',{command:request()});
+  });
+  it('retains a stale provider rejection with a safe instruction to renew original consent',async()=>{
+    const call=vi.fn(async()=>{throw new BetaApiError('model_configuration_conflict','synthetic-private-provider-path',409);});
+    const api=nativeSummaryClient(call as Parameters<typeof nativeSummaryClient>[0],async()=>({...identity(),capabilities:{summary_jobs:true,summary_originals:true}}));
+    await expect(api.requestWithMaterialConsent!({command:{...request(),selection:{...request().selection,selected_original_ids:[O]}},consent:{provider_config_revision:N,max_original_bytes:68}})).rejects.toMatchObject({code:'model_configuration_conflict',status:409,message:expect.stringContaining('重新核对原件')});
+  });
   it('uses the exact Native commands/default cursors and returns receipts rather than pretending generation succeeded',async()=>{
     const call=vi.fn(async(name:string,args?:Record<string,unknown>)=>{
       if(name==='beta_status')return identity();if(name==='beta_summary_tasks')return{items:[task()],next_after:null};if(name==='beta_summary_task')return task();if(name==='beta_summary_artifacts')return{items:[artifact()],next_before:null,highwater:3};

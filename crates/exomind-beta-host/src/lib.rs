@@ -22,6 +22,8 @@ mod profile_archive;
 mod summary_jobs;
 mod summary_jobs_http;
 mod summary_material;
+mod summary_material_consent;
+pub use summary_material_consent::SummaryMaterialConsent;
 pub use profile_archive::{
     ArchiveBudget, ArchiveCancelHandle, ArchiveLimits, ArchivePreviewId, ProfileArchiveConflict,
     ProfileArchiveError, ProfileArchiveExportReceipt, ProfileArchiveImportReceipt,
@@ -49,7 +51,8 @@ mod record_organization;
 pub use peers::{
     ApprovePeerInvitationReplacement, CreatePeerInvitation, DEFAULT_ORIGINAL_AUTO_BYTES,
     DeviceIdentityInfo, IssuedPeerInvitation, MAX_ORIGINAL_AUTO_BYTES, MIN_ORIGINAL_AUTO_BYTES,
-    OriginalAutoBackoff, OriginalAutoPolicy, OriginalAutoPolicyCommand, OriginalAutoQueueStatus,
+    NearbyPeerCandidate, OriginalAutoBackoff, OriginalAutoPolicy, OriginalAutoPolicyCommand,
+    OriginalAutoQueueStatus,
     OriginalAutoSuppression, OriginalAutoSuppressionCommand, OriginalLocalIntent,
     OriginalTransferOptions, OriginalTransferResult, PEER_CORE_SCHEMA, PEER_PROTOCOL,
     PeerCancellation, PeerCapabilities, PeerChannel, PeerClaimReceipt, PeerConnectionView,
@@ -322,6 +325,7 @@ pub struct HostCapabilities {
     pub typed_timeline: bool,
     pub timeline_period: bool,
     pub summary_jobs: bool,
+    pub summary_originals: bool,
     pub correction_source: bool,
 }
 
@@ -478,6 +482,7 @@ impl BetaHost {
                 typed_timeline: true,
                 timeline_period: true,
                 summary_jobs: true,
+                summary_originals: true,
                 correction_source: true,
             },
         })

@@ -18,6 +18,12 @@ export interface BetaPeerStatus {
   runtime_id: string; device_id: string; profile_id: string;
   network_enabled: boolean; local_addresses: string[]; peers: BetaPeer[];
 }
+export interface BetaNearbyCandidate {
+  device_id: string;
+  addresses: string[];
+  expires_at_ms: number;
+  verification_state: 'unverified';
+}
 export interface BetaInvitation {
   invitation_text: string; invitation_id: string; expires_at_ms: number; local_addresses: string[];
 }
@@ -28,6 +34,7 @@ export interface BetaInvitationPreview {
 }
 export interface BetaJoinResult { profile_id: string; peer_device_id: string; state: 'pending' | 'ready' }
 export interface BetaPeersClient {
+  nearbyCandidates(): Promise<BetaNearbyCandidate[]>;
   status(profileId: string): Promise<BetaPeerStatus>;
   setEnabled(enabled: boolean): Promise<void>;
   createInvitation(profileId: string, peerDeviceId?: string): Promise<BetaInvitation>;
@@ -55,6 +62,22 @@ function boolean(value: unknown): boolean { if (typeof value !== 'boolean') retu
 function hash(value: unknown): string { const result = text(value, 64); if (!/^[0-9a-f]{64}$/.test(result)) return invalid(); return result; }
 function strings(value: unknown): string[] { if (!Array.isArray(value) || value.length > 16) return invalid(); return value.map(value => text(value, 256)); }
 function choice<T extends string>(value: unknown, values: readonly T[]): T { if (!values.includes(value as T)) return invalid(); return value as T; }
+function nearbyCandidate(value: unknown): BetaNearbyCandidate {
+  const item = object(value, ['device_id','addresses','expires_at_ms','verification_state']);
+  if (!Array.isArray(item.addresses) || item.addresses.length < 1 || item.addresses.length > 4) return invalid();
+  const addresses = item.addresses.map(value => {
+    const address = text(value, 128);
+    if (!address || address.trim() !== address || /[\u0000-\u001f\u007f]/.test(address)) return invalid();
+    return address;
+  });
+  if (new Set(addresses).size !== addresses.length) return invalid();
+  return {
+    device_id:uuid(item.device_id),
+    addresses,
+    expires_at_ms:integer(item.expires_at_ms, 1),
+    verification_state:choice(item.verification_state,['unverified']),
+  };
+}
 function peer(value: unknown): BetaPeer {
   const extra=!!value&&typeof value==='object'&&'history_gaps'in value;
   const item = object(value, ['device_id','fingerprint_sha256','member_generation','member_state','connection_state','endpoints','last_sync_at_ms','last_error_code','event_sync','originals_sync',...(extra?['history_gaps']:[])]);
@@ -66,6 +89,13 @@ function peer(value: unknown): BetaPeer {
 }
 export function nativeBetaPeersClient(call: Call = (command, args) => invoke(command, args)): BetaPeersClient {
   return {
+    async nearbyCandidates() {
+      const value = await call('beta_peer_nearby_candidates');
+      if (!Array.isArray(value) || value.length > 64) return invalid();
+      const candidates = value.map(nearbyCandidate);
+      if (new Set(candidates.map(candidate => candidate.device_id)).size !== candidates.length) return invalid();
+      return candidates;
+    },
     async status(profileId) {
       const raw = object(await call('beta_peer_status', { profileId }), ['runtime_id','device_id','profile_id','network_enabled','local_addresses','peers']);
       if (raw.profile_id !== profileId || !Array.isArray(raw.peers) || raw.peers.length > 256) return invalid();

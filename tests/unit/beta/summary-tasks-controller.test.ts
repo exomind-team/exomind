@@ -1,16 +1,20 @@
 import { describe,expect,it,vi } from 'vitest';
 import { BetaApiError } from '@/beta/api-error';
 import { SummaryTasksController } from '@/beta/summary-tasks-controller';
-import type { SummaryArtifactView,SummaryClient,SummaryControlCommand,SummaryTaskView } from '@/beta/summary-types';
+import type { SummaryArtifactView,SummaryClient,SummaryControlCommand,SummaryRequestCommand,SummaryTaskView } from '@/beta/summary-types';
 import { deferred } from './fixtures';
 import { memoryIntentJournal } from './timeblock-ui-fixtures';
 import { A,D,N,P,T,artifact,manyIds,receipt,task } from './summary-client-fixtures';
+type MaterialConsent={provider_config_revision:string;max_original_bytes:number};
+type MaterialRequestEnvelope={command:SummaryRequestCommand;consent:MaterialConsent};
 
 async function fixture(){
   let server:SummaryTaskView=task();let versions:SummaryArtifactView[]=[artifact()];
-  const api={tasks:vi.fn(async()=>({items:[server],next_after:null as string|null})),task:vi.fn(async()=>server),artifacts:vi.fn(async(_profile:string,_task:string,before:number|null)=>({items:versions.filter(item=>before===null||item.event_id===A),next_before:null as number|null,highwater:versions.length+2})),blockSelection:vi.fn(async()=>server.selection),request:vi.fn(async()=>{throw Error('not this slice');}),control:vi.fn(async(command:SummaryControlCommand)=>receipt(command))}satisfies SummaryClient;
-  const read=vi.fn(async()=>null as ReturnType<typeof receipt>|null);let next=100;const uuid=vi.fn(()=>{const values=manyIds(++next);return values[values.length-1];});const owner=new SummaryTasksController(api,D,P,read,uuid,undefined,memoryIntentJournal());await owner.ready();
-  return{api,read,uuid,owner,setTask:(value:SummaryTaskView)=>{server=value;},setVersions:(items:SummaryArtifactView[])=>{versions=items;}};
+  const requestWithMaterialConsent=vi.fn(async(input:MaterialRequestEnvelope)=>receipt(input.command));
+  const api={tasks:vi.fn(async()=>({items:[server],next_after:null as string|null})),task:vi.fn(async()=>server),artifacts:vi.fn(async(_profile:string,_task:string,before:number|null)=>({items:versions.filter(item=>before===null||item.event_id===A),next_before:null as number|null,highwater:versions.length+2})),blockSelection:vi.fn(async()=>server.selection),request:vi.fn(async(_command:SummaryRequestCommand)=>{throw Error('not this slice');}),control:vi.fn(async(command:SummaryControlCommand)=>receipt(command))}satisfies SummaryClient;
+  const apiWithConsent=Object.assign(api,{requestWithMaterialConsent});
+  const read=vi.fn(async()=>null as ReturnType<typeof receipt>|null);let next=100;const uuid=vi.fn(()=>{const values=manyIds(++next);return values[values.length-1];});const owner=new SummaryTasksController(apiWithConsent,D,P,read,uuid,undefined,memoryIntentJournal());await owner.ready();
+  return{api:apiWithConsent,read,uuid,owner,setTask:(value:SummaryTaskView)=>{server=value;},setVersions:(items:SummaryArtifactView[])=>{versions=items;}};
 }
 describe('summary task UI state and fixed control intents',()=>{
   it('reads 25 at a time with explicit more and no automatic control/model request',async()=>{
@@ -52,5 +56,24 @@ describe('summary task UI state and fixed control intents',()=>{
   it('drops old scope reads after disposal instead of filling the next profile with a late result',async()=>{
     const f=await fixture(),gate=deferred<SummaryTaskView>();f.api.task.mockReturnValueOnce(gate.promise);const pending=f.owner.selectTask(T);f.owner.dispose();gate.resolve(task());await pending;
     expect(f.owner.snapshot().detail?.task).toBeNull();expect(f.api.control).not.toHaveBeenCalled();
+  });
+  it('persists consent locally and sends it through the Host wrapper, not the Core command',async()=>{
+    const f=await fixture();
+    const selection={...task().selection,selected_original_ids:[A]};
+    const consent={provider_config_revision:N,max_original_bytes:68};
+    await f.owner.create('compressed_message',selection,consent);
+    expect(f.api.request).not.toHaveBeenCalled();
+    expect(f.api.requestWithMaterialConsent).toHaveBeenCalledTimes(1);
+    const envelope=f.api.requestWithMaterialConsent.mock.calls[0][0];
+    expect(envelope).toMatchObject({command:{selection},consent});
+    expect(envelope.command).not.toHaveProperty('consent');
+    expect(envelope.command).not.toHaveProperty('external_material_consent');
+    expect(f.owner.snapshot().requests[0]).toMatchObject({command:{selection},consent});f.owner.dispose();
+  });
+  it('does not dispatch a consented original after the dialog fences pending creation',async()=>{
+    const f=await fixture();const selection={...task().selection,selected_original_ids:[A]},consent={provider_config_revision:N,max_original_bytes:68};
+    const pending=f.owner.create('compressed_message',selection,consent);f.owner.fenceDispatch();await pending;
+    expect(f.api.request).not.toHaveBeenCalled();expect(f.api.requestWithMaterialConsent).not.toHaveBeenCalled();
+    expect(f.owner.snapshot().requests[0]).toMatchObject({command:{selection},consent});f.owner.dispose();
   });
 });

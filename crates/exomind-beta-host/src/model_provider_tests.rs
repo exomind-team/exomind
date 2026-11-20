@@ -42,6 +42,7 @@ fn input() -> ModelInput {
     ModelInput {
         system: "Summarize only the frozen evidence.".into(),
         material: r#"{"sources":[{"id":"synthetic-event","text":"Synthetic material"}]}"#.into(),
+        images: vec![],
     }
 }
 fn response() -> Value {
@@ -294,6 +295,7 @@ async fn oversized_frozen_input_is_rejected_before_network_and_timeout_is_finite
     let oversized = ModelInput {
         system: String::new(),
         material: "x".repeat(MAX_MODEL_INPUT_BYTES + 1),
+        images: vec![],
     };
     let (_keep, cancel) = watch::channel(false);
     assert_eq!(
@@ -322,5 +324,28 @@ async fn oversized_frozen_input_is_rejected_before_network_and_timeout_is_finite
         .unwrap()
         .unwrap_err(),
         ModelCallError::Timeout
+    );
+}
+#[test]
+fn text_content_stays_a_string_and_selected_png_uses_the_image_url_field() {
+    let text = input();
+    assert_eq!(
+        request_body(&settings("http://localhost/v1"), &text)["messages"][1]["content"],
+        text.material
+    );
+    let image = ModelInput {
+        system: "Only describe what is visible.".into(),
+        material: "{\"records\":[]}".into(),
+        images: vec![ModelImage {
+            media_type: "image/png".into(),
+            bytes: vec![0x89, 0x50, 0x4e, 0x47],
+        }],
+    };
+    let body = request_body(&settings("http://localhost/v1"), &image);
+    let content = body["messages"][1]["content"].as_array().unwrap();
+    assert_eq!(content[0]["type"], "text");
+    assert_eq!(
+        content[1]["image_url"]["url"],
+        "data:image/png;base64,iVBORw=="
     );
 }

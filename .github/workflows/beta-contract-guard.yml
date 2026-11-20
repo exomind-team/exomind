@@ -477,6 +477,26 @@ jobs:
               expected: ['sdk_reads_both_summary_feeds_from_real_host_with_restart_continuation'],
             },
             {
+              name: 'host-selected-originals-http-boundary',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--test', 'summary_material_http', '--', '--test-threads=1'],
+              expected: ['material_envelopes_keep_low_grants_and_legacy_core_wire_separate'],
+            },
+            {
+              name: 'host-selected-originals-provider-bytes',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'explicitly_selected_image_bytes_reach_the_provider_and_are_recorded', '--', '--test-threads=1'],
+              expected: ['explicitly_selected_image_bytes_reach_the_provider_and_are_recorded'],
+            },
+            {
+              name: 'host-selected-originals-sidecar',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'summary_material_consent::tests', '--', '--test-threads=1'],
+              expected: ['reopened_sidecar_requires_the_current_control_event_task_and_selection'],
+            },
+            {
+              name: 'host-selected-originals-material-validation',
+              args: ['test', '--locked', '-p', 'exomind-beta-host', '--lib', 'summary_material::tests', '--', '--test-threads=1'],
+              expected: ['only_png_jpeg_and_webp_are_provider_image_material', 'selected_original_bytes_must_match_the_frozen_hash_and_length'],
+            },
+            {
               name: 'core-external-summary-source-boundary',
               args: ['test', '--locked', '-p', 'exomind-core', '--lib', 'external_summary_evidence_rejects_internal_correction_source_kind', '--', '--test-threads=1'],
               expected: ['external_summary_evidence_rejects_internal_correction_source_kind'],

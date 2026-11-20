@@ -1,4 +1,4 @@
-> 最后更新：`2026-11-21` | 更新者：`Codex` | 更新内容概要：`补充 opt-in 摘要历史及明确 coverage；保留旧调用和旧 RT 路线。`
+> 最后更新：`2026-11-21` | 更新者：`Codex` | 更新内容概要：`维护 opt-in 摘要历史；说明 Human-only 原件外发入口和独立本机同意。`
 
 # Beta Agent 接入：exomind-beta/1
 
@@ -33,6 +33,14 @@ source Host 结果代替冻结 Beta19 或后续候选。日用调用见 [Beta mo
 grant 不等于只读文件沙箱或“只能追加一条说明”：特别是 `agent_note` 的 stage 能力确实存在，不应在授权说明中隐去。stage 还有 P 与作者约束，不能读取其他作者的私有暂存。
 
 hello 只描述全局功能字段，不返回 per-grant 能力。使用源码已接线的 `access/check` 查询当前 token 的实际 grant；不要从 hello 推断某个角色可调用的 API。冻结的 Beta16 安装包不含这批后续源码增量，使用它时以其真实响应为准，不能因 404/403 回退到旧 Runtime。
+
+`capabilities.summary_originals` 表示 Host 的选件执行能力。Human Adapter 以
+`POST /profiles/P/summaries/material-requests` 或 `material-controls` 提交
+`{command, consent}`，consent 含当前 `provider_config_revision` 和 `max_original_bytes`；
+Core command 保持原样。该本机同意独立于一般原件读取权限，不随复制或档案导出分发。
+observer、agent_note、summary_producer 仍不能调用这些执行入口。当前支持 PNG/JPEG/WebP，
+原始总字节最多 256 KiB，完整编码请求另有上限；默认不读、不发送未选原件。
+这不是 monitor SDK 的追加能力，外部 Agent 不得借用 Human grant 执行模型请求。
 
 授权 broker 已有的管理面（不是 Agent 自行操作步骤）：
 
