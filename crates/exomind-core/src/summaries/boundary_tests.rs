@@ -616,6 +616,7 @@ fn portable_artifact_kind_matching_result_remains_internal_current() {
     assert_eq!(artifacts.items[0].event_id, original.event_id);
 }
 #[test]
+#[ignore = "requires pinned old Core10 raw fixture via EXOMIND_PREFREEZE_FIXTURE_DIR"]
 fn genuine_legacy_summary_snapshot_fixture_stays_valid_without_rewriting_raw_body() {
     use sha2::{Digest, Sha256};
     use std::{env, fs, path::PathBuf};

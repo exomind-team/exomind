@@ -25,3 +25,7 @@ Node 与 Bun 入口均保留。输出拒绝仓库内目录、已有目标、链�
 升级测试应把此 fixture 作为只读输入，复制后交给新 Core 打开，并检查事实 BLOB、
 领域 digest、原 local sequence、回执和身份。新库可建立索引，不能改写旧摘要或借用
 fixture 身份运行新设备。升级成功与 peer schema 兼容是不同判断，后者仍须单独协商。
+
+需要此目录的原始摘要/升级测试均显式标记为依赖外部输入，CI 在生成夹具后设置
+`EXOMIND_PREFREEZE_FIXTURE_DIR` 或 `EXOMIND_CORE_SCHEMA10_FIXTURE`，并用 `--ignored`
+选中对应具名用例。没有夹具时不把空测试当作通过；普通 Core 单测不要求先生成旧库。

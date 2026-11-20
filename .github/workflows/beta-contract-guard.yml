@@ -407,7 +407,7 @@ jobs:
             },
             {
               name: 'core-old-raw-summary-preservation',
-              args: ['test', '--locked', '-p', 'exomind-core', '--lib', 'genuine_legacy_summary_snapshot_fixture_stays_valid_without_rewriting_raw_body', '--', '--test-threads=1'],
+              args: ['test', '--locked', '-p', 'exomind-core', '--lib', 'genuine_legacy_summary_snapshot_fixture_stays_valid_without_rewriting_raw_body', '--', '--ignored', '--test-threads=1'],
               expected: ['genuine_legacy_summary_snapshot_fixture_stays_valid_without_rewriting_raw_body'],
               fixture: 'core10',
             },

@@ -322,7 +322,7 @@ fn read_and_export_permit_cannot_claim_success_after_concurrent_release() {
 }
 
 #[test]
-fn schema9_to10_preserves_original_facts_references_bytes_receipt_and_origin_prefix() {
+fn schema9_to_current_preserves_original_facts_references_bytes_receipt_and_origin_prefix() {
     const EVENTS9: &str = "CREATE TABLE events(local_seq INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT UNIQUE NOT NULL,profile_id TEXT NOT NULL REFERENCES profiles(id),digest TEXT NOT NULL,body TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'capture' CHECK(kind IN ('capture','timeblock/1','summary_job/1','summary/1','agent_summary/1','correction/1')))";
     const ORIGIN_ENTRIES9: &str = "CREATE TABLE origin_entries(profile_id TEXT NOT NULL,origin_device TEXT NOT NULL,restoration_epoch TEXT NOT NULL,origin_seq INTEGER NOT NULL CHECK(origin_seq>0),event_id TEXT NOT NULL REFERENCES events(event_id),fact_type TEXT NOT NULL CHECK(fact_type IN ('capture/1','capture/2','timeblock/1','summary_job/1','summary/1','agent_summary/1','correction/1')),digest TEXT NOT NULL,chain_hash TEXT NOT NULL,PRIMARY KEY(profile_id,origin_device,restoration_epoch,origin_seq),UNIQUE(profile_id,origin_device,restoration_epoch,event_id),FOREIGN KEY(profile_id,origin_device,restoration_epoch) REFERENCES origin_heads(profile_id,origin_device,restoration_epoch))";
     const ORIGINAL_CHUNK_DELETE9: &str = "CREATE TRIGGER original_chunks_no_delete BEFORE DELETE ON original_chunks\n BEGIN SELECT RAISE(ABORT,'original release requires a later explicit lifecycle'); END";
@@ -448,7 +448,7 @@ fn schema9_to10_preserves_original_facts_references_bytes_receipt_and_origin_pre
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
             .unwrap(),
-        10
+        crate::CORE_SCHEMA_VERSION
     );
 }
 
