@@ -11,6 +11,7 @@ export interface RedactedDiagnostic {
 }
 
 const MASK_PREFIX_LENGTH = 8;
+const MAX_JAVASCRIPT_DATE_MS = 8_640_000_000_000_000;
 
 /** Stable-prefix mask: keeps a deterministic head of an identifier and drops
  * everything after it. Short identifiers are returned unchanged. */
@@ -24,7 +25,10 @@ function asString(value: unknown): string | null {
 }
 
 function asTimestamp(value: unknown): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+  return typeof value === 'number'
+    && Number.isSafeInteger(value)
+    && value >= 0
+    && value <= MAX_JAVASCRIPT_DATE_MS
     ? value
     : null;
 }

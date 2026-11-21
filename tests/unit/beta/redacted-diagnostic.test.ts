@@ -55,4 +55,11 @@ describe('redactDiagnostic', () => {
     });
     expect(JSON.stringify(redacted)).not.toContain('secret');
   });
+
+  it('drops a safe integer timestamp that cannot be represented as a JavaScript date', () => {
+    expect(redactDiagnostic({
+      ...SOURCE,
+      timestampMs: 8_640_000_000_000_001,
+    }).timestampMs).toBeNull();
+  });
 });
