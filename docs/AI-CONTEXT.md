@@ -50,10 +50,22 @@ Beta 的 Core/Host/Native/UI 边界按上面的当前入口读取，不把下表
 
 ## 当前阶段
 
-2026-11-21 后续候选修复：Beta20 source `6ad7869d` 的 Source Contracts 已通过，但四平台
-构建的 Android job 在档案保存分支发现 `E0425`：Android 引用了仅桌面编译的保存函数。
-工作区已隔离该平台分支，并为不支持的保存位置补可操作反馈；新版本入口递增为
-**Beta21／6021**。Beta20 的 source／recipe 和失败记录保留，不将桌面通过当成 Android 通过。
+2026-11-21 当前候选为 **Beta25／6025／Core11**。functional source
+`5051a6bc` 修复 Beta24 的三个 P2：在途附件捕获的新稿隔离、非法自定义分钟，
+以及取消导出文案；Source Contracts 与 versioned payload `97b642f9` 的独立
+source gate 均通过。request-only recipe `bcabadaa` 的 Build Validation
+`44866998175` 中 resolver、Windows、Linux、macOS、Android 全部成功。精确
+Windows Root 真窗和两位独立 DeepSeek 用户已走 S01-S10；D01/D02/D03 两位均通过。
+
+完整 Beta 仍未签收。两位用户都是 6 项本地路径 pass、S02/S04/S07/S08 等真实
+外部路径 partial；B 的 S10 也为 partial。缺口是第二设备/网络矩阵、真实回顾
+模型、持凭据外部 Agent、可交互系统保存框、物理 Android/麦克风与到期彻底清理。
+这些不能由 source/CI/Root smoke 代替。候选 hash、逐故事证据、P3 观察和逐项恢复
+条件见 [Beta25 frozen and blocked matrix](plans/2026-11-21-beta25-frozen-and-blocked-matrix.md)。
+
+历史阶段：Beta20 source `6ad7869d` 的 Android job 曾发现 `E0425`，后以
+**Beta21／6021** 修正平台分支。Beta20 的 source／recipe 和失败记录保留，不将
+桌面通过当成 Android 通过。
 
 2026-11-21 工作区已完成档案往返／选取内容导出的 Native 与 UI 接线，准备
 **Beta20／6020／Core11**。733 项 Beta 前端、完整类型与生产 Web、90 项 Beta Native、
