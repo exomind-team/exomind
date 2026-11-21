@@ -179,6 +179,31 @@ Host auth 数据库升级到一个新 schema version，新增：
 LocalSend 的“多路径发现”是本轮参考：先 multicast/broadcast，失败后对本地地址
 做 HTTP/服务级兜底。外心使用自己的 announce/probe 帧，不复制其文件传输协议。
 
+### 7.3 LocalSend 源码对照（2026-11-21）
+
+本轮只读核对了 LocalSend 官方仓库提交
+`26cc8f997aa3f7ad789c12500a8b7206cfbb3ddc` 中的
+[`packages/core/src/discovery/mod.rs`](https://github.com/localsend/localsend/blob/26cc8f997aa3f7ad789c12500a8b7206cfbb3ddc/packages/core/src/discovery/mod.rs)、
+[`packages/core/src/discovery/store.rs`](https://github.com/localsend/localsend/blob/26cc8f997aa3f7ad789c12500a8b7206cfbb3ddc/packages/core/src/discovery/store.rs)、
+[`packages/core/src/multicast/socket.rs`](https://github.com/localsend/localsend/blob/26cc8f997aa3f7ad789c12500a8b7206cfbb3ddc/packages/core/src/multicast/socket.rs)
+与
+[`app/lib/provider/network/scan_facade.dart`](https://github.com/localsend/localsend/blob/26cc8f997aa3f7ad789c12500a8b7206cfbb3ddc/app/lib/provider/network/scan_facade.dart)。
+
+可迁移的工程规律：
+
+- 先走便宜的广播、公告与已知端点；短 grace 内没有任何确认时才升级到子网探测。
+- 子网协议层通常探 `/24`，单请求超时为数百毫秒，并限制并发；应用层另行限制
+  自动扫描的接口数，用户可改选范围。
+- 发现结果按稳定设备身份归并，同一设备的多个通道保留独立可达证据和方向，
+  不只留一个“在线/离线”。
+- 未确认的广播只可供诊断，不能直接作为传输目标；发现成功也不自动形成业务授权。
+- 一个接口或广播 socket 失败不应让其他接口与主动探测一起失效。
+
+外心只迁移这些结构规律，继续使用 `exomind-peer/1`、签名邀请、TLS pin 和
+profile membership，不复制 LocalSend 的 HTTP 注册协议。`/24` 也不是全局默认：
+若用户选择更大 IPv4 范围，外心先用计划中的 `/21` 内硬上限、总 host 上限、并发
+上限和取消代次收束，再按物理 LAN、EasyTier 与其他接口分别返回扫描范围与结果。
+
 ## 8. 邀请流程
 
 ### 8.1 默认无复制流程
