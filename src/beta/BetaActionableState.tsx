@@ -18,16 +18,27 @@ export interface ActionableAction {
   variant?: 'default' | 'outline' | 'ghost' | 'destructive';
 }
 
-export interface BetaActionableStateProps {
-  state: ActionableStateKind;
+interface ActionableStateBase {
   title: string;
   detail?: string;
   lastConfirmedAtMs?: number;
   actions?: readonly ActionableAction[];
-  diagnostic?: RedactedDiagnostic | null;
   onAction?: (id: string) => void;
+}
+
+interface NonCopyStateProps extends ActionableStateBase {
+  state: 'success' | 'warning';
+  diagnostic?: RedactedDiagnostic | null;
   onCopyDiagnostic?: () => Promise<'copied' | 'failed'>;
 }
+
+interface CopyStateProps extends ActionableStateBase {
+  state: 'pending' | 'error' | 'unknown' | 'private';
+  diagnostic: RedactedDiagnostic;
+  onCopyDiagnostic?: () => Promise<'copied' | 'failed'>;
+}
+
+export type BetaActionableStateProps = NonCopyStateProps | CopyStateProps;
 
 const STATE_LABELS: Record<ActionableStateKind, string> = {
   pending: '处理中',
@@ -82,6 +93,35 @@ function DiagnosticItem({ label, value }: { label: string; value: string }) {
   );
 }
 
+type CopyOutcome = 'copied' | 'failed' | 'unavailable';
+
+function copyNoticeFor(outcome: CopyOutcome): string {
+  switch (outcome) {
+    case 'copied':
+      return '诊断已复制';
+    case 'unavailable':
+      return '此窗口不支持剪贴板，请手动复制诊断详情';
+    case 'failed':
+      return '复制失败，可重试';
+  }
+}
+
+/** Built-in fallback: serialize the already re-sanitized diagnostic. Key order
+ * is fixed by redactDiagnostic, so the JSON is stable across runs. */
+async function copyRedactedDiagnostic(
+  diagnostic: RedactedDiagnostic,
+): Promise<CopyOutcome> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+    return 'unavailable';
+  }
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(diagnostic));
+    return 'copied';
+  } catch {
+    return 'failed';
+  }
+}
+
 /** Shared contract surface for consequential waits, errors, unknown results and
  * private-but-alive states. The state itself may never disappear; only body
  * content may be redacted. */
@@ -108,17 +148,21 @@ export function BetaActionableState({
   const showCopy = COPY_AVAILABLE_STATES.has(state);
 
   const handleCopy = async () => {
-    if (!onCopyDiagnostic || copyBusy) return;
+    if (!showCopy || copyBusy) return;
     const flight = ++copyFlight.current;
     setCopyBusy(true);
     setCopyNotice(null);
     try {
-      const result = await onCopyDiagnostic();
+      const outcome: CopyOutcome = onCopyDiagnostic
+        ? await onCopyDiagnostic()
+        : safeDiagnostic
+          ? await copyRedactedDiagnostic(safeDiagnostic)
+          : 'failed';
       if (copyFlight.current !== flight) return;
-      setCopyNotice(result === 'copied' ? '诊断已复制' : '复制失败，可重试');
+      setCopyNotice(copyNoticeFor(outcome));
     } catch {
       if (copyFlight.current !== flight) return;
-      setCopyNotice('复制失败，可重试');
+      setCopyNotice(copyNoticeFor('failed'));
     } finally {
       if (copyFlight.current === flight) setCopyBusy(false);
     }
@@ -162,19 +206,20 @@ export function BetaActionableState({
         </div>
       </div>
 
-      {actions?.length || (showCopy && onCopyDiagnostic) ? (
+      {actions?.length || showCopy ? (
         <div className="mt-3 flex flex-wrap gap-2">
           {actions?.map((action) => (
             <Button
               key={action.id}
               type="button"
               variant={action.variant ?? 'outline'}
+              disabled={!onAction}
               onClick={() => onAction?.(action.id)}
             >
               {action.label}
             </Button>
           ))}
-          {showCopy && onCopyDiagnostic ? (
+          {showCopy ? (
             <Button
               type="button"
               variant="ghost"
