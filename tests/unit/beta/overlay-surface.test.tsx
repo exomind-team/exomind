@@ -38,8 +38,8 @@ describe('real Beta overlay uses shared Alpha presentation and Native workspace 
     f.disconnect();
     render(<BetaOverlaySurface session={f.session}/>);
 
-    expect(await screen.findByRole('button',{name:'同名档案 · 123456789-a'})).toBeVisible();
-    fireEvent.click(screen.getByRole('button',{name:'同名档案 · 123456789-b'}));
+    expect(await screen.findByRole('button',{name:'123456789-a · 同名档案'})).toBeVisible();
+    fireEvent.click(screen.getByRole('button',{name:'123456789-b · 同名档案'}));
     await waitFor(()=>expect(nativeWorkspaceBind).toHaveBeenCalledWith('123456789-b'));
     expect(f.session.refresh).toHaveBeenCalledTimes(1);
   });

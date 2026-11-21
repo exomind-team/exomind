@@ -115,6 +115,43 @@ fn lifecycle_api_entrypoint_status_returns_host_owned_state() {
 }
 
 #[test]
+fn lifecycle_api_entrypoint_lists_bounded_followups_for_the_validated_profile() {
+    let fixture = fixture();
+    let human = fixture.workspace.human_session(fixture.profile).unwrap();
+    assert!(matches!(
+        fixture.host.original_lifecycle_followups(
+            &human,
+            fixture.profile,
+            None,
+            20,
+        ),
+        Err(HostError::Unauthorized | HostError::Forbidden)
+    ));
+
+    let page = native_lifecycle_followups(
+        &fixture.host,
+        &fixture.owner,
+        validated_profile(&fixture),
+        None,
+        20,
+    )
+    .unwrap();
+    assert!(page.items.is_empty());
+    assert_eq!(page.next_after, None);
+
+    let error = native_lifecycle_followups(
+        &fixture.host,
+        &fixture.owner,
+        validated_profile(&fixture),
+        None,
+        0,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.code, "invalid_original_followup_limit");
+}
+
+#[test]
 fn status_validates_native_human_then_uses_host_owner_authority() {
     let fixture = fixture();
     let human = fixture.workspace.human_session(fixture.profile).unwrap();
@@ -590,7 +627,8 @@ fn lifecycle_capability_descriptor_is_explicit_and_contains_no_user_data() {
         ))
     );
     assert_eq!(value["supports_restore_retry"], true);
-    assert_eq!(value.as_object().unwrap().len(), 6);
+    assert_eq!(value["supports_followups"], true);
+    assert_eq!(value.as_object().unwrap().len(), 7);
 }
 
 #[test]

@@ -46,7 +46,9 @@ export function betaProfileLabels(profiles: readonly BetaProfile[]): Map<string,
       labels.set(profile.profile_id, {
         displayName,
         identity,
-        text: identity ? `${displayName} · ${identity}` : displayName,
+        // The compact select may truncate from the end; keep the distinguishing
+        // identity first so a narrow layout cannot remove it.
+        text: identity ? `${identity} · ${displayName}` : displayName,
       });
     }
   }

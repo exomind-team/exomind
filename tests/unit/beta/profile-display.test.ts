@@ -18,8 +18,8 @@ describe('Beta profile display labels', () => {
       { profile_id: '12345678-b', display_name: '同名档案' },
     ]);
 
-    expect(labels.get('12345678-a')?.text).toBe('同名档案 · 12345678-a');
-    expect(labels.get('12345678-b')?.text).toBe('同名档案 · 12345678-b');
+    expect(labels.get('12345678-a')?.text).toBe('12345678-a · 同名档案');
+    expect(labels.get('12345678-b')?.text).toBe('12345678-b · 同名档案');
   });
 
   it('extends the identity prefix until every colliding profile is distinct', () => {

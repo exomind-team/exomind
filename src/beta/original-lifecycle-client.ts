@@ -7,6 +7,7 @@ export const ORIGINAL_LIFECYCLE_COMMANDS = {
   retryCacheCleanup: "beta_retry_original_cache_cleanup",
   revealCache: "beta_reveal_original_cache",
   retryRestore: "beta_retry_original_restore",
+  followups: "beta_original_lifecycle_followups",
 } as const;
 
 export const ORIGINAL_LIFECYCLE_SCHEMA_VERSION = 1;
@@ -47,6 +48,7 @@ export interface OriginalLifecycleCapabilities {
   cache_policy: OriginalCachePolicy;
   supports_reveal: boolean;
   supports_restore_retry?: boolean;
+  supports_followups?: boolean;
 }
 
 export interface OriginalLifecycleCommand {
@@ -59,7 +61,7 @@ export interface OriginalLifecycleCommand {
   action: OriginalLifecycleAction;
   cleanup_confirmed: boolean;
   follow_up_device_ids: string[];
-  responds_to_event_id: null;
+  responds_to_event_id: string | null;
 }
 
 export interface OriginalLifecycleReceipt {
@@ -93,6 +95,32 @@ export interface OriginalLifecycleHostStatus {
 export interface OriginalLifecycleStatus {
   lifecycle: OriginalLifecycleHostStatus;
   cache_presence: OriginalCachePresence;
+}
+
+export interface OriginalLifecycleFollowupRequest {
+  event_id: string;
+  profile_id: string;
+  device_id: string;
+  author_id: string;
+  original_id: string;
+  action: "release_local";
+  generation: number;
+  command_id: string;
+  occurred_at_ms: number;
+  follow_up_device_ids: string[];
+  responds_to_event_id: string | null;
+  local_seq: number;
+  digest: string;
+}
+
+export interface OriginalLifecycleFollowup {
+  request: OriginalLifecycleFollowupRequest;
+  resolution: "unresolved" | "manifest_known";
+}
+
+export interface OriginalLifecycleFollowupPage {
+  items: OriginalLifecycleFollowup[];
+  next_after: string | null;
 }
 
 export interface OriginalCacheCleanupResult {
@@ -140,6 +168,11 @@ export interface OriginalLifecycleClient {
     originalId: string,
   ): Promise<OriginalCacheCleanupResult>;
   revealCache(profileId: string, originalId: string): Promise<void>;
+  followups?(
+    profileId: string,
+    after: string | null,
+    limit: number,
+  ): Promise<OriginalLifecycleFollowupPage>;
 }
 
 export type OriginalLifecycleInvoke = <T>(
@@ -237,7 +270,9 @@ function parseCapabilities(value: unknown): OriginalLifecycleCapabilities {
     !["verified_same_handle", "retained"].includes(descriptor.cache_policy) ||
     typeof descriptor.supports_reveal !== "boolean" ||
     (descriptor.supports_restore_retry !== undefined &&
-      typeof descriptor.supports_restore_retry !== "boolean")
+      typeof descriptor.supports_restore_retry !== "boolean") ||
+    (descriptor.supports_followups !== undefined &&
+      typeof descriptor.supports_followups !== "boolean")
   ) {
     throw new OriginalLifecycleClientError(
       "当前 Native 原件管理能力版本不兼容，尚未发起管理操作。",
@@ -267,6 +302,85 @@ function parseCapabilities(value: unknown): OriginalLifecycleCapabilities {
     cache_policy: descriptor.cache_policy as OriginalCachePolicy,
     supports_reveal: descriptor.supports_reveal,
     supports_restore_retry: descriptor.supports_restore_retry === true,
+    supports_followups: descriptor.supports_followups === true,
+  };
+}
+
+function parseFollowupPage(
+  value: unknown,
+  profileId: string,
+  limit: number,
+): OriginalLifecycleFollowupPage {
+  const response = object(value);
+  if (
+    !Array.isArray(response.items) ||
+    response.items.length > limit ||
+    !nullableText(response.next_after)
+  ) {
+    throw invalidResponse();
+  }
+  const items: OriginalLifecycleFollowup[] = response.items.map((entry) => {
+    const followup = object(entry);
+    const request = object(followup.request);
+    if (
+      followup.resolution !== "unresolved" &&
+      followup.resolution !== "manifest_known"
+    ) {
+      throw invalidResponse();
+    }
+    if (
+      request.profile_id !== profileId ||
+      !text(request.event_id) ||
+      !text(request.device_id) ||
+      !text(request.author_id) ||
+      !text(request.original_id) ||
+      request.action !== "release_local" ||
+      !integer(request.generation) ||
+      request.generation <= 0 ||
+      !text(request.command_id) ||
+      !integer(request.occurred_at_ms) ||
+      request.occurred_at_ms < 0 ||
+      !Array.isArray(request.follow_up_device_ids) ||
+      request.follow_up_device_ids.length > 256 ||
+      request.follow_up_device_ids.some((deviceId) => !text(deviceId)) ||
+      new Set(request.follow_up_device_ids).size !==
+        request.follow_up_device_ids.length ||
+      !nullableText(request.responds_to_event_id) ||
+      !integer(request.local_seq) ||
+      request.local_seq <= 0 ||
+      typeof request.digest !== "string" ||
+      !/^[a-f0-9]{64}$/.test(request.digest)
+    ) {
+      throw invalidResponse();
+    }
+    return {
+      request: {
+        event_id: request.event_id,
+        profile_id: profileId,
+        device_id: request.device_id,
+        author_id: request.author_id,
+        original_id: request.original_id,
+        action: "release_local" as const,
+        generation: request.generation,
+        command_id: request.command_id,
+        occurred_at_ms: request.occurred_at_ms,
+        follow_up_device_ids: request.follow_up_device_ids.map(
+          (deviceId) => deviceId as string,
+        ),
+        responds_to_event_id: request.responds_to_event_id,
+        local_seq: request.local_seq,
+        digest: request.digest,
+      },
+      resolution:
+        followup.resolution as OriginalLifecycleFollowup["resolution"],
+    };
+  });
+  if (new Set(items.map((item) => item.request.event_id)).size !== items.length) {
+    throw invalidResponse();
+  }
+  return {
+    items,
+    next_after: response.next_after as string | null,
   };
 }
 
@@ -567,6 +681,20 @@ export function createOriginalLifecycleClient(
         profileId,
         originalId,
       });
+    },
+    async followups(profileId, after, limit) {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+        throw invalidResponse();
+      }
+      return parseFollowupPage(
+        await call<unknown>(ORIGINAL_LIFECYCLE_COMMANDS.followups, {
+          profileId,
+          limit,
+          ...(after ? { after } : {}),
+        }),
+        profileId,
+        limit,
+      );
     },
   };
 }

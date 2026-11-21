@@ -9,8 +9,8 @@ use exomind_beta_host::{
 };
 
 use exomind_core::{
-    OriginalBytesState, OriginalId, OriginalLifecycleAction, OriginalLifecycleCommand, ProfileId,
-    Receipt,
+    EventId, OriginalBytesState, OriginalId, OriginalLifecycleAction, OriginalLifecycleCommand,
+    OriginalLifecycleFollowupPage, ProfileId, Receipt,
 };
 use serde::Serialize;
 use std::{
@@ -289,6 +289,23 @@ pub(super) fn apply_original_lifecycle(
     })
 }
 
+pub(super) fn native_lifecycle_followups(
+    host: &BetaHost,
+    owner: &Session,
+    profile: NativeHumanProfile,
+    after: Option<EventId>,
+    limit: usize,
+) -> Result<OriginalLifecycleFollowupPage, Failure> {
+    if limit == 0 || limit > 100 {
+        return Err(failure(
+            "invalid_original_followup_limit",
+            "原件跟进请求的分页大小无效",
+        ));
+    }
+    host.original_lifecycle_followups(owner, profile.profile_id, after, limit)
+        .map_err(Failure::from)
+}
+
 /// Resets only a hash-failed stage through Host, preserving its Core request and command IDs.
 /// A cancelled partial stage keeps its durable offset and only clears its explicit suppression.
 pub(super) fn retry_original_restore(
@@ -444,6 +461,7 @@ pub(super) struct NativeOriginalLifecycleCapabilities {
     cache_policy: &'static str,
     supports_reveal: bool,
     supports_restore_retry: bool,
+    supports_followups: bool,
 }
 
 pub(super) fn capabilities_descriptor() -> NativeOriginalLifecycleCapabilities {
@@ -466,6 +484,7 @@ pub(super) fn capabilities_descriptor() -> NativeOriginalLifecycleCapabilities {
             target_os = "openbsd"
         )),
         supports_restore_retry: true,
+        supports_followups: true,
     }
 }
 
@@ -537,6 +556,28 @@ pub(super) async fn beta_apply_original_lifecycle(
     }
     invalidate_original_views(&app, profile_id, original_id);
     Ok(result)
+}
+
+#[tauri::command]
+pub(super) async fn beta_original_lifecycle_followups(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    after: Option<EventId>,
+    limit: usize,
+) -> Result<OriginalLifecycleFollowupPage, Failure> {
+    trusted_window(&window, state.inner())?;
+    run_native(state.inner().clone(), move |native| {
+        let profile = validate_native_profile(profile_id, |profile| native.human(profile))?;
+        native_lifecycle_followups(
+            &native.host,
+            &native.owner,
+            profile,
+            after,
+            limit,
+        )
+    })
+    .await
 }
 
 #[tauri::command]

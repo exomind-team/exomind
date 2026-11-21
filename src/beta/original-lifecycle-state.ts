@@ -7,6 +7,7 @@ import {
   type OriginalLifecycleCapabilities,
   type OriginalLifecycleClient,
   type OriginalLifecycleCommand,
+  type OriginalLifecycleFollowup,
   type OriginalLifecycleReceipt,
   type OriginalLifecycleStatus,
 } from "./original-lifecycle-client";
@@ -30,6 +31,12 @@ export type OriginalLifecycleOperationPhase =
   | "unknown"
   | "accepted"
   | "accepted_by_status";
+export type OriginalLifecycleFollowupPhase =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "unsupported"
+  | "error";
 
 export interface OriginalLifecycleOperation {
   command: OriginalLifecycleCommand;
@@ -61,6 +68,10 @@ export interface OriginalLifecycleSnapshot {
   restoreRetryMessage: string;
   revealPhase: "idle" | "running" | "requested" | "error";
   revealMessage: string;
+  followupPhase: OriginalLifecycleFollowupPhase;
+  followups: OriginalLifecycleFollowup[];
+  followupNextAfter: string | null;
+  followupMessage: string;
   message: string;
 }
 
@@ -78,8 +89,14 @@ const INITIAL_SNAPSHOT: OriginalLifecycleSnapshot = {
   restoreRetryMessage: "",
   revealPhase: "idle",
   revealMessage: "",
+  followupPhase: "idle",
+  followups: [],
+  followupNextAfter: null,
+  followupMessage: "",
   message: "",
 };
+
+const FOLLOWUP_PAGE_SIZE = 20;
 
 function currentLocal(
   status: OriginalLifecycleStatus | null,
@@ -190,6 +207,7 @@ export class OriginalLifecycleOwner {
   private readonly listeners = new Set<() => void>();
   private capabilityFlight: Promise<boolean> | null = null;
   private statusSequence = 0;
+  private followupSequence = 0;
   private activeRequests = 0;
   private pruneWhenIdle: (() => void) | null;
 
@@ -325,7 +343,7 @@ export class OriginalLifecycleOwner {
 
   async open(stillVisible: () => boolean = () => true): Promise<void> {
     if (!(await this.ensureCapabilities()) || !stillVisible()) return;
-    await this.refreshStatus();
+    await Promise.all([this.refreshStatus(), this.refreshFollowups()]);
   }
 
   async retryCapabilities(): Promise<void> {
@@ -335,7 +353,92 @@ export class OriginalLifecycleOwner {
       capabilities: null,
       message: "",
     });
-    if (await this.ensureCapabilities(true)) await this.refreshStatus();
+    if (await this.ensureCapabilities(true)) {
+      await Promise.all([this.refreshStatus(), this.refreshFollowups()]);
+    }
+  }
+
+  async refreshFollowups(): Promise<void> {
+    await this.loadFollowups(null, true);
+  }
+
+  async loadMoreFollowups(): Promise<void> {
+    if (this.snapshot.followupPhase !== "ready" || !this.snapshot.followupNextAfter) {
+      return;
+    }
+    await this.loadFollowups(this.snapshot.followupNextAfter, false);
+  }
+
+  private async loadFollowups(after: string | null, replace: boolean): Promise<void> {
+    const capabilities = this.snapshot.capabilities;
+    const followups = this.client.followups;
+    if (!capabilities?.supports_followups || !followups) {
+      this.patch({
+        followupPhase: "unsupported",
+        followups: replace ? [] : this.snapshot.followups,
+        followupNextAfter: replace ? null : this.snapshot.followupNextAfter,
+        followupMessage: "当前版本暂不支持查看其他设备的原件跟进请求。",
+      });
+      return;
+    }
+    const sequence = ++this.followupSequence;
+    this.patch({
+      followupPhase: "loading",
+      ...(replace ? { followups: [], followupNextAfter: null } : {}),
+      followupMessage: replace
+        ? "正在读取其他设备的原件请求…"
+        : "正在读取更多原件请求…",
+    });
+    await this.counted(async () => {
+      try {
+        const page = await followups.call(
+          this.client,
+          this.profileId,
+          after,
+          FOLLOWUP_PAGE_SIZE,
+        );
+        if (sequence !== this.followupSequence) return;
+        if (after !== null && page.next_after === after) {
+          throw new Error("原件请求分页没有前进");
+        }
+        const merged = replace ? [] : [...this.snapshot.followups];
+        const seen = new Set(merged.map((item) => item.request.event_id));
+        for (const item of page.items) {
+          if (
+            item.request.profile_id !== this.profileId ||
+            item.request.original_id !== this.originalId ||
+            seen.has(item.request.event_id)
+          ) {
+            continue;
+          }
+          seen.add(item.request.event_id);
+          merged.push(item);
+        }
+        this.patch({
+          followupPhase: "ready",
+          followups: merged,
+          followupNextAfter: page.next_after,
+          followupMessage:
+            page.next_after === null
+              ? ""
+              : "已读取第一批请求；仍有后续请求可加载。",
+        });
+      } catch (error) {
+        if (sequence !== this.followupSequence) return;
+        const unsupported =
+          error instanceof OriginalLifecycleClientError &&
+          error.kind === "unsupported";
+        this.patch({
+          followupPhase: unsupported ? "unsupported" : "error",
+          followupMessage: failureMessage(
+            error,
+            unsupported
+              ? "当前版本暂不支持查看其他设备的原件跟进请求。"
+              : "其他设备的原件请求尚未确认。",
+          ),
+        });
+      }
+    });
   }
 
   async refreshStatus(): Promise<OriginalLifecycleStatus | null> {
@@ -413,7 +516,11 @@ export class OriginalLifecycleOwner {
     });
   }
 
-  async begin(action: OriginalLifecycleAction): Promise<void> {
+  async begin(
+    action: OriginalLifecycleAction,
+    followUpDeviceIds: readonly string[] = [],
+    respondsToEventId: string | null = null,
+  ): Promise<void> {
     const capabilities = this.snapshot.capabilities;
     const status = this.snapshot.status;
     if (
@@ -428,6 +535,10 @@ export class OriginalLifecycleOwner {
     }
     let command: OriginalLifecycleCommand;
     try {
+      const followups =
+        action === "release_local"
+          ? [...new Set(followUpDeviceIds)].sort()
+          : [];
       command = {
         command_id: this.createId(),
         event_id: this.createId(),
@@ -438,8 +549,9 @@ export class OriginalLifecycleOwner {
         action,
         cleanup_confirmed:
           action === "release_local" || action === "purge_reclaimed",
-        follow_up_device_ids: [],
-        responds_to_event_id: null,
+        follow_up_device_ids: followups,
+        responds_to_event_id:
+          action === "release_local" ? respondsToEventId : null,
       };
     } catch (error) {
       this.patch({
@@ -527,6 +639,9 @@ export class OriginalLifecycleOwner {
           },
           message: "",
         });
+        if (this.snapshot.capabilities?.supports_followups) {
+          await this.refreshFollowups();
+        }
       } catch (error) {
         const busyBeforeCore = failureCode(error) === "original_busy";
         this.patch({

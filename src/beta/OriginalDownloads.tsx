@@ -190,7 +190,7 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
       <div className="min-w-0 flex-1"><p className="break-all text-xs font-medium">{original.file_name}</p><p className="text-[10px] text-muted">{formatBytes(original.byte_length)}</p></div>
       <Button variant="ghost" size="icon" aria-label={`下载 ${original.file_name}`} disabled={exporting||!readable||!client.originalExports&&original.byte_length>MAX_BASIC_DOWNLOAD_BYTES} onClick={onDownload}><Download size={14}/></Button>
     </div>
-    <BetaOriginalLifecyclePanel profileId={profileId} originalId={original.original_id} fileName={original.file_name} visible={visible} revision={lifecycleRevision} />
+    <BetaOriginalLifecyclePanel profileId={profileId} originalId={original.original_id} fileName={original.file_name} deviceLabel={deviceNames.label} visible={visible} revision={lifecycleRevision} />
     {opening&&<p role="status" className="text-xs text-muted">正在准备系统打开…</p>}
     {acquisition&&<div className="mt-1 space-y-1 text-xs text-muted"><p role="status">{label}</p>
       {running&&<><p role="status">{transferLabel}</p>{status&&<Progress className="h-1 w-full" aria-label={`原件获取进度 ${original.file_name}`} value={status.next_offset} max={Math.max(1,status.byte_length)}/>}</>}

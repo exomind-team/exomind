@@ -80,7 +80,7 @@ function cleanup(
 
 describe("Native original lifecycle client contract", () => {
   it("accepts the unchanged lifecycle schema 1 capability from Core 11 without downgrading its identity", async () => {
-    const descriptor = { ...capabilities(), core_schema: 11, supports_restore_retry: true };
+    const descriptor = { ...capabilities(), core_schema: 11, supports_restore_retry: true, supports_followups: true };
     const nativeInvoke = vi.fn(async () => descriptor);
     const client = createOriginalLifecycleClient(nativeInvoke as unknown as OriginalLifecycleInvoke);
     await expect(client.capabilities()).resolves.toEqual(descriptor);
@@ -103,6 +103,7 @@ describe("Native original lifecycle client contract", () => {
     await expect(client.capabilities()).resolves.toEqual({
       ...capabilities(false, "retained"),
       supports_restore_retry: false,
+      supports_followups: false,
     });
     expect(nativeInvoke).toHaveBeenCalledWith(
       ORIGINAL_LIFECYCLE_COMMANDS.capabilities,
@@ -215,5 +216,72 @@ describe("Native original lifecycle client contract", () => {
       cache_policy: "retained",
       supports_reveal: false,
     });
+  });
+
+  it("reads bounded profile follow-up requests and preserves the request cursor", async () => {
+    const DEVICE = "55555555-5555-4555-8555-555555555555";
+    const AUTHOR = "66666666-6666-4666-8666-666666666666";
+    const REQUEST = "77777777-7777-4777-8777-777777777777";
+    const nativeInvoke = vi.fn(async () => ({
+      items: [{
+        request: {
+          event_id: REQUEST,
+          profile_id: PROFILE,
+          device_id: DEVICE,
+          author_id: AUTHOR,
+          original_id: ORIGINAL,
+          action: "release_local",
+          generation: 4,
+          command_id: COMMAND_ID,
+          occurred_at_ms: 100,
+          follow_up_device_ids: ["88888888-8888-4888-8888-888888888888"],
+          responds_to_event_id: null,
+          local_seq: 9,
+          digest: "d".repeat(64),
+        },
+        resolution: "manifest_known",
+      }],
+      next_after: REQUEST,
+    }));
+    const client = createOriginalLifecycleClient(
+      nativeInvoke as unknown as OriginalLifecycleInvoke,
+    );
+
+    await expect(client.followups(PROFILE, null, 20)).resolves.toMatchObject({
+      items: [{
+        request: { event_id: REQUEST, profile_id: PROFILE, original_id: ORIGINAL },
+        resolution: "manifest_known",
+      }],
+      next_after: REQUEST,
+    });
+    expect(nativeInvoke).toHaveBeenCalledWith(
+      ORIGINAL_LIFECYCLE_COMMANDS.followups,
+      { profileId: PROFILE, limit: 20 },
+    );
+
+    const wrongProfile = vi.fn(async () => ({
+      items: [{
+        request: {
+          event_id: REQUEST,
+          profile_id: "99999999-9999-4999-8999-999999999999",
+          device_id: DEVICE,
+          author_id: AUTHOR,
+          original_id: ORIGINAL,
+          action: "release_local",
+          generation: 4,
+          command_id: COMMAND_ID,
+          occurred_at_ms: 100,
+          follow_up_device_ids: [],
+          responds_to_event_id: null,
+          local_seq: 9,
+          digest: "d".repeat(64),
+        },
+        resolution: "unresolved",
+      }],
+      next_after: null,
+    }));
+    await expect(createOriginalLifecycleClient(
+      wrongProfile as unknown as OriginalLifecycleInvoke,
+    ).followups(PROFILE, null, 20)).rejects.toMatchObject({ code: "invalid_response" });
   });
 });

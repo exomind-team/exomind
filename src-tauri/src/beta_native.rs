@@ -1215,6 +1215,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             original_lifecycle::beta_original_lifecycle_status,
             original_lifecycle::beta_original_lifecycle_capabilities,
             original_lifecycle::beta_apply_original_lifecycle,
+            original_lifecycle::beta_original_lifecycle_followups,
             original_lifecycle::beta_retry_original_restore,
             original_lifecycle::beta_retry_original_cache_cleanup,
             original_lifecycle::beta_reveal_original_cache,

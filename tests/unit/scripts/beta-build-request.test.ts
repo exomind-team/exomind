@@ -215,9 +215,9 @@ describe('Beta build request validation', () => {
     }
   });
 
-  it('validates the exact Beta22 config file through the immutable request identity', () => {
+  it('validates the exact Beta23 config file through the immutable request identity', () => {
     const request = resolveBetaBuildRequest(dispatchInput({
-      dispatchInputs: { ...candidateRequest, expected_version: '0.6.0-beta22' },
+      dispatchInputs: { ...candidateRequest, expected_version: '0.6.0-beta23' },
     }));
     const config = JSON.parse(readFileSync(resolve('src-tauri/tauri.beta.conf.json'), 'utf8')) as unknown;
     expect(validateBetaCandidateIdentity(request, CANDIDATE_SHA, config)).toBeUndefined();
@@ -229,6 +229,18 @@ describe('Beta build request validation', () => {
     const config = { ...beta16Config(), version: '0.6.0-beta22', bundle: { android: { versionCode: 6022 } } };
     expect(validateBetaCandidateIdentity(request, CANDIDATE_SHA, config)).toBeUndefined();
     for (const versionCode of [6020, 6021, 6023]) {
+      expectCode(() => validateBetaCandidateIdentity(request, CANDIDATE_SHA, {
+        ...config, bundle: { android: { versionCode } },
+      }), 'version_code_mismatch');
+    }
+  });
+  it('accepts Beta23 only with Android versionCode 6023 and rejects adjacent codes', () => {
+    const request = resolveBetaBuildRequest(dispatchInput({
+      dispatchInputs: { ...candidateRequest, expected_version: '0.6.0-beta23' },
+    }));
+    const config = { ...beta16Config(), version: '0.6.0-beta23', bundle: { android: { versionCode: 6023 } } };
+    expect(validateBetaCandidateIdentity(request, CANDIDATE_SHA, config)).toBeUndefined();
+    for (const versionCode of [6021, 6022, 6024]) {
       expectCode(() => validateBetaCandidateIdentity(request, CANDIDATE_SHA, {
         ...config, bundle: { android: { versionCode } },
       }), 'version_code_mismatch');

@@ -60,6 +60,7 @@ Alpha 组件承担呈现，复用视觉资产不意味着继承旧 Runtime 的�
 | 回顾原件与外发同意 | Host summary/material/provider、本机 sidecar、手动压缩及任务确认 UI | [选件与本机外发合同](../../docs/development/beta-summary-originals.md)；源码已接通，旧候选不含此能力 |
 | 浮窗与共享草稿 | `native_workspace.rs`、`beta_overlay.rs`、`overlay/` | Host `tests/native_workspace.rs`、`main-workspace-client`、`presentation-independence` |
 | 原件准备/获取/导出 | `drafts.ts`、Host sources/peers、Native originals/export | 字节/hash、取消/代际、搜索离场、系统打开分别验证 |
+| 原件本机释放与跟进 | Host/Core lifecycle、Native lifecycle command、附件卡管理面板 | 释放只作用于本机；其他设备必须显式选择，接收端查看请求后仍由本机 Human 决定是否释放 |
 | 反馈与快捷键 | `BetaFocusTimer`、`BetaOverlayPage`、共享反馈Dialog | 固定 Ctrl/Cmd+Enter；草稿 ACK 前快速提交；IME 不误发；编辑不冒充提交忙 |
 | 设置/外观 | Beta adapter + 共享组件/settings primitives | 先复用展示与语义 token，Alpha/Beta 状态仍隔离 |
 | Android 生成物 | 对应 plugin crate + `beta-android-prepare.ts` | 修改维护源，fresh 构建后核最终 APK；真机外观另验 |

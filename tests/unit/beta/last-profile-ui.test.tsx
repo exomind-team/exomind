@@ -27,11 +27,11 @@ describe('Beta reopens the last successfully opened local profile', () => {
     const select = await screen.findByRole('combobox', { name: '当前档案' });
     await waitFor(() => expect(select).toBeEnabled());
     await selectField(select, '123456789-b');
-    await waitFor(() => expect(select).toHaveTextContent('同名档案 · 123456789-b'));
+    await waitFor(() => expect(select).toHaveTextContent('123456789-b · 同名档案'));
 
     fireEvent.click(screen.getByRole('button', { name: '管理档案' }));
-    expect(screen.getByRole('button', { name: '同名档案 · 123456789-a' })).toBeVisible();
-    expect(screen.getByRole('button', { name: '同名档案 · 123456789-b' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '123456789-a · 同名档案' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '123456789-b · 同名档案' })).toBeVisible();
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
 
     fireEvent.change(await screen.findByRole('textbox', { name: '记录当下' }), {

@@ -16,7 +16,7 @@ export function BetaProfileDialog({ open, onOpenChange, profiles, profileId, loa
   const labels=betaProfileLabels(profiles);
   useEffect(()=>{if(!open)openedProfile.current=profileId;else if(profileId!==openedProfile.current)onOpenChange(false);},[open,profileId,onOpenChange]);
   return <Dialog open={open} onOpenChange={next=>{if(!creating)onOpenChange(next);}}>
-    <DialogContent><DialogHeader><DialogTitle>打开档案</DialogTitle><DialogDescription>切换前会确认当前草稿已在本机暂存。同名档案仍分别保存。</DialogDescription></DialogHeader>
+    <DialogContent><DialogHeader><DialogTitle>打开档案</DialogTitle><DialogDescription>切换前会确认当前草稿已在本机暂存。同名档案名前的编号用于区分，各自的记录仍分别保存。</DialogDescription></DialogHeader>
       {loading?<p role="status" className="text-sm text-muted">正在读取档案…</p>:<div className="space-y-2">{profiles.length===0?<p className="text-sm text-secondary">还没有本机档案。</p>:profiles.map(profile=>{const label=labels.get(profile.profile_id)?.text??profile.profile_id;return <Button key={profile.profile_id} variant="ghost" className="h-auto w-full justify-between py-3 text-left" aria-label={label} aria-pressed={profile.profile_id===profileId} disabled={disabled||creating} onClick={()=>{void onSelect(profile.profile_id).then(selected=>{if(selected)onOpenChange(false);});}}><span className="min-w-0 truncate">{label}</span>{profile.profile_id===profileId&&<Check size={16} aria-label="当前档案"/>}</Button>;})}</div>}
       <form onSubmit={event=>{void onCreate(event);}} className="space-y-3 border-t border-border-card pt-4">
         <label htmlFor="beta-dialog-profile-name" className="text-sm font-medium text-foreground">创建本机档案</label>

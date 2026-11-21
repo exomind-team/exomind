@@ -29,6 +29,7 @@ function capabilities(supportsReveal = true): OriginalLifecycleCapabilities {
     ],
     cache_policy: "verified_same_handle",
     supports_reveal: supportsReveal,
+    supports_followups: true,
   };
 }
 
@@ -95,11 +96,14 @@ function fakeClient(options: {
   applyStatus?: OriginalLifecycleStatus["lifecycle"]["local"]["bytes_state"];
   cleanup?: OriginalCacheCleanupResult;
   retryCleanup?: OriginalCacheCleanupResult;
+  remoteSources?: OriginalLifecycleStatus["lifecycle"]["remote_sources"];
+  followups?: Awaited<ReturnType<NonNullable<OriginalLifecycleClient["followups"]>>>;
 } = {}): OriginalLifecycleClient {
   const initial = lifecycleStatus(
     options.initialState ?? "available",
     options.cachePresence ?? "absent",
   );
+  initial.lifecycle.remote_sources = options.remoteSources ?? [];
   return {
     capabilities: vi.fn(async () => capabilities(options.supportsReveal)),
     status: vi.fn(async () => initial),
@@ -121,6 +125,7 @@ function fakeClient(options: {
       cleanupResult("complete", null, false, "absent"),
     ),
     revealCache: vi.fn(async () => {}),
+    followups: vi.fn(async () => options.followups ?? { items: [], next_after: null }),
   };
 }
 
@@ -138,6 +143,73 @@ function renderPanel(client: OriginalLifecycleClient) {
 afterEach(() => cleanup());
 
 describe("Beta original lifecycle panel", () => {
+  it("keeps release local by default and sends only explicitly selected follow-up devices", async () => {
+    const user = userEvent.setup();
+    const first = "77777777-7777-4777-8777-777777777777";
+    const second = "88888888-8888-4888-8888-888888888888";
+    const native = fakeClient({
+      remoteSources: [
+        { device_id: first, state: "needs_probe" },
+        { device_id: second, state: "needs_probe" },
+      ],
+      applyStatus: "released",
+    });
+    renderPanel(native);
+    await user.click(screen.getByRole("button", { name: "管理本机副本" }));
+    await user.click(await screen.findByRole("button", { name: "释放本机副本" }));
+
+    expect(screen.getByText(/不会自动删除另一台设备/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: `通知设备 77777777 跟进` }));
+    await user.click(screen.getByRole("button", { name: "确认释放本机副本" }));
+
+    await waitFor(() => expect(native.apply).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(native.apply).mock.calls[0][0].follow_up_device_ids).toEqual([first]);
+  });
+
+  it("shows an incoming release request as informational until the local human releases bytes", async () => {
+    const user = userEvent.setup();
+    const REQUEST = "77777777-7777-4777-8777-777777777777";
+    const FROM = "88888888-8888-4888-8888-888888888888";
+    const native = fakeClient({
+      followups: {
+        items: [{
+          request: {
+            event_id: REQUEST,
+            profile_id: PROFILE,
+            device_id: FROM,
+            author_id: "99999999-9999-4999-8999-999999999999",
+            original_id: ORIGINAL,
+            action: "release_local",
+            generation: 4,
+            command_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            occurred_at_ms: 100,
+            follow_up_device_ids: ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
+            responds_to_event_id: null,
+            local_seq: 9,
+            digest: "c".repeat(64),
+          },
+          resolution: "manifest_known",
+        }],
+        next_after: null,
+      },
+      applyStatus: "released",
+    });
+    renderPanel(native);
+    await user.click(screen.getByRole("button", { name: "管理本机副本" }));
+
+    expect(await screen.findByText(/不会自动删除本机副本/)).toBeVisible();
+    expect(native.apply).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "按此请求释放本机副本" }));
+    await user.click(screen.getByRole("button", { name: "确认释放本机副本" }));
+
+    await waitFor(() => expect(native.apply).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(native.apply).mock.calls[0][0]).toMatchObject({
+      action: "release_local",
+      responds_to_event_id: REQUEST,
+      follow_up_device_ids: [],
+    });
+  });
+
   it("refreshes an open lifecycle view after an attachment availability invalidation without issuing another action", async () => {
     const user = userEvent.setup();
     const native = fakeClient({initialState: "restore_pending"});

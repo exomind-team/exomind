@@ -36,6 +36,7 @@ function capabilities(
     ] as OriginalLifecycleCapabilities["operations"],
     cache_policy: "verified_same_handle",
     supports_reveal: supportsReveal,
+    supports_followups: true,
   };
 }
 
@@ -335,6 +336,58 @@ describe("Original lifecycle operation owner", () => {
     expect(native.apply).toHaveBeenCalledTimes(2);
     expect(native.apply).toHaveBeenNthCalledWith(2, draft);
     expect(owner.getSnapshot().operation?.phase).toBe("accepted");
+  });
+
+  it("fixes sorted explicit follow-up recipients into the retryable release command", async () => {
+    const first = "77777777-7777-4777-8777-777777777777";
+    const second = "88888888-8888-4888-8888-888888888888";
+    const native = client({
+      apply: vi.fn()
+        .mockRejectedValueOnce(busyError())
+        .mockImplementation(async (command) =>
+          applied(
+            command,
+            lifecycleStatus("released", {
+              generation: 3,
+              latestEventId: command.event_id,
+            }),
+          ),
+        ),
+    });
+    const owner = ownerFor(native);
+    await owner.open();
+    await owner.begin("release_local", [second, first, second]);
+
+    const draft = owner.getSnapshot().operation?.command;
+    expect(draft?.follow_up_device_ids).toEqual([first, second]);
+    expect(owner.getSnapshot().operation?.phase).toBe("not_issued");
+    await owner.retrySameCommand();
+    expect(native.apply).toHaveBeenNthCalledWith(2, draft);
+    expect(draft?.follow_up_device_ids).toEqual([first, second]);
+  });
+
+  it("links an explicit local release answer to the selected incoming request", async () => {
+    const REQUEST = "77777777-7777-4777-8777-777777777777";
+    const native = client({
+      status: vi.fn(async () => lifecycleStatus("available")),
+      apply: vi.fn(async (command) =>
+        applied(
+          command,
+          lifecycleStatus("released", {
+            generation: 3,
+            latestEventId: command.event_id,
+          }),
+        ),
+      ),
+    });
+    const owner = ownerFor(native);
+    await owner.open();
+    await owner.begin("release_local", [], REQUEST);
+
+    expect(native.apply).toHaveBeenCalledWith(expect.objectContaining({
+      action: "release_local",
+      responds_to_event_id: REQUEST,
+    }));
   });
 
   it("retries only Native cache cleanup after status proves an unknown release event", async () => {

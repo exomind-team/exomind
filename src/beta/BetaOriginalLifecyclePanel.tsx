@@ -39,6 +39,7 @@ interface BetaOriginalLifecyclePanelProps {
   originalId: string;
   fileName: string;
   client?: OriginalLifecycleClient | null;
+  deviceLabel?: (deviceId: string) => string;
   visible?: boolean;
   revision?: number;
 }
@@ -64,6 +65,10 @@ const EMPTY_SNAPSHOT: OriginalLifecycleSnapshot = {
   restoreRetryMessage: "",
   revealPhase: "idle",
   revealMessage: "",
+  followupPhase: "idle",
+  followups: [],
+  followupNextAfter: null,
+  followupMessage: "",
   message: "",
 };
 
@@ -224,12 +229,16 @@ export function BetaOriginalLifecyclePanel({
   originalId,
   fileName,
   client: injectedClient,
+  deviceLabel,
   visible = true,
   revision = 0,
 }: BetaOriginalLifecyclePanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [confirmation, setConfirmation] =
     useState<OriginalLifecycleAction | null>(null);
+  const [respondingToEventId, setRespondingToEventId] =
+    useState<string | null>(null);
+  const [selectedFollowups, setSelectedFollowups] = useState<string[]>([]);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const expandedRef = useRef(false);
   const visibleRef = useRef(visible);
@@ -286,7 +295,9 @@ export function BetaOriginalLifecyclePanel({
   useEffect(() => {
     const changed = observedRevision.current !== revision;
     observedRevision.current = revision;
-    if (changed && expanded && visible && owner) void owner.refreshStatus();
+    if (changed && expanded && visible && owner) {
+      void Promise.all([owner.refreshStatus(), owner.refreshFollowups()]);
+    }
   }, [revision, expanded, visible, owner]);
 
   useEffect(
@@ -297,6 +308,17 @@ export function BetaOriginalLifecyclePanel({
   );
 
   const local = snapshot.status?.lifecycle.local ?? null;
+  const remoteSources = snapshot.status?.lifecycle.remote_sources ?? [];
+  const labelForDevice =
+    deviceLabel ??
+    ((deviceId: string) => `未命名设备 ${deviceId.slice(0, 8)}`);
+  useEffect(() => {
+    const available = new Set(remoteSources.map((source) => source.device_id));
+    setSelectedFollowups((current) => {
+      const next = current.filter((deviceId) => available.has(deviceId));
+      return next.length === current.length ? current : next;
+    });
+  }, [remoteSources]);
   useEffect(() => {
     const deadline = local?.reclaim_deadline_ms;
     if (
@@ -337,8 +359,35 @@ export function BetaOriginalLifecyclePanel({
   async function confirmAction() {
     if (!owner || !confirmation) return;
     const action = confirmation;
+    const followups =
+      action === "release_local" && !respondingToEventId
+        ? selectedFollowups
+        : [];
+    const response = action === "release_local" ? respondingToEventId : null;
     setConfirmation(null);
-    await owner.begin(action);
+    setRespondingToEventId(null);
+    setSelectedFollowups([]);
+    await owner.begin(action, followups, response);
+  }
+
+  function openAction(action: OriginalLifecycleAction) {
+    setRespondingToEventId(null);
+    setSelectedFollowups([]);
+    setConfirmation(action);
+  }
+
+  function openIncomingRelease(eventId: string) {
+    setSelectedFollowups([]);
+    setRespondingToEventId(eventId);
+    setConfirmation("release_local");
+  }
+
+  function toggleFollowup(deviceId: string) {
+    setSelectedFollowups((current) =>
+      current.includes(deviceId)
+        ? current.filter((item) => item !== deviceId)
+        : [...current, deviceId],
+    );
   }
 
   return (
@@ -521,13 +570,104 @@ export function BetaOriginalLifecyclePanel({
                       }
                       className="min-h-9"
                       disabled={!owner || unresolved}
-                      onClick={() => setConfirmation(action)}
+                      onClick={() => openAction(action)}
                     >
                       {actionLabel(action)}
                     </Button>
                   ))}
                 </div>
               )}
+
+              {local.bytes_state !== "restore_pending" &&
+                snapshot.followupPhase !== "unsupported" &&
+                snapshot.followupPhase !== "idle" && (
+                  <div className="space-y-2 rounded-lg border border-border-page bg-surface p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium">其他设备的原件跟进请求</p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="min-h-9"
+                        disabled={snapshot.followupPhase === "loading"}
+                        onClick={() => void owner?.refreshFollowups()}
+                      >
+                        <RefreshCw size={14} aria-hidden="true" />
+                        刷新请求
+                      </Button>
+                    </div>
+                    {snapshot.followupPhase === "loading" && (
+                      <p className="text-xs text-secondary" role="status">
+                        {snapshot.followupMessage || "正在读取原件请求…"}
+                      </p>
+                    )}
+                    {snapshot.followupPhase === "error" && (
+                      <p
+                        className="text-xs text-destructive dark:text-red-300"
+                        role="alert"
+                      >
+                        {snapshot.followupMessage || "原件请求尚未确认。"}
+                      </p>
+                    )}
+                    {snapshot.followupPhase === "ready" &&
+                      snapshot.followups.length === 0 &&
+                      !snapshot.followupNextAfter && (
+                        <p className="text-xs text-secondary">
+                          当前没有来自其他设备的原件跟进请求。
+                        </p>
+                      )}
+                    {snapshot.followups.map((followup) => (
+                      <div
+                        key={followup.request.event_id}
+                        className="space-y-1 rounded-lg border border-border-card p-2"
+                      >
+                        <p className="text-xs font-medium">
+                          {labelForDevice(followup.request.device_id)} 请求跟进
+                        </p>
+                        <p className="text-xs text-secondary">
+                          {followup.resolution === "manifest_known"
+                            ? "本机已有此原件的记录；请求不会自动删除本机副本。"
+                            : "本机尚未确认完整的原件副本；请求不会自动获取或删除文件。"}
+                        </p>
+                        <p className="text-[10px] text-muted">
+                          {new Date(followup.request.occurred_at_ms).toLocaleString()}
+                        </p>
+                        {actions.includes("release_local") && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="min-h-9"
+                            disabled={unresolved}
+                            onClick={() =>
+                              openIncomingRelease(followup.request.event_id)
+                            }
+                          >
+                            按此请求释放本机副本
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                    {snapshot.followupMessage &&
+                      snapshot.followupPhase === "ready" && (
+                        <p className="text-xs text-secondary" role="status">
+                          {snapshot.followupMessage}
+                        </p>
+                      )}
+                    {snapshot.followupNextAfter && owner && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="min-h-9"
+                        disabled={snapshot.followupPhase === "loading"}
+                        onClick={() => void owner.loadMoreFollowups()}
+                      >
+                        加载更多请求
+                      </Button>
+                    )}
+                  </div>
+                )}
 
               {!snapshot.cacheResult &&
                 originalCacheCanReveal(snapshot) &&
@@ -789,6 +929,48 @@ export function BetaOriginalLifecyclePanel({
                     对象：{fileName}。{confirmationDetails.description}
                   </DialogDescription>
                 </DialogHeader>
+                {confirmation === "release_local" && respondingToEventId && (
+                  <p className="text-xs text-secondary" role="status">
+                    释放本机副本后，本机会记录它是对所选设备请求的明确回应。其他设备不会因此自动删除自己的副本。
+                  </p>
+                )}
+                {confirmation === "release_local" &&
+                  !respondingToEventId && (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">通知其他设备跟进</p>
+                      <p className="text-xs text-secondary">
+                        只通知你明确选择的已授权设备；不会自动删除另一台设备上的副本。
+                      </p>
+                      {remoteSources.length === 0 ? (
+                        <p className="text-xs text-secondary">
+                          当前没有其他已授权设备可接收跟进请求。
+                        </p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {remoteSources.map((source) => (
+                            <Button
+                              key={source.device_id}
+                              type="button"
+                              size="sm"
+                              variant={
+                                selectedFollowups.includes(source.device_id)
+                                  ? "secondary"
+                                  : "outline"
+                              }
+                              aria-label={`通知设备 ${source.device_id.slice(0, 8)} 跟进`}
+                              aria-pressed={selectedFollowups.includes(
+                                source.device_id,
+                              )}
+                              className="min-h-9"
+                              onClick={() => toggleFollowup(source.device_id)}
+                            >
+                              {labelForDevice(source.device_id)}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 <DialogFooter className="gap-2 sm:gap-2">
                   <Button
                     type="button"
