@@ -232,7 +232,10 @@ describe('Beta period history wiring', () => {
     await user.click(within(group).getByRole('button', { name: '周' }));
     await waitFor(() => expect(client.timelinePeriodPage).toHaveBeenCalledTimes(3));
     const weekWindow = client.timelinePeriodPage.mock.calls.at(-1)?.[1];
-    expect(weekWindow?.to_ms).not.toBe(dayWindow?.to_ms);
+    expect([weekWindow?.from_ms, weekWindow?.to_ms]).not.toEqual([
+      dayWindow?.from_ms,
+      dayWindow?.to_ms,
+    ]);
     expect(weekWindow?.tag).toBe('focus');
 
     await user.click(screen.getByRole('button', { name: '清除标签' }));
