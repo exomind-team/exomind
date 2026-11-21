@@ -1,7 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import { Check, Circle, Clock3, Lock, TriangleAlert } from 'lucide-react';
+import { isTauri } from '@tauri-apps/api/core';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { writeBetaMessageClipboard } from './beta-message-clipboard';
 import { redactDiagnostic, type RedactedDiagnostic } from './redacted-diagnostic';
 
 export type ActionableStateKind =
@@ -111,11 +113,11 @@ function copyNoticeFor(outcome: CopyOutcome): string {
 async function copyRedactedDiagnostic(
   diagnostic: RedactedDiagnostic,
 ): Promise<CopyOutcome> {
-  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+  if (!isTauri() && (typeof navigator === 'undefined' || !navigator.clipboard?.writeText)) {
     return 'unavailable';
   }
   try {
-    await navigator.clipboard.writeText(JSON.stringify(diagnostic));
+    await writeBetaMessageClipboard(JSON.stringify(diagnostic));
     return 'copied';
   } catch {
     return 'failed';
