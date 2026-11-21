@@ -1,8 +1,8 @@
 //! Main-window owner management. Invitation secrets stay out of logs and URLs.
 use super::{Failure, NativeState, trusted_window, work};
 use exomind_beta_host::{
-    HostError, NearbyPeerCandidate, OriginalTransferResult, PEER_CORE_SCHEMA, PEER_PROTOCOL,
-    PeerInvitation, PeerNetworkStatus, PeerOriginalStatus, PeerSyncResult,
+    HostError, NearbyPeerCandidate, NetworkScanResult, OriginalTransferResult, PEER_CORE_SCHEMA,
+    PEER_PROTOCOL, PeerInvitation, PeerNetworkStatus, PeerOriginalStatus, PeerSyncResult, ScanScope,
 };
 use exomind_core::{DeviceId, OriginalId, ProfileId};
 use serde::Serialize;
@@ -194,6 +194,62 @@ pub(super) async fn beta_peer_nearby_candidates(
 ) -> Result<Vec<NearbyPeerCandidate>, Failure> {
     trusted_window(&window, state.inner())?;
     work(state.inner(), |state| state.peers.nearby_candidates()).await
+}
+
+#[tauri::command]
+pub(super) async fn beta_peer_network_enabled(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+) -> Result<bool, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), |state| state.peers.network_enabled()).await
+}
+
+#[tauri::command]
+pub(super) async fn beta_peer_scan_scopes(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+) -> Result<Vec<ScanScope>, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), |state| state.peers.scan_scopes()).await
+}
+
+#[tauri::command]
+pub(super) async fn beta_peer_scan_start(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    scope_ids: Vec<String>,
+    manual_cidrs: Vec<String>,
+) -> Result<NetworkScanResult, Failure> {
+    trusted_window(&window, state.inner())?;
+    if state.closing.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(HostError::Stopped.into());
+    }
+    state
+        .peers
+        .scan_start(scope_ids, manual_cidrs)
+        .await
+        .map_err(Failure::from)
+}
+
+#[tauri::command]
+pub(super) async fn beta_peer_scan_status(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    scan_id: Uuid,
+) -> Result<NetworkScanResult, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| state.peers.scan_status(scan_id)).await
+}
+
+#[tauri::command]
+pub(super) async fn beta_peer_scan_cancel(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    scan_id: Uuid,
+) -> Result<NetworkScanResult, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), move |state| state.peers.scan_cancel(scan_id)).await
 }
 
 #[tauri::command]

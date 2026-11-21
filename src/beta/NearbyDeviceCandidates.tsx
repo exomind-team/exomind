@@ -18,7 +18,7 @@ export function BetaNearbyDevices({
         广播只表示附近存在设备。身份尚未验证；发现本身不会授予档案权限或读取资料。
       </p>
       {candidates.length === 0 ? (
-        <p role="status" className="text-sm text-secondary">{emptyMessage}</p>
+        <p role="status" data-testid="beta-nearby-empty" className="text-sm text-secondary">{emptyMessage}</p>
       ) : (
         <ul className="divide-y divide-border-subtle">
           {candidates.map(candidate => {

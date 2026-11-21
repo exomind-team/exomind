@@ -14,7 +14,7 @@ import { useBetaViewActive } from './view-activity';
 import { errorMessage } from './drafts';
 import { useBetaDateDisplayMode } from './preferences';
 import { BetaPeerJoinError, joinFailureEndpointReports } from './peers-client';
-import type { BetaNearbyCandidate, BetaInvitation, BetaInvitationEndpointReport, BetaInvitationPreview, BetaJoinResult, BetaPeer, BetaPeerStatus, BetaPeersClient } from './peers-client';
+import type { BetaNearbyCandidate, BetaInvitation, BetaInvitationEndpointReport, BetaInvitationPreview, BetaJoinResult, BetaNetworkScan, BetaPeer, BetaPeerStatus, BetaPeersClient, BetaScanScope } from './peers-client';
 import { BetaNearbyDevices } from './NearbyDeviceCandidates';
 import { BetaDeviceName } from './BetaDeviceName';
 import { useBetaDeviceNames } from './device-names';
@@ -67,6 +67,58 @@ function buildInvitationDiagnostic(preview: BetaInvitationPreview, failure: Join
   ];
   return lines.join('\n');
 }
+const SCAN_SCOPE_KIND_LABEL: Record<BetaScanScope['kind'], string> = {
+  physical_lan: '物理局域网',
+  easytier: 'EasyTier',
+  overlay: '覆盖网（未验证，可能为 EasyTier）',
+  other: '其他接口',
+  manual: '手动范围',
+};
+function scanScopeReasonLabel(reason: string): string {
+  const labels: Record<string, string> = {
+    loopback: '回环接口，默认不扫描',
+    virtual_interface: '虚拟接口（WSL/容器/虚拟网卡），默认不扫描',
+    link_local_address: '链路本地地址，默认不扫描',
+    unspecified_address: '未指定地址',
+    multicast_address: '组播地址',
+    broadcast_address: '广播地址',
+    ipv6_not_scanned: 'IPv6 保留，不参与有界扫描',
+    scope_limit: '已达扫描接口上限（8 个）',
+  };
+  return labels[reason] ?? reason;
+}
+// Redaction contract: a scan diagnostic copies only bounded counts, the stage,
+// cancellation state, a stable short scan prefix and whitelisted scope reason
+// codes. Full scan ids, interface names, networks and open-port endpoints are
+// never copied into clipboard diagnostics.
+function buildScanDiagnostic(scan: BetaNetworkScan | null, scopes: readonly BetaScanScope[], error: string, networkError: string): string {
+  const kindCount = (kind: BetaScanScope['kind']) =>
+    scopes.filter(scope => scope.eligible && scope.kind === kind).length;
+  const reasonCounts = new Map<string, number>();
+  for (const scope of scopes) {
+    if (!scope.eligible && scope.reason) {
+      reasonCounts.set(scope.reason, (reasonCounts.get(scope.reason) ?? 0) + 1);
+    }
+  }
+  const reasons = [...reasonCounts.entries()]
+    .map(([reason, count]) => `${reason}×${count}`)
+    .join('、') || '无';
+  const lines = [
+    '附近扫描诊断',
+    ...(scan ? [
+      `扫描标识：${scan.scan_id.slice(0, 8)}…`,
+      `阶段：${scan.stage}`,
+      `尝试：${scan.attempted} · 发现：${scan.discovered} · 跳过：${scan.skipped}`,
+      `已取消：${scan.cancelled ? '是' : '否'}`,
+      `开放端口候选：${scan.discovered_addresses.length} 个`,
+    ] : ['扫描尚未完成']),
+    `可选范围：${scopes.filter(scope => scope.eligible).length} 个（物理局域网 ${kindCount('physical_lan')}、EasyTier ${kindCount('easytier')}、覆盖网 ${kindCount('overlay')}、手动 ${kindCount('manual')}、其他 ${kindCount('other')}）`,
+    `不可用范围原因：${reasons}`,
+    ...(error ? [`错误：${error.slice(0, 200)}`] : []),
+    ...(networkError ? [`设备同步状态：${networkError.slice(0, 200)}`] : []),
+  ];
+  return lines.join('\n');
+}
 export function BetaPeersPage({ peers, profileId, profileName, runtimeId, deviceId, onJoined, onEventsChanged, visible = true, copyText = writeBetaMessageClipboard }: {
   peers: BetaPeersClient | null;
   profileId: string;
@@ -106,6 +158,20 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   const observedSync = useRef<string | null>(null);
   const readSequence = useRef(0);
   const nearbyReadSequence = useRef(0);
+  const scanSequence = useRef(0);
+  const scanTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scanFailuresRef = useRef(0);
+  const scanScopesLoaded = useRef(false);
+  const [scanScopes, setScanScopes] = useState<BetaScanScope[]>([]);
+  const [scanScopesError, setScanScopesError] = useState('');
+  const [selectedScopeIds, setSelectedScopeIds] = useState<string[]>([]);
+  const [manualCidr, setManualCidr] = useState('');
+  const [networkEnabled, setNetworkEnabled] = useState<boolean | null>(null);
+  const [networkEnabledError, setNetworkEnabledError] = useState('');
+  const [scan, setScan] = useState<BetaNetworkScan | null>(null);
+  const [scanError, setScanError] = useState('');
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanPollPaused, setScanPollPaused] = useState(false);
   const observing = useBetaViewActive(visible);
   const now = useBetaNow(observing); const dateMode = useBetaDateDisplayMode();
   const isCurrent = (life: Life) => life.active && lifecycle.current === life && currentScope.current === scope;
@@ -144,16 +210,159 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
     inputRevision.current++;
     setNotice('候选地址只用于尝试连接；仍需检查完整邀请并明确确认加入。');
   }
+  async function loadScanScopes(life: Life) {
+    if (!peers || scanScopesLoaded.current) return;
+    let result: BetaScanScope[];
+    try { result = await peers.scanScopes(); }
+    catch (failure) {
+      if (isCurrent(life)) { scanScopesLoaded.current = false; setScanScopesError(errorMessage(failure)); }
+      return;
+    }
+    if (!isCurrent(life)) return;
+    scanScopesLoaded.current = true;
+    setScanScopesError('');
+    setScanScopes(result);
+    setSelectedScopeIds(result.filter(scope => scope.eligible).map(scope => scope.scope_id));
+  }
+  async function refreshNetworkEnabled(life: Life) {
+    if (!peers) return;
+    try {
+      const enabled = await peers.networkEnabled();
+      if (isCurrent(life)) { setNetworkEnabled(enabled); setNetworkEnabledError(''); }
+    } catch (failure) {
+      // Keep the last known truth; a read failure must not silently unlock or
+      // lock the scan gate.
+      if (isCurrent(life)) setNetworkEnabledError(errorMessage(failure));
+    }
+  }
+  function retryNetworkEnabled() {
+    setNetworkEnabledError('');
+    const life = lifecycle.current;
+    if (life) void refreshNetworkEnabled(life);
+  }
+  function retryScanScopes() {
+    scanScopesLoaded.current = false;
+    setScanScopesError('');
+    const life = lifecycle.current;
+    if (life) void loadScanScopes(life);
+  }
+  function toggleScope(scopeId: string, selected: boolean) {
+    setSelectedScopeIds(current => selected
+      ? (current.includes(scopeId) ? current : [...current, scopeId])
+      : current.filter(id => id !== scopeId));
+  }
+  function stopScanPolling() {
+    if (scanTimer.current) { clearTimeout(scanTimer.current); scanTimer.current = undefined; }
+  }
+  async function pollScan(life: Life, scanId: string, sequence: number) {
+    if (!isCurrent(life) || sequence !== scanSequence.current) return;
+    let result: BetaNetworkScan;
+    try { result = await peers!.scanStatus(scanId); }
+    catch (failure) {
+      if (!isCurrent(life) || sequence !== scanSequence.current) return;
+      scanFailuresRef.current += 1;
+      if (scanFailuresRef.current <= 3) {
+        setScanError(`读取扫描进度失败（第 ${scanFailuresRef.current} 次重试）；后台扫描仍可能运行。`);
+        setScanBusy(true);
+        setScanPollPaused(false);
+        scanTimer.current = setTimeout(() => { void pollScan(life, scanId, sequence); }, 400);
+        return;
+      }
+      setScanError('扫描进度读取持续失败；后台扫描仍可能运行。可继续读取、取消扫描或复制诊断。');
+      setScanBusy(true);
+      setScanPollPaused(true);
+      stopScanPolling();
+      return;
+    }
+    if (!isCurrent(life) || sequence !== scanSequence.current) return;
+    scanFailuresRef.current = 0;
+    setScanError('');
+    setScan(result);
+    if (result.finished_at_ms === 0) {
+      setScanBusy(true);
+      setScanPollPaused(false);
+      scanTimer.current = setTimeout(() => { void pollScan(life, scanId, sequence); }, 500);
+    } else {
+      setScanBusy(false);
+      setScanPollPaused(false);
+      stopScanPolling();
+      if (result.discovered > 0) await refreshNearby(life);
+    }
+  }
+  function resumeScanPolling() {
+    if (!scan || scan.finished_at_ms !== 0) return;
+    scanFailuresRef.current = 0;
+    setScanError('');
+    setScanPollPaused(false);
+    const life = lifecycle.current;
+    if (life) void pollScan(life, scan.scan_id, scanSequence.current);
+  }
+  async function startScan(life: Life) {
+    if (!peers) return;
+    if (networkEnabled === false) {
+      setScanError('请先开启设备同步后才能扫描附近设备。');
+      return;
+    }
+    const sequence = ++scanSequence.current;
+    stopScanPolling();
+    scanFailuresRef.current = 0;
+    setScanError('');
+    setScanPollPaused(false);
+    const cidr = manualCidr.trim();
+    let result: BetaNetworkScan;
+    try {
+      result = await peers.scanNearby({ scopeIds: selectedScopeIds, ...(cidr ? { manualCidrs: [cidr] } : {}) });
+    } catch (failure) {
+      if (!isCurrent(life) || sequence !== scanSequence.current) return;
+      setScanError(errorMessage(failure));
+      setScanBusy(false);
+      return;
+    }
+    if (!isCurrent(life) || sequence !== scanSequence.current) return;
+    setScan(result);
+    setScanBusy(result.finished_at_ms === 0);
+    setScanPollPaused(false);
+    if (result.finished_at_ms === 0) void pollScan(life, result.scan_id, sequence);
+  }
+  async function cancelScan(life: Life) {
+    if (!peers || !scan) return;
+    const sequence = scanSequence.current;
+    scanFailuresRef.current = 0;
+    try {
+      const result = await peers.cancelScan(scan.scan_id);
+      if (!isCurrent(life) || sequence !== scanSequence.current) return;
+      setScan(result);
+      setScanBusy(result.finished_at_ms === 0);
+      setScanPollPaused(false);
+      if (result.finished_at_ms === 0) void pollScan(life, result.scan_id, sequence);
+    } catch (failure) {
+      if (isCurrent(life) && sequence === scanSequence.current) setScanError(errorMessage(failure));
+    }
+  }
+  async function copyScanDiagnostic(life: Life) {
+    setError('');
+    setNotice('');
+    try {
+      await copyText(buildScanDiagnostic(scan, scanScopes, scanError, networkEnabledError));
+      if (isCurrent(life)) setNotice('附近扫描诊断已复制');
+    } catch (failure) {
+      if (isCurrent(life)) setError(`扫描诊断复制失败：${errorMessage(failure)}。请重试；不会读取或保存剪贴板内容。`);
+    }
+  }
   useEffect(() => {
     const life: Life = { active: true }; lifecycle.current = life;
     setStatus(null); setNearby([]); setNearbyError(''); setNearbySelection(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setJoinFailure(null); setInvitationText(''); setDialAddress(''); setShowDialAddress(false); setPendingJoin(null); setRevoke(null); setCopyingInvitationId(null); observedSync.current = null; inputRevision.current++; copySequence.current++;
-    return () => { life.active = false; copySequence.current++; if (operationFlight.current === life) operationFlight.current = null; };
+    scanSequence.current++; scanScopesLoaded.current = false; scanFailuresRef.current = 0; setScanScopes([]); setScanScopesError(''); setSelectedScopeIds([]); setManualCidr(''); setNetworkEnabled(null); setNetworkEnabledError(''); setScan(null); setScanError(''); setScanBusy(false); setScanPollPaused(false);
+    if (scanTimer.current) { clearTimeout(scanTimer.current); scanTimer.current = undefined; }
+    return () => { life.active = false; copySequence.current++; scanSequence.current++; if (scanTimer.current) { clearTimeout(scanTimer.current); scanTimer.current = undefined; } if (operationFlight.current === life) operationFlight.current = null; };
   }, [scope]);
   useEffect(() => {
     const life = lifecycle.current;
     if (!observing || !life) return;
     let timer: ReturnType<typeof setTimeout> | undefined; let stopped = false;
     const poll = async () => {
+      void refreshNetworkEnabled(life);
+      void loadScanScopes(life);
       if (profileId) {
         try { await refresh(life); }
         catch (failure) { if (isCurrent(life)) setStatusError(errorMessage(failure)); }
@@ -237,35 +446,166 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
     <div className="mx-auto max-w-3xl space-y-5 px-5 pb-8 pt-5 md:px-8 md:py-8">
       <SettingsSection title={profileName || '加入档案'}>
         {status ? <SettingRow icon={<Waypoints className="size-4 text-muted"/>} label="设备同步" right={<Switch aria-label="设备同步" checked={status.network_enabled} disabled={!!operation || !!statusError} onCheckedChange={enabled => void perform('network', async life => {
-          await peers.setEnabled(enabled); if (!isCurrent(life)) return; await refresh(life);
+          await peers.setEnabled(enabled); if (!isCurrent(life)) return; await refresh(life); await refreshNetworkEnabled(life);
           if (enabled) await refreshNearby(life); else setNearby([]);
         })}/>}/> : <p role="status" className="px-4 py-4 text-sm text-secondary">{profileId ? '正在读取设备状态…' : '粘贴另一设备的邀请，加入已有档案；也可以先创建本机档案。'}</p>}
         {status && <p className="px-4 pb-4 text-xs leading-relaxed text-muted">{status.network_enabled ? '已授权设备会自动连接与补齐。记录和原件分别确认。' : '同步已关闭，本机记录仍可继续保存。'}</p>}
         {status && <details className="px-4 pb-4 text-xs text-muted"><summary className="cursor-pointer">本机设备与同步地址</summary><dl className="mt-3 space-y-3 select-text"><div><dt>设备身份</dt><dd className="break-all">{status.device_id}</dd></div><div><dt>当前同步地址</dt><dd data-testid="beta-local-sync-addresses" className="mt-1 space-y-1 break-all">{status.local_addresses.length ? status.local_addresses.map(address => <p key={address}>{address}</p>) : status.network_enabled ? '尚未确认可用的同步地址' : '设备同步已关闭'}</dd></div></dl><p className="mt-3">这些地址供已授权设备连接；本机 HTTP 服务地址可在「当下」标题上方查看。</p></details>}
       </SettingsSection>
       <SettingsSection title="潜在设备">
+        <div className="space-y-3 px-4 pb-4">
+          <p className="text-xs leading-relaxed text-secondary">
+            扫描只发起一次有界探测。TCP 43344 开放端口只作为未验证地址候选，不会建立路由、成员授权或档案写入。
+          </p>
+          {scanScopesError && (
+            <div className="space-y-2">
+              <p role="alert" className="text-sm text-destructive">扫描范围读取失败：{scanScopesError}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={retryScanScopes}>重新读取范围</Button>
+                <Button variant="ghost" size="sm" onClick={() => void copyScanDiagnostic(lifecycle.current!)}>复制扫描诊断</Button>
+              </div>
+              <p className="text-xs leading-relaxed text-secondary">仍可手动填写 CIDR（例如 EasyTier 的 10.137.0.0/24）。</p>
+            </div>
+          )}
+          {scanScopes.some(scope => scope.eligible) && (
+            <div role="group" aria-label="扫描范围" className="space-y-1.5">
+              {scanScopes.filter(scope => scope.eligible).map(scope => (
+                <label key={scope.scope_id} className="flex items-start gap-2 text-xs">
+                  <input type="checkbox" className="mt-0.5" checked={selectedScopeIds.includes(scope.scope_id)}
+                    onChange={event => toggleScope(scope.scope_id, event.target.checked)} />
+                  <span className="min-w-0 break-all">
+                    <span className="text-foreground">{SCAN_SCOPE_KIND_LABEL[scope.kind]}</span>
+                    <span className="text-secondary"> · {scope.interface_name} · </span>
+                    <span className="font-mono text-secondary">{scope.network}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          {scanScopes.some(scope => !scope.eligible) && (
+            <details className="text-xs text-muted">
+              <summary className="cursor-pointer">不可用范围（{scanScopes.filter(scope => !scope.eligible).length}）</summary>
+              <ul className="mt-2 space-y-1">
+                {scanScopes.filter(scope => !scope.eligible).map(scope => (
+                  <li key={scope.scope_id}>{scope.interface_name} · {scope.reason ? scanScopeReasonLabel(scope.reason) : '不适用'}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+          <label htmlFor="beta-scan-manual-cidr" className="sr-only">手动扫描范围</label>
+          <Input id="beta-scan-manual-cidr" value={manualCidr} maxLength={64} placeholder="手动 CIDR，如 10.137.0.0/24" className="w-full max-w-64"
+            onChange={event => setManualCidr(event.target.value)} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" disabled={scanBusy || networkEnabled !== true}
+              onClick={() => void startScan(lifecycle.current!)}>
+              扫描当前内网
+            </Button>
+            {scanBusy && <Button variant="ghost" size="sm" onClick={() => void cancelScan(lifecycle.current!)}>取消扫描</Button>}
+            {scan && scan.finished_at_ms === 0 && scanPollPaused && (
+              <Button variant="ghost" size="sm" onClick={resumeScanPolling}>继续读取</Button>
+            )}
+          </div>
+          {networkEnabled === null && networkEnabledError && (
+            <div className="space-y-2">
+              <p role="alert" className="text-sm text-destructive">设备同步状态读取失败：{networkEnabledError}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={retryNetworkEnabled}>重新读取状态</Button>
+                <Button variant="ghost" size="sm" onClick={() => void copyScanDiagnostic(lifecycle.current!)}>复制扫描诊断</Button>
+              </div>
+            </div>
+          )}
+          {networkEnabled === null && !networkEnabledError && (
+            <p role="status" className="text-xs text-secondary">正在读取设备同步状态…</p>
+          )}
+          {networkEnabled !== null && networkEnabledError && (
+            <div className="space-y-2">
+              <p role="status" className="text-xs text-secondary">设备同步状态读取失败；以下保留上次确认值：{networkEnabled ? '已开启' : '已关闭'}（{networkEnabledError}）。</p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={retryNetworkEnabled}>重新读取状态</Button>
+                <Button variant="ghost" size="sm" onClick={() => void copyScanDiagnostic(lifecycle.current!)}>复制扫描诊断</Button>
+              </div>
+            </div>
+          )}
+          {networkEnabled === false && (
+            <p role="status" className="text-xs text-secondary">{profileId ? '请先开启上方“设备同步”后再扫描附近设备。' : '请先开启设备同步后再扫描附近设备。'}</p>
+          )}
+          {scanError && <div className="space-y-2">
+            <p role="alert" className="text-sm text-destructive">{scanError}</p>
+            <p className="text-xs leading-relaxed text-secondary">可重新扫描、勾选其他范围或手动填写 CIDR（例如 EasyTier 的 10.137.0.0/24）；若覆盖网 App 未暴露虚拟网卡，请手动添加该网段。</p>
+            <Button variant="ghost" size="sm" onClick={() => void copyScanDiagnostic(lifecycle.current!)}>复制扫描诊断</Button>
+          </div>}
+          {scan && scan.finished_at_ms === 0 && (
+            <p role="status" className="text-xs text-secondary">
+              {scan.stage === 'cancelling' ? '正在取消扫描' : '正在扫描'} · 已尝试 {scan.attempted} · 已跳过 {scan.skipped}；开放端口将在扫描结束后汇总确认
+            </p>
+          )}
+          {scan && scan.finished_at_ms > 0 && (
+            <div className="space-y-2">
+              <p role="status" className="text-xs text-secondary">
+                扫描结束 · 已尝试 {scan.attempted} · 已发现 {scan.discovered} · 已跳过 {scan.skipped}{scan.cancelled ? ' · 已取消' : ''}
+              </p>
+              {scan.discovered_addresses.length > 0 && (
+                <div className="space-y-1">
+                  <ul aria-label="未验证地址候选" className="space-y-1">
+                    {scan.discovered_addresses.map(address => (
+                      <li key={address} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="min-w-0 break-all font-mono text-secondary">{address} · 开放端口，未验证身份</span>
+                        <Button variant="outline" size="sm" disabled={!!operation}
+                          onClick={() => { setDialAddress(address); setShowDialAddress(true); setNotice('该地址只是开放端口候选，仍需粘贴完整邀请并核对设备身份。'); }}>
+                          使用地址
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                  {scan.discovered > scan.discovered_addresses.length && (
+                    <p className="text-xs text-secondary">另有 {scan.discovered - scan.discovered_addresses.length} 个开放端口未展示（最多展示 64 个）。</p>
+                  )}
+                </div>
+              )}
+              {scan.discovered === 0 && (
+                <p className="text-xs leading-relaxed text-secondary">
+                  {scan.attempted === 0 && scan.skipped > 0
+                    ? `所选范围没有可探测的其他主机（已跳过 ${scan.skipped}）。可勾选其他范围或手动填写 CIDR（例如 EasyTier 的 10.137.0.0/24）。`
+                    : '没有发现开放端口。可重新扫描、勾选其他范围或手动填写 CIDR（例如 EasyTier 的 10.137.0.0/24）；若覆盖网 App 未暴露虚拟网卡，请手动添加该网段。'}
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button variant="ghost" size="sm" disabled={scanBusy || networkEnabled !== true} onClick={() => void startScan(lifecycle.current!)}>重新扫描</Button>
+                <Button variant="ghost" size="sm" onClick={() => void copyScanDiagnostic(lifecycle.current!)}>复制扫描诊断</Button>
+              </div>
+            </div>
+          )}
+        </div>
         <BetaNearbyDevices
           candidates={nearby}
-          emptyMessage={status?.network_enabled
-            ? '暂未发现附近设备。收到广播也不代表身份已验证。'
-            : profileId
-              ? '打开上方“设备同步”后，才会接收附近设备广播。'
-              : '暂未发现附近设备。开启设备同步后可被动发现；发现不会授权档案。'}
+          emptyMessage="暂未发现附近设备"
           disabled={!!operation}
           onSelect={selectNearbyCandidate}
         />
         {nearbyError && <p role="alert" className="px-4 pb-4 text-sm text-destructive">附近设备状态暂未更新：{nearbyError}</p>}
-        {!profileId && <div className="flex flex-wrap gap-2 px-4 pb-4"><Button variant="outline" size="sm" disabled={!!operation} onClick={() => void perform('network', async life => {
-          await peers.setEnabled(true);
-          if (!isCurrent(life)) return;
-          await refreshNearby(life);
-          setNotice('设备同步与附近发现已开启；这不会授权其他设备。');
-        })}>开启设备同步与发现</Button><Button variant="outline" size="sm" disabled={!!operation} onClick={() => void perform('network', async life => {
-          await peers.setEnabled(false);
-          if (!isCurrent(life)) return;
-          await refreshNearby(life);
-          setNotice('设备同步与附近发现已关闭。');
-        })}>关闭设备同步与发现</Button></div>}
+        {!profileId && <div className="space-y-2 px-4 pb-4">
+          {networkEnabled !== null && (
+            <p role="status" className="text-xs text-secondary">{networkEnabled
+              ? '设备同步已开启；附近发现可用，扫描不会授权任何档案。'
+              : '设备同步已关闭；开启后可被动发现与扫描，不会授权任何档案。'}</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" disabled={!!operation || networkEnabled === true} onClick={() => void perform('network', async life => {
+              await peers.setEnabled(true);
+              if (!isCurrent(life)) return;
+              await refreshNetworkEnabled(life);
+              await refreshNearby(life);
+              setNotice('设备同步与附近发现已开启；这不会授权其他设备。');
+            })}>开启设备同步与发现</Button>
+            <Button variant="outline" size="sm" disabled={!!operation || networkEnabled === false} onClick={() => void perform('network', async life => {
+              await peers.setEnabled(false);
+              if (!isCurrent(life)) return;
+              await refreshNetworkEnabled(life);
+              await refreshNearby(life);
+              setNotice('设备同步与附近发现已关闭。');
+            })}>关闭设备同步与发现</Button>
+          </div>
+        </div>}
       </SettingsSection>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {statusError && <p role="alert" className="text-sm text-destructive">状态暂未更新：{statusError}{status ? '。以下保留上次确认结果。' : ''}</p>}

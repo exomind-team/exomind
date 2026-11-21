@@ -21,8 +21,8 @@ pub use original_auto_store::{
 };
 pub(crate) mod sync_store;
 pub use network::{
-    NearbyPeerCandidate, OriginalAutoQueueStatus, PeerConnectionView, PeerNetwork,
-    PeerNetworkStatus, PeerOriginalStatus,
+    NearbyPeerCandidate, NetworkScanResult, OriginalAutoQueueStatus, PeerConnectionView,
+    PeerNetwork, PeerNetworkStatus, PeerOriginalStatus, ScanScope,
 };
 mod service;
 pub use network_store::PeerNetworkSettings;

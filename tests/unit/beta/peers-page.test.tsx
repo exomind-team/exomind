@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest';
 import { BetaPeersPage } from '@/beta/BetaPeersPage';
 import { BetaPeerJoinError } from '@/beta/peers-client';
-import type { BetaInvitationPreview, BetaJoinResult, BetaPeerStatus, BetaPeersClient } from '@/beta/peers-client';
+import type { BetaInvitationPreview, BetaJoinResult, BetaNetworkScan, BetaPeerStatus, BetaPeersClient } from '@/beta/peers-client';
 import { deferred } from './fixtures';
 
 const P='11111111-1111-4111-8111-111111111111';
@@ -13,6 +13,11 @@ const B='55555555-5555-4555-8555-555555555555';
 const status=(profile=P):BetaPeerStatus=>({runtime_id:R,device_id:D,profile_id:profile,network_enabled:false,local_addresses:[],peers:[]});
 function peers(){return{
   status:vi.fn(async(profile:string)=>status(profile)),nearbyCandidates:vi.fn<BetaPeersClient['nearbyCandidates']>(async()=>[]),setEnabled:vi.fn(async()=>{}),
+  networkEnabled:vi.fn(async()=>true),
+  scanScopes:vi.fn(async()=>[{scope_id:'eth0:192.168.1.0/24',interface_name:'eth0',kind:'physical_lan',prefix:24,eligible:true,network:'192.168.1.0/24',reason:null}]),
+  scanNearby:vi.fn<BetaPeersClient['scanNearby']>(async()=>({scan_id:B,started_at_ms:1000,finished_at_ms:2000,stage:'complete',scopes:[],attempted:0,discovered:0,skipped:0,cancelled:false,discovered_addresses:[]})),
+  scanStatus:vi.fn(async()=>({scan_id:B,started_at_ms:1000,finished_at_ms:2000,stage:'complete',scopes:[],attempted:0,discovered:0,skipped:0,cancelled:false,discovered_addresses:[]})),
+  cancelScan:vi.fn(async()=>({scan_id:B,started_at_ms:1000,finished_at_ms:2000,stage:'cancelled',scopes:[],attempted:0,discovered:0,skipped:0,cancelled:true,discovered_addresses:[]})),
   createInvitation:vi.fn(async()=>({invitation_text:'opaque-secret',invitation_id:B,expires_at_ms:2000,local_addresses:[]})),
   inspectInvitation:vi.fn(async()=>({profile_id:P,profile_name:'目标档案',issuer_device_id:B,fingerprint_sha256:'a'.repeat(64),expires_at_ms:Date.now()+20_000,compatible:true,endpoints:[]})),
   joinInvitation:vi.fn<BetaPeersClient['joinInvitation']>(async()=>({profile_id:P,peer_device_id:B,state:'pending'})),
@@ -371,5 +376,210 @@ describe('Invitation preview connectivity and membership labels',()=>{
     await act(async()=>{pending.reject(new Error('旧加入尝试失败'));await Promise.resolve();});
     expect(screen.queryByText('旧加入尝试失败')).not.toBeInTheDocument();
     expect(input).toHaveValue('new-invitation');
+  });
+});
+
+describe('Nearby network scan',()=>{
+  const completed=(overrides:Record<string,unknown>={}):BetaNetworkScan=>({scan_id:B,started_at_ms:1000,finished_at_ms:2000,stage:'complete',scopes:[],attempted:10,discovered:2,skipped:1,cancelled:false,discovered_addresses:['192.168.1.7:43344'],...overrides});
+  it('offers a real scan action and never leaves an empty nearby list terminal',async()=>{
+    const client=peers();
+    client.status.mockResolvedValue({...status(Q),network_enabled:true});
+    client.scanNearby.mockResolvedValue(completed());
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    expect(await screen.findByText('暂未发现附近设备')).toBeInTheDocument();
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await waitFor(()=>expect(scanButton).toBeEnabled());
+    fireEvent.click(scanButton);
+    expect(client.scanNearby).toHaveBeenCalledWith(expect.objectContaining({scopeIds:expect.any(Array)}));
+    expect(await screen.findByText(/扫描结束/)).toBeInTheDocument();
+    expect(screen.getByLabelText('未验证地址候选')).toHaveTextContent('开放端口，未验证身份');
+  });
+  it('exposes progress and a cancel action while scanning',async()=>{
+    const client=peers();
+    client.status.mockResolvedValue({...status(Q),network_enabled:true});
+    const pending=deferred<BetaNetworkScan>();
+    client.scanNearby.mockResolvedValue({scan_id:B,started_at_ms:1000,finished_at_ms:0,stage:'tcp_probe',scopes:[],attempted:3,discovered:0,skipped:2,cancelled:false,discovered_addresses:[]});
+    client.scanStatus.mockReturnValueOnce(pending.promise);
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await waitFor(()=>expect(scanButton).toBeEnabled());
+    fireEvent.click(scanButton);
+    expect(await screen.findByText(/正在扫描 · 已尝试 3 · 已跳过 2/)).toBeInTheDocument();
+    expect(screen.queryByText(/已发现 0/)).not.toBeInTheDocument();
+    expect(screen.getByText(/开放端口将在扫描结束后汇总确认/)).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'取消扫描'})).toBeEnabled();
+    await act(async()=>{pending.resolve(completed({discovered_addresses:[],discovered:0}));await pending.promise;});
+    await waitFor(()=>expect(screen.getByText(/扫描结束/)).toBeInTheDocument());
+  });
+  it('failure offers retry, scope change, manual CIDR, EasyTier guidance and copy diagnostic',async()=>{
+    const client=peers();const copyText=vi.fn(async()=>{});
+    client.status.mockResolvedValue({...status(Q),network_enabled:true});
+    client.scanNearby.mockRejectedValueOnce(new Error('扫描失败'));
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})} copyText={copyText}/>);
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await waitFor(()=>expect(scanButton).toBeEnabled());
+    fireEvent.click(scanButton);
+    expect(await screen.findByRole('alert')).toHaveTextContent('扫描失败');
+    expect(screen.getByText(/EasyTier 的 10\.137\.0\.0\/24/)).toBeInTheDocument();
+    expect(screen.getByLabelText('手动扫描范围')).toBeEnabled();
+    expect(screen.getByRole('button',{name:'扫描当前内网'})).toBeEnabled();
+    fireEvent.click(screen.getByRole('button',{name:'复制扫描诊断'}));
+    expect(await screen.findByText('附近扫描诊断已复制')).toBeInTheDocument();
+    expect(copyText).toHaveBeenCalledOnce();
+    expect(copyText.mock.calls[0][0]).toContain('扫描失败');
+    expect(copyText.mock.calls[0][0]).not.toContain('eth0');
+    expect(copyText.mock.calls[0][0]).not.toContain('192.168.1.0/24');
+  });
+  it('reports clipboard failure truthfully and keeps the copy action retryable',async()=>{
+    const client=peers();const copyText=vi.fn(async()=>{throw new Error('clipboard denied');});
+    client.status.mockResolvedValue({...status(Q),network_enabled:true});
+    client.scanNearby.mockResolvedValue(completed());
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})} copyText={copyText}/>);
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await waitFor(()=>expect(scanButton).toBeEnabled());
+    fireEvent.click(scanButton);
+    await screen.findByText(/扫描结束/);
+    const copyButton=screen.getByRole('button',{name:'复制扫描诊断'});
+    fireEvent.click(copyButton);
+    expect(await screen.findByText(/扫描诊断复制失败/)).toBeInTheDocument();
+    expect(copyButton).toBeEnabled();
+    copyText.mockResolvedValueOnce(undefined);
+    fireEvent.click(copyButton);
+    expect(await screen.findByText('附近扫描诊断已复制')).toBeInTheDocument();
+  });
+  it('lets a no-profile state scan without inventing a profile',async()=>{
+    const client=peers();
+    client.scanNearby.mockResolvedValue(completed({discovered_addresses:[],discovered:0}));
+    render(<BetaPeersPage {...props} profileId="" profileName="" peers={client} onJoined={vi.fn(async()=>{})}/>);
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await waitFor(()=>expect(scanButton).toBeEnabled());
+    fireEvent.click(scanButton);
+    expect(client.scanNearby).toHaveBeenCalled();
+    expect(client.status).not.toHaveBeenCalled();
+    expect(await screen.findByText(/扫描结束/)).toBeInTheDocument();
+  });
+  it('does not silently enable the network for a no-profile scan and shows the prerequisite',async()=>{
+    const client=peers();
+    client.networkEnabled.mockResolvedValue(false);
+    render(<BetaPeersPage {...props} profileId="" profileName="" peers={client} onJoined={vi.fn(async()=>{})}/>);
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await screen.findByText(/请先开启设备同步后再扫描附近设备/);
+    expect(scanButton).toBeDisabled();
+    expect(client.setEnabled).not.toHaveBeenCalled();
+    expect(client.scanNearby).not.toHaveBeenCalled();
+  });
+  it('unlocks a no-profile scan immediately after explicitly enabling the network',async()=>{
+    const client=peers();
+    client.networkEnabled.mockResolvedValueOnce(false).mockResolvedValue(true);
+    client.scanNearby.mockResolvedValue(completed({discovered_addresses:[],discovered:0}));
+    render(<BetaPeersPage {...props} profileId="" profileName="" peers={client} onJoined={vi.fn(async()=>{})}/>);
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await screen.findByText(/请先开启设备同步后再扫描附近设备/);
+    expect(scanButton).toBeDisabled();
+    fireEvent.click(screen.getByRole('button',{name:'开启设备同步与发现'}));
+    await waitFor(()=>expect(client.setEnabled).toHaveBeenCalledWith(true));
+    await waitFor(()=>expect(scanButton).toBeEnabled());
+    fireEvent.click(scanButton);
+    expect(client.scanNearby).toHaveBeenCalledWith(expect.objectContaining({scopeIds:expect.any(Array)}));
+    expect(await screen.findByText(/扫描结束/)).toBeInTheDocument();
+  });
+  it('shows a persistent no-profile enabled state and disables the redundant action',async()=>{
+    const client=peers();
+    render(<BetaPeersPage {...props} profileId="" profileName="" peers={client} onJoined={vi.fn(async()=>{})}/>);
+    expect(await screen.findByText('设备同步已开启；附近发现可用，扫描不会授权任何档案。')).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'开启设备同步与发现'})).toBeDisabled();
+    expect(screen.getByRole('button',{name:'关闭设备同步与发现'})).toBeEnabled();
+  });
+  it('surfaces a network state read failure with retry and a redacted diagnostic',async()=>{
+    const client=peers();const copyText=vi.fn(async()=>{});
+    client.networkEnabled.mockRejectedValueOnce(new Error('读取失败')).mockResolvedValue(true);
+    render(<BetaPeersPage {...props} profileId="" profileName="" peers={client} onJoined={vi.fn(async()=>{})} copyText={copyText}/>);
+    expect(await screen.findByText(/设备同步状态读取失败/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'复制扫描诊断'}));
+    expect(await screen.findByText('附近扫描诊断已复制')).toBeInTheDocument();
+    expect(copyText.mock.calls[0][0]).toContain('设备同步状态：读取失败');
+    fireEvent.click(screen.getByRole('button',{name:'重新读取状态'}));
+    await waitFor(()=>expect(screen.getByRole('button',{name:'扫描当前内网'})).toBeEnabled());
+  });
+  it('keeps the last known network truth and warns when a later read fails',async()=>{
+    const client=peers();
+    client.networkEnabled.mockResolvedValueOnce(true).mockRejectedValue(new Error('读取失败'));
+    const view=render(<BetaPeersPage {...props} profileId="" profileName="" visible={false} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    vi.useFakeTimers();
+    try{
+      view.rerender(<BetaPeersPage {...props} profileId="" profileName="" visible peers={client} onJoined={vi.fn(async()=>{})}/>);
+      await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
+      const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+      expect(scanButton).toBeEnabled();
+      await act(async()=>{await vi.advanceTimersByTimeAsync(2100);});
+      expect(client.networkEnabled.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(scanButton).toBeEnabled();
+      expect(screen.getByText(/设备同步状态读取失败；以下保留上次确认值：已开启/)).toBeInTheDocument();
+    }finally{view.unmount();vi.useRealTimers();}
+  });
+  it('reports omitted open-port candidates when the list hits the display cap',async()=>{
+    const client=peers();
+    client.status.mockResolvedValue({...status(Q),network_enabled:true});
+    const addresses=Array.from({length:64},(_,index)=>`192.168.1.${index+1}:43344`);
+    client.scanNearby.mockResolvedValue(completed({attempted:70,discovered:70,discovered_addresses:addresses}));
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await waitFor(()=>expect(scanButton).toBeEnabled());
+    fireEvent.click(scanButton);
+    expect(await screen.findByText(/另有 6 个开放端口未展示/)).toBeInTheDocument();
+  });
+  it('auto-retries a transient scan status failure and recovers',async()=>{
+    const client=peers();
+    client.status.mockResolvedValue({...status(Q),network_enabled:true});
+    client.scanNearby.mockResolvedValue({scan_id:B,started_at_ms:1000,finished_at_ms:0,stage:'tcp_probe',scopes:[],attempted:0,discovered:0,skipped:0,cancelled:false,discovered_addresses:[]});
+    client.scanStatus.mockRejectedValueOnce(new Error('读取失败')).mockResolvedValue(completed({discovered_addresses:[],discovered:0}));
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await waitFor(()=>expect(scanButton).toBeEnabled());
+    fireEvent.click(scanButton);
+    expect(await screen.findByText(/后台扫描仍可能运行/)).toBeInTheDocument();
+    expect(await screen.findByText(/扫描结束/,undefined,{timeout:3000})).toBeInTheDocument();
+  });
+  it('keeps a background scan actionable after persistent status failures',async()=>{
+    const client=peers();
+    client.status.mockResolvedValue({...status(Q),network_enabled:true});
+    client.scanNearby.mockResolvedValue({scan_id:B,started_at_ms:1000,finished_at_ms:0,stage:'tcp_probe',scopes:[],attempted:0,discovered:0,skipped:0,cancelled:false,discovered_addresses:[]});
+    client.scanStatus.mockRejectedValue(new Error('读取失败'));
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await waitFor(()=>expect(scanButton).toBeEnabled());
+    fireEvent.click(scanButton);
+    expect(await screen.findByText(/扫描进度读取持续失败/,undefined,{timeout:5000})).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'继续读取'})).toBeEnabled();
+    expect(screen.getByRole('button',{name:'取消扫描'})).toBeEnabled();
+    expect(screen.getByRole('button',{name:'复制扫描诊断'})).toBeEnabled();
+    const callsBefore=client.scanStatus.mock.calls.length;
+    fireEvent.click(screen.getByRole('button',{name:'继续读取'}));
+    await waitFor(()=>expect(client.scanStatus.mock.calls.length).toBeGreaterThan(callsBefore));
+  });
+  it('reports a no-host scope with skipped count instead of a generic no-port message',async()=>{
+    const client=peers();
+    client.status.mockResolvedValue({...status(Q),network_enabled:true});
+    client.scanNearby.mockResolvedValue(completed({attempted:0,discovered:0,skipped:7,discovered_addresses:[]}));
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await waitFor(()=>expect(scanButton).toBeEnabled());
+    fireEvent.click(scanButton);
+    expect(await screen.findByText(/所选范围没有可探测的其他主机（已跳过 7）/)).toBeInTheDocument();
+    expect(screen.queryByText(/没有发现开放端口/)).not.toBeInTheDocument();
+  });
+  it('ignores a late previous scan result after the profile scope changes',async()=>{
+    const client=peers();
+    client.status.mockResolvedValue({...status(Q),network_enabled:true});
+    const pending=deferred<BetaNetworkScan>();
+    client.scanNearby.mockReturnValueOnce(pending.promise);
+    const view=render(<BetaPeersPage {...props} profileId={P} profileName="P" peers={client} onJoined={vi.fn(async()=>{})}/>);
+    const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
+    await waitFor(()=>expect(scanButton).toBeEnabled());
+    fireEvent.click(scanButton);
+    await waitFor(()=>expect(client.scanNearby).toHaveBeenCalledOnce());
+    view.rerender(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    await act(async()=>{pending.resolve(completed());await pending.promise;});
+    expect(screen.queryByText(/扫描结束/)).not.toBeInTheDocument();
   });
 });

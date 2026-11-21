@@ -2524,3 +2524,451 @@ async fn nearby_discovery_is_visible_bounded_and_never_becomes_peer_access() {
     stopped(a).await;
     stopped(b).await;
 }
+
+mod scan {
+    use super::*;
+    use crate::HostError;
+    use std::collections::HashSet;
+    use std::net::{IpAddr, Ipv4Addr};
+    use tokio::net::TcpListener;
+
+    fn request(name: &str, kind: &'static str, network: Ipv4Addr, prefix: u8) -> ScanRequest {
+        ScanRequest {
+            scope_id: derive_scope_id(name, &scan_cidr_string(network, prefix)),
+            interface_name: name.to_string(),
+            kind,
+            network,
+            prefix,
+        }
+    }
+
+    fn initial_result(scan_id: Uuid, started_at_ms: i64) -> NetworkScanResult {
+        NetworkScanResult {
+            scan_id,
+            started_at_ms,
+            finished_at_ms: 0,
+            stage: "tcp_probe",
+            scopes: vec![],
+            attempted: 0,
+            discovered: 0,
+            skipped: 0,
+            cancelled: false,
+            discovered_addresses: vec![],
+        }
+    }
+
+    #[test]
+    fn manual_cidr_parsing_masks_host_bits() {
+        assert_eq!(
+            parse_ipv4_cidr("10.137.0.2/24").unwrap(),
+            (Ipv4Addr::new(10, 137, 0, 0), 24)
+        );
+        assert_eq!(
+            parse_ipv4_cidr("192.168.1.99/24").unwrap(),
+            (Ipv4Addr::new(192, 168, 1, 0), 24)
+        );
+        assert!(parse_ipv4_cidr("10.0.0.0/33").is_err());
+        assert!(parse_ipv4_cidr("not-a-cidr").is_err());
+        assert!(parse_ipv4_cidr("10.0.0.0").is_err());
+    }
+
+    #[test]
+    fn scope_classification_excludes_defaults_and_detects_overlay() {
+        assert_eq!(
+            classify_scan_interface("lo", IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
+            ("other", false, Some("loopback"))
+        );
+        assert_eq!(
+            classify_scan_interface("vEthernet (WSL)", IpAddr::V4(Ipv4Addr::new(172, 20, 0, 1))),
+            ("other", false, Some("virtual_interface"))
+        );
+        assert_eq!(
+            classify_scan_interface("et_4_tcod", IpAddr::V4(Ipv4Addr::new(10, 137, 0, 2))),
+            ("overlay", true, None)
+        );
+        assert_eq!(
+            classify_scan_interface("EasyTier", IpAddr::V4(Ipv4Addr::new(10, 137, 0, 2))),
+            ("easytier", true, None)
+        );
+        assert_eq!(
+            classify_scan_interface("eth0", IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))),
+            ("physical_lan", true, None)
+        );
+        assert_eq!(
+            classify_scan_interface("fe80::1", IpAddr::V6("fe80::1".parse().unwrap())),
+            ("other", false, Some("link_local_address"))
+        );
+        assert_eq!(
+            classify_scan_interface("eth0", IpAddr::V6("2001:db8::1".parse().unwrap())),
+            ("other", false, Some("ipv6_not_scanned"))
+        );
+    }
+
+    #[test]
+    fn host_enumeration_skips_network_broadcast_self_and_duplicates() {
+        let self_ips = HashSet::from([Ipv4Addr::new(192, 168, 1, 20)]);
+        let mut scheduled = HashSet::new();
+        let first = enumerate_scan_hosts(
+            Ipv4Addr::new(192, 168, 1, 0),
+            24,
+            &self_ips,
+            &mut scheduled,
+            MAX_SCAN_HOSTS,
+        );
+        assert_eq!(first.hosts.len(), 253);
+        assert_eq!(first.skipped, 3); // network, broadcast, self
+        let second = enumerate_scan_hosts(
+            Ipv4Addr::new(192, 168, 1, 0),
+            24,
+            &self_ips,
+            &mut scheduled,
+            MAX_SCAN_HOSTS,
+        );
+        assert_eq!(second.hosts.len(), 0);
+        assert_eq!(second.skipped, 256); // network, broadcast, 254 duplicates
+    }
+
+    #[test]
+    fn host_enumeration_caps_large_scopes_at_global_host_limit() {
+        let self_ips = HashSet::new();
+        let mut scheduled = HashSet::new();
+        let enumerated = enumerate_scan_hosts(
+            Ipv4Addr::new(10, 0, 0, 0),
+            8,
+            &self_ips,
+            &mut scheduled,
+            MAX_SCAN_HOSTS,
+        );
+        assert_eq!(enumerated.hosts.len(), MAX_SCAN_HOSTS);
+        // network + broadcast + (2^24 - 2 usable - 1024 taken)
+        assert_eq!(enumerated.skipped, 16_776_192);
+    }
+
+    #[test]
+    fn scan_caps_are_fixed_and_non_zero() {
+        assert_eq!(MAX_SCAN_INTERFACES, 8);
+        assert_eq!(MAX_SCAN_HOSTS, 1024);
+        assert_eq!(MAX_SCAN_IN_FLIGHT, 32);
+        assert_eq!(SCAN_REQUEST_TIMEOUT, Duration::from_millis(800));
+        assert_eq!(SCAN_TOTAL_BUDGET, Duration::from_secs(15));
+    }
+
+    #[test]
+    fn unsafe_manual_networks_are_rejected() {
+        assert!(reject_unsafe_scan_network(Ipv4Addr::new(127, 0, 0, 0)).is_err());
+        assert!(reject_unsafe_scan_network(Ipv4Addr::new(169, 254, 0, 0)).is_err());
+        assert!(reject_unsafe_scan_network(Ipv4Addr::new(224, 0, 0, 0)).is_err());
+        assert!(reject_unsafe_scan_network(Ipv4Addr::new(255, 255, 255, 255)).is_err());
+        assert!(reject_unsafe_scan_network(Ipv4Addr::UNSPECIFIED).is_err());
+        assert!(reject_unsafe_scan_network(Ipv4Addr::new(10, 137, 0, 0)).is_ok());
+        assert!(reject_unsafe_scan_network(Ipv4Addr::new(192, 168, 1, 0)).is_ok());
+    }
+
+    #[test]
+    fn build_scan_requests_deduplicates_scope_ids() {
+        let first_id = derive_scope_id("eth0", "192.168.1.0/24");
+        let second_id = derive_scope_id("eth0", "10.0.0.0/24");
+        let scopes = vec![
+            ScanScope {
+                scope_id: first_id.clone(),
+                interface_name: "eth0".to_string(),
+                kind: "physical_lan",
+                prefix: 24,
+                eligible: true,
+                network: "192.168.1.0/24".to_string(),
+                reason: None,
+            },
+            ScanScope {
+                scope_id: second_id.clone(),
+                interface_name: "eth0".to_string(),
+                kind: "physical_lan",
+                prefix: 24,
+                eligible: true,
+                network: "10.0.0.0/24".to_string(),
+                reason: None,
+            },
+        ];
+        let requests = build_scan_requests(
+            vec![first_id.clone(), first_id.clone()],
+            vec![],
+            &scopes,
+        )
+        .unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].scope_id, first_id);
+        assert_eq!(requests[0].interface_name, "eth0");
+        assert_eq!(requests[0].prefix, 24);
+        // Same adapter name with two addresses stays independently selectable.
+        let both = build_scan_requests(
+            vec![first_id, second_id],
+            vec![],
+            &scopes,
+        )
+        .unwrap();
+        assert_eq!(both.len(), 2);
+    }
+
+    #[test]
+    fn derive_scope_id_is_stable_and_unique_per_address() {
+        let long_name = format!("{}{}", "a".repeat(60), "b");
+        let a = derive_scope_id(&long_name, "192.168.1.0/24");
+        let b = derive_scope_id(&long_name, "10.0.0.0/24");
+        assert_ne!(a, b);
+        assert_eq!(a, derive_scope_id(&long_name, "192.168.1.0/24"));
+        assert!(a.len() <= 96);
+
+        let v6_link = derive_scope_id("eth0", "fe80::1");
+        let v6_global = derive_scope_id("eth0", "2001:db8::1");
+        assert_ne!(v6_link, v6_global);
+        assert!(v6_link.len() <= 96);
+
+        let weird = derive_scope_id("eth\u{1}0", "192.168.1.0/24");
+        assert!(!weird.contains('\u{1}'));
+        assert!(!weird.chars().any(|ch| ch.is_control()));
+    }
+
+    #[test]
+    fn build_scan_scopes_from_keeps_unique_rows_and_dedups_ineligible_duplicates() {
+        let interfaces = vec![
+            ("eth0".to_string(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))),
+            ("eth0".to_string(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 20))),
+            ("lo".to_string(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
+            ("lo".to_string(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
+            ("eth0".to_string(), IpAddr::V6("fe80::1".parse().unwrap())),
+            ("eth0".to_string(), IpAddr::V6("2001:db8::1".parse().unwrap())),
+        ];
+        let scopes = build_scan_scopes_from(interfaces.into_iter());
+        let ids = scopes
+            .iter()
+            .map(|scope| scope.scope_id.clone())
+            .collect::<HashSet<_>>();
+        assert_eq!(ids.len(), scopes.len(), "scope ids must be unique");
+        assert_eq!(scopes.len(), 5);
+        assert_eq!(scopes.iter().filter(|scope| scope.eligible).count(), 2);
+    }
+
+    #[test]
+    fn mixed_host_safety_boundary_is_skipped_per_host() {
+        assert!(unsafe_scan_host(Ipv4Addr::new(127, 0, 0, 1)));
+        assert!(unsafe_scan_host(Ipv4Addr::new(169, 254, 0, 1)));
+        assert!(unsafe_scan_host(Ipv4Addr::new(224, 0, 0, 1)));
+        assert!(unsafe_scan_host(Ipv4Addr::new(255, 255, 255, 255)));
+        assert!(unsafe_scan_host(Ipv4Addr::UNSPECIFIED));
+        assert!(!unsafe_scan_host(Ipv4Addr::new(10, 0, 0, 1)));
+        assert!(!unsafe_scan_host(Ipv4Addr::new(192, 168, 1, 1)));
+    }
+
+    #[test]
+    fn enumeration_skips_link_local_hosts_inside_a_scope() {
+        let self_ips = HashSet::new();
+        let mut scheduled = HashSet::new();
+        let enumerated = enumerate_scan_hosts(
+            Ipv4Addr::new(169, 254, 1, 0),
+            24,
+            &self_ips,
+            &mut scheduled,
+            MAX_SCAN_HOSTS,
+        );
+        assert_eq!(enumerated.hosts.len(), 0);
+        assert_eq!(enumerated.skipped, 256);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tcp_probe_detects_an_open_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let cancel = PeerCancellation::new();
+        assert!(tcp_probe_open(listener.local_addr().unwrap(), SCAN_REQUEST_TIMEOUT, &cancel).await);
+        drop(listener);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tcp_probe_reports_a_closed_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let cancel = PeerCancellation::new();
+        assert!(!tcp_probe_open(address, SCAN_REQUEST_TIMEOUT, &cancel).await);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_probe_never_publishes_late_candidates() {
+        let scan_id = Uuid::new_v4();
+        let started = now();
+        let progress = std::sync::Mutex::new(initial_result(scan_id, started));
+        let cancel = PeerCancellation::new();
+        cancel.cancel();
+        let result = run_scan_probe(
+            scan_id,
+            started,
+            SCAN_SERVICE_PORT,
+            &[request("manual", "manual", Ipv4Addr::new(127, 0, 0, 0), 30)],
+            &HashSet::new(),
+            &cancel,
+            &progress,
+        )
+        .await;
+        assert!(result.cancelled);
+        assert_eq!(result.attempted, 0);
+        assert_eq!(result.discovered, 0);
+        assert!(result.finished_at_ms > 0);
+    }
+
+    async fn wait_scan(network: &PeerNetwork, id: Uuid) -> NetworkScanResult {
+        for _ in 0..200 {
+            let result = network.scan_status(id).unwrap();
+            if result.finished_at_ms > 0 {
+                return result;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("scan {id} did not finish");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn scan_without_profile_never_writes_routes_or_membership() {
+        let _discovery = crate::peers::test_discovery::lease().await;
+        let (_root, host, owner) = super::host();
+        let profile = ProfileId::new();
+        host.provision_profile(&owner, profile, "scan test profile")
+            .unwrap();
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+        network.set_enabled(true).await.unwrap();
+        let started = network
+            .scan_start(vec![], vec!["192.168.1.7/32".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(started.finished_at_ms, 0);
+        let finished = wait_scan(&network, started.scan_id).await;
+        assert_eq!(finished.scan_id, started.scan_id);
+        assert!(finished.finished_at_ms > 0);
+        assert_eq!(finished.attempted, 1);
+        assert!(host.peer_routes(&owner).unwrap().is_empty());
+        assert!(host.peer_members(&owner, profile).unwrap().is_empty());
+        network.stop().await.unwrap();
+        drop(network);
+        super::stopped(host).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn overlapping_scans_keep_only_the_newest_generation() {
+        let _discovery = crate::peers::test_discovery::lease().await;
+        let (_root, host, owner) = super::host();
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+        network.set_enabled(true).await.unwrap();
+        let first = network
+            .scan_start(vec![], vec!["192.168.1.7/32".to_string()])
+            .await
+            .unwrap();
+        let second = network
+            .scan_start(vec![], vec!["192.168.1.8/32".to_string()])
+            .await
+            .unwrap();
+        assert_ne!(first.scan_id, second.scan_id);
+        assert!(network.scan_status(first.scan_id).is_err());
+        let latest = wait_scan(&network, second.scan_id).await;
+        assert_eq!(latest.scan_id, second.scan_id);
+        network.stop().await.unwrap();
+        drop(network);
+        super::stopped(host).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stopping_the_network_cancels_an_active_scan() {
+        let _discovery = crate::peers::test_discovery::lease().await;
+        let (_root, host, owner) = super::host();
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+        network.set_enabled(true).await.unwrap();
+        let started = network
+            .scan_start(vec![], vec!["10.0.0.0/8".to_string()])
+            .await
+            .unwrap();
+        network.stop().await.unwrap();
+        let terminal = network.scan_status(started.scan_id).unwrap();
+        assert_eq!(terminal.scan_id, started.scan_id);
+        assert!(terminal.cancelled);
+        assert_eq!(terminal.stage, "cancelled");
+        assert!(terminal.finished_at_ms > 0);
+        drop(network);
+        super::stopped(host).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancel_scan_terminates_with_a_cancelled_result() {
+        let _discovery = crate::peers::test_discovery::lease().await;
+        let (_root, host, owner) = super::host();
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+        network.set_enabled(true).await.unwrap();
+        let started = network
+            .scan_start(vec![], vec!["10.0.0.0/8".to_string()])
+            .await
+            .unwrap();
+        let snapshot = network.scan_cancel(started.scan_id).unwrap();
+        assert_eq!(snapshot.scan_id, started.scan_id);
+        assert!(snapshot.finished_at_ms == 0);
+        let terminal = wait_scan(&network, started.scan_id).await;
+        assert!(terminal.cancelled);
+        assert_eq!(terminal.stage, "cancelled");
+        assert!(terminal.finished_at_ms > 0);
+        network.stop().await.unwrap();
+        drop(network);
+        super::stopped(host).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn scan_start_rejects_unsafe_manual_cidr() {
+        let _discovery = crate::peers::test_discovery::lease().await;
+        let (_root, host, owner) = super::host();
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+        network.set_enabled(true).await.unwrap();
+        for cidr in ["127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/24", "255.255.255.255/32", "0.0.0.0/8"] {
+            let error = network
+                .scan_start(vec![], vec![cidr.to_string()])
+                .await
+                .unwrap_err();
+            assert!(matches!(error, HostError::InvalidScanScope), "{cidr}");
+        }
+        network.stop().await.unwrap();
+        drop(network);
+        super::stopped(host).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn scan_start_rejects_more_than_eight_scopes() {
+        let _discovery = crate::peers::test_discovery::lease().await;
+        let (_root, host, owner) = super::host();
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+        network.set_enabled(true).await.unwrap();
+        let cidrs = (0..9)
+            .map(|index| format!("10.137.{index}.0/24"))
+            .collect::<Vec<_>>();
+        let error = network.scan_start(vec![], cidrs).await.unwrap_err();
+        assert!(matches!(error, HostError::InvalidRequest));
+        network.stop().await.unwrap();
+        drop(network);
+        super::stopped(host).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn scan_start_deduplicates_canonical_manual_cidrs() {
+        let _discovery = crate::peers::test_discovery::lease().await;
+        let (_root, host, owner) = super::host();
+        let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+        network.set_enabled(true).await.unwrap();
+        let started = network
+            .scan_start(
+                vec![],
+                vec!["192.168.1.0/24".to_string(), "192.168.1.99/24".to_string()],
+            )
+            .await
+            .unwrap();
+        let names = started
+            .scopes
+            .iter()
+            .map(|scope| scope.interface_name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["192.168.1.0/24"]);
+        network.stop().await.unwrap();
+        drop(network);
+        super::stopped(host).await;
+    }
+}

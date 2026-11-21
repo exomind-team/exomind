@@ -87,7 +87,7 @@ impl From<HostError> for Failure {
         let (code, message) = match error {
             HostError::PeerNetworkDisabled => (
                 "peer_network_disabled",
-                "设备同步已暂停，请先启用同步再取回其他设备的原件",
+                "设备同步已暂停，请先启用同步后再继续",
             ),
             HostError::Core(CoreError::InvalidSummary(_)) => {
                 ("invalid_summary_request", "回顾范围或操作内容无效")
@@ -164,6 +164,10 @@ impl From<HostError> for Failure {
             HostError::PeerBusy => ("peer_busy", "连接正在处理，请稍后重试"),
             HostError::PeerTimeout => ("peer_timeout", "连接超时，本机记录已保留"),
             HostError::PeerCancelled => ("cancelled", "连接已停止，本机记录已保留"),
+            HostError::InvalidScanScope => (
+                "invalid_scan_scope",
+                "该扫描范围不安全或不可用；请选择物理局域网或 EasyTier 网段，并检查手动 CIDR",
+            ),
             HostError::PeerTransportUnavailable | HostError::PeerSyncUnavailable => {
                 ("unreachable", "暂时无法连接对端，本机记录可继续使用")
             }
@@ -1249,6 +1253,11 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             user_export::command::beta_user_range_export_status,
             peer_commands::beta_peer_status,
             peer_commands::beta_peer_nearby_candidates,
+            peer_commands::beta_peer_network_enabled,
+            peer_commands::beta_peer_scan_scopes,
+            peer_commands::beta_peer_scan_start,
+            peer_commands::beta_peer_scan_status,
+            peer_commands::beta_peer_scan_cancel,
             peer_commands::beta_peer_set_enabled,
             peer_commands::beta_peer_create_invitation,
             peer_commands::beta_peer_inspect_invitation,

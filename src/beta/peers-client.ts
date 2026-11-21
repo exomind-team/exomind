@@ -24,6 +24,28 @@ export interface BetaNearbyCandidate {
   expires_at_ms: number;
   verification_state: 'unverified';
 }
+export type BetaScanScopeKind = 'physical_lan' | 'easytier' | 'overlay' | 'other' | 'manual';
+export interface BetaScanScope {
+  scope_id: string;
+  interface_name: string;
+  kind: BetaScanScopeKind;
+  prefix: number;
+  eligible: boolean;
+  network: string;
+  reason: string | null;
+}
+export interface BetaNetworkScan {
+  scan_id: string;
+  started_at_ms: number;
+  finished_at_ms: number;
+  stage: 'tcp_probe' | 'complete' | 'cancelled' | 'cancelling';
+  scopes: BetaScanScope[];
+  attempted: number;
+  discovered: number;
+  skipped: number;
+  cancelled: boolean;
+  discovered_addresses: string[];
+}
 export interface BetaInvitation {
   invitation_text: string; invitation_id: string; expires_at_ms: number; local_addresses: string[];
 }
@@ -48,6 +70,11 @@ export class BetaPeerJoinError extends BetaApiError {
 }
 export interface BetaPeersClient {
   nearbyCandidates(): Promise<BetaNearbyCandidate[]>;
+  networkEnabled(): Promise<boolean>;
+  scanScopes(): Promise<BetaScanScope[]>;
+  scanNearby(options: { scopeIds: string[]; manualCidrs?: string[] }): Promise<BetaNetworkScan>;
+  scanStatus(scanId: string): Promise<BetaNetworkScan>;
+  cancelScan(scanId: string): Promise<BetaNetworkScan>;
   status(profileId: string): Promise<BetaPeerStatus>;
   setEnabled(enabled: boolean): Promise<void>;
   createInvitation(profileId: string, peerDeviceId?: string): Promise<BetaInvitation>;
@@ -89,6 +116,78 @@ function nearbyCandidate(value: unknown): BetaNearbyCandidate {
     addresses,
     expires_at_ms:integer(item.expires_at_ms, 1),
     verification_state:choice(item.verification_state,['unverified']),
+  };
+}
+const SCAN_SCOPE_KINDS=['physical_lan','easytier','overlay','other','manual'] as const;
+const MAX_SCAN_SCOPES=8;
+const MAX_SCAN_DISCOVERED_ADDRESSES=64;
+const SCAN_STAGES=['tcp_probe','complete','cancelled','cancelling'] as const;
+function scanCidr(value: unknown): string {
+  const cidr=text(value,64);
+  if(!cidr)return cidr;
+  const match=/^([0-9]{1,3}(?:\.[0-9]{1,3}){3})\/([0-9]{1,2})$/.exec(cidr);
+  if(!match)return invalid();
+  const octets=match[1].split('.');
+  if(octets.some(octet=>!/^\d{1,3}$/.test(octet)||Number(octet)>255))return invalid();
+  if(Number(match[2])>32)return invalid();
+  return cidr;
+}
+function scanReason(value: unknown): string | null {
+  if(value===null)return null;
+  const code=text(value,64);
+  if(!/^[a-z][a-z0-9_]{0,63}$/.test(code))return invalid();
+  return code;
+}
+function scopeId(value: unknown): string {
+  const id=text(value,96);
+  if(!id||id.trim()!==id||/[\u0000-\u001f\u007f]/.test(id)||/\s/.test(id))return invalid();
+  return id;
+}
+function scanScope(value: unknown): BetaScanScope {
+  const item=object(value,['scope_id','interface_name','kind','prefix','eligible','network','reason']);
+  const eligible=boolean(item.eligible);
+  const network=scanCidr(item.network);
+  if(eligible&&!network)return invalid();
+  return {
+    scope_id:scopeId(item.scope_id),
+    interface_name:text(item.interface_name,256),
+    kind:choice(item.kind,SCAN_SCOPE_KINDS),
+    prefix:integer(item.prefix,0,32),
+    eligible,
+    network,
+    reason:scanReason(item.reason),
+  };
+}
+function networkScan(value: unknown): BetaNetworkScan {
+  const item=object(value,['scan_id','started_at_ms','finished_at_ms','stage','scopes','attempted','discovered','skipped','cancelled','discovered_addresses']);
+  if(!Array.isArray(item.scopes)||item.scopes.length>MAX_SCAN_SCOPES)return invalid();
+  const scopes=item.scopes.map(scanScope);
+  if(new Set(scopes.map(scope=>scope.scope_id)).size!==scopes.length)return invalid();
+  if(!Array.isArray(item.discovered_addresses)||item.discovered_addresses.length>MAX_SCAN_DISCOVERED_ADDRESSES)return invalid();
+  const discovered_addresses=item.discovered_addresses.map(endpointAddress);
+  if(new Set(discovered_addresses).size!==discovered_addresses.length)return invalid();
+  const cancelled=boolean(item.cancelled);
+  const finished=integer(item.finished_at_ms,0);
+  const stage=choice(item.stage,SCAN_STAGES);
+  if(finished===0){
+    if(cancelled||stage==='complete')return invalid();
+  }else if(stage!=='complete'&&stage!=='cancelled')return invalid();
+  const attempted=integer(item.attempted,0,1024);
+  const discovered=integer(item.discovered,0,1024);
+  if(discovered>attempted)return invalid();
+  const skipped=integer(item.skipped,0);
+  if(cancelled&&stage!=='cancelled')return invalid();
+  return {
+    scan_id:uuid(item.scan_id),
+    started_at_ms:integer(item.started_at_ms,0),
+    finished_at_ms:finished,
+    stage,
+    scopes,
+    attempted,
+    discovered,
+    skipped,
+    cancelled,
+    discovered_addresses,
   };
 }
 const ENDPOINT_DISPOSITIONS=['attempted','skipped','reachable','identity_mismatch','unreachable','protocol_mismatch'] as const;
@@ -163,6 +262,34 @@ export function nativeBetaPeersClient(call: Call = (command, args) => invoke(com
       const candidates = value.map(nearbyCandidate);
       if (new Set(candidates.map(candidate => candidate.device_id)).size !== candidates.length) return invalid();
       return candidates;
+    },
+    async networkEnabled() {
+      return boolean(await call('beta_peer_network_enabled'));
+    },
+    async scanScopes() {
+      const value = await call('beta_peer_scan_scopes');
+      if (!Array.isArray(value) || value.length > 64) return invalid();
+      const scopes = value.map(scanScope);
+      if (new Set(scopes.map(scope => scope.scope_id)).size !== scopes.length) return invalid();
+      return scopes;
+    },
+    async scanNearby(options) {
+      if (!options || !Array.isArray(options.scopeIds) || options.scopeIds.length > MAX_SCAN_SCOPES) return invalid();
+      const scopeIds = options.scopeIds.map(scopeId);
+      if (scopeIds.some(id => !id) || new Set(scopeIds).size !== scopeIds.length) return invalid();
+      const manualCidrs = options.manualCidrs ?? [];
+      if (!Array.isArray(manualCidrs) || manualCidrs.length > MAX_SCAN_SCOPES) return invalid();
+      const cidrs = manualCidrs.map(scanCidr).filter(cidr => cidr !== '');
+      if (cidrs.some(cidr => cidr === '')) return invalid();
+      return networkScan(await call('beta_peer_scan_start', { scopeIds, manualCidrs: cidrs }));
+    },
+    async scanStatus(scanId) {
+      uuid(scanId);
+      return networkScan(await call('beta_peer_scan_status', { scanId }));
+    },
+    async cancelScan(scanId) {
+      uuid(scanId);
+      return networkScan(await call('beta_peer_scan_cancel', { scanId }));
     },
     async status(profileId) {
       const raw = object(await call('beta_peer_status', { profileId }), ['runtime_id','device_id','profile_id','network_enabled','local_addresses','peers']);

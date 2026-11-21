@@ -116,3 +116,84 @@ describe('Invitation preview endpoint reports',()=> {
     await expect(malformed.joinInvitation('invite')).rejects.toMatchObject({code:'invalid_peer_response'});
   });
 });
+
+describe('Nearby scan boundary',()=> {
+  const S='66666666-6666-4666-8666-666666666666';
+  const scope=()=>({scope_id:'eth0:192.168.1.0/24',interface_name:'eth0',kind:'physical_lan',prefix:24,eligible:true,network:'192.168.1.0/24',reason:null});
+  const scan=(overrides:Record<string,unknown>={})=>({
+    scan_id:S,started_at_ms:1000,finished_at_ms:2000,stage:'complete',scopes:[scope()],
+    attempted:10,discovered:2,skipped:1,cancelled:false,discovered_addresses:['192.168.1.7:43344'],...overrides,
+  });
+  it('reads network enabled without a profile argument',async()=>{
+    let reply:unknown=true;
+    const call=vi.fn(async(name:string)=>name==='beta_peer_network_enabled'?reply:null);
+    const client=nativeBetaPeersClient(call);
+    expect(await client.networkEnabled()).toBe(true);
+    expect(call).toHaveBeenCalledWith('beta_peer_network_enabled');
+    reply='yes';
+    await expect(client.networkEnabled()).rejects.toMatchObject({code:'invalid_peer_response'});
+  });
+  it('reads selectable scopes and normalizes manual CIDR arguments',async()=>{
+    let reply:unknown=[scope(),{scope_id:'et_4_tcod:10.137.0.0/24',interface_name:'et_4_tcod',kind:'overlay',prefix:24,eligible:true,network:'10.137.0.0/24',reason:null}];
+    const call=vi.fn(async(name:string,args?:Record<string,unknown>)=>{
+      if(name==='beta_peer_scan_scopes')return reply;
+      if(name==='beta_peer_scan_start')return scan({finished_at_ms:0,stage:'tcp_probe',discovered_addresses:[],attempted:0,discovered:0});
+      return null;
+    });
+    const client=nativeBetaPeersClient(call);
+    expect(await client.scanScopes()).toEqual(reply);
+    await client.scanNearby({scopeIds:['eth0:192.168.1.0/24','et_4_tcod:10.137.0.0/24'],manualCidrs:['10.137.0.2/24']});
+    expect(call).toHaveBeenCalledWith('beta_peer_scan_start',{scopeIds:['eth0:192.168.1.0/24','et_4_tcod:10.137.0.0/24'],manualCidrs:['10.137.0.2/24']});
+  });
+  it('accepts multiple scopes from the same interface name with distinct scope ids',async()=>{
+    const reply=[
+      scope(),
+      {scope_id:'eth0:10.0.0.0/24',interface_name:'eth0',kind:'physical_lan',prefix:24,eligible:true,network:'10.0.0.0/24',reason:null},
+    ];
+    const client=nativeBetaPeersClient(vi.fn(async()=>reply));
+    expect(await client.scanScopes()).toHaveLength(2);
+  });
+  it('rejects malformed scopes, stages, counts and duplicate endpoints',async()=>{
+    const cases:unknown[]=[
+      [{...scope(),kind:'mystery'}],
+      [{...scope(),eligible:true,network:''}],
+      [{...scope(),reason:'Bad Reason'}],
+      [{...scope()},{...scope()}],
+    ];
+    let reply:unknown=[scope()];
+    const client=nativeBetaPeersClient(vi.fn(async()=>reply));
+    for(const value of cases){
+      reply=value;
+      await expect(client.scanScopes()).rejects.toMatchObject({code:'invalid_peer_response'});
+    }
+    const scanCases:unknown[]=[
+      scan({stage:'tcp_probe',finished_at_ms:2000}),
+      scan({stage:'complete',finished_at_ms:0}),
+      scan({attempted:2,discovered:3}),
+      scan({discovered_addresses:['192.168.1.7:43344','192.168.1.7:43344']}),
+      scan({discovered_addresses:Array.from({length:65},(_,i)=>`192.168.1.${i+1}:43344`)}),
+      scan({cancelled:true,stage:'complete'}),
+      scan({scopes:[scope(),scope()]}),
+    ];
+    reply=scan();
+    const scanClient=nativeBetaPeersClient(vi.fn(async()=>reply));
+    for(const value of scanCases){
+      reply=value;
+      await expect(scanClient.scanStatus(S)).rejects.toMatchObject({code:'invalid_peer_response'});
+    }
+  });
+  it('passes scan ids through scan status and cancel commands',async()=>{
+    let mode='status';
+    const call=vi.fn(async(name:string,args?:Record<string,unknown>)=>{
+      if(name==='beta_peer_scan_status'||name==='beta_peer_scan_cancel')return scan({stage:mode==='cancel'?'cancelled':'complete',cancelled:mode==='cancel',finished_at_ms:3000});
+      return null;
+    });
+    const client=nativeBetaPeersClient(call);
+    await client.scanStatus(S);
+    expect(call).toHaveBeenCalledWith('beta_peer_scan_status',{scanId:S});
+    mode='cancel';
+    const cancelled=await client.cancelScan(S);
+    expect(cancelled.cancelled).toBe(true);
+    expect(call).toHaveBeenCalledWith('beta_peer_scan_cancel',{scanId:S});
+  });
+});

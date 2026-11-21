@@ -52,7 +52,7 @@ pub use peers::{
     ApprovePeerInvitationReplacement, CreatePeerInvitation, DEFAULT_ORIGINAL_AUTO_BYTES,
     DeviceIdentityInfo, IssuedPeerInvitation, MAX_ORIGINAL_AUTO_BYTES, MIN_ORIGINAL_AUTO_BYTES,
     NearbyPeerCandidate, OriginalAutoBackoff, OriginalAutoPolicy, OriginalAutoPolicyCommand,
-    OriginalAutoQueueStatus,
+    NetworkScanResult, OriginalAutoQueueStatus,
     OriginalAutoSuppression, OriginalAutoSuppressionCommand, OriginalLocalIntent,
     OriginalTransferOptions, OriginalTransferResult, PEER_CORE_SCHEMA, PEER_PROTOCOL,
     PeerCancellation, PeerCapabilities, PeerChannel, PeerClaimReceipt, PeerConnectionView,
@@ -61,7 +61,7 @@ pub use peers::{
     PeerNetwork, PeerNetworkSettings, PeerNetworkStatus, PeerOriginalStatus, PeerPin, PeerProbe,
     PeerReadyAcknowledgement, PeerReadyReceipt, PeerRejoinExpectation, PeerServiceKind,
     PeerServiceOutcome, PeerSyncOptions, PeerSyncResult, PeerTransportListener,
-    PeerTransportOptions,
+    PeerTransportOptions, ScanScope,
 };
 pub mod diagnostics;
 #[cfg(test)]
@@ -188,6 +188,8 @@ pub enum HostError {
     PeerTimeout,
     #[error("peer operation was cancelled")]
     PeerCancelled,
+    #[error("network scan scope is not permitted")]
+    InvalidScanScope,
     #[error("peer transport resource limit reached")]
     PeerBusy,
     #[error("peer membership storage requires recovery")]
