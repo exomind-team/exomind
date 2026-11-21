@@ -557,6 +557,10 @@ fn legacy_auth(version: i64) -> Connection {
     let mut c = Connection::open_in_memory().unwrap();
     c.execute_batch("PRAGMA user_version=1;CREATE TABLE owner(singleton INTEGER PRIMARY KEY CHECK(singleton=1),token_hash TEXT NOT NULL);CREATE TABLE grants(id TEXT PRIMARY KEY,profile_id TEXT NOT NULL,kind TEXT NOT NULL,agent_id TEXT,token_hash TEXT UNIQUE NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);INSERT INTO owner VALUES(1,'synthetic-owner-hash');INSERT INTO grants VALUES('synthetic-grant','synthetic-P','observer',NULL,'synthetic-grant-hash',0);").unwrap();
     super::super::membership_store::migrate(&mut c).unwrap();
+    c.execute_batch(
+        "DROP TABLE peer_connection_endpoints;DROP TABLE peer_connections;DROP TABLE peer_environments;",
+    )
+    .unwrap();
     drop_auto(&c);
     if version <= 4 {
         c.execute_batch("DROP TABLE peer_environment_alias;DROP TABLE peer_environment_alias_claims;")

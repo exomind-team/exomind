@@ -241,7 +241,7 @@ fn outgoing_ack_auth_two_upgrade_preserves_signed_invitation_owner_and_grants() 
         .query_row("SELECT token_hash FROM owner", [], |r| r.get(0))
         .unwrap();
     db.execute_batch(
-        "DROP TABLE peer_original_auto_backoff;DROP TABLE peer_original_auto_intents;DROP TABLE peer_original_auto_policy;DROP TABLE peer_original_auto_revisions;DROP TABLE peer_sync_ack;DROP TABLE peer_sync_ack_layout;DROP TABLE peer_network_routes;DROP TABLE peer_network_settings;DROP TABLE peer_environment_alias;DROP TABLE peer_environment_alias_claims;PRAGMA user_version=2",
+        "DROP TABLE peer_connection_endpoints;DROP TABLE peer_connections;DROP TABLE peer_environments;DROP TABLE peer_original_auto_backoff;DROP TABLE peer_original_auto_intents;DROP TABLE peer_original_auto_policy;DROP TABLE peer_original_auto_revisions;DROP TABLE peer_sync_ack;DROP TABLE peer_sync_ack_layout;DROP TABLE peer_network_routes;DROP TABLE peer_network_settings;DROP TABLE peer_environment_alias;DROP TABLE peer_environment_alias_claims;PRAGMA user_version=2",
     )
     .unwrap();
     drop(db);

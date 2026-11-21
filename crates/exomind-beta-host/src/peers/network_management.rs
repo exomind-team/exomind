@@ -279,6 +279,43 @@ impl BetaHost {
         tx.commit()?;
         Ok(())
     }
+    pub fn peer_environments(
+        &self,
+        owner: &Session,
+    ) -> Result<Vec<super::PeerEnvironmentRecord>, HostError> {
+        let state = self.active_state()?;
+        self.owner(owner)?;
+        super::connection_store::list_environments(&crate::resources(&state)?.persistence.auth)
+    }
+    pub fn peer_connections(
+        &self,
+        owner: &Session,
+    ) -> Result<Vec<super::PeerNetworkConnection>, HostError> {
+        let state = self.active_state()?;
+        self.owner(owner)?;
+        super::connection_store::list_connections(&crate::resources(&state)?.persistence.auth)
+    }
+    /// Changes only this device's permission to dial the connection. Membership,
+    /// grants and the peer's own enabled state remain untouched.
+    pub fn set_peer_connection_enabled(
+        &self,
+        owner: &Session,
+        connection_id: uuid::Uuid,
+        expected_revision: u64,
+        enabled: bool,
+    ) -> Result<super::PeerNetworkConnection, HostError> {
+        let mut state = self.active_state()?;
+        self.owner(owner)?;
+        let resources = state.resources.as_mut().ok_or(HostError::Stopped)?;
+        let wall_ms = self.clock.sample()?.wall_ms;
+        super::connection_store::set_local_enabled_cas(
+            &mut resources.persistence.auth,
+            connection_id,
+            expected_revision,
+            enabled,
+            wall_ms,
+        )
+    }
     pub(super) fn peer_alias_claims(
         &self,
         owner: &Session,
@@ -384,6 +421,11 @@ impl BetaHost {
                 device,
                 endpoints,
             },
+        )?;
+        super::connection_store::reconcile_current_topology_in_tx(
+            &tx,
+            self.device_id,
+            self.clock.sample()?.wall_ms,
         )?;
         tx.commit()?;
         Ok(())

@@ -12,6 +12,11 @@ mod source_history;
 mod network;
 mod network_management;
 mod network_store;
+mod connection_store;
+pub use connection_store::{
+    ConnectionKind as PeerConnectionKind, LastTestState as PeerConnectionTestState,
+    PeerConnection as PeerNetworkConnection, PeerEnvironment as PeerEnvironmentRecord,
+};
 pub use network_management::{EnvironmentAliasSource, EnvironmentAliasView};
 mod original_admission;
 mod original_auto_store;

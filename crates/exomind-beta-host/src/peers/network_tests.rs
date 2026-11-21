@@ -746,7 +746,10 @@ fn auth_five_alias_migration_preserves_network_settings_and_rolls_back_on_failur
     let mut database = rusqlite::Connection::open(&path).unwrap();
     database
         .execute_batch(
-            "DROP TABLE peer_environment_alias;
+            "DROP TABLE peer_connection_endpoints;
+             DROP TABLE peer_connections;
+             DROP TABLE peer_environments;
+             DROP TABLE peer_environment_alias;
              DROP TABLE peer_environment_alias_claims;
              PRAGMA user_version=5;",
         )
@@ -756,7 +759,7 @@ fn auth_five_alias_migration_preserves_network_settings_and_rolls_back_on_failur
         database
             .pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
             .unwrap(),
-        6
+        7
     );
     assert_eq!(
         super::super::network_store::settings(&database).unwrap(),
@@ -774,7 +777,10 @@ fn auth_five_alias_migration_preserves_network_settings_and_rolls_back_on_failur
     let mut database = rusqlite::Connection::open(&path).unwrap();
     database
         .execute_batch(
-            "DROP TABLE peer_environment_alias;
+            "DROP TABLE peer_connection_endpoints;
+             DROP TABLE peer_connections;
+             DROP TABLE peer_environments;
+             DROP TABLE peer_environment_alias;
              DROP TABLE peer_environment_alias_claims;
              CREATE TABLE peer_environment_alias(not_the_schema TEXT NOT NULL);
              PRAGMA user_version=5;",

@@ -2,11 +2,14 @@
 //! No second SQLite authority and no raw invitation secret is persisted.
 use super::membership::*;
 use crate::HostError;
+use exomind_core::DeviceId;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Serialize, de::DeserializeOwned};
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-pub(crate) const AUTH_VERSION: i64 = 6;
+pub(crate) const AUTH_VERSION: i64 = 7;
+const AUTH_VERSION_V6: i64 = 6;
 const LAYOUT: &str = "exomind-peer-membership/1";
 pub(super) const MAX_JSON: usize = 16384;
 pub(super) const MAX_MEMBERS: i64 = 256;
@@ -43,7 +46,43 @@ pub(super) fn corrupt<T>(_: T) -> HostError {
     HostError::PeerMembershipRecoveryRequired
 }
 
+#[cfg(test)]
 pub(crate) fn migrate(connection: &mut Connection) -> Result<(), HostError> {
+    let wall_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(unavailable)?
+        .as_millis()
+        .try_into()
+        .map_err(|_| HostError::InvalidRequest)?;
+    migrate_for_device(connection, DeviceId::new(), wall_ms)
+}
+
+pub(crate) fn migrate_for_device(
+    connection: &mut Connection,
+    local_device: DeviceId,
+    wall_ms: i64,
+) -> Result<(), HostError> {
+    if wall_ms < 0 {
+        return Err(HostError::InvalidRequest);
+    }
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(unavailable)?;
+    if version != AUTH_VERSION {
+        migrate_to_v6(connection)?;
+    }
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(unavailable)?;
+    if version == AUTH_VERSION_V6 {
+        migrate_v6_to_v7(connection, local_device, wall_ms)?;
+    } else if version != AUTH_VERSION {
+        return Err(HostError::PeerMembershipRecoveryRequired);
+    }
+    validate(connection)
+}
+
+fn migrate_to_v6(connection: &mut Connection) -> Result<(), HostError> {
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(unavailable)?;
@@ -93,7 +132,7 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), HostError> {
             .map_err(unavailable)?;
         validate_v5(&tx)?;
         super::network_store::create_alias(&tx)?;
-        tx.pragma_update(None, "user_version", AUTH_VERSION)
+        tx.pragma_update(None, "user_version", AUTH_VERSION_V6)
             .map_err(unavailable)?;
         tx.commit().map_err(unavailable)?;
     } else if version == 4 {
@@ -108,7 +147,7 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), HostError> {
             .map_err(unavailable)?;
         validate_v5(&tx)?;
         super::network_store::create_alias(&tx)?;
-        tx.pragma_update(None, "user_version", AUTH_VERSION)
+        tx.pragma_update(None, "user_version", AUTH_VERSION_V6)
             .map_err(unavailable)?;
         tx.commit().map_err(unavailable)?;
     } else if version == 5 {
@@ -128,13 +167,56 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), HostError> {
             .map_err(unavailable)?;
         validate_v5(&tx)?;
         super::network_store::create_alias(&tx)?;
-        tx.pragma_update(None, "user_version", AUTH_VERSION)
+        tx.pragma_update(None, "user_version", AUTH_VERSION_V6)
             .map_err(unavailable)?;
         tx.commit().map_err(unavailable)?;
-    } else if version != AUTH_VERSION {
+    } else if version != AUTH_VERSION_V6 {
         return Err(HostError::PeerMembershipRecoveryRequired);
     }
-    validate(connection)
+    validate_v6(connection)
+}
+fn migrate_v6_to_v7(
+    connection: &mut Connection,
+    local_device: DeviceId,
+    wall_ms: i64,
+) -> Result<(), HostError> {
+    validate_v6(connection)?;
+    let tx = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(unavailable)?;
+    validate_v6(&tx)?;
+    super::connection_store::create_v7_schema(&tx)?;
+    let members = all_members_for_migration(&tx)?;
+    let routes = super::network_store::routes(&tx)?;
+    // The migration timestamp belongs to the new topology projection. Do not
+    // advance the existing membership clock merely because a schema changed.
+    let now_ms = wall_ms;
+    super::connection_store::ensure_topology_from_verified_in_tx(
+        &tx,
+        local_device,
+        &members,
+        &routes,
+        now_ms,
+    )?;
+    super::connection_store::validate_v7_schema(&tx)?;
+    tx.pragma_update(None, "user_version", AUTH_VERSION)
+        .map_err(unavailable)?;
+    tx.commit().map_err(unavailable)
+}
+fn validate_common(connection: &Connection) -> Result<(), HostError> {
+    validate_membership_layout(connection)?;
+    super::sync_store::validate(connection)?;
+    super::network_store::validate(connection)?;
+    super::original_auto_store::validate(connection)
+}
+pub(super) fn validate_v6(connection: &Connection) -> Result<(), HostError> {
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .map_err(unavailable)?;
+    if version != AUTH_VERSION_V6 {
+        return Err(HostError::PeerMembershipRecoveryRequired);
+    }
+    validate_common(connection)
 }
 pub(super) fn validate(connection: &Connection) -> Result<(), HostError> {
     let version: i64 = connection
@@ -143,10 +225,8 @@ pub(super) fn validate(connection: &Connection) -> Result<(), HostError> {
     if version != AUTH_VERSION {
         return Err(HostError::PeerMembershipRecoveryRequired);
     }
-    validate_membership_layout(connection)?;
-    super::sync_store::validate(connection)?;
-    super::network_store::validate(connection)?;
-    super::original_auto_store::validate(connection)
+    validate_common(connection)?;
+    super::connection_store::validate_v7_schema(connection)
 }
 fn validate_v4(connection: &Connection) -> Result<(), HostError> {
     let version: i64 = connection
@@ -348,6 +428,15 @@ pub(super) fn members(
 }
 pub(super) fn all_members(connection: &Connection) -> Result<Vec<PeerMember>, HostError> {
     validate(connection)?;
+    all_members_rows(connection)
+}
+pub(super) fn all_members_for_migration(
+    connection: &Connection,
+) -> Result<Vec<PeerMember>, HostError> {
+    validate_membership_layout(connection)?;
+    all_members_rows(connection)
+}
+fn all_members_rows(connection: &Connection) -> Result<Vec<PeerMember>, HostError> {
     let mut statement = connection
         .prepare("SELECT CASE WHEN length(profile_id)=36 THEN profile_id END,CASE WHEN length(device_id)=36 THEN device_id END,CASE WHEN length(body)<=16384 THEN body END FROM peer_members ORDER BY profile_id,device_id LIMIT 257")
         .map_err(unavailable)?;
@@ -439,6 +528,26 @@ pub(super) fn save_member(connection: &Connection, row: &StoredMember) -> Result
     }
     connection.execute("INSERT INTO peer_members VALUES(?1,?2,?3) ON CONFLICT(profile_id,device_id) DO UPDATE SET body=excluded.body",params![row.record.profile_id.to_string(),row.record.device_id.to_string(),encode(row)?]).map_err(unavailable)?;
     Ok(())
+}
+/// Persists an authenticated membership and its corresponding environment view
+/// in the same transaction. The topology rows never grant membership or access.
+pub(super) fn save_member_for_device(
+    connection: &Connection,
+    row: &StoredMember,
+    local_device: DeviceId,
+) -> Result<(), HostError> {
+    save_member(connection, row)?;
+    let wall_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(unavailable)?
+        .as_millis()
+        .try_into()
+        .map_err(|_| HostError::InvalidRequest)?;
+    super::connection_store::reconcile_current_topology_in_tx(
+        connection,
+        local_device,
+        wall_ms,
+    )
 }
 pub(super) fn save_invitation(
     connection: &Connection,

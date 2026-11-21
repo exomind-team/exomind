@@ -361,6 +361,11 @@ impl BetaHost {
             Err(HostError::PeerBusy) => return Ok(false),
             Err(error) => return Err(error),
         }
+        super::connection_store::reconcile_current_topology_in_tx(
+            &tx,
+            self.device_id,
+            self.clock.sample()?.wall_ms,
+        )?;
         tx.commit().map_err(|_| HostError::PeerSyncUnavailable)?;
         Ok(true)
     }

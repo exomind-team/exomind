@@ -444,7 +444,7 @@ fn local_member(
     if store::member_has_history(connection, profile, identity.info.device_id)? {
         return Err(HostError::PeerMembershipRecoveryRequired);
     }
-    store::save_member(
+    store::save_member_for_device(
         connection,
         &StoredMember {
             record: PeerMember {
@@ -458,6 +458,7 @@ fn local_member(
             },
             claim_id: None,
         },
+        identity.info.device_id,
     )
 }
 fn require_local_member(
@@ -780,7 +781,7 @@ impl BetaHost {
             signature: sign(&identity, CLAIM_DOMAIN, &evidence)?,
             evidence,
         };
-        store::save_member(&tx, &member)?;
+        store::save_member_for_device(&tx, &member, self.device_id)?;
         store::save_claim(
             &tx,
             &StoredClaim {
@@ -845,8 +846,8 @@ impl BetaHost {
                     )?,
                 )
             };
-            store::save_member(&tx, &local)?;
-            store::save_member(&tx, &issuer)?;
+            store::save_member_for_device(&tx, &local, self.device_id)?;
+            store::save_member_for_device(&tx, &issuer, self.device_id)?;
             pending.issuer_generation = Some(issuer.record.generation);
             pending.local_generation = Some(local.record.generation);
             pending.receipt = Some(receipt.clone());
@@ -901,7 +902,7 @@ impl BetaHost {
             claim_receipt: claim.receipt.clone(),
         };
         member.record.state = PeerJoinState::Ready;
-        store::save_member(&tx, &member)?;
+        store::save_member_for_device(&tx, &member, self.device_id)?;
         claim.ready = Some(ready.clone());
         store::save_claim(&tx, &claim)?;
         channel.binding_pin(self)?;
@@ -953,8 +954,8 @@ impl BetaHost {
         )?;
         local.record.state = PeerJoinState::Ready;
         issuer.record.state = PeerJoinState::Ready;
-        store::save_member(&tx, &local)?;
-        store::save_member(&tx, &issuer)?;
+        store::save_member_for_device(&tx, &local, self.device_id)?;
+        store::save_member_for_device(&tx, &issuer, self.device_id)?;
         pending.ready = Some(ready.clone());
         store::save_pending(&tx, &pending)?;
         channel.binding_pin(self)?;
@@ -1083,7 +1084,7 @@ impl BetaHost {
                 .checked_add(1)
                 .filter(|g| *g <= i64::MAX as u64)
                 .ok_or(HostError::PeerMembershipConflict)?;
-            store::save_member(&tx, &member)?;
+            store::save_member_for_device(&tx, &member, self.device_id)?;
         }
         tx.commit().map_err(store::unavailable)?;
         Ok(member.record)
@@ -1111,7 +1112,7 @@ impl BetaHost {
                     .generation
                     .checked_add(1)
                     .ok_or(HostError::PeerMembershipConflict)?;
-                store::save_member(&tx, &member)?;
+                store::save_member_for_device(&tx, &member, self.device_id)?;
             }
         }
         store::save_invitation(&tx, &invitation)?;

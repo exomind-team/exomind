@@ -57,9 +57,11 @@ pub use peers::{
     OriginalAutoSuppression, OriginalAutoSuppressionCommand, OriginalLocalIntent,
     OriginalTransferOptions, OriginalTransferResult, PEER_CORE_SCHEMA, PEER_PROTOCOL,
     PeerCancellation, PeerCapabilities, PeerChannel, PeerClaimReceipt, PeerConnectionView,
+    PeerConnectionKind, PeerConnectionTestState, PeerEnvironmentRecord,
     PeerInvitation, PeerInvitationOffer, PeerInvitationState, PeerInvitationStatus, PeerJoinClaim,
     PeerJoinConfirmation, PeerJoinState, PeerJoinStatus, PeerMember, PeerMembershipEvidence,
-    PeerNetwork, PeerNetworkSettings, PeerNetworkStatus, PeerOriginalStatus, PeerPin, PeerProbe,
+    PeerNetwork, PeerNetworkConnection, PeerNetworkSettings, PeerNetworkStatus,
+    PeerOriginalStatus, PeerPin, PeerProbe,
     PeerReadyAcknowledgement, PeerReadyReceipt, PeerRejoinExpectation, PeerServiceKind,
     PeerServiceOutcome, PeerSyncOptions, PeerSyncResult, PeerTransportListener,
     PeerTransportOptions, ScanScope,
@@ -410,7 +412,11 @@ impl BetaHost {
             None => Core::open(&core_root)?,
         };
         persistence.bind_core(core.device_id())?;
-        peers::membership_store::migrate(&mut persistence.auth)?;
+        peers::membership_store::migrate_for_device(
+            &mut persistence.auth,
+            core.device_id(),
+            clock.sample()?.wall_ms,
+        )?;
         // Secure recognized core files only after Core has validated its schema
         // and ownership. Never modify a foreign directory to make it acceptable.
         storage::secure_private_tree(&core_root)?;

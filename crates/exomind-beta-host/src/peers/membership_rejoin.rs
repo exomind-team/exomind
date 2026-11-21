@@ -290,7 +290,7 @@ impl BetaHost {
             request.claim_id,
             invitation.signed.offer.capabilities,
         )?;
-        store::save_member(&tx, &reserved)?;
+        store::save_member_for_device(&tx, &reserved, self.device_id)?;
         invitation.replacement = Some(IssuerReplacement {
             request: request.clone(),
             previous,
@@ -418,8 +418,8 @@ impl BetaHost {
         });
         row.replacement = Some(replacement);
         validate_joiner(&row)?;
-        store::save_member(&tx, &reserved_local)?;
-        store::save_member(&tx, &reserved_issuer)?;
+        store::save_member_for_device(&tx, &reserved_local, self.device_id)?;
+        store::save_member_for_device(&tx, &reserved_issuer, self.device_id)?;
         store::save_pending(&tx, &row)?;
         tx.commit().map_err(store::unavailable)?;
         Ok(claim)
