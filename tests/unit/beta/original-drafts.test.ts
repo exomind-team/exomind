@@ -73,7 +73,7 @@ describe('Beta original drafts',()=>{
     draft.removeFile('p',id);copy.resolve();await adding;
     expect(f.store.get).not.toHaveBeenCalled();expect(f.api.begin).not.toHaveBeenCalled();expect(f.client.capture).not.toHaveBeenCalled();
   });
-  it('freezes A/B and original command while upload A is blocked, preserving same-text next revision with C',async()=>{
+  it('freezes A/B and original command while upload A is blocked, then removes submitted B from the next revision with C',async()=>{
     const f=fixture();const gate=deferred<void>();const entered=deferred<void>();const write=f.api.write.getMockImplementation()!;
     f.api.write.mockImplementationOnce(async (...args)=>{entered.resolve();await gate.promise;return write(...args);});
     const draft=f.create();draft.setDraft('p','same text');await draft.addFiles('p',[file('A'),file('B')]);await entered.promise;
@@ -81,12 +81,16 @@ describe('Beta original drafts',()=>{
     const original=draft.snapshot().pending[0].command;
     expect(f.client.capture).not.toHaveBeenCalled();
     draft.removeFile('p',selected[0].id);await draft.addFiles('p',[file('C')]);draft.setDraft('p','same text');
+    const nextRevision=draft.snapshot().drafts.p.revision;
     gate.resolve();await sending;
     expect(f.client.capture).toHaveBeenCalledTimes(1);
     expect(f.client.capture.mock.calls[0][0]).toEqual(original);
     expect(original.originals?.map(item=>item.file_name)).toEqual(['A','B']);
     expect(draft.snapshot().drafts.p.text).toBe('same text');
-    expect(draft.snapshot().drafts.p.files!.map(item=>item.file_name)).toEqual(['B','C']);
+    expect(draft.snapshot().drafts.p.files!.map(item=>item.file_name)).toEqual(['C']);
+    expect(draft.snapshot().drafts.p.revision).toBe(nextRevision+1);
+    const persisted=JSON.parse(f.storage.getItem('exomind:beta:drafts:device-a')!);
+    expect(persisted.drafts.p.files.map((item:{file_name:string})=>item.file_name)).toEqual(['C']);
   });
   it('persists source bytes before any stage RPC and never falls back to a partial pure-text submission',async()=>{
     const f=fixture();const copied=deferred<void>();f.store.put.mockImplementationOnce(async()=>copied.promise);

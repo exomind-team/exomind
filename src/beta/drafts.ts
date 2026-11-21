@@ -513,9 +513,19 @@ export class BetaDraftController {
     if (this.disposed) return receipt;
     const profile = pending.command.profile_id;
     const draft = this.state.drafts[profile];
-    const drafts = draft?.revision === pending.draft_revision
-      ? { ...this.state.drafts, [profile]: { text: '', revision: draft.revision + 1, tags: [], files: [] } }
-      : this.state.drafts;
+    let drafts = this.state.drafts;
+    if (draft?.revision === pending.draft_revision) {
+      drafts = { ...drafts, [profile]: { text: '', revision: draft.revision + 1, tags: [], files: [] } };
+    } else if (draft && pending.files?.length) {
+      // The successful command owns only the attachment identities it froze.
+      // A later text/tag edit inherits the old file list, so remove exactly
+      // those submitted files while preserving whatever the user added since.
+      const submitted = new Set(pending.files.map(file => file.id));
+      const files = draft.files?.filter(file => !submitted.has(file.id));
+      if (files && files.length !== (draft.files?.length ?? 0)) {
+        drafts = { ...drafts, [profile]: { ...draft, revision: draft.revision + 1, files } };
+      }
+    }
     this.publish({ ...this.state, drafts,
       pending: this.state.pending.filter(entry => entry.command.command_id !== pending.command.command_id),
       confirmed: [...this.state.confirmed, { receipt, draft_revision: pending.draft_revision }].slice(-8) });
