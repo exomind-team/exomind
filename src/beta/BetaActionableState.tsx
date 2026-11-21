@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Circle, Clock3, Lock, TriangleAlert } from 'lucide-react';
 import { isTauri } from '@tauri-apps/api/core';
 import { Badge } from '@/components/ui/badge';
@@ -145,6 +145,16 @@ export function BetaActionableState({
   const [copyBusy, setCopyBusy] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const copyFlight = useRef(0);
+  const diagnosticKey = safeDiagnostic ? JSON.stringify(safeDiagnostic) : 'none';
+
+  useEffect(() => {
+    copyFlight.current++;
+    setCopyBusy(false);
+    setCopyNotice(null);
+    return () => {
+      copyFlight.current++;
+    };
+  }, [state, diagnosticKey, onCopyDiagnostic]);
 
   const Icon = stateIcon(state);
   const showCopy = COPY_AVAILABLE_STATES.has(state);

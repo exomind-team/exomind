@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BetaActionableState } from '@/beta/BetaActionableState';
 import type { RedactedDiagnostic } from '@/beta/redacted-diagnostic';
+import { deferred } from './fixtures';
 
 const REDACTED: RedactedDiagnostic = {
   operation: 'peer_sync',
@@ -225,5 +226,34 @@ describe('BetaActionableState', () => {
 
     expect(screen.getByRole('button', { name: '重试连接' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '复制诊断' })).toBeEnabled();
+  });
+
+  it('does not announce a completed copy after the displayed diagnostic changes', async () => {
+    const pending = deferred<'copied' | 'failed'>();
+    const onCopyDiagnostic = vi.fn(() => pending.promise);
+    const view = render(
+      <BetaActionableState
+        state="error"
+        title="连接失败"
+        diagnostic={REDACTED}
+        onCopyDiagnostic={onCopyDiagnostic}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '复制诊断' }));
+    view.rerender(
+      <BetaActionableState
+        state="error"
+        title="连接失败"
+        diagnostic={{ ...REDACTED, code: 'NEW_CODE' }}
+        onCopyDiagnostic={onCopyDiagnostic}
+      />,
+    );
+    await act(async () => {
+      pending.resolve('copied');
+      await pending.promise;
+    });
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });
