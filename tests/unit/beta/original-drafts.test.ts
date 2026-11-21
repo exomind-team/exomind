@@ -88,7 +88,7 @@ describe('Beta original drafts',()=>{
     expect(original.originals?.map(item=>item.file_name)).toEqual(['A','B']);
     expect(draft.snapshot().drafts.p.text).toBe('same text');
     expect(draft.snapshot().drafts.p.files!.map(item=>item.file_name)).toEqual(['C']);
-    expect(draft.snapshot().drafts.p.revision).toBe(nextRevision+1);
+    expect(draft.snapshot().drafts.p.revision).toBe(nextRevision);
     const persisted=JSON.parse(f.storage.getItem('exomind:beta:drafts:device-a')!);
     expect(persisted.drafts.p.files.map((item:{file_name:string})=>item.file_name)).toEqual(['C']);
   });

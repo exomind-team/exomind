@@ -14,6 +14,7 @@ describe('Beta reliable drafts', () => {
     const durable=Object.assign(storage,{durable:true as const,commit:vi.fn(()=>gate.promise),snapshot:()=>({state:'pending' as const,error:null}),subscribe:()=>()=>{}});
     const draft=controller(client,durable);draft.setDraft('p','fixed original');const sending=draft.submit('p');
     const original=draft.snapshot().pending[0].command;expect(client.capture).not.toHaveBeenCalled();
+    expect(draft.snapshot().drafts.p).toMatchObject({ text: '', tags: [], files: [] });
     draft.setDraft('p','newer draft');gate.reject(new Error('synthetic quota'));
     await expect(sending).rejects.toBeDefined();expect(client.capture).not.toHaveBeenCalled();
     expect(draft.snapshot().pending[0].command).toEqual(original);expect(draft.snapshot().drafts.p.text).toBe('newer draft');
@@ -72,6 +73,35 @@ describe('Beta reliable drafts', () => {
     expect(client.capture.mock.calls[1][0]).toEqual(client.capture.mock.calls[0][0]);
     expect(client.receipt).toHaveBeenCalledTimes(1);
     expect(client.capture.mock.calls[0][0].occurred_at_ms).toBe(1234);
+  });
+  it('reuses the command named by a restored draft while an older submission remains unresolved', async () => {
+    const client = fakeClient();
+    const older = deferred<BetaReceipt>(), current = deferred<BetaReceipt>();
+    client.capture.mockImplementationOnce(() => older.promise).mockImplementationOnce(() => current.promise);
+    const draft = controller(client);
+
+    draft.setDraft('p', 'older submission');
+    const olderSubmission = draft.submit('p');
+    const olderCommand = client.capture.mock.calls[0][0];
+    draft.setDraft('p', 'current submission');
+    const currentSubmission = draft.submit('p');
+    const currentCommand = client.capture.mock.calls[1][0];
+
+    current.reject(new Error('lost current receipt'));
+    await currentSubmission;
+    expect(draft.snapshot().drafts.p).toMatchObject({
+      text: 'current submission',
+      restored_command_id: currentCommand.command_id,
+    });
+
+    client.receipt.mockResolvedValueOnce(null);
+    await draft.submit('p');
+    expect(client.receipt).toHaveBeenCalledWith('p', currentCommand.command_id);
+    expect(client.capture.mock.calls[2][0]).toEqual(currentCommand);
+    expect(client.capture.mock.calls[2][0].command_id).not.toBe(olderCommand.command_id);
+
+    older.resolve(saved(olderCommand));
+    await olderSubmission;
   });
   it('a late receipt clears neither the newer same-profile draft nor another profile', async () => {
     const client = fakeClient(); const flight = deferred<BetaReceipt>(); client.capture.mockReturnValueOnce(flight.promise);

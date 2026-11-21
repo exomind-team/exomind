@@ -53,4 +53,25 @@ describe('selected export controls disclosure', () => {
     expect(screen.getByText(hash)).toBeVisible();
     expect(screen.getByText(REQUEST, { exact: false })).toBeVisible();
   });
+
+  it('does not describe a cancelled export as a partial package that can be inspected', () => {
+    const { state, owner } = fixture();
+    const cancelled = { ...state, task: {
+      version: 1, request_id: REQUEST, profile_id: PROFILE, device_id: EVENT, runtime_id: EVENT,
+      selections: state.selections, phase: 'cancelled', message: '导出已取消',
+      cancelAccepted: true,
+      result: { request_id: REQUEST, profile_id: PROFILE, phase: 'cancelled',
+        content_complete: false, partial_output: false, included_originals: 4,
+        omitted_originals: 0, archive_byte_length: null, archive_sha256: null,
+        failure_code: 'cancelled' },
+    } } as UserRangeExportSnapshot;
+    render(<BetaUserRangeExportControls state={cancelled} owner={owner} />);
+    fireEvent.click(screen.getByRole('button', { name: /^选取内容导出/ }));
+
+    expect(screen.getByText('已取消')).toBeVisible();
+    expect(screen.getByText('本次未生成可核对的导出包。')).toBeVisible();
+    expect(screen.queryByText('部分内容未包含，请查看包内清单。')).toBeNull();
+    expect(screen.queryByText(/本机原件：包含/)).toBeNull();
+    expect(screen.queryByText('未包含的附件请查看包内清单。')).toBeNull();
+  });
 });

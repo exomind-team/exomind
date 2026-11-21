@@ -475,6 +475,7 @@ export function FocusTimerView({
                         onFocus={bindings.customMinutes?.onFocus}
                         onBlur={bindings.customMinutes?.onBlur}
                         onKeyDown={handleCustomDurationKeyDown}
+                        inputMode="numeric"
                         aria-label="自定义倒计时分钟（Custom countdown minutes）"
                         placeholder="分钟"
                         className="relative z-10 h-8 w-full border-transparent bg-transparent px-[6px] text-center text-[12px] font-semibold leading-none text-[#1C1917] shadow-none outline-none ring-0 focus-visible:ring-0 dark:text-[#FAFAF9]"

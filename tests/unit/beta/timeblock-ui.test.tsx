@@ -196,6 +196,23 @@ describe('shared Alpha focus presentation with real Beta commands',()=>{
     try{await screen.findByTestId('new-focus-running-clock');expect(client.timeblocks.command).not.toHaveBeenCalled();}
     finally{ui.unmount();await owner.close();}
   });
+  it('rejects a fractional custom countdown instead of silently reinterpreting it',async()=>{
+    const client=timeblockClient(),owner=await BetaTimeblockController.open(client,D,P,{journal:memoryIntentJournal()});
+    const ui=render(<BetaFocusTimer controller={owner} client={client} profileId={P}/>);
+    try{
+      fireEvent.click(await screen.findByTestId('new-focus-idle-card'));
+      fireEvent.click(screen.getByTestId('new-focus-expected-custom-trigger'));
+      const input=screen.getByTestId('new-focus-expected-custom-input');
+      fireEvent.change(input,{target:{value:'0.05'}});
+      fireEvent.keyDown(input,{key:'Enter'});
+      expect(await screen.findByText('请输入 1 到 720 之间的整数分钟。')).toBeVisible();
+      expect(screen.getByTestId('new-focus-expected-custom-input')).toHaveValue('0.05');
+      fireEvent.click(screen.getByTestId('new-focus-start-button'));
+      expect(screen.getByTestId('new-focus-expected-custom-input')).toHaveValue('0.05');
+      expect(client.timeblocks.command).not.toHaveBeenCalled();
+      expect(owner.snapshot().draft.minutes).toBe(25);
+    }finally{ui.unmount();await owner.close();}
+  });
   it('holds the document writer lock until accepted local draft writes have completed on close',async()=>{
     const locks=Object.getOwnPropertyDescriptor(navigator,'locks');let releases=0;
     Object.defineProperty(navigator,'locks',{configurable:true,value:{request:async(_name:string,_options:unknown,callback:(lock:Lock)=>Promise<void>)=>{try{await callback({} as Lock);}finally{releases++;}}}});

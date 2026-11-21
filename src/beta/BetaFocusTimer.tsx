@@ -23,6 +23,7 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
   const [panel,setPanel]=useState<Panel>(null);
   const initializedOwner=useRef<BetaTimeblockController|null>(null);
   const [custom,setCustom]=useState({editing:false,text:String(state.draft.minutes)});
+  const [customError,setCustomError]=useState('');
   const [feedback,setFeedback]=useState<FeedbackTarget>(null);
   const [openedHandoff,setOpenedHandoff]=useState('');const readyHandoff=useRef('');
   const [feedbackPortal,setFeedbackPortal]=useState<HTMLDivElement|null>(null);
@@ -62,11 +63,22 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
   }
   function setDraft(patch:Parameters<BetaTimeblockController['setStartDraft']>[0]){try{controller.setStartDraft(patch);}catch(failure){setError(message(failure));}}
   function start(){if(disabled){setError('当前操作或本机暂存尚未确认，请先查证');return;}
+    if(custom.editing&&!applyMinutes(custom.text))return;
     if(panel?.kind==='rotate'&&state.remote?.active?.block_id!==panel.from){setError('当前时间块已变化，请重新确认切换目标');return;}
     void run(()=>panel?.kind==='rotate'?controller.rotate():controller.start(),()=>setPanel(null));
   }
   const quick=(event:KeyboardEvent<HTMLElement>)=>!event.nativeEvent.isComposing&&event.key==='Enter'&&(event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey;
-  function applyMinutes(raw:string){const number=Number.parseInt(raw,10);const minutes=Number.isFinite(number)?Math.max(1,Math.min(720,number)):state.draft.minutes;setDraft({mode:'countdown',minutes});setCustom({editing:false,text:String(minutes)});}
+  function applyMinutes(raw:string):boolean{
+    const normalized=raw.trim(),number=Number(normalized);
+    if(!/^\d+$/.test(normalized)||!Number.isSafeInteger(number)||number<1||number>720){
+      setCustomError('请输入 1 到 720 之间的整数分钟。');
+      return false;
+    }
+    setCustomError('');
+    setDraft({mode:'countdown',minutes:number});
+    setCustom({editing:false,text:String(number)});
+    return true;
+  }
   const active=state.remote?.active;const clock=controller.displayClock();
   const pendingFeedback=[...new Set([...(state.remote?.pending_feedback??[]),...(active?.phase==='feedback_pending'?[active.block_id]:[])])];
   const handoffKey=handoffTarget?`${handoffTarget.handoffId}:${handoffTarget.attempt}`:'';
@@ -125,18 +137,18 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
     {state.pending.map(item=><div key={item.command.command_id} className="flex items-center gap-2 px-5 py-2 text-xs text-secondary"><span className="min-w-0 flex-1">{item.state==='pending'?'正在确认时间块操作…':item.state==='rejected'?'时间块已变化，此操作被拒绝':'时间块操作结果待确认'}{item.message&&`：${item.message}`}</span>{item.state==='rejected'?<Button size="sm" variant="outline" onClick={()=>{controller.dismissRejected(item.command.command_id);void controller.refresh();}}>放弃被拒操作</Button>:<Button size="sm" variant="outline" disabled={item.state==='pending'} onClick={()=>void run(()=>controller.retry(item.command.command_id))}>查证时间块操作</Button>}</div>)}
     {!state.remote?<p role="status" className="px-5 py-3 text-xs text-muted">{state.error?'尚未读取到可用的时间块状态，请按错误提示处理后刷新。':'正在恢复并读取时间块…'}</p>:<>
       <FocusTimerView surface="workspace" startLabel={panel?.kind==='rotate'?'切换并开始':'开始计时'} model={model} actionsDisabled={disabled} actions={{
-        expand:()=>{setCustom({editing:false,text:String(state.draft.minutes)});setPanel({kind:'start'});},collapse:()=>setPanel(null),
-        selectTiming:(mode,minutes)=>{setCustom({editing:false,text:String(minutes??state.draft.minutes)});setDraft({mode,...(minutes===undefined?{}:{minutes})});},
-        editCustom:()=>setCustom({editing:true,text:String(state.draft.minutes)}),start,beginRename:()=>{},
+        expand:()=>{setCustomError('');setCustom({editing:false,text:String(state.draft.minutes)});setPanel({kind:'start'});},collapse:()=>setPanel(null),
+        selectTiming:(mode,minutes)=>{setCustomError('');setCustom({editing:false,text:String(minutes??state.draft.minutes)});setDraft({mode,...(minutes===undefined?{}:{minutes})});},
+        editCustom:()=>{setCustomError('');setCustom({editing:true,text:String(state.draft.minutes)});},start,beginRename:()=>{},
         pauseResume:()=>{if(active&&!disabled)void run(()=>controller.control(active.phase==='paused'?'resume':'pause',active.block_id));},
         end:()=>{if(!active||disabled)return;if(active.phase==='feedback_pending')setFeedback({id:active.block_id,kind:'submit'});else void run(()=>controller.control('end_action',active.block_id),()=>setFeedback({id:active.block_id,kind:'submit'}));},
       }} bindings={{
         configName:{inputRef:configInput,onChange:event=>setDraft({name:event.target.value}),onKeyDown:event=>{if(quick(event)){event.preventDefault();start();}}},
-        customMinutes:{inputRef:customInput,onChange:event=>setCustom({editing:true,text:event.target.value.replace(/[^\d]/g,'')}),onBlur:()=>applyMinutes(custom.text),onKeyDown:event=>{
-          if(event.nativeEvent.isComposing)return;if(quick(event)){event.preventDefault();event.stopPropagation();applyMinutes(event.currentTarget.value);start();}
-          else if(event.key==='Enter'){event.preventDefault();applyMinutes(event.currentTarget.value);}else if(event.key==='Escape'){event.preventDefault();setCustom({editing:false,text:String(state.draft.minutes)});}
+        customMinutes:{inputRef:customInput,onChange:event=>{setCustomError('');setCustom({editing:true,text:event.target.value});},onBlur:()=>applyMinutes(custom.text),onKeyDown:event=>{
+          if(event.nativeEvent.isComposing)return;if(quick(event)){event.preventDefault();event.stopPropagation();if(applyMinutes(event.currentTarget.value))start();}
+          else if(event.key==='Enter'){event.preventDefault();applyMinutes(event.currentTarget.value);}else if(event.key==='Escape'){event.preventDefault();setCustomError('');setCustom({editing:false,text:String(state.draft.minutes)});}
         }},expectedTimeKeyDown:event=>{if(quick(event)){event.preventDefault();start();}},
-      }} slots={{configurationDetails:panel&&<div className="flex flex-wrap items-center gap-2 text-xs text-secondary">{panel.kind==='rotate'&&<span>当前时间块：{panel.name} → 新时间块</span>}<label className="flex items-center gap-2">倒计时到点<FieldSelect label="倒计时到点方式" value={state.draft.endMode} onValueChange={value=>setDraft({endMode:value as 'soft'|'hard'})} options={[{value:'soft',label:'继续超时'},{value:'hard',label:'结束行动并待反馈'}]}/></label></div>,dialogs:<TimeBlockFeedbackDialog open={!!feedback} onOpenChange={open=>{if(!open)setFeedback(null);}}
+      }} slots={{configurationDetails:panel&&<div className="space-y-2 text-xs text-secondary"><div className="flex flex-wrap items-center gap-2">{panel.kind==='rotate'&&<span>当前时间块：{panel.name} → 新时间块</span>}<label className="flex items-center gap-2">倒计时到点<FieldSelect label="倒计时到点方式" value={state.draft.endMode} onValueChange={value=>setDraft({endMode:value as 'soft'|'hard'})} options={[{value:'soft',label:'继续超时'},{value:'hard',label:'结束行动并待反馈'}]}/></label></div>{customError&&<p role="alert" className="text-xs text-destructive">{customError}</p>}</div>,dialogs:<TimeBlockFeedbackDialog open={!!feedback} onOpenChange={open=>{if(!open)setFeedback(null);}}
         title={feedback?.kind==='append'?'追加反馈':'结束反馈'} description={feedback?roster[feedback.id]??feedback.id.slice(0,8):''} compact
         feedback={feedbackDraft} onFeedbackChange={text=>{if(feedback)try{controller.setFeedbackDraft(feedback.id,text);}catch(failure){setError(message(failure));}}}
         onFeedbackKeyDown={event=>{runActionOnPrimaryModifierEnter(event,()=>submitFeedback());}} feedbackPlaceholder="记录本次专注的反馈..." feedbackTestId="new-focus-feedback-textarea"

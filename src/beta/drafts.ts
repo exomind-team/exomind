@@ -18,7 +18,13 @@ export interface DraftFile {
   state: 'preparing' | 'uploading' | 'verified' | 'failed' | 'source_missing';
   next_offset: number; message?: string;
 }
-interface Draft { text: string; revision: number; tags?: string[]; files?: DraftFile[] }
+interface Draft {
+  text: string;
+  revision: number;
+  tags?: string[];
+  files?: DraftFile[];
+  restored_command_id?: string;
+}
 export interface PendingCapture {
   command: BetaCommand; draft_revision: number;
   state: 'pending' | 'unknown' | 'failed' | 'committed';
@@ -79,6 +85,8 @@ function load(raw: string | null, deviceId: string): PersistedState {
   for (const [profile, draft] of Object.entries(value.drafts)) {
     if (typeof draft.text !== 'string' || !Number.isSafeInteger(draft.revision) || draft.revision < 0
       || (draft.tags !== undefined && (!Array.isArray(draft.tags) || !validTags(draft.tags)))
+      || (draft.restored_command_id !== undefined
+        && (typeof draft.restored_command_id !== 'string' || !draft.restored_command_id.trim()))
       || (draft.files !== undefined && !Array.isArray(draft.files))) throw new Error('Invalid draft');
     draft.files?.forEach(file => validateFile(file, profile, deviceId));
   }
@@ -194,7 +202,9 @@ export class BetaDraftController {
 
   setDraft(profileId: string, text: string): void {
     const previous = this.state.drafts[profileId] ?? { text: '', revision: 0, tags: [] };
-    this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...previous, text, revision: previous.revision + 1 } } });
+    this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: {
+      ...previous, text, revision: previous.revision + 1, restored_command_id: undefined,
+    } } });
   }
 
   setTags(profileId: string, tags: readonly string[]): void {
@@ -202,7 +212,9 @@ export class BetaDraftController {
     if (!validTags(normalized)) throw new BetaApiError('invalid_tags', '最多可添加 64 个标签，每个标签最多 128 字节');
     const previous = this.state.drafts[profileId] ?? { text: '', revision: 0, tags: [] };
     if (JSON.stringify(previous.tags ?? []) === JSON.stringify(normalized)) return;
-    this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...previous, tags: normalized, revision: previous.revision + 1 } } });
+    this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: {
+      ...previous, tags: normalized, revision: previous.revision + 1, restored_command_id: undefined,
+    } } });
   }
 
   private needed(profileId: string, id: string): boolean {
@@ -299,7 +311,10 @@ export class BetaDraftController {
     incomingInputs.forEach(({ index }, position) => { ids[index] = incoming[position].id; });
     const previous = this.state.drafts[profileId] ?? { text: '', revision: 0, tags: [] };
     const selectedAt=this.clock(),fileProgress={...this.state.fileProgress};for(const file of incoming)fileProgress[file.id]={phase:'queued',completed:null,total:file.byte_length,startedAt:selectedAt,phaseStartedAt:selectedAt,updatedAt:selectedAt};
-    const next = { ...this.state,fileProgress, drafts: { ...this.state.drafts, [profileId]: { ...previous, revision: previous.revision + 1, files: [...(previous.files ?? []), ...incoming] } } };
+    const next = { ...this.state,fileProgress, drafts: { ...this.state.drafts, [profileId]: {
+      ...previous, revision: previous.revision + 1, files: [...(previous.files ?? []), ...incoming],
+      restored_command_id: undefined,
+    } } };
     let admitted=false;
     try { this.publish(next, true);admitted=true; if (durable(this.storage)) { await this.requiredCommit(); this.active(); } }
     catch (error) {
@@ -333,7 +348,8 @@ export class BetaDraftController {
   removeFile(profileId: string, id: string): void {
     this.active(); const previous = this.state.drafts[profileId]; if (!previous) return;
     this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...previous,
-      revision: previous.revision + 1, files: previous.files?.filter(file => file.id !== id) } } });
+      revision: previous.revision + 1, files: previous.files?.filter(file => file.id !== id),
+      restored_command_id: undefined } } });
     if(!this.needed(profileId,id)){this.fileCancellation.get(id)?.abort();this.fileCancellation.delete(id);}
     // A frozen pending submission may still need these bytes. Removing a next
     // draft selection never deletes the Core original or its browser source.
@@ -392,7 +408,8 @@ export class BetaDraftController {
     if(!isNativeAttachment(source)){const sha=await hashFileSource(source,()=>this.disposed);this.active();if(file.original&&sha!==file.original.sha256)throw new BetaApiError('source_mismatch','重新选择的文件与原件 hash 不同，原提交保持不变');}
     const current = this.state.drafts[profileId];
     this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...current, revision: current.revision + 1,
-      files: current.files?.map(item => item.id === id ? { ...item, state: 'preparing' as const, message: undefined } : item) } } }, true);
+      files: current.files?.map(item => item.id === id ? { ...item, state: 'preparing' as const, message: undefined } : item),
+      restored_command_id: undefined } } }, true);
     if (durable(this.storage)) { await this.requiredCommit(); this.active(); }
     try { const work=this.fileWork(profileId,file);if(isNativeAttachment(source)){if(!hasNativeAttachmentSources(this.sources))throw new BetaApiError('unsupported_file_source','当前环境不能读取系统文件');await this.sources.importFile(file.source_key,source,work);}else await this.sources.put(file.source_key, source,work); this.selected(profileId,file.id); await this.prepareSource(profileId, file); }
     catch (error) { if (!this.disposed) this.patchFile(profileId, id, { state: 'failed', message: errorMessage(error) }); throw error; }
@@ -468,7 +485,14 @@ export class BetaDraftController {
     if (this.disposed) throw new BetaApiError('inactive_session', '当前记录窗口已关闭');
     const draft = this.state.drafts[profileId];
     if (draft?.files?.some(file => !file.original || file.state === 'preparing')) throw new BetaApiError('original_preparing', '所选原件尚未完成本机复制和校验，请等待、重选或明确移除');
-    if (!draft?.text.trim() && !draft?.files?.length) return null;
+    const pendingForProfile = this.state.pending.find(entry => entry.command.profile_id === profileId && entry.state !== 'committed');
+    const restoredPending = draft?.restored_command_id
+      ? this.state.pending.find(entry => entry.command.profile_id === profileId
+        && entry.command.command_id === draft.restored_command_id
+        && entry.state !== 'committed')
+      : undefined;
+    if (restoredPending) return this.retry(restoredPending.command.command_id);
+    if (!draft?.text.trim() && !draft?.files?.length) return pendingForProfile ? this.retry(pendingForProfile.command.command_id) : null;
     const previous = this.state.pending.find(entry => entry.command.profile_id === profileId
       && entry.draft_revision === draft.revision && entry.state !== 'committed');
     if (previous) return this.retry(previous.command.command_id);
@@ -476,10 +500,31 @@ export class BetaDraftController {
     const command = freezeCommand({ command_id: this.uuid(), event_id: this.uuid(), profile_id: profileId,
       occurred_at_ms: this.clock(), text: draft.text, tags: [...(draft.tags ?? [])], ...(files.length ? { originals: files.map(file => ({ ...file.original! })) } : {}) });
     const pending: PendingCapture = { command, draft_revision: draft.revision, state: 'pending', ...(files.length ? { files, capture_attempted: false } : {}) };
-    this.publish({ ...this.state, pending: [...this.state.pending, pending] }, true);
+    const nextDraft = { text: '', revision: draft.revision + 1, tags: [], files: [] };
+    this.publish({
+      ...this.state,
+      drafts: { ...this.state.drafts, [profileId]: nextDraft },
+      pending: [...this.state.pending, pending],
+    }, true);
     if (durable(this.storage)) {
       try { await this.requiredCommit(); }
-      catch (error) { if (!this.disposed) this.updatePending(command.command_id, { state: 'failed', message: errorMessage(error), error_code: errorCode(error) }); throw error; }
+      catch (error) {
+        if (!this.disposed) {
+          const latest = this.state.drafts[profileId];
+          const unchanged = latest?.revision === nextDraft.revision
+            && !latest.text
+            && !latest.tags?.length
+            && !latest.files?.length;
+          this.publish({
+            ...this.state,
+            ...(unchanged ? { drafts: { ...this.state.drafts, [profileId]: draft } } : {}),
+            pending: this.state.pending.map(entry => entry.command.command_id === command.command_id
+              ? { ...entry, state: 'failed' as const, message: errorMessage(error), error_code: errorCode(error) }
+              : entry),
+          });
+        }
+        throw error;
+      }
       if (this.disposed) return null;
     }
     return this.send(pending, false);
@@ -508,13 +553,38 @@ export class BetaDraftController {
   private updatePending(id: string, change: Partial<PendingCapture>): void {
     this.publish({ ...this.state, pending: this.state.pending.map(entry => entry.command.command_id === id ? { ...entry, ...change } : entry) });
   }
+  private restoreEditableDraftFromPending(pending: PendingCapture): void {
+    if (this.disposed) return;
+    const profileId = pending.command.profile_id;
+    const current = this.state.drafts[profileId];
+    if (!current || current.revision !== pending.draft_revision + 1
+      || current.text.length || current.tags?.length || current.files?.length) return;
+    const files = pending.files?.map(file => ({
+      ...file,
+      ...(file.original ? { original: { ...file.original } } : {}),
+    }));
+    this.publish({
+      ...this.state,
+      drafts: {
+        ...this.state.drafts,
+        [profileId]: {
+          text: pending.command.text,
+          revision: current.revision + 1,
+          tags: [...pending.command.tags],
+          files,
+          restored_command_id: pending.command.command_id,
+        },
+      },
+    });
+  }
   private commit(pending: PendingCapture, value: unknown): BetaReceipt {
     const receipt = validateReceipt(value, pending.command);
     if (this.disposed) return receipt;
     const profile = pending.command.profile_id;
     const draft = this.state.drafts[profile];
     let drafts = this.state.drafts;
-    if (draft?.revision === pending.draft_revision) {
+    if (draft?.restored_command_id === pending.command.command_id
+      || draft?.revision === pending.draft_revision) {
       drafts = { ...drafts, [profile]: { text: '', revision: draft.revision + 1, tags: [], files: [] } };
     } else if (draft && pending.files?.length) {
       // The successful command owns only the attachment identities it froze.
@@ -535,7 +605,13 @@ export class BetaDraftController {
   private async perform(pending: PendingCapture, reconcileFirst: boolean): Promise<BetaReceipt | null> {
     if (durable(this.storage)) {
       try { await this.requiredCommit(); }
-      catch (error) { if (!this.disposed) this.updatePending(pending.command.command_id, { state: 'failed', message: errorMessage(error), error_code: errorCode(error) }); return null; }
+      catch (error) {
+        if (!this.disposed) {
+          this.updatePending(pending.command.command_id, { state: 'failed', message: errorMessage(error), error_code: errorCode(error) });
+          this.restoreEditableDraftFromPending(pending);
+        }
+        return null;
+      }
       if (this.disposed) return null;
     }
     if (reconcileFirst) {
@@ -543,7 +619,10 @@ export class BetaDraftController {
         const receipt = await this.client.receipt(pending.command.profile_id, pending.command.command_id);
         if (receipt) return this.commit(pending, receipt);
       } catch (error) {
-        if (!this.disposed) this.updatePending(pending.command.command_id, { state: 'unknown', message: errorMessage(error), error_code: errorCode(error) });
+        if (!this.disposed) {
+          this.updatePending(pending.command.command_id, { state: 'unknown', message: errorMessage(error), error_code: errorCode(error) });
+          this.restoreEditableDraftFromPending(pending);
+        }
         return null;
       }
     }
@@ -560,7 +639,10 @@ export class BetaDraftController {
       return this.commit(pending, await this.client.capture(pending.command));
     }
     catch (error) {
-      if (!this.disposed) this.updatePending(pending.command.command_id, { state: captureAttempted ? 'unknown' : 'failed', message: errorMessage(error), error_code: errorCode(error) });
+      if (!this.disposed) {
+        this.updatePending(pending.command.command_id, { state: captureAttempted ? 'unknown' : 'failed', message: errorMessage(error), error_code: errorCode(error) });
+        this.restoreEditableDraftFromPending(pending);
+      }
       return null;
     }
   }

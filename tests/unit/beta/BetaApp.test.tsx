@@ -145,6 +145,27 @@ describe('Beta React entry', () => {
     expect(await screen.findByRole('textbox', { name: '记录当下' })).toHaveValue('new text');
     await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
   });
+  it('starts a clean next draft as soon as a capture snapshot is frozen', async () => {
+    const client = fakeClient();
+    const flight = deferred<BetaReceipt>();
+    client.capture.mockReturnValueOnce(flight.promise);
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} />);
+    const input = await screen.findByRole('textbox', { name: '记录当下' });
+    await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
+
+    fireEvent.change(input, { target: { value: 'submitted snapshot' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await waitFor(() => expect(client.capture).toHaveBeenCalledTimes(1));
+    expect(input).toHaveValue('');
+
+    fireEvent.change(input, { target: { value: 'independent next draft' } });
+    await act(async () => {
+      flight.resolve(saved(client.capture.mock.calls[0][0]));
+      await flight.promise;
+    });
+    expect(input).toHaveValue('independent next draft');
+    expect(client.capture.mock.calls[0][0].text).toBe('submitted snapshot');
+  });
   it('discards a stale history response after selecting another profile', async () => {
     const client = fakeClient(); const oldPage = deferred<BetaPage>();
     client.eventsPage.mockImplementationOnce(() => oldPage.promise as ReturnType<typeof client.eventsPage>);

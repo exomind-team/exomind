@@ -158,12 +158,14 @@ export function BetaUserRangeExportControls({
         {result.phase === 'saved' && result.archive_byte_length !== null && result.archive_sha256 !== null && <>
           <p>文件已在本机保存 · {bytesLabel(result.archive_byte_length)}</p>
         </>}
-        <p>{result.content_complete ? '所选内容完整' : '部分内容未包含，请查看包内清单。'}</p>
+        {result.phase === 'saved' ? <>
+          <p>{result.content_complete ? '所选内容完整' : '部分内容未包含，请查看包内清单。'}</p>
+          <p>本机原件：包含 {result.included_originals} 项，省略 {result.omitted_originals} 项。</p>
+          {result.omitted_originals > 0 && <p className="text-muted">
+            未包含的附件请查看包内清单。
+          </p>}
+        </> : !result.partial_output && <p>本次未生成可核对的导出包。</p>}
         {result.partial_output && <p>保存位置可能留有部分文件，请核对。</p>}
-        <p>本机原件：包含 {result.included_originals} 项，省略 {result.omitted_originals} 项。</p>
-        {result.omitted_originals > 0 && <p className="text-muted">
-          未包含的附件请查看包内清单。
-        </p>}
       </div>}
       <Button type="button" size="sm" variant="ghost" aria-expanded={detailsOpen}
         onClick={() => setDetailsOpen(value => !value)}>{detailsOpen ? '收起校验详情' : '查看校验详情'}</Button>
