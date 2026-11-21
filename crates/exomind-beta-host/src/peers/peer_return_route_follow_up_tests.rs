@@ -86,6 +86,21 @@ fn read_original(
         .bytes
 }
 
+// Production route hygiene no longer persists a same-host join endpoint
+// (loopback or the machine's own address). Same-host fixtures therefore seed
+// the source's advertised shareable candidates directly, without weakening the
+// production merge filter, so the controlled sync below has a dialable route.
+fn seed_shareable_peer_route(
+    host: &BetaHost,
+    owner: &Session,
+    profile: ProfileId,
+    peer: DeviceId,
+    endpoints: Vec<SocketAddr>,
+) {
+    host.save_peer_routes(owner, profile, peer, endpoints)
+        .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shared_profile_after_256_healthy_solo_profiles_is_fetched_by_controlled_ticks() {
     let _discovery = crate::peers::test_discovery::lease().await;
@@ -158,6 +173,13 @@ async fn shared_profile_after_256_healthy_solo_profiles_is_fetched_by_controlled
             .unwrap();
         core.import_origin_page(&context, &origin_page).unwrap();
     }
+    seed_shareable_peer_route(
+        &target,
+        &target_owner,
+        profile,
+        source.device_id,
+        invitation.offer.candidates.clone(),
+    );
     target_network
         .sync_now(profile, source.device_id)
         .await
@@ -315,7 +337,7 @@ async fn v1_only_peer_alpn_completes_pinned_signed_join() {
         Ok::<_, HostError>((negotiated, outcome))
     });
     let network = PeerNetwork::new(joiner.clone(), joiner_owner.clone()).unwrap();
-    let joined = network.join(&invitation, Uuid::new_v4()).await;
+    let joined = network.join_for_test(&invitation, Uuid::new_v4()).await;
 
     let service_result = if joined.is_ok() {
         match tokio::time::timeout(Duration::from_secs(10), &mut service_task).await {

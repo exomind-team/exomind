@@ -234,6 +234,9 @@ fn error_code(error: &HostError) -> &'static str {
     }
     match error {
         HostError::PeerProtocolMismatch => "protocol_mismatch",
+        HostError::PeerTimeout => "peer_timeout",
+        HostError::PeerBusy => "peer_busy",
+        HostError::PeerNetworkDisabled => "peer_network_disabled",
         HostError::PeerMembershipDenied | HostError::Forbidden | HostError::Unauthorized => {
             "membership_denied"
         }
@@ -258,8 +261,11 @@ fn join_route_error_priority(error: &HostError) -> u8 {
         _ => 0,
     }
 }
-fn endpoints(listener: SocketAddr) -> Vec<SocketAddr> {
-    let port = listener.port();
+const MAX_SHAREABLE_ENDPOINTS: usize = 7;
+const MAX_INVITATION_ENDPOINT_REPORTS: usize = 8;
+const JOIN_ROUTE_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn interface_ips(listener: SocketAddr) -> Vec<IpAddr> {
     let mut ips: Vec<IpAddr> = if_addrs::get_if_addrs()
         .unwrap_or_default()
         .into_iter()
@@ -269,7 +275,7 @@ fn endpoints(listener: SocketAddr) -> Vec<SocketAddr> {
                 && !ip.is_unspecified()
                 && !ip.is_multicast()
                 && !ip.is_loopback()
-                && !matches!(ip,IpAddr::V6(v) if v.is_unicast_link_local())
+                && !matches!(ip, IpAddr::V6(v) if v.is_unicast_link_local())
         })
         .collect();
     ips.sort_by_key(|ip| match ip {
@@ -278,9 +284,66 @@ fn endpoints(listener: SocketAddr) -> Vec<SocketAddr> {
         IpAddr::V6(_) => (2, ip.to_string()),
     });
     ips.dedup();
-    let mut output: Vec<_> = ips
+    ips
+}
+
+fn canonical_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(ip) => ip
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V6(ip)),
+        v4 => v4,
+    }
+}
+
+pub(super) fn is_shareable_endpoint(address: SocketAddr) -> bool {
+    match canonical_ip(address.ip()) {
+        IpAddr::V4(ip) => {
+            address.port() != 0
+                && !ip.is_unspecified()
+                && !ip.is_multicast()
+                && !ip.is_broadcast()
+                && !ip.is_loopback()
+                && !ip.is_link_local()
+        }
+        IpAddr::V6(ip) => {
+            address.port() != 0
+                && !ip.is_unspecified()
+                && !ip.is_multicast()
+                && !ip.is_loopback()
+                && !ip.is_unicast_link_local()
+        }
+    }
+}
+
+fn non_shareable_code(address: SocketAddr) -> &'static str {
+    let ip = canonical_ip(address.ip());
+    if address.port() == 0 {
+        "invalid_port"
+    } else if ip.is_unspecified() {
+        "unspecified_address"
+    } else if ip.is_multicast() {
+        "multicast_address"
+    } else if matches!(ip, IpAddr::V4(ip) if ip.is_broadcast()) {
+        "broadcast_address"
+    } else if ip.is_loopback() {
+        "loopback_not_shareable"
+    } else if matches!(ip, IpAddr::V4(ip) if ip.is_link_local())
+        || matches!(ip, IpAddr::V6(ip) if ip.is_unicast_link_local())
+    {
+        "link_local_address"
+    } else {
+        "not_shareable"
+    }
+}
+
+/// Local diagnostic endpoints retain loopback for same-host verification.
+fn endpoints(listener: SocketAddr) -> Vec<SocketAddr> {
+    let port = listener.port();
+    let mut output: Vec<_> = interface_ips(listener)
         .into_iter()
-        .take(7)
+        .take(MAX_SHAREABLE_ENDPOINTS)
         .map(|ip| SocketAddr::new(ip, port))
         .collect();
     output.push(SocketAddr::new(
@@ -292,6 +355,131 @@ fn endpoints(listener: SocketAddr) -> Vec<SocketAddr> {
         port,
     ));
     output
+}
+
+fn shareable_endpoints(listener: SocketAddr, ips: Vec<IpAddr>) -> Vec<SocketAddr> {
+    let port = listener.port();
+    let mut seen = HashSet::new();
+    ips
+        .into_iter()
+        .map(|ip| SocketAddr::new(ip, port))
+        .filter(|address| is_shareable_endpoint(*address) && seen.insert(*address))
+        .take(MAX_SHAREABLE_ENDPOINTS)
+        .collect()
+}
+
+#[cfg(test)]
+fn shareable_endpoints_for_test(listener: SocketAddr, ips: Vec<IpAddr>) -> Vec<SocketAddr> {
+    shareable_endpoints(listener, ips)
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JoinCandidateClassification {
+    pub skipped_loopback: usize,
+    pub attempted: usize,
+}
+
+#[cfg(test)]
+fn classify_join_candidates(candidates: Vec<SocketAddr>) -> JoinCandidateClassification {
+    let skipped_loopback = candidates
+        .iter()
+        .filter(|address| address.ip().is_loopback())
+        .count();
+    JoinCandidateClassification {
+        skipped_loopback,
+        attempted: candidates.len() - skipped_loopback,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InvitationEndpointDisposition {
+    Attempted,
+    Skipped,
+    Reachable,
+    IdentityMismatch,
+    Unreachable,
+    ProtocolMismatch,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InvitationEndpointReport {
+    pub endpoint: String,
+    pub disposition: InvitationEndpointDisposition,
+    pub elapsed_ms: u64,
+    pub error_code: Option<&'static str>,
+}
+
+fn classify_probe_error(error: &HostError) -> (InvitationEndpointDisposition, Option<&'static str>) {
+    match error {
+        HostError::PeerPinMismatch => (
+            InvitationEndpointDisposition::IdentityMismatch,
+            Some("pin_mismatch"),
+        ),
+        HostError::PeerProtocolMismatch => (
+            InvitationEndpointDisposition::ProtocolMismatch,
+            Some("protocol_mismatch"),
+        ),
+        HostError::PeerTls => (
+            InvitationEndpointDisposition::ProtocolMismatch,
+            Some("tls_handshake_failed"),
+        ),
+        HostError::PeerTimeout => (
+            InvitationEndpointDisposition::Unreachable,
+            Some("timeout"),
+        ),
+        HostError::PeerTransportUnavailable => (
+            InvitationEndpointDisposition::Unreachable,
+            Some("unreachable"),
+        ),
+        HostError::PeerBusy | HostError::PeerNetworkDisabled => {
+            (InvitationEndpointDisposition::Skipped, Some(error_code(error)))
+        }
+        HostError::Stopped | HostError::PeerCancelled => {
+            (InvitationEndpointDisposition::Skipped, Some("cancelled"))
+        }
+        _ => (InvitationEndpointDisposition::Attempted, Some(error_code(error))),
+    }
+}
+
+fn classify_service_error(
+    error: &HostError,
+) -> (InvitationEndpointDisposition, Option<&'static str>) {
+    match error {
+        HostError::PeerProtocolMismatch | HostError::PayloadTooLarge => (
+            InvitationEndpointDisposition::ProtocolMismatch,
+            Some(error_code(error)),
+        ),
+        HostError::PeerPinMismatch => (
+            InvitationEndpointDisposition::IdentityMismatch,
+            Some("pin_mismatch"),
+        ),
+        HostError::PeerTls => classify_probe_error(error),
+        HostError::PeerTimeout | HostError::PeerTransportUnavailable => {
+            (InvitationEndpointDisposition::Attempted, Some(error_code(error)))
+        }
+        HostError::Stopped | HostError::PeerCancelled | HostError::PeerBusy => {
+            classify_probe_error(error)
+        }
+        _ => (InvitationEndpointDisposition::Attempted, Some(error_code(error))),
+    }
+}
+
+fn push_endpoint_report(reports: &mut Vec<InvitationEndpointReport>, report: InvitationEndpointReport) {
+    if reports.len() >= MAX_INVITATION_ENDPOINT_REPORTS
+        || reports.iter().any(|existing| existing.endpoint == report.endpoint)
+    {
+        return;
+    }
+    reports.push(report);
+}
+
+fn serialize_endpoint_reports(reports: Vec<InvitationEndpointReport>) -> Vec<serde_json::Value> {
+    reports
+        .into_iter()
+        .map(|report| serde_json::to_value(report).unwrap_or(serde_json::Value::Null))
+        .collect()
 }
 fn discovery_socket() -> Result<UdpSocket, HostError> {
     let socket = socket2::Socket::new(
@@ -659,6 +847,17 @@ impl PeerNetwork {
             .addresses
             .clone())
     }
+    /// Shareable invitation candidates only: no loopback, link-local,
+    /// unspecified, multicast, zero-port or duplicate addresses.
+    pub fn shareable_addresses(&self) -> Result<Vec<SocketAddr>, HostError> {
+        // Re-read the interfaces and filter before truncating: local_addresses
+        // also carries loopback and may already have spent its budget on
+        // link-local diagnostics that can never be shared.
+        let Some(listener) = self.local_addresses()?.first().copied() else {
+            return Ok(Vec::new());
+        };
+        Ok(shareable_endpoints(listener, interface_ips(listener)))
+    }
     pub async fn create_invitation(
         self: &Arc<Self>,
         profile: ProfileId,
@@ -670,7 +869,7 @@ impl PeerNetwork {
                 invitation_id: Uuid::new_v4(),
                 profile_id: profile,
                 capabilities: super::PeerCapabilities::FULL,
-                candidates: self.local_addresses()?,
+                candidates: self.shareable_addresses()?,
                 ttl_seconds: 600,
             },
         )
@@ -691,46 +890,132 @@ impl PeerNetwork {
         claim: Uuid,
         dial_address: Option<SocketAddr>,
     ) -> Result<super::PeerJoinStatus, HostError> {
-        let offer = invitation.verified_offer()?;
+        self.join_inner(invitation, claim, dial_address, false)
+            .await
+            .map_err(|(error, _)| error)
+    }
+
+    /// Same production dial semantics, but the returned failure carries the
+    /// bounded per-endpoint outcome reports for the Native join command.
+    pub async fn join_with_route_diagnosed(
+        self: &Arc<Self>,
+        invitation: &PeerInvitation,
+        claim: Uuid,
+        dial_address: Option<SocketAddr>,
+    ) -> Result<super::PeerJoinStatus, (HostError, Vec<serde_json::Value>)> {
+        match self.join_inner(invitation, claim, dial_address, false).await {
+            Ok(status) => Ok(status),
+            Err((error, reports)) => Err((error, serialize_endpoint_reports(reports))),
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn join_for_test(
+        self: &Arc<Self>,
+        invitation: &PeerInvitation,
+        claim: Uuid,
+    ) -> Result<super::PeerJoinStatus, HostError> {
+        self.join_inner(invitation, claim, None, true)
+            .await
+            .map_err(|(error, _)| error)
+    }
+
+    #[cfg(test)]
+    pub async fn join_with_route_for_test(
+        self: &Arc<Self>,
+        invitation: &PeerInvitation,
+        claim: Uuid,
+        dial_address: Option<SocketAddr>,
+    ) -> Result<super::PeerJoinStatus, HostError> {
+        self.join_inner(invitation, claim, dial_address, true)
+            .await
+            .map_err(|(error, _)| error)
+    }
+
+    async fn join_inner(
+        self: &Arc<Self>,
+        invitation: &PeerInvitation,
+        claim: Uuid,
+        dial_address: Option<SocketAddr>,
+        allow_loopback: bool,
+    ) -> Result<super::PeerJoinStatus, (HostError, Vec<InvitationEndpointReport>)> {
+        let offer = invitation
+            .verified_offer()
+            .map_err(|error| (error, Vec::new()))?;
         if offer.schema != super::PEER_CORE_SCHEMA || offer.protocol != super::PEER_PROTOCOL {
-            return Err(HostError::PeerProtocolMismatch);
+            return Err((HostError::PeerProtocolMismatch, Vec::new()));
         }
         if let Some(address) = dial_address {
-            super::network_store::validate_endpoints(&[address])?;
+            super::network_store::validate_endpoints(&[address])
+                .map_err(|error| (error, Vec::new()))?;
         }
         let mut candidates = Vec::with_capacity(offer.candidates.len() + 1);
-        if let Some(address) = dial_address {
-            candidates.push(address);
-        }
-        for address in &offer.candidates {
-            if !candidates.contains(address) {
-                candidates.push(*address);
+        let mut reports: Vec<InvitationEndpointReport> =
+            Vec::with_capacity(offer.candidates.len() + 1);
+        {
+            let mut push = |address: SocketAddr| {
+                let loopback_allowed = allow_loopback && address.ip().is_loopback();
+                let skipped = if address.ip().is_loopback() && !allow_loopback {
+                    Some(non_shareable_code(address))
+                } else if !is_shareable_endpoint(address) && !loopback_allowed {
+                    Some(non_shareable_code(address))
+                } else {
+                    None
+                };
+                if let Some(error_code) = skipped {
+                    push_endpoint_report(
+                        &mut reports,
+                        InvitationEndpointReport {
+                            endpoint: address.to_string(),
+                            disposition: InvitationEndpointDisposition::Skipped,
+                            elapsed_ms: 0,
+                            error_code: Some(error_code),
+                        },
+                    );
+                } else if !candidates.contains(&address) {
+                    candidates.push(address);
+                }
+            };
+            if let Some(address) = dial_address {
+                push(address);
+            }
+            for address in &offer.candidates {
+                push(*address);
             }
         }
-        self.set_enabled(true).await?;
-        let local_addresses = self.local_addresses()?;
+        self.set_enabled(true)
+            .await
+            .map_err(|error| (error, reports.clone()))?;
+        let local_addresses = self
+            .local_addresses()
+            .map_err(|error| (error, reports.clone()))?;
         let port = local_addresses
             .first()
-            .ok_or(HostError::PeerTransportUnavailable)?
+            .ok_or(HostError::PeerTransportUnavailable)
+            .map_err(|error| (error, reports.clone()))?
             .port();
         let service_candidates = super::transport::local_service_candidates(&local_addresses);
-        let pin = PeerPin::from_sha256(&offer.issuer.fingerprint_sha256)?;
+        let pin = PeerPin::from_sha256(&offer.issuer.fingerprint_sha256)
+            .map_err(|error| (error, reports.clone()))?;
         let (cancel, generation) = {
             let running = self.lifecycle.lock().await;
             let cancel = running
                 .as_ref()
-                .ok_or(HostError::PeerTransportUnavailable)?
+                .ok_or(HostError::PeerTransportUnavailable)
+                .map_err(|error| (error, reports.clone()))?
                 .cancel
                 .clone();
             let generation = self
                 .shared
                 .lock()
-                .map_err(|_| HostError::StatePoisoned)?
+                .map_err(|_| HostError::StatePoisoned)
+                .map_err(|error| (error, reports.clone()))?
                 .generation;
             (cancel, generation)
         };
         let mut last = HostError::PeerTransportUnavailable;
         for endpoint in &candidates {
+            let started = Instant::now();
             let channel = match self
                 .host
                 .connect_peer_transport(
@@ -747,6 +1032,17 @@ impl PeerNetwork {
             {
                 Ok(channel) => channel,
                 Err(error) => {
+                    let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                    let (disposition, code) = classify_probe_error(&error);
+                    push_endpoint_report(
+                        &mut reports,
+                        InvitationEndpointReport {
+                            endpoint: endpoint.to_string(),
+                            disposition,
+                            elapsed_ms,
+                            error_code: code,
+                        },
+                    );
                     // A later unreachable candidate must not erase earlier TLS evidence.
                     if join_route_error_priority(&error) >= join_route_error_priority(&last) {
                         last = error;
@@ -754,7 +1050,8 @@ impl PeerNetwork {
                     continue;
                 }
             };
-            self.host
+            match self
+                .host
                 .select_peer_service_with_candidates(
                     &self.owner,
                     &channel,
@@ -764,35 +1061,62 @@ impl PeerNetwork {
                     port,
                     &service_candidates,
                 )
-                .await?;
-            match self
-                .host
-                .join_peer_profile_over_transport_with_candidates(
+                .await
+            {
+                Ok(()) => {}
+                Err(error) => {
+                    let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                    let (disposition, code) = classify_service_error(&error);
+                    push_endpoint_report(
+                        &mut reports,
+                        InvitationEndpointReport {
+                            endpoint: endpoint.to_string(),
+                            disposition,
+                            elapsed_ms,
+                            error_code: code,
+                        },
+                    );
+                    if join_route_error_priority(&error) >= join_route_error_priority(&last) {
+                        last = error;
+                    }
+                    continue;
+                }
+            }
+            let joined = tokio::time::timeout(
+                JOIN_ROUTE_TIMEOUT,
+                self.host.join_peer_profile_over_transport_with_candidates(
                     &self.owner,
                     invitation,
                     claim,
                     channel,
-                )
-                .await
-            {
+                ),
+            )
+            .await;
+            let joined = match joined {
+                Ok(result) => result,
+                Err(_) => Err(HostError::PeerTimeout),
+            };
+            match joined {
                 Ok((status, negotiation)) => {
                     if self
                         .shared
                         .lock()
-                        .map_err(|_| HostError::StatePoisoned)?
+                        .map_err(|_| HostError::StatePoisoned)
+                        .map_err(|error| (error, reports.clone()))?
                         .generation
                         != generation
                     {
-                        return Err(HostError::PeerCancelled);
+                        return Err((HostError::PeerCancelled, reports));
                     }
                     if status.profile_id != offer.profile_id
                         || status.issuer_device_id != offer.issuer.device_id
                     {
-                        return Err(HostError::PeerMembershipDenied);
+                        return Err((HostError::PeerMembershipDenied, reports));
                     }
                     let member = self
                         .host
-                        .peer_members(&self.owner, status.profile_id)?
+                        .peer_members(&self.owner, status.profile_id)
+                        .map_err(|error| (error, reports.clone()))?
                         .into_iter()
                         .find(|member| {
                             member.device_id == offer.issuer.device_id
@@ -800,59 +1124,212 @@ impl PeerNetwork {
                                 && member.state == PeerJoinState::Ready
                                 && member.pin == offer.issuer.fingerprint_sha256
                         })
-                        .ok_or(HostError::PeerMembershipDenied)?;
+                        .ok_or(HostError::PeerMembershipDenied)
+                        .map_err(|error| (error, reports.clone()))?;
+                    let route_candidate_allowed = |candidate: SocketAddr| {
+                        is_shareable_endpoint(candidate)
+                            && !local_addresses
+                                .iter()
+                                .any(|local| local.ip() == candidate.ip())
+                    };
                     let mut route_candidates = match negotiation {
                         Some(negotiation) => {
                             if negotiation.peer_device_id != offer.issuer.device_id {
-                                return Err(HostError::PeerMembershipDenied);
+                                return Err((HostError::PeerMembershipDenied, reports));
                             }
                             negotiation.candidates
                         }
                         None => vec![],
                     };
+                    route_candidates.retain(|candidate| route_candidate_allowed(*candidate));
                     for candidate in &offer.candidates {
                         if route_candidates.len() >= super::network_store::MAX_ROUTE_ENDPOINTS {
                             break;
                         }
-                        if !candidate.ip().is_ipv4()
-                            && matches!(candidate.ip(), IpAddr::V6(ip) if ip.is_unicast_link_local())
-                        {
-                            continue;
-                        }
-                        if super::network_store::validate_endpoints(&[*candidate]).is_ok()
-                            && !route_candidates.contains(candidate)
-                        {
+                        if route_candidate_allowed(*candidate) && !route_candidates.contains(candidate) {
                             route_candidates.push(*candidate);
                         }
                     }
-                    let saved = self.host.save_authenticated_peer_routes(
-                        &self.owner,
-                        status.profile_id,
-                        offer.issuer.device_id,
-                        pin,
-                        member.generation,
-                        &route_candidates,
-                        Some(*endpoint),
-                        Some(&cancel),
-                    )?;
+                    let saved = self
+                        .host
+                        .save_authenticated_peer_routes(
+                            &self.owner,
+                            status.profile_id,
+                            offer.issuer.device_id,
+                            pin,
+                            member.generation,
+                            &route_candidates,
+                            Some(*endpoint),
+                            Some(&cancel),
+                        )
+                        .map_err(|error| (error, reports.clone()))?;
                     if !saved && cancel.is_cancelled() {
-                        return Err(HostError::PeerCancelled);
+                        return Err((HostError::PeerCancelled, reports));
                     }
-                    let mut shared = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
+                    let mut shared = self
+                        .shared
+                        .lock()
+                        .map_err(|_| HostError::StatePoisoned)
+                        .map_err(|error| (error, reports.clone()))?;
                     if shared.generation != generation {
-                        return Err(HostError::PeerCancelled);
+                        return Err((HostError::PeerCancelled, reports));
                     }
                     shared.nearby.remove(&offer.issuer.device_id);
-
                     shared
                         .forced
                         .insert((status.profile_id, offer.issuer.device_id));
+                    push_endpoint_report(
+                        &mut reports,
+                        InvitationEndpointReport {
+                            endpoint: endpoint.to_string(),
+                            disposition: InvitationEndpointDisposition::Reachable,
+                            elapsed_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                            error_code: None,
+                        },
+                    );
                     return Ok(status);
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                    let (disposition, code) = classify_service_error(&error);
+                    push_endpoint_report(
+                        &mut reports,
+                        InvitationEndpointReport {
+                            endpoint: endpoint.to_string(),
+                            disposition,
+                            elapsed_ms,
+                            error_code: code,
+                        },
+                    );
+                    let keep_trying = matches!(
+                        &error,
+                        HostError::PeerTransportUnavailable
+                            | HostError::PeerTimeout
+                            | HostError::PeerTls
+                            | HostError::PeerPinMismatch
+                            | HostError::PeerProtocolMismatch
+                    );
+                    if keep_trying {
+                        if join_route_error_priority(&error) >= join_route_error_priority(&last) {
+                            last = error;
+                        }
+                        continue;
+                    }
+                    return Err((error, reports));
+                }
             }
         }
-        Err(last)
+        Err((last, reports))
+    }
+    /// Bounded, read-only connectivity report for the invitation's candidates.
+    /// This dials only after the user calls inspect; it never starts a listener
+    /// or writes membership, routes, grants or profile facts.
+    pub async fn inspect_invitation_endpoint_reports(
+        self: &Arc<Self>,
+        invitation: &PeerInvitation,
+    ) -> Result<Vec<serde_json::Value>, HostError> {
+        let offer = invitation.verified_offer()?;
+        let pin = PeerPin::from_sha256(&offer.issuer.fingerprint_sha256)?;
+        let reports = self
+            .probe_invitation_endpoints(&offer.candidates, pin, false)
+            .await?;
+        Ok(serialize_endpoint_reports(reports))
+    }
+
+    #[cfg(test)]
+    async fn inspect_invitation_endpoint_reports_for_test(
+        self: &Arc<Self>,
+        invitation: &PeerInvitation,
+    ) -> Result<Vec<serde_json::Value>, HostError> {
+        let offer = invitation.verified_offer()?;
+        let pin = PeerPin::from_sha256(&offer.issuer.fingerprint_sha256)?;
+        let reports = self
+            .probe_invitation_endpoints(&offer.candidates, pin, true)
+            .await?;
+        Ok(serialize_endpoint_reports(reports))
+    }
+
+    async fn probe_invitation_endpoints(
+        self: &Arc<Self>,
+        candidates: &[SocketAddr],
+        pin: PeerPin,
+        allow_loopback: bool,
+    ) -> Result<Vec<InvitationEndpointReport>, HostError> {
+        let budget = Duration::from_secs(5);
+        let budget_start = Instant::now();
+        let mut reports = Vec::with_capacity(candidates.len().min(MAX_INVITATION_ENDPOINT_REPORTS));
+        for endpoint in candidates.iter().take(MAX_INVITATION_ENDPOINT_REPORTS) {
+            if !is_shareable_endpoint(*endpoint)
+                && !(allow_loopback && endpoint.ip().is_loopback())
+            {
+                push_endpoint_report(
+                    &mut reports,
+                    InvitationEndpointReport {
+                        endpoint: endpoint.to_string(),
+                        disposition: InvitationEndpointDisposition::Skipped,
+                        elapsed_ms: 0,
+                        error_code: Some(non_shareable_code(*endpoint)),
+                    },
+                );
+                continue;
+            }
+            let remaining = budget.saturating_sub(budget_start.elapsed());
+            if remaining < Duration::from_millis(50) {
+                push_endpoint_report(
+                    &mut reports,
+                    InvitationEndpointReport {
+                        endpoint: endpoint.to_string(),
+                        disposition: InvitationEndpointDisposition::Skipped,
+                        elapsed_ms: 0,
+                        error_code: Some("probe_budget_exhausted"),
+                    },
+                );
+                continue;
+            }
+            let options = PeerTransportOptions {
+                handshake_timeout: remaining.min(Duration::from_secs(2)),
+                channel_lifetime: Duration::from_secs(30),
+            };
+            let started = Instant::now();
+            let result = self
+                .host
+                .connect_peer_transport(
+                    &self.owner,
+                    *endpoint,
+                    pin,
+                    options,
+                    PeerCancellation::new(),
+                )
+                .await;
+            let elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+            match result {
+                Ok(channel) => {
+                    let _ = channel.close().await;
+                    push_endpoint_report(
+                        &mut reports,
+                        InvitationEndpointReport {
+                            endpoint: endpoint.to_string(),
+                            disposition: InvitationEndpointDisposition::Reachable,
+                            elapsed_ms,
+                            error_code: None,
+                        },
+                    );
+                }
+                Err(error) => {
+                    let (disposition, code) = classify_probe_error(&error);
+                    push_endpoint_report(
+                        &mut reports,
+                        InvitationEndpointReport {
+                            endpoint: endpoint.to_string(),
+                            disposition,
+                            elapsed_ms,
+                            error_code: code,
+                        },
+                    );
+                }
+            }
+        }
+        Ok(reports)
     }
     pub async fn sync_now(
         self: &Arc<Self>,

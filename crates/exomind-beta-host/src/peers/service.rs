@@ -72,8 +72,51 @@ fn merge_route_endpoints(
     candidates: &[SocketAddr],
     successful_endpoint: Option<SocketAddr>,
 ) -> Result<Vec<SocketAddr>, HostError> {
-    let candidates = super::transport::validate_service_candidates(candidates)?;
+    let local_ips = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|interface| interface.ip())
+        .collect::<Vec<_>>();
+    merge_route_endpoints_with_local_ips(old, candidates, successful_endpoint, &local_ips)
+}
+fn merge_route_endpoints_with_local_ips(
+    old: &[SocketAddr],
+    candidates: &[SocketAddr],
+    successful_endpoint: Option<SocketAddr>,
+    local_ips: &[IpAddr],
+) -> Result<Vec<SocketAddr>, HostError> {
+    let canonical = |address: SocketAddr| {
+        super::transport::validate_service_candidates(&[address])
+            .ok()
+            .and_then(|values| values.first().copied())
+    };
+    let allowed = |address: SocketAddr| {
+        super::network::is_shareable_endpoint(address) && !local_ips.contains(&address.ip())
+    };
+    // Previously authenticated routes stay available as fallbacks, but only
+    // when the cached address itself is still valid to persist. Loopback,
+    // link-local, unspecified, multicast/broadcast, zero-port and local-self
+    // routes must never survive a merge, even when they arrived via the legacy
+    // cache rather than a fresh candidate list.
+    let mut seen_old = std::collections::HashSet::new();
+    let old = old
+        .iter()
+        .filter_map(|address| canonical(*address))
+        .filter(|address| allowed(*address))
+        .filter(|address| seen_old.insert(*address))
+        .collect::<Vec<_>>();
+    let candidates = candidates
+        .iter()
+        .filter_map(|address| canonical(*address))
+        .filter(|address| allowed(*address))
+        .collect::<Vec<_>>();
     let mut endpoints = Vec::with_capacity(network_store::MAX_ROUTE_ENDPOINTS);
+    // A successful endpoint earns placement only when it is itself shareable
+    // and not local-self; an observed inbound source can otherwise smuggle a
+    // loopback/link-local/broadcast address past the candidate hygiene.
+    let successful_endpoint = successful_endpoint
+        .and_then(canonical)
+        .filter(|endpoint| allowed(*endpoint));
     if let Some(endpoint) = successful_endpoint {
         network_store::validate_endpoints(&[endpoint])?;
         endpoints.push(endpoint);
@@ -94,8 +137,8 @@ fn merge_route_endpoints(
         if endpoints.len() == network_store::MAX_ROUTE_ENDPOINTS {
             break;
         }
-        if !endpoints.contains(previous) {
-            endpoints.push(*previous);
+        if !endpoints.contains(&previous) {
+            endpoints.push(previous);
         }
     }
     Ok(endpoints)

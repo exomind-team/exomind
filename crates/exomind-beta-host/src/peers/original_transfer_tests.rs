@@ -2325,7 +2325,7 @@ async fn one_way_invitation_learns_return_route_and_auto_fetches_without_second_
         .find(|address| address.ip().is_loopback())
         .unwrap();
     let joined = pc_network
-        .join_with_route(&invitation, Uuid::new_v4(), Some(issuer_address))
+        .join_with_route_for_test(&invitation, Uuid::new_v4(), Some(issuer_address))
         .await
         .unwrap();
     let (tcp_source, join_outcome) = tokio::time::timeout(Duration::from_secs(6), accept)

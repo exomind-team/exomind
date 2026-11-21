@@ -13,7 +13,8 @@ import { useBetaNow } from './date-clock';
 import { useBetaViewActive } from './view-activity';
 import { errorMessage } from './drafts';
 import { useBetaDateDisplayMode } from './preferences';
-import type { BetaNearbyCandidate, BetaInvitation, BetaInvitationPreview, BetaPeer, BetaPeerStatus, BetaPeersClient } from './peers-client';
+import { BetaPeerJoinError, joinFailureEndpointReports } from './peers-client';
+import type { BetaNearbyCandidate, BetaInvitation, BetaInvitationEndpointReport, BetaInvitationPreview, BetaJoinResult, BetaPeer, BetaPeerStatus, BetaPeersClient } from './peers-client';
 import { BetaNearbyDevices } from './NearbyDeviceCandidates';
 import { BetaDeviceName } from './BetaDeviceName';
 import { useBetaDeviceNames } from './device-names';
@@ -21,17 +22,50 @@ import { writeBetaMessageClipboard } from './beta-message-clipboard';
 
 type Life = { active: boolean };
 type NearbySelection = { device_id: string; address: string };
+type JoinFailureView = { message: string; endpoints: BetaInvitationEndpointReport[] };
 function peerState(peer: BetaPeer): string {
-  if (peer.member_state === 'revoked') return '授权已撤销';
-  if (peer.member_state === 'pending') return '正在完成加入确认';
+  if (peer.member_state === 'revoked') return '同步已停止';
+  if (peer.member_state === 'pending') return '尚未建立数据同步';
   if (peer.connection_state === 'connecting') return '正在连接';
   if (peer.connection_state === 'syncing') return '正在补齐记录';
   if (peer.connection_state === 'error') return '连接需要处理';
   if (peer.connection_state === 'waiting') return '等待设备恢复连接';
+  if (peer.last_sync_at_ms === null) return '等待首次数据确认';
   if (peer.event_sync !== 'complete') return '记录待补齐';
   if (peer.originals_sync === 'complete') return '记录与原件已补齐';
   if (peer.originals_sync === 'pending') return '记录已补齐，原件按需';
   return '记录已补齐，原件状态待确认';
+}
+function membershipState(peer: BetaPeer): string {
+  if (peer.member_state === 'revoked') return '成员资格已撤销';
+  if (peer.member_state === 'pending') return '成员资格待确认';
+  return '成员资格已接受';
+}
+const ENDPOINT_DISPOSITION_LABEL: Record<BetaInvitationEndpointReport['disposition'], string> = {
+  attempted: '已尝试',
+  skipped: '已跳过',
+  reachable: '安全身份可达，尚未加入',
+  identity_mismatch: '身份指纹不符，未加入',
+  unreachable: '地址不可达',
+  protocol_mismatch: '协议不兼容',
+};
+function invitationEndpointSummary(report: BetaInvitationEndpointReport): string {
+  const label = report.disposition === 'protocol_mismatch' && report.error_code === 'tls_handshake_failed'
+    ? '安全身份验证失败'
+    : ENDPOINT_DISPOSITION_LABEL[report.disposition] ?? report.disposition;
+  return report.error_code ? `${label}（${report.error_code}）` : label;
+}
+function buildInvitationDiagnostic(preview: BetaInvitationPreview, failure: JoinFailureView | null): string {
+  const endpoints = failure?.endpoints.length ? failure.endpoints : preview.endpoints;
+  const lines = [
+    '邀请检查结果',
+    '结构：邀请格式与签名有效',
+    `协议/schema：${preview.compatible ? '兼容' : '不兼容'}`,
+    '档案成员资格：尚未接受',
+    ...(failure ? [`上次加入尝试：${failure.message}`] : []),
+    ...endpoints.map(report => `${report.endpoint} ${invitationEndpointSummary(report)}`),
+  ];
+  return lines.join('\n');
 }
 export function BetaPeersPage({ peers, profileId, profileName, runtimeId, deviceId, onJoined, onEventsChanged, visible = true, copyText = writeBetaMessageClipboard }: {
   peers: BetaPeersClient | null;
@@ -61,6 +95,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   const [nearbySelection, setNearbySelection] = useState<NearbySelection | null>(null);
   const [showDialAddress, setShowDialAddress] = useState(false);
   const [preview, setPreview] = useState<BetaInvitationPreview | null>(null);
+  const [joinFailure, setJoinFailure] = useState<JoinFailureView | null>(null);
   const [pendingJoin, setPendingJoin] = useState<string | null>(null);
   const [revoke, setRevoke] = useState<BetaPeer | null>(null);
   const [copyingInvitationId, setCopyingInvitationId] = useState<string | null>(null);
@@ -104,13 +139,14 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
     setDialAddress(address);
     setShowDialAddress(true);
     setPreview(null);
+    setJoinFailure(null);
     setPendingJoin(null);
     inputRevision.current++;
     setNotice('候选地址只用于尝试连接；仍需检查完整邀请并明确确认加入。');
   }
   useEffect(() => {
     const life: Life = { active: true }; lifecycle.current = life;
-    setStatus(null); setNearby([]); setNearbyError(''); setNearbySelection(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setInvitationText(''); setDialAddress(''); setShowDialAddress(false); setPendingJoin(null); setRevoke(null); setCopyingInvitationId(null); observedSync.current = null; inputRevision.current++; copySequence.current++;
+    setStatus(null); setNearby([]); setNearbyError(''); setNearbySelection(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setJoinFailure(null); setInvitationText(''); setDialAddress(''); setShowDialAddress(false); setPendingJoin(null); setRevoke(null); setCopyingInvitationId(null); observedSync.current = null; inputRevision.current++; copySequence.current++;
     return () => { life.active = false; copySequence.current++; if (operationFlight.current === life) operationFlight.current = null; };
   }, [scope]);
   useEffect(() => {
@@ -167,17 +203,34 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
     if (nearbySelection && nearbySelection.device_id !== expected.issuer_device_id) {
       throw new Error('所选设备与完整邀请中的身份不一致，未加入档案');
     }
+    if (Date.now() >= expected.expires_at_ms) {
+      throw new Error('邀请已过期，未执行加入；请重新获取邀请。');
+    }
     const address = dialAddress.trim();
-    const result = await (address ? peers.joinInvitation(text, address) : peers.joinInvitation(text));
+    setJoinFailure(null);
+    let result: BetaJoinResult;
+    try { result = await (address ? peers.joinInvitation(text, address) : peers.joinInvitation(text)); }
+    catch (failure) {
+      if (!isCurrent(life) || revision !== inputRevision.current) return;
+      const reports = failure instanceof BetaPeerJoinError ? failure.endpoints : joinFailureEndpointReports(failure);
+      if (reports && reports.length > 0) setJoinFailure({ message: errorMessage(failure), endpoints: reports });
+      throw failure;
+    }
     if (!isCurrent(life) || revision !== inputRevision.current) return;
     if (result.profile_id !== expected.profile_id || result.peer_device_id !== expected.issuer_device_id) throw new Error('加入结果与邀请不一致，未切换当前档案');
     if (result.state === 'pending') {
-      setPendingJoin(result.profile_id); setNotice('加入尚待确认，当前档案保持不变。请保留完整邀请后继续查证。'); return;
+      setPendingJoin(result.profile_id); setNotice('成员资格尚未确认；加入尚待确认，当前档案保持不变。请保留完整邀请后继续查证。'); return;
     }
-    setPendingJoin(null); setNotice('档案已加入，正在打开…');
+    setPendingJoin(null); setNotice('成员资格已确认，正在打开…');
     try { await onJoined(result.profile_id); }
-    catch (failure) { if (isCurrent(life)) setNotice(`档案已加入，尚未切换：${errorMessage(failure)}`); }
+    catch (failure) { if (isCurrent(life)) setNotice(`成员资格已确认，尚未切换：${errorMessage(failure)}`); }
   }
+  const previewExpired = preview !== null && now >= preview.expires_at_ms;
+  const shownEndpoints = joinFailure?.endpoints.length ? joinFailure.endpoints : preview?.endpoints ?? [];
+  const endpointListLabel = joinFailure?.endpoints.length ? '上次加入尝试的连接来源' : '连接来源检查结果';
+  const allUnreachable = shownEndpoints.length > 0
+    && shownEndpoints.every(report => report.disposition === 'unreachable' || report.disposition === 'skipped')
+    && shownEndpoints.some(report => report.disposition === 'unreachable');
   if (!peers) return <PageShell title="设备同步" contentClassName="overflow-y-auto"><div className="mx-auto max-w-3xl px-5 py-8"><SettingsSection title="当前连接"><p className="px-4 py-4 text-sm text-secondary">此连接尚未提供设备同步管理。独立应用会使用本机服务连接设备。</p></SettingsSection></div></PageShell>;
   if (!runtimeId || !deviceId) return <PageShell title="设备同步"><p role="status" className="px-5 py-8 text-sm text-secondary">本机服务尚未就绪，请在当下页面完成连接后继续。</p></PageShell>;
   return <PageShell title="设备同步" contentClassName="overflow-y-auto" headerAction={profileId && <Button variant="ghost" size="icon" aria-label="刷新同步状态" disabled={!!operation} onClick={() => void perform('refresh', refresh)}><RefreshCw size={16}/></Button>}>
@@ -232,29 +285,57 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
         <div className="space-y-3 px-4 py-4">
           <label htmlFor="beta-peer-invitation" className="text-sm font-medium text-foreground">另一设备的完整邀请</label>
           {nearbySelection && <p role="status" className="break-all text-xs text-secondary">{'已选择设备 ' + nearbySelection.device_id + ' · 候选地址 ' + nearbySelection.address + '。仍需检查完整邀请并明确确认加入。'}</p>}
-          <Textarea id="beta-peer-invitation" value={invitationText} maxLength={32768} placeholder="粘贴完整邀请" className="min-h-24 text-xs" onChange={event => { setInvitationText(event.target.value); setPreview(null); setPendingJoin(null); if (!nearbySelection) { setDialAddress(''); setShowDialAddress(false); } inputRevision.current++; }}/>
+          <Textarea id="beta-peer-invitation" value={invitationText} maxLength={32768} placeholder="粘贴完整邀请" className="min-h-24 text-xs" onChange={event => { setInvitationText(event.target.value); setPreview(null); setJoinFailure(null); setPendingJoin(null); if (!nearbySelection) { setDialAddress(''); setShowDialAddress(false); } inputRevision.current++; }}/>
           <Button variant="outline" disabled={!!operation || !invitationText.trim()} onClick={() => void perform('inspect', async life => {
-            const revision = inputRevision.current; const result = await peers.inspectInvitation(invitationText.trim());
+            const revision = inputRevision.current;
+            let result: BetaInvitationPreview;
+            try { result = await peers.inspectInvitation(invitationText.trim()); }
+            catch (failure) {
+              if (!isCurrent(life) || revision !== inputRevision.current) return;
+              throw failure;
+            }
             if (!isCurrent(life) || revision !== inputRevision.current) return;
             if (nearbySelection && nearbySelection.device_id !== result.issuer_device_id) {
               setNearbySelection(null); setDialAddress(''); setShowDialAddress(false);
               setNotice('所选候选设备与完整邀请的身份不一致，已清除候选地址。');
             }
             setPreview(result);
+            setJoinFailure(null);
           })}><Link2 size={14}/>{operation === 'inspect' ? '正在检查…' : '检查邀请'}</Button>
           {preview && <div className="space-y-3 rounded-xl bg-surface p-3 text-sm">
             <p className="font-medium text-foreground">加入「{preview.profile_name}」</p>
-            <p className="text-xs leading-relaxed text-secondary">{profileId && profileId !== preview.profile_id ? `当前「${profileName}」会保留，加入确认后才切换档案。` : '加入确认后，已授权设备将自动补齐此档案。'}</p>
+            <p className="text-xs leading-relaxed text-secondary">{profileId && profileId !== preview.profile_id ? `当前「${profileName}」会保留，加入确认后才切换档案。` : '加入成功后才会进入同步阶段；记录与原件是否完成以设备卡的最后确认为准。'}</p>
             {preview.requires_replacement && <p className="text-xs leading-relaxed text-secondary">这次确认会替换原连接授权，保留档案和已保存记录。旧连接的请求将不再继续。</p>}
             <p className="text-xs text-muted">有效期至 {new Date(preview.expires_at_ms).toLocaleString()}</p>
-            <Button variant="ghost" size="sm" aria-expanded={showDialAddress} onClick={()=>setShowDialAddress(true)}>更换连接地址</Button>
+            <dl aria-label="邀请检查状态" className="space-y-1 text-xs">
+              <div><dt className="font-medium text-foreground">邀请结构</dt><dd className="text-secondary">邀请格式与签名有效。</dd></div>
+              <div><dt className="font-medium text-foreground">协议/schema</dt><dd className="text-secondary">{preview.compatible ? '协议/schema 兼容，可继续检查来源。' : '协议/schema 不兼容，不能加入此档案。'}</dd></div>
+              <div><dt className="font-medium text-foreground">档案成员资格</dt><dd className="text-secondary">尚未接受；确认加入后才会建立或替换档案授权。</dd></div>
+            </dl>
+            {previewExpired && <p role="alert" className="text-sm text-destructive">邀请结构有效，但已过期。</p>}
+            {shownEndpoints.length > 0 && <div className="space-y-1 rounded-md border border-border-card p-2">
+              <p className="text-xs font-medium text-foreground">{endpointListLabel}</p>
+              <ul role="list" aria-label={endpointListLabel} className="space-y-1">
+                {shownEndpoints.map(report => <li key={report.endpoint} className="break-all text-xs text-secondary">{report.endpoint} · {invitationEndpointSummary(report)}</li>)}
+              </ul>
+            </div>}
+            {shownEndpoints.length === 0 && <p className="text-xs text-secondary">暂无可检查的连接来源；可手动填写其他连接地址后重试。</p>}
+            {allUnreachable && <p role="alert" className="text-sm text-destructive">所有可尝试的连接来源均不可达。请填写 EasyTier 或其他网络地址后重试；仍会核对原邀请的设备身份。</p>}
+            {joinFailure && shownEndpoints.length === 0 && <p className="text-xs text-secondary">上次加入尝试没有可回显的逐地址结果。</p>}
+            {pendingJoin && <p role="status" className="text-xs leading-relaxed text-secondary">档案成员资格尚未接受。当前档案保持不变；请保留完整邀请后继续查证。</p>}
+            <div className="flex flex-wrap gap-2">
+              <Button variant="ghost" size="sm" aria-expanded={showDialAddress} aria-controls={showDialAddress ? 'beta-peer-dial-address' : undefined} onClick={()=>setShowDialAddress(true)}>更换连接地址</Button>
+              <Button variant="ghost" size="sm" disabled={!!operation} onClick={() => void perform('diagnostic', async life => {
+                await copyText(buildInvitationDiagnostic(preview, joinFailure));
+                if (isCurrent(life)) setNotice('连接诊断已复制');
+              })}>复制连接诊断</Button>
+            </div>
             {showDialAddress && <div className="space-y-2">
               <label htmlFor="beta-peer-dial-address" className="text-xs font-medium">其他连接地址</label>
               <Input id="beta-peer-dial-address" value={dialAddress} maxLength={256} placeholder="设备 IP:端口" onChange={event=>{setNearbySelection(null);setDialAddress(event.target.value);inputRevision.current++;}}/>
               <p className="text-xs leading-relaxed text-secondary">邀请地址不可达时，可填写发起设备的 EasyTier 等网络地址。留空使用邀请地址；仍核对原邀请的设备身份与授权。</p>
             </div>}
-            {!preview.compatible && <p className="text-sm text-destructive">两端版本暂不兼容，请更新后重新获取邀请。</p>}
-            <Button disabled={!!operation || !preview.compatible} onClick={() => void perform('join', join)}><Check size={14}/>{operation === 'join' ? '正在确认…' : pendingJoin ? '继续查证加入' : preview.requires_replacement ? '确认替换连接并加入' : '确认加入档案'}</Button>
+            <Button disabled={!!operation || !preview.compatible || previewExpired} onClick={() => void perform('join', join)}><Check size={14}/>{operation === 'join' ? '正在确认…' : pendingJoin ? '继续查证加入' : preview.requires_replacement ? '确认替换连接并加入' : '确认加入档案'}</Button>
           </div>}
         </div>
       </SettingsSection>
@@ -262,9 +343,9 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
         {status.peers.length === 0 ? <p className="px-4 py-4 text-sm text-secondary">还没有其他设备加入。</p> : status.peers.map((peer, index) => <div key={peer.device_id}>
           {index > 0 && <Divider/>}
           <div className="space-y-2 px-4 py-4">
-            <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-sm font-medium text-foreground"><BetaDeviceName localDeviceId={deviceId} deviceId={peer.device_id}/></div><p className="mt-1 text-xs text-secondary">{peerState(peer)}</p></div>
+            <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-sm font-medium text-foreground"><BetaDeviceName localDeviceId={deviceId} deviceId={peer.device_id}/></div><p className="mt-1 text-xs text-secondary">{membershipState(peer)}</p><p className="mt-1 text-xs text-secondary">{peerState(peer)}</p></div>
               <Button variant="outline" size="sm" disabled={!!operation || !!statusError || !status.network_enabled || peer.member_state !== 'ready'} onClick={() => void perform('sync', async life => { await peers.sync(profileId, peer.device_id); if (isCurrent(life)) await refresh(life); })}>立即同步</Button></div>
-            {peer.last_sync_at_ms !== null && <div className="flex items-center gap-1 text-xs text-muted"><span>上次确认</span><EventTimestamp timestamp={peer.last_sync_at_ms} now={now} mode={dateMode}/></div>}
+            <p className="flex items-center gap-1 text-xs text-muted">数据同步：{peer.last_sync_at_ms === null ? (peer.member_state === 'ready' ? '尚未确认' : peer.member_state === 'pending' ? '等待成员资格确认' : '已停止') : <><span>上次数据同步确认 </span><EventTimestamp timestamp={peer.last_sync_at_ms} now={now} mode={dateMode}/></>}</p>
             {!!peer.history_gaps?.length&&<details className="space-y-2 text-xs text-secondary"><summary className="cursor-pointer">部分历史还不能完整中转（{peer.history_gaps.length} 项）</summary><p>上次同步发现：部分已保存历史的可验证转发前缀尚未补齐。请让仍持有原身份的来源设备用新版上线，或核对来源授权；现有资料保留。已知附件可独立获取。</p>{peer.history_gaps.map(gap=><div key={`${gap.direction}:${gap.origin_device_id}`} className="rounded-lg border border-border-card p-2"><BetaDeviceName localDeviceId={deviceId} deviceId={gap.origin_device_id}/><p>{gap.direction==='to_peer'?'本机 → 对方':'对方 → 本机'} · 保存位置 {gap.materialized_seq} · 可验证转发位置 {gap.available_seq??'尚未建立'}</p></div>)}</details>}
             <details className="text-xs text-muted"><summary className="cursor-pointer py-1">连接详情</summary><dl className="space-y-2 py-2"><div><dt>设备身份</dt><dd className="break-all font-mono">{peer.device_id}</dd></div><div><dt>身份指纹</dt><dd className="break-all font-mono">{peer.fingerprint_sha256}</dd></div>{peer.last_error_code && <div><dt>最近错误</dt><dd className="break-all">{peer.last_error_code}</dd></div>}{!!peer.endpoints.length && <div><dt>连接地址</dt><dd className="break-all">{peer.endpoints.join('、')}</dd></div>}</dl>
               <Button variant="outline" size="sm" disabled={!!operation || !!statusError || !!copyingInvitationId} onClick={() => void perform('replace', async life => { const result = await peers.createInvitation(profileId, peer.device_id); if (isCurrent(life)) publishInvitation(life,result); })}>重新授权此设备</Button>

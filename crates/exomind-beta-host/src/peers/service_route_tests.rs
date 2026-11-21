@@ -2,7 +2,10 @@ use super::*;
 use crate::peers::{PeerNetwork, PeerNetworkSettings};
 use crate::{BetaHost, Session};
 use exomind_core::{DeviceId, ProfileId};
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
+};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -110,7 +113,9 @@ fn route_merge_keeps_recent_success_then_new_pinned_candidates_and_caps_the_tail
         .collect::<Vec<_>>();
     let successful = address("10.1.0.1:43344");
     let fresh = address("10.1.0.2:43344");
-    let merged = merge_route_endpoints(&old, &[fresh, old[2]], Some(successful)).unwrap();
+    let merged =
+        merge_route_endpoints_with_local_ips(&old, &[fresh, old[2]], Some(successful), &[])
+            .unwrap();
     assert_eq!(merged.len(), 8);
     assert_eq!(merged[0], successful);
     assert_eq!(merged[1], fresh);
@@ -127,7 +132,7 @@ fn route_merge_keeps_recent_success_then_new_pinned_candidates_and_caps_the_tail
         merged.len()
     );
 
-    let retained = merge_route_endpoints(&old, &[fresh], None).unwrap();
+    let retained = merge_route_endpoints_with_local_ips(&old, &[fresh], None, &[]).unwrap();
     assert_eq!(
         retained,
         [old[0], fresh, old[1], old[2], old[3], old[4], old[5], old[6]],
@@ -141,10 +146,48 @@ fn a_new_authenticated_inbound_candidate_survives_a_full_stale_route_cache() {
         .map(|last| address(&format!("10.0.0.{last}:43344")))
         .collect::<Vec<_>>();
     let fresh = address("10.137.0.2:43344");
-    let merged = merge_route_endpoints(&old, &[fresh], None).unwrap();
+    let merged = merge_route_endpoints_with_local_ips(&old, &[fresh], None, &[]).unwrap();
     assert_eq!(merged.len(), 8);
     assert_eq!(merged[0], old[0], "retain the prior preferred address");
     assert!(merged.contains(&fresh), "a full cache must not discard a newly authenticated return address");
+}
+
+#[test]
+fn route_merge_keeps_authenticated_fallbacks_but_skips_unsafe_or_local_candidates() {
+    let successful = address("10.137.0.2:43344");
+    let old = vec![
+        address("10.0.0.8:43344"),
+        address("127.0.0.1:43344"),
+        address("169.254.10.9:43344"),
+        address("255.255.255.255:43344"),
+        address("192.0.2.1:0"),
+        address("10.0.0.8:43344"),
+        address("10.0.0.9:43344"),
+    ];
+    let candidates = vec![
+        address("127.0.0.2:43344"),
+        address("169.254.10.10:43344"),
+        address("10.0.0.9:43344"),
+        address("192.0.2.10:43344"),
+    ];
+
+    let merged = merge_route_endpoints_with_local_ips(
+        &old,
+        &candidates,
+        Some(successful),
+        &[address("10.0.0.9:1").ip()],
+    )
+    .unwrap();
+
+    assert_eq!(
+        merged,
+        [
+            successful,
+            address("192.0.2.10:43344"),
+            address("10.0.0.8:43344")
+        ],
+        "the authenticated fallback and the successful new candidate persist; unsafe and local self candidates do not"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -177,8 +220,8 @@ async fn authenticated_route_write_rejects_wrong_pin_stale_generation_and_cancel
 
     network_a.stop().await.unwrap();
     network_b.stop().await.unwrap();
-    let candidate = address("127.0.0.77:43344");
-    let successful = address("127.0.0.78:43344");
+    let candidate = address("192.0.2.77:43344");
+    let successful = address("192.0.2.78:43344");
     let saved = b
         .save_authenticated_peer_routes(
             &owner_b,
@@ -287,4 +330,146 @@ async fn authenticated_route_write_rejects_wrong_pin_stale_generation_and_cancel
     assert!(unchanged_after_rejections);
     assert!(!revoked_saved);
     assert!(unchanged_after_revoke);
+}
+
+#[test]
+fn route_merge_never_persists_unsafe_successful_endpoint() {
+    let fallback = address("10.0.0.8:43344");
+    let old = vec![fallback];
+    let unsafe_successful = [
+        address("127.0.0.1:43344"),
+        address("[::1]:43344"),
+        address("169.254.10.9:43344"),
+        address("[fe80::1]:43344"),
+        address("255.255.255.255:43344"),
+        address("0.0.0.0:43344"),
+        address("224.0.0.1:43344"),
+        address("10.0.0.8:0"),
+    ];
+    for endpoint in unsafe_successful {
+        let merged =
+            merge_route_endpoints_with_local_ips(&old, &[], Some(endpoint), &[]).unwrap();
+        assert_eq!(
+            merged,
+            vec![fallback],
+            "unsafe successful endpoint must fall back to the shareable cached route: {endpoint}"
+        );
+    }
+    assert!(
+        merge_route_endpoints_with_local_ips(&[], &[], Some(address("127.0.0.1:43344")), &[])
+            .unwrap()
+            .is_empty(),
+        "an unsafe successful endpoint must not persist when no safe fallback exists"
+    );
+
+    let local_self = address("10.0.0.9:43344");
+    assert_eq!(
+        merge_route_endpoints_with_local_ips(&old, &[], Some(local_self), &[local_self.ip()])
+            .unwrap(),
+        vec![fallback],
+        "a local-self successful endpoint must not persist"
+    );
+
+    let shareable = address("10.1.0.1:43344");
+    assert_eq!(
+        merge_route_endpoints_with_local_ips(&old, &[], Some(shareable), &[]).unwrap(),
+        vec![shareable, fallback],
+        "a shareable successful endpoint keeps the head position"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn observed_route_write_skips_unsafe_source_and_persists_shareable_source() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_root_a, a, owner_a) = open_host();
+    let (_root_b, b, owner_b) = open_host();
+    let profile = ProfileId::new();
+    a.provision_profile(&owner_a, profile, "observed route hygiene")
+        .unwrap();
+
+    let network_a = PeerNetwork::new(a.clone(), owner_a.clone()).unwrap();
+    let network_b = PeerNetwork::new(b.clone(), owner_b.clone()).unwrap();
+    let invitation = network_a
+        .create_invitation(profile)
+        .await
+        .unwrap()
+        .invitation
+        .unwrap();
+    let join = network_b.join(&invitation, Uuid::new_v4()).await.unwrap();
+    let peer = a.device_id;
+    let member = b
+        .peer_members(&owner_b, profile)
+        .unwrap()
+        .into_iter()
+        .find(|member| member.device_id == peer)
+        .unwrap();
+    let peer_pin = PeerPin::from_sha256(&member.pin).unwrap();
+
+    network_a.stop().await.unwrap();
+    network_b.stop().await.unwrap();
+
+    let unsafe_sources = [
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(Ipv6Addr::LOCALHOST),
+        IpAddr::V4(Ipv4Addr::new(169, 254, 10, 9)),
+        IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
+        IpAddr::V4(Ipv4Addr::BROADCAST),
+    ];
+    for source in unsafe_sources {
+        b.save_observed_peer_route(
+            &owner_b,
+            profile,
+            peer,
+            source,
+            43344,
+            member.generation,
+            peer_pin,
+            None,
+        )
+        .unwrap();
+        let routes = b.peer_routes(&owner_b).unwrap();
+        assert!(
+            routes
+                .iter()
+                .filter(|route| route.profile == profile && route.device == peer)
+                .flat_map(|route| route.endpoints.iter())
+                .all(|endpoint| endpoint.ip() != source),
+            "unsafe observed source must never persist: {source}"
+        );
+    }
+
+    let shareable = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 78));
+    b.save_observed_peer_route(
+        &owner_b,
+        profile,
+        peer,
+        shareable,
+        43344,
+        member.generation,
+        peer_pin,
+        None,
+    )
+    .unwrap();
+    let routes = b.peer_routes(&owner_b).unwrap();
+    let route = routes
+        .iter()
+        .find(|route| route.profile == profile && route.device == peer)
+        .expect("shareable observed source must persist");
+    assert_eq!(
+        route.endpoints.first(),
+        Some(&SocketAddr::new(shareable, 43344)),
+        "the shareable observed source must take the head position"
+    );
+
+    drop((network_a, network_b));
+    tokio::task::spawn_blocking(move || a.stop())
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::task::spawn_blocking(move || b.stop())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(join.state, PeerJoinState::Ready);
 }

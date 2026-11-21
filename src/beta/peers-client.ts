@@ -27,12 +27,25 @@ export interface BetaNearbyCandidate {
 export interface BetaInvitation {
   invitation_text: string; invitation_id: string; expires_at_ms: number; local_addresses: string[];
 }
+export interface BetaInvitationEndpointReport {
+  endpoint: string;
+  disposition: 'attempted'|'skipped'|'reachable'|'identity_mismatch'|'unreachable'|'protocol_mismatch';
+  elapsed_ms: number;
+  error_code: string | null;
+}
 export interface BetaInvitationPreview {
   profile_id: string; profile_name: string; issuer_device_id: string;
   fingerprint_sha256: string; expires_at_ms: number; compatible: boolean;
+  endpoints: BetaInvitationEndpointReport[];
   requires_replacement?: boolean;
 }
 export interface BetaJoinResult { profile_id: string; peer_device_id: string; state: 'pending' | 'ready' }
+export class BetaPeerJoinError extends BetaApiError {
+  constructor(code: string, message: string, public readonly endpoints: BetaInvitationEndpointReport[]) {
+    super(code, message);
+    this.name = 'BetaPeerJoinError';
+  }
+}
 export interface BetaPeersClient {
   nearbyCandidates(): Promise<BetaNearbyCandidate[]>;
   status(profileId: string): Promise<BetaPeerStatus>;
@@ -57,7 +70,7 @@ function uuid(value: unknown): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) || id === '00000000-0000-0000-0000-000000000000') return invalid();
   return id;
 }
-function integer(value: unknown, min = 0): number { if (!Number.isSafeInteger(value) || Number(value) < min) return invalid(); return Number(value); }
+function integer(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): number { if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) return invalid(); return Number(value); }
 function boolean(value: unknown): boolean { if (typeof value !== 'boolean') return invalid(); return value; }
 function hash(value: unknown): string { const result = text(value, 64); if (!/^[0-9a-f]{64}$/.test(result)) return invalid(); return result; }
 function strings(value: unknown): string[] { if (!Array.isArray(value) || value.length > 16) return invalid(); return value.map(value => text(value, 256)); }
@@ -77,6 +90,61 @@ function nearbyCandidate(value: unknown): BetaNearbyCandidate {
     expires_at_ms:integer(item.expires_at_ms, 1),
     verification_state:choice(item.verification_state,['unverified']),
   };
+}
+const ENDPOINT_DISPOSITIONS=['attempted','skipped','reachable','identity_mismatch','unreachable','protocol_mismatch'] as const;
+const MAX_INVITATION_ENDPOINTS=8;
+function endpointAddress(value: unknown): string {
+  const endpoint=text(value,128);
+  if (!endpoint || endpoint.trim()!==endpoint || /[\u0000-\u001f\u007f]/.test(endpoint)) return invalid();
+  const v6=/^\[([^\]]+)\]:(\d{1,5})$/.exec(endpoint);
+  if(v6){
+    try { new URL(`http://[${v6[1]}]/`); } catch { return invalid(); }
+    const port=Number(v6[2]);
+    if(port>65535) return invalid();
+    return endpoint;
+  }
+  const v4=/^([^:]+):(\d{1,5})$/.exec(endpoint);
+  if(!v4) return invalid();
+  const octets=v4[1].split('.');
+  if(octets.length!==4||octets.some(octet=>!/^\d{1,3}$/.test(octet)||Number(octet)>255)) return invalid();
+  const port=Number(v4[2]);
+  if(port>65535) return invalid();
+  return endpoint;
+}
+function endpointReports(value: unknown): BetaInvitationEndpointReport[] {
+  if (!Array.isArray(value) || value.length > MAX_INVITATION_ENDPOINTS) return invalid();
+  const reports=value.map(endpointReport);
+  if (new Set(reports.map(report=>report.endpoint)).size !== reports.length) return invalid();
+  return reports;
+}
+function endpointReport(value: unknown): BetaInvitationEndpointReport {
+  const item=object(value,['endpoint','disposition','elapsed_ms','error_code']);
+  const endpoint=endpointAddress(item.endpoint);
+  const disposition=choice(item.disposition,ENDPOINT_DISPOSITIONS);
+  const errorCode=item.error_code===null?null:text(item.error_code,64);
+  if (errorCode!==null && !/^[a-z][a-z0-9_]{0,63}$/.test(errorCode)) return invalid();
+  if(disposition==='reachable'&&errorCode!==null) return invalid();
+  if(disposition!=='reachable'&&disposition!=='attempted'&&errorCode===null) return invalid();
+  return {
+    endpoint,
+    disposition,
+    elapsed_ms:integer(item.elapsed_ms,0,3_600_000),
+    error_code:errorCode,
+  };
+}
+function joinFailure(value: unknown): unknown {
+  if(!value||typeof value!=='object'||Array.isArray(value)||!('endpoints' in value)) return value;
+  const failure=object(value,['code','message','endpoints']);
+  return new BetaPeerJoinError(
+    text(failure.code,64),
+    text(failure.message,1024),
+    endpointReports(failure.endpoints),
+  );
+}
+export function joinFailureEndpointReports(value: unknown): BetaInvitationEndpointReport[] | null {
+  if(!value||typeof value!=='object'||Array.isArray(value)||!('endpoints' in value)) return null;
+  try { return endpointReports((value as { endpoints: unknown }).endpoints); }
+  catch { return null; }
 }
 function peer(value: unknown): BetaPeer {
   const extra=!!value&&typeof value==='object'&&'history_gaps'in value;
@@ -111,11 +179,14 @@ export function nativeBetaPeersClient(call: Call = (command, args) => invoke(com
     async inspectInvitation(invitationText) {
       const value = await call('beta_peer_inspect_invitation', { invitationText });
       const extra = !!value && typeof value === 'object' && 'requires_replacement' in value;
-      const raw = object(value, ['profile_id','profile_name','issuer_device_id','fingerprint_sha256','expires_at_ms','compatible', ...(extra ? ['requires_replacement'] : [])]);
-      return { profile_id:uuid(raw.profile_id),profile_name:text(raw.profile_name,256),issuer_device_id:uuid(raw.issuer_device_id),fingerprint_sha256:hash(raw.fingerprint_sha256),expires_at_ms:integer(raw.expires_at_ms),compatible:boolean(raw.compatible), ...(extra ? {requires_replacement:boolean(raw.requires_replacement)} : {}) };
+      const raw = object(value, ['profile_id','profile_name','issuer_device_id','fingerprint_sha256','expires_at_ms','compatible','endpoints', ...(extra ? ['requires_replacement'] : [])]);
+      return { profile_id:uuid(raw.profile_id),profile_name:text(raw.profile_name,256),issuer_device_id:uuid(raw.issuer_device_id),fingerprint_sha256:hash(raw.fingerprint_sha256),expires_at_ms:integer(raw.expires_at_ms),compatible:boolean(raw.compatible),endpoints:endpointReports(raw.endpoints), ...(extra ? {requires_replacement:boolean(raw.requires_replacement)} : {}) };
     },
     async joinInvitation(invitationText, dialAddress) {
-      const raw = object(await call('beta_peer_join_invitation', { invitationText, ...(dialAddress?.trim() ? {dialAddress:dialAddress.trim()} : {}) }), ['profile_id','peer_device_id','state']);
+      let value: unknown;
+      try { value = await call('beta_peer_join_invitation', { invitationText, ...(dialAddress?.trim() ? {dialAddress:dialAddress.trim()} : {}) }); }
+      catch (failure) { throw joinFailure(failure); }
+      const raw = object(value, ['profile_id','peer_device_id','state']);
       return { profile_id:uuid(raw.profile_id),peer_device_id:uuid(raw.peer_device_id),state:choice(raw.state,['pending','ready']) };
     },
     async sync(profileId, peerDeviceId) { await call('beta_peer_sync', { profileId, peerDeviceId }); },

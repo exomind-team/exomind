@@ -293,22 +293,29 @@ async fn alternate_join_route_preserves_the_signed_issuer_and_rejects_a_differen
         .invitation
         .unwrap();
     let claim = Uuid::new_v4();
-    let wrong_route = nb.join(&invitation, claim).await;
+    let wrong_route = nb.join_for_test(&invitation, claim).await;
     assert!(matches!(wrong_route, Err(HostError::PeerPinMismatch)));
     assert!(b.profiles(&ob).unwrap().is_empty());
     assert!(c.profiles(&oc).unwrap().is_empty());
 
     let result = nb
-        .join_with_route(&invitation, claim, Some(address))
+        .join_with_route_for_test(&invitation, claim, Some(address))
         .await
         .unwrap();
     assert_eq!(result.profile_id, profile);
     assert_eq!(result.issuer_device_id, a.device_id);
     assert_eq!(result.state, PeerJoinState::Ready);
     assert!(result.remote_ready_observed);
-    assert_eq!(
-        b.peer_routes(&ob).unwrap()[0].endpoints.first(),
-        Some(&address)
+    assert!(
+        b.profiles(&ob)
+            .unwrap()
+            .iter()
+            .any(|member| member.profile_id == profile),
+        "test-only loopback join must still establish membership"
+    );
+    assert!(
+        b.peer_routes(&ob).unwrap().is_empty(),
+        "a loopback successful endpoint must not be persisted as a shareable route"
     );
     assert!(c.profiles(&oc).unwrap().is_empty());
     na.stop().await.unwrap();
@@ -326,11 +333,8 @@ async fn alternate_join_route_preserves_the_signed_issuer_and_rejects_a_differen
             .peer_routes(&reopened_owner)
             .unwrap()
             .iter()
-            .any(|route| {
-                route.profile == profile
-                    && route.device == issuer_device
-                    && route.endpoints.first() == Some(&address)
-            })
+            .all(|route| !(route.profile == profile && route.device == issuer_device)),
+        "a loopback successful endpoint must not be durably persisted"
     );
     reopened.stop().unwrap();
 }
@@ -374,7 +378,7 @@ async fn alternate_join_route_keeps_pin_mismatch_when_signed_candidate_times_out
     let network = PeerNetwork::new(joiner.clone(), joiner_owner.clone()).unwrap();
 
     let result = network
-        .join_with_route(&invitation, Uuid::new_v4(), Some(wrong_address))
+        .join_with_route_for_test(&invitation, Uuid::new_v4(), Some(wrong_address))
         .await;
 
     assert!(matches!(result, Err(HostError::PeerPinMismatch)));
@@ -388,6 +392,183 @@ async fn alternate_join_route_keeps_pin_mismatch_when_signed_candidate_times_out
     stopped(different_peer).await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn join_tries_a_later_candidate_after_service_negotiation_fails() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_ra, issuer, issuer_owner) = host();
+    let (_rb, joiner, joiner_owner) = host();
+    let profile = ProfileId::new();
+    issuer
+        .provision_profile(&issuer_owner, profile, "service fallback")
+        .unwrap();
+    let issuer_network = PeerNetwork::new(issuer.clone(), issuer_owner.clone()).unwrap();
+    issuer_network.set_enabled(true).await.unwrap();
+    let real_address = issuer_network
+        .local_addresses()
+        .unwrap()
+        .into_iter()
+        .find(|address| address.ip().is_loopback())
+        .unwrap();
+    let decoy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let decoy_address = decoy_listener.local_addr().unwrap();
+    let decoy_identity = issuer.transport_identity(&issuer_owner).unwrap();
+    let decoy_config =
+        super::super::transport::server_config_for_test(&decoy_identity).unwrap();
+    let mut decoy_task = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+
+        let (stream, _) = decoy_listener.accept().await?;
+        let mut stream = tokio_rustls::TlsAcceptor::from(decoy_config)
+            .accept(stream)
+            .await
+            .map_err(|_| HostError::PeerTls)?;
+        let length = stream
+            .read_u32()
+            .await
+            .map_err(|_| HostError::PeerTransportUnavailable)? as usize;
+        if length > 256 * 1024 {
+            return Err(HostError::PayloadTooLarge);
+        }
+        let mut header = vec![0; length];
+        stream
+            .read_exact(&mut header)
+            .await
+            .map_err(|_| HostError::PeerTransportUnavailable)?;
+        drop(stream);
+        Ok::<(), HostError>(())
+    });
+    let invitation = issuer
+        .create_peer_invitation(
+            &issuer_owner,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: profile,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![decoy_address, real_address],
+                ttl_seconds: 600,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+    let network = PeerNetwork::new(joiner.clone(), joiner_owner.clone()).unwrap();
+
+    let joined = network.join_for_test(&invitation, Uuid::new_v4()).await;
+
+    assert!(
+        joined.is_ok(),
+        "a failed service exchange on one pinned endpoint must not suppress the next candidate: {joined:?}"
+    );
+    let decoy_result = tokio::time::timeout(Duration::from_secs(5), &mut decoy_task)
+        .await
+        .expect("decoy service observed and closed the first endpoint");
+    assert!(decoy_result.is_ok_and(|result| result.is_ok()));
+    assert_eq!(joined.unwrap().state, PeerJoinState::Ready);
+    network.stop().await.unwrap();
+    issuer_network.stop().await.unwrap();
+    drop(network);
+    drop(issuer_network);
+    stopped(issuer).await;
+    stopped(joiner).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn join_treats_a_silent_post_tls_route_as_bounded_and_falls_back() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_ra, issuer, issuer_owner) = host();
+    let (_rb, joiner, joiner_owner) = host();
+    let profile = ProfileId::new();
+    issuer
+        .provision_profile(&issuer_owner, profile, "silent route")
+        .unwrap();
+    let issuer_network = PeerNetwork::new(issuer.clone(), issuer_owner.clone()).unwrap();
+    issuer_network.set_enabled(true).await.unwrap();
+    let real_address = issuer_network
+        .local_addresses()
+        .unwrap()
+        .into_iter()
+        .find(|address| address.ip().is_loopback())
+        .unwrap();
+    let decoy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let decoy_address = decoy_listener.local_addr().unwrap();
+    let decoy_identity = issuer.transport_identity(&issuer_owner).unwrap();
+    let decoy_config =
+        super::super::transport::server_config_for_test(&decoy_identity).unwrap();
+    let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+    let decoy_task = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+
+        let (stream, _) = decoy_listener.accept().await?;
+        let mut stream = tokio_rustls::TlsAcceptor::from(decoy_config)
+            .accept(stream)
+            .await
+            .map_err(|_| HostError::PeerTls)?;
+        let length = stream
+            .read_u32()
+            .await
+            .map_err(|_| HostError::PeerTransportUnavailable)? as usize;
+        if length > 256 * 1024 {
+            return Err(HostError::PayloadTooLarge);
+        }
+        let mut header = vec![0; length];
+        stream
+            .read_exact(&mut header)
+            .await
+            .map_err(|_| HostError::PeerTransportUnavailable)?;
+        let _ = accepted_tx.send(());
+        // Accept TLS and the service header, then hold without reading the join frames.
+        tokio::time::sleep(Duration::from_secs(15)).await;
+        drop(stream);
+        Ok::<(), HostError>(())
+    });
+    let invitation = issuer
+        .create_peer_invitation(
+            &issuer_owner,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: profile,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![decoy_address, real_address],
+                ttl_seconds: 600,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+    let network = PeerNetwork::new(joiner.clone(), joiner_owner.clone()).unwrap();
+    let join_network = network.clone();
+    let join_invitation = invitation.clone();
+    let started = Instant::now();
+    let join_task = tokio::spawn(async move {
+        join_network
+            .join_for_test(&join_invitation, Uuid::new_v4())
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), accepted_rx)
+        .await
+        .expect("decoy accepted TLS and service header")
+        .expect("decoy signal");
+    let joined = tokio::time::timeout(
+        Duration::from_secs(20),
+        join_task,
+    )
+    .await
+    .expect("join must remain bounded")
+    .expect("join task completed")
+    .expect("a silent route must not suppress the next candidate");
+    assert_eq!(joined.state, PeerJoinState::Ready);
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "per-route join exceeded its bound"
+    );
+    network.stop().await.unwrap();
+    issuer_network.stop().await.unwrap();
+    decoy_task.abort();
+    let _ = decoy_task.await;
+    stopped(issuer).await;
+    stopped(joiner).await;
+}
+
 #[test]
 fn peer_network_error_code_distinguishes_pin_tls_and_unreachable() {
     assert_eq!(error_code(&HostError::PeerPinMismatch), "pin_mismatch");
@@ -396,6 +577,473 @@ fn peer_network_error_code_distinguishes_pin_tls_and_unreachable() {
         error_code(&HostError::PeerTransportUnavailable),
         "unreachable"
     );
+}
+
+#[test]
+fn invitation_candidates_never_include_loopback_or_link_local() {
+    let candidates = shareable_endpoints_for_test(
+        "127.0.0.1:43344".parse().unwrap(),
+        vec![
+            "127.0.0.1".parse().unwrap(),
+            "169.254.2.3".parse().unwrap(),
+            "10.144.144.6".parse().unwrap(),
+        ],
+    );
+    assert_eq!(candidates, vec!["10.144.144.6:43344".parse().unwrap()]);
+}
+
+#[test]
+fn shareable_endpoints_drop_invalid_multicast_unspecified_duplicates_and_v6_link_local() {
+    let candidates = shareable_endpoints_for_test(
+        "192.168.1.20:43344".parse().unwrap(),
+        vec![
+            "192.168.1.20".parse::<IpAddr>().unwrap(),
+            "192.168.1.20".parse::<IpAddr>().unwrap(),
+            "0.0.0.0".parse().unwrap(),
+            "239.255.77.68".parse().unwrap(),
+            "169.254.10.1".parse().unwrap(),
+            "fe80::1".parse().unwrap(),
+            "10.0.0.8".parse().unwrap(),
+        ],
+    );
+    assert_eq!(
+        candidates,
+        vec![
+            "192.168.1.20:43344".parse().unwrap(),
+            "10.0.0.8:43344".parse().unwrap(),
+        ]
+    );
+}
+
+#[test]
+fn shareable_endpoints_are_non_adjacent_deduplicated_and_bounded() {
+    let candidates = shareable_endpoints_for_test(
+        "192.168.1.20:43344".parse().unwrap(),
+        vec![
+            "10.0.0.1".parse().unwrap(),
+            "10.0.0.2".parse().unwrap(),
+            "10.0.0.1".parse().unwrap(),
+            "10.0.0.3".parse().unwrap(),
+            "10.0.0.4".parse().unwrap(),
+            "10.0.0.5".parse().unwrap(),
+            "10.0.0.6".parse().unwrap(),
+            "10.0.0.7".parse().unwrap(),
+            "10.0.0.8".parse().unwrap(),
+        ],
+    );
+    assert_eq!(candidates.len(), MAX_SHAREABLE_ENDPOINTS);
+    assert_eq!(
+        candidates
+            .iter()
+            .filter(|address| *address == &"10.0.0.1:43344".parse().unwrap())
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn shareable_endpoints_filter_before_budget_truncation() {
+    let candidates = shareable_endpoints_for_test(
+        "192.168.1.20:43344".parse().unwrap(),
+        vec![
+            "169.254.0.1".parse().unwrap(),
+            "169.254.0.2".parse().unwrap(),
+            "169.254.0.3".parse().unwrap(),
+            "169.254.0.4".parse().unwrap(),
+            "169.254.0.5".parse().unwrap(),
+            "169.254.0.6".parse().unwrap(),
+            "169.254.0.7".parse().unwrap(),
+            "10.0.0.9".parse().unwrap(),
+        ],
+    );
+    assert_eq!(candidates, vec!["10.0.0.9:43344".parse().unwrap()]);
+}
+
+#[test]
+fn shareable_endpoint_policy_covers_manual_dial_link_local_broadcast_and_loopback() {
+    assert!(!is_shareable_endpoint(
+        "169.254.1.1:43344".parse().unwrap()
+    ));
+    assert!(!is_shareable_endpoint(
+        "255.255.255.255:43344".parse().unwrap()
+    ));
+    assert!(!is_shareable_endpoint("127.0.0.1:43344".parse().unwrap()));
+    assert!(!is_shareable_endpoint("[fe80::1]:43344".parse().unwrap()));
+    assert!(is_shareable_endpoint("192.168.1.20:43344".parse().unwrap()));
+    assert!(is_shareable_endpoint("10.0.0.8:43344".parse().unwrap()));
+}
+
+#[test]
+fn shareable_endpoint_policy_canonicalizes_ipv4_mapped_ipv6() {
+    assert!(!is_shareable_endpoint(
+        "[::ffff:127.0.0.1]:43344".parse().unwrap()
+    ));
+    assert!(!is_shareable_endpoint(
+        "[::ffff:169.254.1.1]:43344".parse().unwrap()
+    ));
+    assert!(!is_shareable_endpoint(
+        "[::ffff:255.255.255.255]:43344".parse().unwrap()
+    ));
+    assert!(is_shareable_endpoint(
+        "[::ffff:192.168.1.20]:43344".parse().unwrap()
+    ));
+    // Native IPv6 classification is unchanged.
+    assert!(!is_shareable_endpoint("[::1]:43344".parse().unwrap()));
+    assert!(!is_shareable_endpoint("[fe80::1]:43344".parse().unwrap()));
+    assert!(is_shareable_endpoint("[2001:db8::1]:43344".parse().unwrap()));
+}
+
+#[test]
+fn non_shareable_code_canonicalizes_ipv4_mapped_ipv6() {
+    assert_eq!(
+        non_shareable_code("[::ffff:127.0.0.1]:43344".parse().unwrap()),
+        "loopback_not_shareable"
+    );
+    assert_eq!(
+        non_shareable_code("[::ffff:169.254.1.1]:43344".parse().unwrap()),
+        "link_local_address"
+    );
+    assert_eq!(
+        non_shareable_code("[::ffff:255.255.255.255]:43344".parse().unwrap()),
+        "broadcast_address"
+    );
+}
+
+#[test]
+fn legacy_loopback_invitation_is_reported_as_skipped_not_identity_mismatch() {
+    let report = classify_join_candidates(vec![
+        "127.0.0.1:43344".parse().unwrap(),
+        "10.144.144.6:43344".parse().unwrap(),
+    ]);
+    assert_eq!(report.skipped_loopback, 1);
+    assert_eq!(report.attempted, 1);
+}
+
+#[test]
+fn probe_classification_keeps_tls_and_local_resource_failures_truthful() {
+    assert_eq!(
+        classify_probe_error(&HostError::PeerTls),
+        (
+            InvitationEndpointDisposition::ProtocolMismatch,
+            Some("tls_handshake_failed")
+        )
+    );
+    assert_eq!(
+        classify_probe_error(&HostError::PeerBusy),
+        (
+            InvitationEndpointDisposition::Skipped,
+            Some("peer_busy")
+        )
+    );
+}
+
+#[test]
+fn service_timeout_is_attempted_not_address_unreachable() {
+    assert_eq!(
+        classify_service_error(&HostError::PeerTimeout),
+        (
+            InvitationEndpointDisposition::Attempted,
+            Some("peer_timeout")
+        )
+    );
+    assert_eq!(
+        classify_service_error(&HostError::PeerTransportUnavailable),
+        (
+            InvitationEndpointDisposition::Attempted,
+            Some("unreachable")
+        )
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn structurally_valid_invitation_can_have_no_shareable_candidate() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_root, host, owner) = host();
+    let profile = ProfileId::new();
+    host.provision_profile(&owner, profile, "empty candidates")
+        .unwrap();
+
+    let invitation = host
+        .create_peer_invitation(
+            &owner,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: profile,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![],
+                ttl_seconds: 600,
+            },
+        )
+        .unwrap()
+        .invitation
+        .expect("a structurally valid invitation may have no shareable route");
+
+    assert!(invitation.offer.candidates.is_empty());
+    assert!(invitation.verified_offer().is_ok());
+    let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+    assert!(network
+        .inspect_invitation_endpoint_reports(&invitation)
+        .await
+        .unwrap()
+        .is_empty());
+    drop(network);
+    stopped(host).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn production_join_skips_loopback_and_link_local_signed_candidates() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_ra, issuer, issuer_owner) = host();
+    let (_rb, joiner, joiner_owner) = host();
+    let profile = ProfileId::new();
+    issuer
+        .provision_profile(&issuer_owner, profile, "unsafe signed candidates")
+        .unwrap();
+    let invitation = issuer
+        .create_peer_invitation(
+            &issuer_owner,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: profile,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![
+                    "169.254.255.254:43344".parse().unwrap(),
+                    "127.0.0.1:43344".parse().unwrap(),
+                ],
+                ttl_seconds: 600,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+    let network = PeerNetwork::new(joiner.clone(), joiner_owner.clone()).unwrap();
+
+    let (error, reports) = network
+        .join_with_route_diagnosed(&invitation, Uuid::new_v4(), None)
+        .await
+        .expect_err("no signed candidate is safe to dial");
+
+    assert!(matches!(error, HostError::PeerTransportUnavailable));
+    assert_eq!(reports.len(), 2);
+    assert!(reports.iter().all(|report| {
+        report["disposition"].as_str() == Some("skipped")
+            && report["elapsed_ms"].as_u64() == Some(0)
+    }));
+    assert!(reports.iter().any(|report| {
+        report["error_code"].as_str() == Some("link_local_address")
+    }));
+    assert!(reports.iter().any(|report| {
+        report["error_code"].as_str() == Some("loopback_not_shareable")
+    }));
+    assert!(joiner.profiles(&joiner_owner).unwrap().is_empty());
+
+    network.stop().await.unwrap();
+    drop(network);
+    stopped(issuer).await;
+    stopped(joiner).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn production_join_skips_unsafe_manual_dial_addresses() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_ra, issuer, issuer_owner) = host();
+    let (_rb, joiner, joiner_owner) = host();
+    let profile = ProfileId::new();
+    issuer
+        .provision_profile(&issuer_owner, profile, "unsafe manual dial")
+        .unwrap();
+    let invitation = issuer
+        .create_peer_invitation(
+            &issuer_owner,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: profile,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![],
+                ttl_seconds: 600,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+    let network = PeerNetwork::new(joiner.clone(), joiner_owner.clone()).unwrap();
+
+    for (address, expected_code) in [
+        ("169.254.255.254:43344", "link_local_address"),
+        ("255.255.255.255:43344", "broadcast_address"),
+        ("127.0.0.1:43344", "loopback_not_shareable"),
+        ("[::ffff:169.254.1.1]:43344", "link_local_address"),
+        ("[::ffff:255.255.255.255]:43344", "broadcast_address"),
+        ("[::ffff:127.0.0.1]:43344", "loopback_not_shareable"),
+    ] {
+        let (error, reports) = network
+            .join_with_route_diagnosed(
+                &invitation,
+                Uuid::new_v4(),
+                Some(address.parse().unwrap()),
+            )
+            .await
+            .expect_err("an unsafe manual dial address must be skipped");
+        assert!(matches!(error, HostError::PeerTransportUnavailable));
+        assert_eq!(reports.len(), 1, "one skipped report for {address}");
+        assert_eq!(reports[0]["endpoint"].as_str(), Some(address));
+        assert_eq!(reports[0]["disposition"].as_str(), Some("skipped"));
+        assert_eq!(reports[0]["elapsed_ms"].as_u64(), Some(0));
+        assert_eq!(reports[0]["error_code"].as_str(), Some(expected_code));
+    }
+
+    assert!(joiner.profiles(&joiner_owner).unwrap().is_empty());
+    assert!(joiner.peer_routes(&joiner_owner).unwrap().is_empty());
+
+    network.stop().await.unwrap();
+    drop(network);
+    stopped(issuer).await;
+    stopped(joiner).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn production_join_attempts_a_shareable_manual_dial_address() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_ra, issuer, issuer_owner) = host();
+    let (_rb, joiner, joiner_owner) = host();
+    let profile = ProfileId::new();
+    issuer
+        .provision_profile(&issuer_owner, profile, "shareable manual dial")
+        .unwrap();
+    let invitation = issuer
+        .create_peer_invitation(
+            &issuer_owner,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: profile,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![],
+                ttl_seconds: 600,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+    let network = PeerNetwork::new(joiner.clone(), joiner_owner.clone()).unwrap();
+    let address: SocketAddr = "192.0.2.1:43344".parse().unwrap();
+
+    let (error, reports) = network
+        .join_with_route_diagnosed(&invitation, Uuid::new_v4(), Some(address))
+        .await
+        .expect_err("a shareable address without a listener must fall through to dialing");
+
+    assert!(matches!(
+        error,
+        HostError::PeerTransportUnavailable | HostError::PeerTimeout
+    ));
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0]["endpoint"].as_str(), Some("192.0.2.1:43344"));
+    assert_eq!(reports[0]["disposition"].as_str(), Some("unreachable"));
+    assert!(matches!(
+        reports[0]["error_code"].as_str(),
+        Some("unreachable") | Some("timeout")
+    ));
+    assert!(joiner.profiles(&joiner_owner).unwrap().is_empty());
+
+    network.stop().await.unwrap();
+    drop(network);
+    stopped(issuer).await;
+    stopped(joiner).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn invitation_inspection_is_bounded_to_tls_identity_without_membership_side_effects() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (_ra, issuer, issuer_owner) = host();
+    let (_rb, inspector, inspector_owner) = host();
+    let profile = ProfileId::new();
+    issuer
+        .provision_profile(&issuer_owner, profile, "inspection identity")
+        .unwrap();
+    let issuer_network = PeerNetwork::new(issuer.clone(), issuer_owner.clone()).unwrap();
+    issuer_network.set_enabled(true).await.unwrap();
+    let issuer_address = issuer_network
+        .local_addresses()
+        .unwrap()
+        .into_iter()
+        .find(|address| address.ip().is_loopback())
+        .unwrap();
+    let invitation = issuer
+        .create_peer_invitation(
+            &issuer_owner,
+            &CreatePeerInvitation {
+                invitation_id: Uuid::new_v4(),
+                profile_id: profile,
+                capabilities: PeerCapabilities::FULL,
+                candidates: vec![issuer_address],
+                ttl_seconds: 600,
+            },
+        )
+        .unwrap()
+        .invitation
+        .unwrap();
+    let inspector_network =
+        PeerNetwork::new(inspector.clone(), inspector_owner.clone()).unwrap();
+
+    let reports = inspector_network
+        .inspect_invitation_endpoint_reports_for_test(&invitation)
+        .await
+        .unwrap();
+
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0]["disposition"].as_str(), Some("reachable"));
+    assert!(inspector_network.local_addresses().unwrap().is_empty());
+    assert!(!issuer
+        .peer_members(&issuer_owner, profile)
+        .unwrap()
+        .iter()
+        .any(|member| member.device_id == inspector.device_id));
+    inspector_network.stop().await.unwrap();
+    issuer_network.stop().await.unwrap();
+    drop(inspector_network);
+    drop(issuer_network);
+    stopped(issuer).await;
+    stopped(inspector).await;
+}
+
+#[test]
+fn invitation_endpoint_report_serializes_dispositions_and_bounded_fields() {
+    let report = InvitationEndpointReport {
+        endpoint: "10.0.0.2:43344".into(),
+        disposition: InvitationEndpointDisposition::Unreachable,
+        elapsed_ms: 2000,
+        error_code: Some("timeout"),
+    };
+    let value = serde_json::to_value(report).unwrap();
+    assert_eq!(value["endpoint"].as_str(), Some("10.0.0.2:43344"));
+    assert_eq!(value["disposition"].as_str(), Some("unreachable"));
+    assert_eq!(value["elapsed_ms"].as_u64(), Some(2000));
+    assert_eq!(value["error_code"].as_str(), Some("timeout"));
+
+    for (disposition, name) in [
+        (InvitationEndpointDisposition::Attempted, "attempted"),
+        (InvitationEndpointDisposition::Skipped, "skipped"),
+        (InvitationEndpointDisposition::Reachable, "reachable"),
+        (
+            InvitationEndpointDisposition::IdentityMismatch,
+            "identity_mismatch",
+        ),
+        (InvitationEndpointDisposition::Unreachable, "unreachable"),
+        (
+            InvitationEndpointDisposition::ProtocolMismatch,
+            "protocol_mismatch",
+        ),
+    ] {
+        let value = serde_json::to_value(InvitationEndpointReport {
+            endpoint: "10.0.0.2:43344".into(),
+            disposition,
+            elapsed_ms: 1,
+            error_code: None,
+        })
+        .unwrap();
+        assert_eq!(value["disposition"].as_str(), Some(name));
+        assert!(value["error_code"].is_null());
+    }
 }
 
 fn record(host: &BetaHost, owner: &Session, profile: ProfileId, text: &str) -> EventId {
@@ -1041,7 +1689,9 @@ async fn discovery_is_only_a_ttl_hint_until_pinned_service_promotes_it_and_keeps
     let dummy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let bad = dummy.local_addr().unwrap();
     let previous = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let old = previous.local_addr().unwrap();
+    // The cached fallback is a persisted route, not a live same-host socket.
+    // Use a shareable address so the merge policy can legitimately retain it.
+    let old = SocketAddr::from(([192, 0, 2, 10], previous.local_addr().unwrap().port()));
     a.save_peer_routes(&oa, p, b.device_id, vec![old]).unwrap();
     let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let pin = b.device_identity(&ob).unwrap().fingerprint_sha256;
@@ -1136,13 +1786,17 @@ async fn discovery_is_only_a_ttl_hint_until_pinned_service_promotes_it_and_keeps
     })
     .unwrap();
     until_hint(
-        "verified candidate promoted preserving previous route",
+        "verified candidate synchronized without persisting loopback",
         &socket,
         &[bytes],
         || {
-            a.peer_routes(&oa).unwrap().iter().any(|r| {
-                r.profile == p && r.device == b.device_id && r.endpoints.contains(&address)
-            })
+            network
+                .shared
+                .lock()
+                .unwrap()
+                .progress
+                .get(&(p, b.device_id))
+                .is_some_and(|v| v.memo.is_some())
         },
         || discovery_snapshot(&network, p, b.device_id),
     )
@@ -1153,6 +1807,7 @@ async fn discovery_is_only_a_ttl_hint_until_pinned_service_promotes_it_and_keeps
         .find(|r| r.profile == p && r.device == b.device_id)
         .unwrap();
     assert!(route.endpoints.contains(&old));
+    assert!(!route.endpoints.contains(&address));
     assert!(!route.endpoints.contains(&bad));
     network.stop().await.unwrap();
     cancel.cancel();
@@ -1285,7 +1940,7 @@ async fn tcp_eof_keeps_original_listener_generation_and_signed_join_available() 
 
         // Deliberately never call A.ensure_started/create_invitation again:
         // a hidden listener restart would invalidate this regression proof.
-        let joined = nb.join(&invitation, Uuid::new_v4()).await;
+        let joined = nb.join_for_test(&invitation, Uuid::new_v4()).await;
         let address_stable = na.local_addresses().unwrap().contains(&original_address);
         let generation = na.shared.lock().unwrap().generation;
         let member_ready = a.peer_members(&oa, p).unwrap().iter().any(|member| {

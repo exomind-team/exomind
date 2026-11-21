@@ -44,6 +44,9 @@ fn claim(invite: &PeerInvitation, device: DeviceId) -> Uuid {
     bytes[8] = (bytes[8] & 63) | 0x80;
     Uuid::from_bytes(bytes)
 }
+fn compatible_offer(schema: u32, protocol: &str) -> bool {
+    schema == PEER_CORE_SCHEMA && protocol == PEER_PROTOCOL
+}
 #[derive(Serialize)]
 pub(super) struct InvitationView {
     invitation_text: String,
@@ -60,12 +63,119 @@ pub(super) struct Inspection {
     expires_at_ms: i64,
     compatible: bool,
     requires_replacement: bool,
+    endpoints: Vec<serde_json::Value>,
 }
 #[derive(Serialize)]
 pub(super) struct JoinView {
     profile_id: ProfileId,
     peer_device_id: DeviceId,
     state: &'static str,
+}
+#[derive(Serialize)]
+pub(super) struct JoinCommandFailure {
+    code: String,
+    message: String,
+    endpoints: Vec<serde_json::Value>,
+}
+fn failure_parts(failure: &Failure) -> (String, String) {
+    let value = serde_json::to_value(failure).unwrap_or(serde_json::Value::Null);
+    let code = value
+        .get("code")
+        .and_then(|value| value.as_str())
+        .unwrap_or("host_error")
+        .to_string();
+    let message = value
+        .get("message")
+        .and_then(|value| value.as_str())
+        .unwrap_or("连接失败")
+        .to_string();
+    (code, message)
+}
+impl JoinCommandFailure {
+    fn from_failure(failure: Failure) -> Self {
+        let (code, message) = failure_parts(&failure);
+        Self {
+            code,
+            message,
+            endpoints: Vec::new(),
+        }
+    }
+    fn from_host(error: HostError, endpoints: Vec<serde_json::Value>) -> Self {
+        let failure = Failure::from(error);
+        let (code, message) = failure_parts(&failure);
+        Self {
+            code,
+            message,
+            endpoints,
+        }
+    }
+}
+
+fn canonical_ip(ip: std::net::IpAddr) -> std::net::IpAddr {
+    match ip {
+        std::net::IpAddr::V6(ip) => ip
+            .to_ipv4_mapped()
+            .map(std::net::IpAddr::V4)
+            .unwrap_or(std::net::IpAddr::V6(ip)),
+        v4 => v4,
+    }
+}
+
+fn dial_address_rejection(address: std::net::SocketAddr) -> Option<JoinCommandFailure> {
+    let code = match canonical_ip(address.ip()) {
+        std::net::IpAddr::V4(ip) => {
+            if address.port() == 0 {
+                Some("invalid_port")
+            } else if ip.is_unspecified() {
+                Some("unspecified_address")
+            } else if ip.is_multicast() {
+                Some("multicast_address")
+            } else if ip.is_broadcast() {
+                Some("broadcast_address")
+            } else if ip.is_loopback() {
+                Some("loopback_not_shareable")
+            } else if ip.is_link_local() {
+                Some("link_local_address")
+            } else {
+                None
+            }
+        }
+        std::net::IpAddr::V6(ip) => {
+            if address.port() == 0 {
+                Some("invalid_port")
+            } else if ip.is_unspecified() {
+                Some("unspecified_address")
+            } else if ip.is_multicast() {
+                Some("multicast_address")
+            } else if ip.is_loopback() {
+                Some("loopback_not_shareable")
+            } else if ip.is_unicast_link_local() {
+                Some("link_local_address")
+            } else {
+                None
+            }
+        }
+    };
+    let code = code?;
+    let message = match code {
+        "invalid_port" => "连接地址端口不能为 0",
+        "unspecified_address" => "连接地址不能为空地址",
+        "multicast_address" => "不能使用组播地址",
+        "broadcast_address" => "不能使用广播地址",
+        "loopback_not_shareable" => "回环地址仅限本机自测，不能作为其他设备的连接地址",
+        "link_local_address" => "链路本地地址不能跨网络使用，请填写局域网地址",
+        _ => "该地址不能作为安全的连接地址",
+    };
+    Some(JoinCommandFailure {
+        code: code.to_string(),
+        message: message.to_string(),
+        endpoints: vec![serde_json::json!({
+            "endpoint": address.to_string(),
+            "disposition": "skipped",
+            "elapsed_ms": 0,
+            "error_code": code,
+        })],
+    })
 }
 
 #[tauri::command]
@@ -145,7 +255,7 @@ pub(super) async fn beta_peer_create_invitation(
         expires_at_ms: invite.offer.expires_at_unix_ms,
         local_addresses: state
             .peers
-            .local_addresses()
+            .shareable_addresses()
             .map_err(Failure::from)?
             .iter()
             .map(ToString::to_string)
@@ -159,7 +269,7 @@ pub(super) async fn beta_peer_inspect_invitation(
     invitation_text: String,
 ) -> Result<Inspection, Failure> {
     trusted_window(&window, state.inner())?;
-    work(state.inner(), move |state| {
+    let (invite, replacement) = work(state.inner(), move |state| {
         let invite = invitation(&invitation_text)?;
         let offer = &invite.offer;
         let expected_claim = claim(&invite, state.host.status()?.device_id);
@@ -173,17 +283,24 @@ pub(super) async fn beta_peer_inspect_invitation(
             Err(HostError::PeerMembershipConflict) => true,
             Err(error) => return Err(error),
         };
-        Ok(Inspection {
-            profile_id: offer.profile_id,
-            profile_name: offer.profile_name.clone(),
-            issuer_device_id: offer.issuer.device_id,
-            fingerprint_sha256: offer.issuer.fingerprint_sha256.clone(),
-            expires_at_ms: offer.expires_at_unix_ms,
-            compatible: offer.schema == PEER_CORE_SCHEMA && offer.protocol == PEER_PROTOCOL,
-            requires_replacement: replacement,
-        })
+        Ok((invite, replacement))
     })
-    .await
+    .await?;
+    let endpoints = state
+        .peers
+        .inspect_invitation_endpoint_reports(&invite)
+        .await
+        .map_err(Failure::from)?;
+    Ok(Inspection {
+        profile_id: invite.offer.profile_id,
+        profile_name: invite.offer.profile_name.clone(),
+        issuer_device_id: invite.offer.issuer.device_id,
+        fingerprint_sha256: invite.offer.issuer.fingerprint_sha256.clone(),
+        expires_at_ms: invite.offer.expires_at_unix_ms,
+        compatible: compatible_offer(invite.offer.schema, &invite.offer.protocol),
+        requires_replacement: replacement,
+        endpoints,
+    })
 }
 #[tauri::command]
 pub(super) async fn beta_peer_join_invitation(
@@ -191,22 +308,24 @@ pub(super) async fn beta_peer_join_invitation(
     state: State<'_, Arc<NativeState>>,
     invitation_text: String,
     dial_address: Option<String>,
-) -> Result<JoinView, Failure> {
-    trusted_window(&window, state.inner())?;
+) -> Result<JoinView, JoinCommandFailure> {
+    trusted_window(&window, state.inner()).map_err(JoinCommandFailure::from_failure)?;
     let dial_address = dial_address
         .filter(|value| !value.trim().is_empty())
         .map(|value| value.trim().parse::<std::net::SocketAddr>())
         .transpose()
-        .map_err(|_| Failure::from(HostError::InvalidRequest))?;
+        .map_err(|_| {
+            JoinCommandFailure::from_failure(Failure::from(HostError::InvalidRequest))
+        })?;
     if let Some(address) = dial_address {
-        if address.port() == 0 || address.ip().is_unspecified() || address.ip().is_multicast() {
-            return Err(Failure::from(HostError::InvalidRequest));
+        if let Some(rejection) = dial_address_rejection(address) {
+            return Err(rejection);
         }
     }
     let (invite, id) = work(state.inner(), move |state| {
         let invite = invitation(&invitation_text)?;
         let id = claim(&invite, state.host.status()?.device_id);
-        if invite.offer.schema != PEER_CORE_SCHEMA || invite.offer.protocol != PEER_PROTOCOL {
+        if !compatible_offer(invite.offer.schema, &invite.offer.protocol) {
             return Err(HostError::PeerProtocolMismatch);
         }
         if let Some(expectation) = state
@@ -224,12 +343,13 @@ pub(super) async fn beta_peer_join_invitation(
         }
         Ok((invite, id))
     })
-    .await?;
+    .await
+    .map_err(JoinCommandFailure::from_failure)?;
     let status = state
         .peers
-        .join_with_route(&invite, id, dial_address)
+        .join_with_route_diagnosed(&invite, id, dial_address)
         .await
-        .map_err(Failure::from)?;
+        .map_err(|(error, endpoints)| JoinCommandFailure::from_host(error, endpoints))?;
     Ok(JoinView {
         profile_id: status.profile_id,
         peer_device_id: status.issuer_device_id,
@@ -473,5 +593,49 @@ mod tests {
         assert_ne!(first, claim(&invite, DeviceId::new()));
         invite.offer.invitation_id = Uuid::new_v4();
         assert_ne!(first, claim(&invite, device));
+    }
+
+    #[test]
+    fn compatible_stays_structural_not_reachability() {
+        assert!(compatible_offer(PEER_CORE_SCHEMA, PEER_PROTOCOL));
+        assert!(!compatible_offer(PEER_CORE_SCHEMA, "exomind-peer/0"));
+        assert!(!compatible_offer(PEER_CORE_SCHEMA.saturating_sub(1), PEER_PROTOCOL));
+    }
+
+    #[test]
+    fn dial_address_rejection_mirrors_shareable_endpoint_codes() {
+        for (address, code) in [
+            ("0.0.0.0:43344", "unspecified_address"),
+            ("0.0.0.0:0", "invalid_port"),
+            ("239.255.77.68:43344", "multicast_address"),
+            ("255.255.255.255:43344", "broadcast_address"),
+            ("127.0.0.1:43344", "loopback_not_shareable"),
+            ("169.254.10.1:43344", "link_local_address"),
+            ("[::]:43344", "unspecified_address"),
+            ("[ff02::1]:43344", "multicast_address"),
+            ("[::1]:43344", "loopback_not_shareable"),
+            ("[fe80::1]:43344", "link_local_address"),
+            ("[::ffff:127.0.0.1]:43344", "loopback_not_shareable"),
+            ("[::ffff:169.254.1.1]:43344", "link_local_address"),
+            ("[::ffff:255.255.255.255]:43344", "broadcast_address"),
+        ] {
+            let address: std::net::SocketAddr = address.parse().unwrap();
+            let rejection = dial_address_rejection(address)
+                .unwrap_or_else(|| panic!("{address} must be rejected"));
+            assert_eq!(rejection.code, code, "{address}");
+            assert!(!rejection.message.is_empty(), "{address}");
+            assert_eq!(rejection.endpoints.len(), 1, "{address}");
+            assert_eq!(rejection.endpoints[0]["disposition"].as_str(), Some("skipped"));
+            assert_eq!(rejection.endpoints[0]["error_code"].as_str(), Some(code));
+            assert_eq!(rejection.endpoints[0]["elapsed_ms"].as_u64(), Some(0));
+        }
+    }
+
+    #[test]
+    fn dial_address_rejection_accepts_shareable_manual_addresses() {
+        assert!(dial_address_rejection("192.168.1.20:43344".parse().unwrap()).is_none());
+        assert!(dial_address_rejection("10.0.0.8:43344".parse().unwrap()).is_none());
+        assert!(dial_address_rejection("[2001:db8::1]:43344".parse().unwrap()).is_none());
+        assert!(dial_address_rejection("[::ffff:192.168.1.20]:43344".parse().unwrap()).is_none());
     }
 }

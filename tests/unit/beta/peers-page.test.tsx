@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { BetaPeersPage } from '@/beta/BetaPeersPage';
-import type { BetaJoinResult, BetaPeerStatus, BetaPeersClient } from '@/beta/peers-client';
+import { BetaPeerJoinError } from '@/beta/peers-client';
+import type { BetaInvitationPreview, BetaJoinResult, BetaPeerStatus, BetaPeersClient } from '@/beta/peers-client';
 import { deferred } from './fixtures';
 
 const P='11111111-1111-4111-8111-111111111111';
@@ -13,7 +14,7 @@ const status=(profile=P):BetaPeerStatus=>({runtime_id:R,device_id:D,profile_id:p
 function peers(){return{
   status:vi.fn(async(profile:string)=>status(profile)),nearbyCandidates:vi.fn<BetaPeersClient['nearbyCandidates']>(async()=>[]),setEnabled:vi.fn(async()=>{}),
   createInvitation:vi.fn(async()=>({invitation_text:'opaque-secret',invitation_id:B,expires_at_ms:2000,local_addresses:[]})),
-  inspectInvitation:vi.fn(async()=>({profile_id:P,profile_name:'目标档案',issuer_device_id:B,fingerprint_sha256:'a'.repeat(64),expires_at_ms:2000,compatible:true})),
+  inspectInvitation:vi.fn(async()=>({profile_id:P,profile_name:'目标档案',issuer_device_id:B,fingerprint_sha256:'a'.repeat(64),expires_at_ms:Date.now()+20_000,compatible:true,endpoints:[]})),
   joinInvitation:vi.fn<BetaPeersClient['joinInvitation']>(async()=>({profile_id:P,peer_device_id:B,state:'pending'})),
   sync:vi.fn(async()=>{}),revoke:vi.fn(async()=>{}),
 } satisfies BetaPeersClient;}
@@ -203,7 +204,7 @@ describe('Nearby device selection',()=>{
     }]);
     client.inspectInvitation.mockResolvedValueOnce({
       profile_id:P,profile_name:'目标档案',issuer_device_id:otherIssuer,
-      fingerprint_sha256:'a'.repeat(64),expires_at_ms:Date.now()+20_000,compatible:true,
+      fingerprint_sha256:'a'.repeat(64),expires_at_ms:Date.now()+20_000,compatible:true,endpoints:[],
     });
     client.joinInvitation.mockResolvedValueOnce({profile_id:P,peer_device_id:otherIssuer,state:'ready'});
     const joined=vi.fn(async()=>{});
@@ -223,5 +224,152 @@ describe('Nearby device selection',()=>{
     await waitFor(()=>expect(client.joinInvitation).toHaveBeenCalled());
     expect(client.joinInvitation.mock.calls[0]).toEqual(['opaque-secret']);
     await waitFor(()=>expect(joined).toHaveBeenCalledWith(P));
+  });
+});
+
+describe('Invitation preview connectivity and membership labels',()=>{
+  it('separates structural validity from a reachable TLS identity and never labels it as connection success',async()=>{
+    const client=peers();
+    client.inspectInvitation.mockResolvedValueOnce({
+      profile_id:P,profile_name:'目标档案',issuer_device_id:B,fingerprint_sha256:'a'.repeat(64),expires_at_ms:Date.now()+20_000,compatible:true,
+      endpoints:[{endpoint:'10.0.0.2:43344',disposition:'reachable',elapsed_ms:12,error_code:null}],
+    });
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    fireEvent.change(screen.getByLabelText('另一设备的完整邀请'),{target:{value:'opaque-secret'}});
+    fireEvent.click(screen.getByRole('button',{name:'检查邀请'}));
+    expect(await screen.findByText('邀请格式与签名有效。')).toBeInTheDocument();
+    expect(screen.getByText('协议/schema 兼容，可继续检查来源。')).toBeInTheDocument();
+    expect(screen.getByText(/10\.0\.0\.2:43344 · 安全身份可达，尚未加入/)).toBeInTheDocument();
+    expect(screen.queryByText('连接成功')).not.toBeInTheDocument();
+  });
+  it('keeps manual address retry and a copy diagnostic path when every endpoint is unreachable',async()=>{
+    const client=peers();const copyText=vi.fn(async()=>{});
+    client.inspectInvitation.mockResolvedValueOnce({
+      profile_id:P,profile_name:'目标档案',issuer_device_id:B,fingerprint_sha256:'a'.repeat(64),expires_at_ms:Date.now()+20_000,compatible:true,
+      endpoints:[
+        {endpoint:'10.0.0.2:43344',disposition:'unreachable',elapsed_ms:2000,error_code:'timeout'},
+        {endpoint:'127.0.0.1:43344',disposition:'skipped',elapsed_ms:0,error_code:'loopback_not_shareable'},
+      ],
+    });
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})} copyText={copyText}/>);
+    fireEvent.change(screen.getByLabelText('另一设备的完整邀请'),{target:{value:'opaque-secret'}});
+    fireEvent.click(screen.getByRole('button',{name:'检查邀请'}));
+    expect(await screen.findByText(/10\.0\.0\.2:43344 · 地址不可达（timeout）/)).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('所有可尝试的连接来源均不可达');
+    expect(screen.getByRole('list',{name:'连接来源检查结果'})).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'更换连接地址'})).toBeEnabled();
+    fireEvent.click(screen.getByRole('button',{name:'复制连接诊断'}));
+    expect(await screen.findByText('连接诊断已复制')).toBeInTheDocument();
+    expect(copyText).toHaveBeenCalledOnce();
+    expect(copyText.mock.calls[0][0]).toContain('10.0.0.2:43344 地址不可达（timeout）');
+    expect(copyText.mock.calls[0][0]).not.toContain('opaque-secret');
+  });
+  it('distinguishes membership acceptance from later data sync confirmation',async()=>{
+    const client=peers();const joined=vi.fn(async()=>{});
+    client.inspectInvitation.mockResolvedValueOnce({
+      profile_id:P,profile_name:'目标档案',issuer_device_id:B,fingerprint_sha256:'a'.repeat(64),expires_at_ms:Date.now()+20_000,compatible:true,
+      endpoints:[{endpoint:'10.0.0.2:43344',disposition:'reachable',elapsed_ms:1,error_code:null}],
+    });
+    client.joinInvitation.mockResolvedValueOnce({profile_id:P,peer_device_id:B,state:'pending'});
+    render(<BetaPeersPage {...props} peers={client} onJoined={joined}/>);
+    fireEvent.change(screen.getByLabelText('另一设备的完整邀请'),{target:{value:'opaque-secret'}});
+    fireEvent.click(screen.getByRole('button',{name:'检查邀请'}));
+    await screen.findByText('加入「目标档案」');
+    fireEvent.click(screen.getByRole('button',{name:'确认加入档案'}));
+    expect(await screen.findByText(/成员资格尚未确认；加入尚待确认/)).toBeInTheDocument();
+    expect(joined).not.toHaveBeenCalled();
+    client.joinInvitation.mockResolvedValue({profile_id:P,peer_device_id:B,state:'ready'});
+    fireEvent.click(screen.getByRole('button',{name:'继续查证加入'}));
+    await waitFor(()=>expect(joined).toHaveBeenCalledWith(P));
+    expect(await screen.findByText('成员资格已确认，正在打开…')).toBeInTheDocument();
+  });
+  it('shows data sync confirmation only on the authorized-device card',async()=>{
+    const client=peers();
+    client.status.mockResolvedValue({
+      runtime_id:R,device_id:D,profile_id:Q,network_enabled:true,local_addresses:[],
+      peers:[{device_id:B,fingerprint_sha256:'a'.repeat(64),member_generation:2,member_state:'ready',connection_state:'idle',endpoints:['10.0.0.2:43344'],last_sync_at_ms:1000,last_error_code:null,event_sync:'complete',originals_sync:'complete'}],
+    });
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    expect(await screen.findByText('记录与原件已补齐')).toBeInTheDocument();
+    expect(screen.queryByText('连接成功')).not.toBeInTheDocument();
+  });
+  it('shows accepted membership and data-sync confirmation independently of a still-connecting link',async()=>{
+    const client=peers();
+    client.status.mockResolvedValue({
+      runtime_id:R,device_id:D,profile_id:Q,network_enabled:true,local_addresses:[],
+      peers:[{device_id:B,fingerprint_sha256:'a'.repeat(64),member_generation:2,member_state:'ready',connection_state:'connecting',endpoints:['10.0.0.2:43344'],last_sync_at_ms:1000,last_error_code:null,event_sync:'complete',originals_sync:'complete'}],
+    });
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    expect(await screen.findByText('成员资格已接受')).toBeInTheDocument();
+    expect(screen.getByText('正在连接')).toBeInTheDocument();
+    expect(screen.getByText(/上次数据同步确认/)).toBeInTheDocument();
+  });
+  it('keeps local structure validity separate from protocol compatibility',async()=>{
+    const client=peers();
+    client.inspectInvitation.mockResolvedValueOnce({
+      profile_id:P,profile_name:'目标档案',issuer_device_id:B,fingerprint_sha256:'a'.repeat(64),expires_at_ms:Date.now()+20_000,compatible:false,
+      endpoints:[{endpoint:'10.0.0.2:43344',disposition:'reachable',elapsed_ms:1,error_code:null}],
+    });
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    fireEvent.change(screen.getByLabelText('另一设备的完整邀请'),{target:{value:'opaque-secret'}});
+    fireEvent.click(screen.getByRole('button',{name:'检查邀请'}));
+    expect(await screen.findByText('邀请格式与签名有效。')).toBeInTheDocument();
+    expect(screen.getByText('协议/schema 不兼容，不能加入此档案。')).toBeInTheDocument();
+    expect(screen.queryByText(/结构或版本不兼容/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'确认加入档案'})).toBeDisabled();
+  });
+  it('marks an expired but structurally valid invitation and blocks a misleading join',async()=>{
+    const client=peers();
+    client.inspectInvitation.mockResolvedValueOnce({
+      profile_id:P,profile_name:'目标档案',issuer_device_id:B,fingerprint_sha256:'a'.repeat(64),expires_at_ms:Date.now()-1,compatible:true,endpoints:[],
+    });
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    fireEvent.change(screen.getByLabelText('另一设备的完整邀请'),{target:{value:'opaque-secret'}});
+    fireEvent.click(screen.getByRole('button',{name:'检查邀请'}));
+    expect(await screen.findByText('邀请结构有效，但已过期。')).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'确认加入档案'})).toBeDisabled();
+  });
+  it('renders endpoint reports from a failed join and keeps the manual retry path',async()=>{
+    const client=peers();
+    client.joinInvitation.mockRejectedValueOnce(new BetaPeerJoinError('unreachable','加入尝试未建立连接',[
+      {endpoint:'10.0.0.9:43344',disposition:'unreachable',elapsed_ms:2000,error_code:'timeout'},
+    ]));
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    fireEvent.change(screen.getByLabelText('另一设备的完整邀请'),{target:{value:'opaque-secret'}});
+    fireEvent.click(screen.getByRole('button',{name:'检查邀请'}));
+    await screen.findByText('加入「目标档案」');
+    fireEvent.click(screen.getByRole('button',{name:'确认加入档案'}));
+    expect(await screen.findByText('加入尝试未建立连接')).toBeInTheDocument();
+    expect(screen.getByRole('list',{name:'上次加入尝试的连接来源'})).toHaveTextContent('10.0.0.9:43344 · 地址不可达（timeout）');
+    expect(screen.getByRole('button',{name:'更换连接地址'})).toBeEnabled();
+    expect(screen.getByRole('button',{name:'复制连接诊断'})).toBeEnabled();
+  });
+  it('ignores a late failed inspection after the invitation changes',async()=>{
+    const client=peers();const pending=deferred<BetaInvitationPreview>();
+    client.inspectInvitation.mockReturnValueOnce(pending.promise);
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    const input=screen.getByLabelText('另一设备的完整邀请');
+    fireEvent.change(input,{target:{value:'old-invitation'}});
+    fireEvent.click(screen.getByRole('button',{name:'检查邀请'}));
+    await waitFor(()=>expect(client.inspectInvitation).toHaveBeenCalledOnce());
+    fireEvent.change(input,{target:{value:'new-invitation'}});
+    await act(async()=>{pending.reject(new Error('旧邀请检查失败'));await Promise.resolve();});
+    await waitFor(()=>expect(screen.getByRole('button',{name:'检查邀请'})).toBeEnabled());
+    expect(screen.queryByText('旧邀请检查失败')).not.toBeInTheDocument();
+  });
+  it('ignores a late failed join after the invitation changes',async()=>{
+    const client=peers();const pending=deferred<BetaJoinResult>();
+    client.joinInvitation.mockReturnValueOnce(pending.promise);
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
+    const input=screen.getByLabelText('另一设备的完整邀请');
+    fireEvent.change(input,{target:{value:'old-invitation'}});
+    fireEvent.click(screen.getByRole('button',{name:'检查邀请'}));
+    await screen.findByText('加入「目标档案」');
+    fireEvent.click(screen.getByRole('button',{name:'确认加入档案'}));
+    await waitFor(()=>expect(client.joinInvitation).toHaveBeenCalledOnce());
+    fireEvent.change(input,{target:{value:'new-invitation'}});
+    await act(async()=>{pending.reject(new Error('旧加入尝试失败'));await Promise.resolve();});
+    expect(screen.queryByText('旧加入尝试失败')).not.toBeInTheDocument();
+    expect(input).toHaveValue('new-invitation');
   });
 });

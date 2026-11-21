@@ -346,6 +346,12 @@ fn server_config(identity: &Identity) -> Result<Arc<ServerConfig>, HostError> {
     config.max_early_data_size = 0;
     Ok(Arc::new(config))
 }
+#[cfg(test)]
+pub(super) fn server_config_for_test(
+    identity: &Identity,
+) -> Result<Arc<ServerConfig>, HostError> {
+    server_config(identity)
+}
 fn client_config(
     identity: &Identity,
     pin: PeerPin,

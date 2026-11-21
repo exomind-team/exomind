@@ -142,7 +142,7 @@ fn validate_stored_offer(signed: &SignedOffer) -> Result<(), HostError> {
     verify(&offer.issuer, INVITATION_DOMAIN, offer, &signed.signature)
 }
 fn validate_candidates(candidates: &[std::net::SocketAddr]) -> Result<(), HostError> {
-    if candidates.is_empty() || candidates.len() > MAX_CANDIDATES {
+    if candidates.len() > MAX_CANDIDATES {
         return Err(HostError::InvalidRequest);
     }
     for (index, address) in candidates.iter().enumerate() {
