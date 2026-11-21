@@ -16,6 +16,7 @@ mod dev_instance_paths;
 mod system_tray;
 #[cfg(feature = "alpha-legacy-runtime")]
 mod windows_appbar;
+mod windows_app_identity;
 
 #[cfg(feature = "alpha-legacy-runtime")]
 use commands::asr_commands::{
@@ -297,6 +298,11 @@ pub fn run() {
         Ok(RuntimeConfigRoute::BetaNative),
         "beta-native-only build requires the Beta Tauri configuration"
     );
+    if let Err(error) = windows_app_identity::apply_app_user_model_id(
+        context.config().identifier.as_str(),
+    ) {
+        log::error!("{error}");
+    }
     beta_native::run(context);
 }
 
@@ -308,10 +314,21 @@ pub fn run() {
     // reading its configuration. This identifier is supplied by beta config.
     match select_runtime_config_route(context.config().identifier.as_str()) {
         Ok(RuntimeConfigRoute::BetaNative) => {
+            if let Err(error) = windows_app_identity::apply_app_user_model_id(
+                context.config().identifier.as_str(),
+            ) {
+                log::error!("{error}");
+            }
             beta_native::run(context);
             return;
         }
-        Ok(RuntimeConfigRoute::AlphaLegacy) => {}
+        Ok(RuntimeConfigRoute::AlphaLegacy) => {
+            if let Err(error) = windows_app_identity::apply_app_user_model_id(
+                context.config().identifier.as_str(),
+            ) {
+                log::error!("{error}");
+            }
+        }
         Err(reason) => panic!("{reason}"),
     }
     let ws_client_state = std::sync::Arc::new(WsClientState::default());
