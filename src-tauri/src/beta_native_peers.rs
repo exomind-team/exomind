@@ -1,8 +1,9 @@
 //! Main-window owner management. Invitation secrets stay out of logs and URLs.
 use super::{Failure, NativeState, trusted_window, work};
 use exomind_beta_host::{
-    HostError, NearbyPeerCandidate, NetworkScanResult, OriginalTransferResult, PEER_CORE_SCHEMA,
-    PEER_PROTOCOL, PeerInvitation, PeerNetworkStatus, PeerOriginalStatus, PeerSyncResult, ScanScope,
+    EnvironmentAliasView, HostError, NearbyPeerCandidate, NetworkScanResult,
+    OriginalTransferResult, PEER_CORE_SCHEMA, PEER_PROTOCOL, PeerInvitation, PeerNetworkStatus,
+    PeerOriginalStatus, PeerSyncResult, ScanScope,
 };
 use exomind_core::{DeviceId, OriginalId, ProfileId};
 use serde::Serialize;
@@ -203,6 +204,40 @@ pub(super) async fn beta_peer_network_enabled(
 ) -> Result<bool, Failure> {
     trusted_window(&window, state.inner())?;
     work(state.inner(), |state| state.peers.network_enabled()).await
+}
+
+#[tauri::command]
+pub(super) async fn beta_peer_get_environment_alias(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+) -> Result<EnvironmentAliasView, Failure> {
+    trusted_window(&window, state.inner())?;
+    work(state.inner(), |state| {
+        state.host.environment_alias(&state.owner)
+    })
+    .await
+}
+
+#[tauri::command]
+pub(super) async fn beta_peer_set_environment_alias(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    alias: Option<String>,
+) -> Result<EnvironmentAliasView, Failure> {
+    trusted_window(&window, state.inner())?;
+    if state
+        .closing
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err(HostError::Stopped.into());
+    }
+    if alias.as_ref().is_some_and(|value| value.len() > 1024) {
+        return Err(HostError::PayloadTooLarge.into());
+    }
+    work(state.inner(), move |state| {
+        state.host.set_environment_alias(&state.owner, alias)
+    })
+    .await
 }
 
 #[tauri::command]

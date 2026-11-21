@@ -1,9 +1,22 @@
 import { invoke } from '@tauri-apps/api/core';
 import { BetaApiError } from './api-error';
 
+export type BetaEnvironmentAliasSource = 'custom' | 'os_default' | 'stable_id';
+export type BetaAliasVerification = 'none' | 'signed' | 'confirmed';
+export interface BetaEnvironmentAlias {
+  device_id: string;
+  effective_alias: string;
+  source: BetaEnvironmentAliasSource;
+  custom_alias: string | null;
+  max_chars: number;
+}
 export interface BetaPeer {
   device_id: string;
   fingerprint_sha256: string;
+  effective_alias: string;
+  alias_source: BetaEnvironmentAliasSource;
+  alias_verification: BetaAliasVerification;
+  alias_confirmed_at_ms: number | null;
   member_generation: number;
   member_state: 'pending' | 'ready' | 'revoked';
   connection_state: 'idle' | 'connecting' | 'syncing' | 'waiting' | 'error';
@@ -20,6 +33,11 @@ export interface BetaPeerStatus {
 }
 export interface BetaNearbyCandidate {
   device_id: string;
+  fingerprint_sha256: string;
+  effective_alias: string;
+  alias_source: BetaEnvironmentAliasSource;
+  alias_verification: BetaAliasVerification;
+  alias_confirmed_at_ms: number | null;
   addresses: string[];
   expires_at_ms: number;
   verification_state: 'unverified';
@@ -71,6 +89,8 @@ export class BetaPeerJoinError extends BetaApiError {
 export interface BetaPeersClient {
   nearbyCandidates(): Promise<BetaNearbyCandidate[]>;
   networkEnabled(): Promise<boolean>;
+  environmentAlias(): Promise<BetaEnvironmentAlias>;
+  setEnvironmentAlias(alias: string | null): Promise<BetaEnvironmentAlias>;
   scanScopes(): Promise<BetaScanScope[]>;
   scanNearby(options: { scopeIds: string[]; manualCidrs?: string[] }): Promise<BetaNetworkScan>;
   scanStatus(scanId: string): Promise<BetaNetworkScan>;
@@ -102,8 +122,31 @@ function boolean(value: unknown): boolean { if (typeof value !== 'boolean') retu
 function hash(value: unknown): string { const result = text(value, 64); if (!/^[0-9a-f]{64}$/.test(result)) return invalid(); return result; }
 function strings(value: unknown): string[] { if (!Array.isArray(value) || value.length > 16) return invalid(); return value.map(value => text(value, 256)); }
 function choice<T extends string>(value: unknown, values: readonly T[]): T { if (!values.includes(value as T)) return invalid(); return value as T; }
+const ALIAS_SOURCES=['custom','os_default','stable_id'] as const;
+const ALIAS_VERIFICATIONS=['none','signed','confirmed'] as const;
+function aliasText(value: unknown, input=false): string {
+  const alias=text(value,input?1024:256);
+  const normalized=alias.trim();
+  if(!normalized||Array.from(normalized).length>64||new TextEncoder().encode(normalized).length>256)return invalid();
+  if(input?/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(alias):/[\u0000-\u001f\u007f]/.test(alias)||alias!==normalized)return invalid();
+  return input?alias:normalized;
+}
+function aliasVerificationState(item:Record<string,unknown>): Pick<BetaPeer,'alias_verification'|'alias_confirmed_at_ms'> {
+  const alias_verification=choice(item.alias_verification,ALIAS_VERIFICATIONS);
+  const alias_confirmed_at_ms=item.alias_confirmed_at_ms===null?null:integer(item.alias_confirmed_at_ms,1);
+  if((alias_verification==='confirmed')!==(alias_confirmed_at_ms!==null))return invalid();
+  return {alias_verification,alias_confirmed_at_ms};
+}
+function environmentAliasView(value: unknown): BetaEnvironmentAlias {
+  const item=object(value,['device_id','effective_alias','source','custom_alias','max_chars']);
+  const source=choice(item.source,ALIAS_SOURCES);
+  const effective_alias=aliasText(item.effective_alias);
+  const custom_alias=item.custom_alias===null?null:aliasText(item.custom_alias);
+  if((source==='custom')!==(custom_alias!==null)||(custom_alias!==null&&custom_alias!==effective_alias)||integer(item.max_chars,1,256)!==64)return invalid();
+  return {device_id:uuid(item.device_id),effective_alias,source,custom_alias,max_chars:64};
+}
 function nearbyCandidate(value: unknown): BetaNearbyCandidate {
-  const item = object(value, ['device_id','addresses','expires_at_ms','verification_state']);
+  const item = object(value, ['device_id','fingerprint_sha256','effective_alias','alias_source','alias_verification','alias_confirmed_at_ms','addresses','expires_at_ms','verification_state']);
   if (!Array.isArray(item.addresses) || item.addresses.length < 1 || item.addresses.length > 4) return invalid();
   const addresses = item.addresses.map(value => {
     const address = text(value, 128);
@@ -111,8 +154,15 @@ function nearbyCandidate(value: unknown): BetaNearbyCandidate {
     return address;
   });
   if (new Set(addresses).size !== addresses.length) return invalid();
+  const alias_source=choice(item.alias_source,ALIAS_SOURCES);
+  const aliasState=aliasVerificationState(item);
+  if(aliasState.alias_verification==='none'&&alias_source!=='stable_id')return invalid();
   return {
     device_id:uuid(item.device_id),
+    fingerprint_sha256:hash(item.fingerprint_sha256),
+    effective_alias:aliasText(item.effective_alias),
+    alias_source,
+    ...aliasState,
     addresses,
     expires_at_ms:integer(item.expires_at_ms, 1),
     verification_state:choice(item.verification_state,['unverified']),
@@ -247,9 +297,12 @@ export function joinFailureEndpointReports(value: unknown): BetaInvitationEndpoi
 }
 function peer(value: unknown): BetaPeer {
   const extra=!!value&&typeof value==='object'&&'history_gaps'in value;
-  const item = object(value, ['device_id','fingerprint_sha256','member_generation','member_state','connection_state','endpoints','last_sync_at_ms','last_error_code','event_sync','originals_sync',...(extra?['history_gaps']:[])]);
+  const item = object(value, ['device_id','fingerprint_sha256','effective_alias','alias_source','alias_verification','alias_confirmed_at_ms','member_generation','member_state','connection_state','endpoints','last_sync_at_ms','last_error_code','event_sync','originals_sync',...(extra?['history_gaps']:[])]);
   const gaps=item.history_gaps;if(gaps!==undefined&&(!Array.isArray(gaps)||gaps.length>256))return invalid();
-  return { device_id:uuid(item.device_id),fingerprint_sha256:hash(item.fingerprint_sha256),member_generation:integer(item.member_generation,1),
+  const alias_source=choice(item.alias_source,ALIAS_SOURCES);
+  const aliasState=aliasVerificationState(item);
+  if(aliasState.alias_verification==='none'&&alias_source!=='stable_id')return invalid();
+  return { device_id:uuid(item.device_id),fingerprint_sha256:hash(item.fingerprint_sha256),effective_alias:aliasText(item.effective_alias),alias_source,...aliasState,member_generation:integer(item.member_generation,1),
     member_state:choice(item.member_state,['pending','ready','revoked']),connection_state:choice(item.connection_state,['idle','connecting','syncing','waiting','error']),
     endpoints:strings(item.endpoints),last_sync_at_ms:item.last_sync_at_ms===null?null:integer(item.last_sync_at_ms),last_error_code:item.last_error_code===null?null:text(item.last_error_code,128),
     event_sync:choice(item.event_sync,['pending','complete']),originals_sync:choice(item.originals_sync,['unknown','pending','complete']),...(extra?{history_gaps:(gaps as unknown[]).map(value=>{const gap=object(value,['direction','origin_device_id','materialized_seq','available_seq']),materialized=integer(gap.materialized_seq),available=gap.available_seq===null?null:integer(gap.available_seq);if(available!==null&&available>materialized)return invalid();return{direction:choice(gap.direction,['from_peer','to_peer']),origin_device_id:uuid(gap.origin_device_id),materialized_seq:materialized,available_seq:available};})}:{}) };
@@ -260,11 +313,18 @@ export function nativeBetaPeersClient(call: Call = (command, args) => invoke(com
       const value = await call('beta_peer_nearby_candidates');
       if (!Array.isArray(value) || value.length > 64) return invalid();
       const candidates = value.map(nearbyCandidate);
-      if (new Set(candidates.map(candidate => candidate.device_id)).size !== candidates.length) return invalid();
+      if (new Set(candidates.map(candidate => `${candidate.device_id}:${candidate.fingerprint_sha256}`)).size !== candidates.length) return invalid();
       return candidates;
     },
     async networkEnabled() {
       return boolean(await call('beta_peer_network_enabled'));
+    },
+    async environmentAlias() {
+      return environmentAliasView(await call('beta_peer_get_environment_alias'));
+    },
+    async setEnvironmentAlias(alias) {
+      const value=alias===null?null:aliasText(alias,true);
+      return environmentAliasView(await call('beta_peer_set_environment_alias',{alias:value}));
     },
     async scanScopes() {
       const value = await call('beta_peer_scan_scopes');

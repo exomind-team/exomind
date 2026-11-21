@@ -48,6 +48,7 @@ describe('shared Alpha focus presentation with real Beta commands',()=>{
     const locks=Object.getOwnPropertyDescriptor(navigator,'locks');Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
     const client=timeblockClient();client.profiles.mockResolvedValue([{profile_id:P,display_name:'P'}]);
     const peers=nativeBetaPeersClient(async name=>{
+      if(name==='beta_peer_get_environment_alias')return{device_id:D,effective_alias:'Studio PC',source:'os_default',custom_alias:null,max_chars:64};
       if(name==='beta_peer_status')return{runtime_id:R,device_id:D,profile_id:P,network_enabled:false,local_addresses:[],peers:[]};
       throw new Error(`Unexpected mutation: ${name}`);
     });

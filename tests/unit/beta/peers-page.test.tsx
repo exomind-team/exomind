@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { BetaPeersPage } from '@/beta/BetaPeersPage';
+import { BetaApiError } from '@/beta/api-error';
 import { BetaPeerJoinError } from '@/beta/peers-client';
 import type { BetaInvitationPreview, BetaJoinResult, BetaNetworkScan, BetaPeerStatus, BetaPeersClient } from '@/beta/peers-client';
 import { deferred } from './fixtures';
@@ -14,6 +15,8 @@ const status=(profile=P):BetaPeerStatus=>({runtime_id:R,device_id:D,profile_id:p
 function peers(){return{
   status:vi.fn(async(profile:string)=>status(profile)),nearbyCandidates:vi.fn<BetaPeersClient['nearbyCandidates']>(async()=>[]),setEnabled:vi.fn(async()=>{}),
   networkEnabled:vi.fn(async()=>true),
+  environmentAlias:vi.fn<BetaPeersClient['environmentAlias']>(async()=>({device_id:D,effective_alias:'Studio PC',source:'os_default',custom_alias:null,max_chars:64})),
+  setEnvironmentAlias:vi.fn<BetaPeersClient['setEnvironmentAlias']>(async alias=>({device_id:D,effective_alias:alias??'DESKTOP-0001',source:alias===null?'os_default':'custom',custom_alias:alias,max_chars:64})),
   scanScopes:vi.fn(async()=>[{scope_id:'eth0:192.168.1.0/24',interface_name:'eth0',kind:'physical_lan',prefix:24,eligible:true,network:'192.168.1.0/24',reason:null}]),
   scanNearby:vi.fn<BetaPeersClient['scanNearby']>(async()=>({scan_id:B,started_at_ms:1000,finished_at_ms:2000,stage:'complete',scopes:[],attempted:0,discovered:0,skipped:0,cancelled:false,discovered_addresses:[]})),
   scanStatus:vi.fn(async()=>({scan_id:B,started_at_ms:1000,finished_at_ms:2000,stage:'complete',scopes:[],attempted:0,discovered:0,skipped:0,cancelled:false,discovered_addresses:[]})),
@@ -72,6 +75,37 @@ describe('Beta device joining UI',()=>{
     await act(async()=>{enabled.resolve();await enabled.promise;});
     await waitFor(()=>expect(control).toBeChecked());
     expect(client.sync).not.toHaveBeenCalled();
+  });
+  it('edits the device-global environment alias and reports the saved source',async()=>{
+    const client=peers();
+    render(<BetaPeersPage {...props} profileId="" profileName="" peers={client} onJoined={vi.fn(async()=>{})}/>);
+    expect(await screen.findByTestId('beta-environment-alias')).toHaveTextContent('Studio PC');
+    expect(screen.getByText(/来源：系统默认名称/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'编辑名称'}));
+    const input=screen.getByLabelText('本机外心实例名');
+    fireEvent.change(input,{target:{value:'Travel Room PC'}});
+    fireEvent.click(screen.getByRole('button',{name:'保存名称'}));
+    await waitFor(()=>expect(client.setEnvironmentAlias).toHaveBeenCalledWith('Travel Room PC'));
+    expect(await screen.findByText('本机外心实例名已保存。')).toBeInTheDocument();
+    expect(screen.getByTestId('beta-environment-alias')).toHaveTextContent('Travel Room PC');
+    expect(screen.getByText(/来源：自定义名称/)).toBeInTheDocument();
+  });
+  it('keeps a failed alias save actionable and retries the same draft',async()=>{
+    const client=peers(),copyText=vi.fn(async()=>{});
+    client.setEnvironmentAlias.mockRejectedValueOnce(new BetaApiError('alias_unavailable','save failed'));
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})} copyText={copyText}/>);
+    await screen.findByTestId('beta-environment-alias');
+    fireEvent.click(screen.getByRole('button',{name:'编辑名称'}));
+    fireEvent.change(screen.getByLabelText('本机外心实例名'),{target:{value:'Retry PC'}});
+    fireEvent.click(screen.getByRole('button',{name:'保存名称'}));
+    expect(await screen.findByText(/实例名操作失败：save failed/)).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'复制名称诊断'})).toBeEnabled();
+    fireEvent.click(screen.getByRole('button',{name:'复制名称诊断'}));
+    await waitFor(()=>expect(copyText).toHaveBeenCalledWith(expect.stringContaining('code: alias_unavailable')));
+    fireEvent.click(screen.getByRole('button',{name:'重试保存'}));
+    await waitFor(()=>expect(client.setEnvironmentAlias).toHaveBeenCalledTimes(2));
+    expect(client.setEnvironmentAlias).toHaveBeenLastCalledWith('Retry PC');
+    expect(await screen.findByText('本机外心实例名已保存。')).toBeInTheDocument();
   });
   it('keeps Q selected while join is pending, and only ready invokes the profile switch',async()=>{
     const client=peers();const joined=vi.fn(async()=>{});
@@ -171,14 +205,16 @@ describe('Nearby device selection',()=>{
     const address='127.0.0.1:43344';
     const client=peers();
     client.nearbyCandidates.mockResolvedValue([{
-      device_id:B,addresses:[address],expires_at_ms:Date.now()+20_000,verification_state:'unverified',
+      device_id:B,fingerprint_sha256:'a'.repeat(64),effective_alias:'Tablet signed name',alias_source:'custom',alias_verification:'signed',alias_confirmed_at_ms:null,
+      addresses:[address],expires_at_ms:Date.now()+20_000,verification_state:'unverified',
     }]);
     client.joinInvitation.mockResolvedValueOnce({profile_id:P,peer_device_id:B,state:'ready'});
     const joined=vi.fn(async()=>{});
     render(<BetaPeersPage {...props} peers={client} onJoined={joined}/>);
 
     expect(await screen.findByText('潜在设备')).toBeInTheDocument();
-    expect(screen.getByText('未验证 · 发现不会授权此设备访问档案')).toBeInTheDocument();
+    expect(screen.getByText(/名称签名有效，但尚未完整同步确认/)).toBeInTheDocument();
+    expect(screen.getByText(/广播地址仍未验证/)).toBeInTheDocument();
     const invitation=screen.getByLabelText('另一设备的完整邀请');
     fireEvent.click(screen.getByRole('button',{name:/选择设备/}));
     expect(await screen.findByText(/已选择设备.*候选地址.*127\.0\.0\.1:43344/)).toBeInTheDocument();
@@ -205,7 +241,8 @@ describe('Nearby device selection',()=>{
     const otherIssuer='66666666-6666-4666-8666-666666666666';
     const client=peers();
     client.nearbyCandidates.mockResolvedValue([{
-      device_id:B,addresses:[address],expires_at_ms:Date.now()+20_000,verification_state:'unverified',
+      device_id:B,fingerprint_sha256:'a'.repeat(64),effective_alias:'外心 44444444',alias_source:'stable_id',alias_verification:'none',alias_confirmed_at_ms:null,
+      addresses:[address],expires_at_ms:Date.now()+20_000,verification_state:'unverified',
     }]);
     client.inspectInvitation.mockResolvedValueOnce({
       profile_id:P,profile_name:'目标档案',issuer_device_id:otherIssuer,
@@ -292,20 +329,22 @@ describe('Invitation preview connectivity and membership labels',()=>{
     const client=peers();
     client.status.mockResolvedValue({
       runtime_id:R,device_id:D,profile_id:Q,network_enabled:true,local_addresses:[],
-      peers:[{device_id:B,fingerprint_sha256:'a'.repeat(64),member_generation:2,member_state:'ready',connection_state:'idle',endpoints:['10.0.0.2:43344'],last_sync_at_ms:1000,last_error_code:null,event_sync:'complete',originals_sync:'complete'}],
+      peers:[{device_id:B,fingerprint_sha256:'a'.repeat(64),effective_alias:'Tablet',alias_source:'custom',alias_verification:'confirmed',alias_confirmed_at_ms:900,member_generation:2,member_state:'ready',connection_state:'idle',endpoints:['10.0.0.2:43344'],last_sync_at_ms:1000,last_error_code:null,event_sync:'complete',originals_sync:'complete'}],
     });
     render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
     expect(await screen.findByText('记录与原件已补齐')).toBeInTheDocument();
+    expect(screen.getAllByText(/名称与设备身份已通过完整同步确认/).length).toBeGreaterThan(0);
     expect(screen.queryByText('连接成功')).not.toBeInTheDocument();
   });
   it('shows accepted membership and data-sync confirmation independently of a still-connecting link',async()=>{
     const client=peers();
     client.status.mockResolvedValue({
       runtime_id:R,device_id:D,profile_id:Q,network_enabled:true,local_addresses:[],
-      peers:[{device_id:B,fingerprint_sha256:'a'.repeat(64),member_generation:2,member_state:'ready',connection_state:'connecting',endpoints:['10.0.0.2:43344'],last_sync_at_ms:1000,last_error_code:null,event_sync:'complete',originals_sync:'complete'}],
+      peers:[{device_id:B,fingerprint_sha256:'a'.repeat(64),effective_alias:'Tablet',alias_source:'custom',alias_verification:'signed',alias_confirmed_at_ms:null,member_generation:2,member_state:'ready',connection_state:'connecting',endpoints:['10.0.0.2:43344'],last_sync_at_ms:1000,last_error_code:null,event_sync:'complete',originals_sync:'complete'}],
     });
     render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
     expect(await screen.findByText('成员资格已接受')).toBeInTheDocument();
+    expect(screen.getByText('名称签名有效，尚未通过下一次完整同步确认')).toBeInTheDocument();
     expect(screen.getByText('正在连接')).toBeInTheDocument();
     expect(screen.getByText(/上次数据同步确认/)).toBeInTheDocument();
   });

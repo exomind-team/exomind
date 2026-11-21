@@ -1,11 +1,13 @@
 //! Native-owned discovery, routing and finite sync attempts. No UI polling,
 //! browser timer or development HTTP server owns this lifecycle.
 use super::{
-    PeerCancellation, PeerInvitation, PeerJoinState, PeerPin, PeerServiceKind, PeerServiceOutcome,
-    PeerSnapshot, PeerSyncOptions, PeerSyncResult, PeerTransportOptions,
-    network_store::{PeerNetworkSettings, Route},
+    EnvironmentAliasSource, PeerCancellation, PeerInvitation, PeerJoinState, PeerPin,
+    PeerServiceKind, PeerServiceOutcome, PeerSnapshot, PeerSyncOptions, PeerSyncResult,
+    PeerTransportOptions,
+    network_store::{PeerAliasClaim, PeerNetworkSettings, Route},
 };
 use crate::{BetaHost, HostError, Session};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use exomind_core::{DeviceId, ProfileId};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -48,6 +50,10 @@ const DISCOVERY_GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 77, 68);
 pub struct PeerConnectionView {
     pub device_id: DeviceId,
     pub fingerprint_sha256: String,
+    pub effective_alias: String,
+    pub alias_source: EnvironmentAliasSource,
+    pub alias_verification: &'static str,
+    pub alias_confirmed_at_ms: Option<i64>,
     pub member_generation: u64,
     pub member_state: &'static str,
     pub connection_state: &'static str,
@@ -79,6 +85,11 @@ pub struct PeerNetworkStatus {
 #[derive(Debug, Clone, Serialize)]
 pub struct NearbyPeerCandidate {
     pub device_id: DeviceId,
+    pub fingerprint_sha256: String,
+    pub effective_alias: String,
+    pub alias_source: EnvironmentAliasSource,
+    pub alias_verification: &'static str,
+    pub alias_confirmed_at_ms: Option<i64>,
     pub addresses: Vec<String>,
     pub expires_at_ms: i64,
     pub verification_state: &'static str,
@@ -104,10 +115,78 @@ struct Candidate {
     pin: String,
     expires: Instant,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct NearbyKey {
+    device_id: DeviceId,
+    pin: String,
+}
 /// Kept separate from trusted route candidates and never consumed by sync work.
 struct NearbyCandidate {
     addresses: Vec<SocketAddr>,
     expires: Instant,
+}
+#[derive(Clone)]
+struct ObservedAlias {
+    alias: String,
+    source: EnvironmentAliasSource,
+    revision: u64,
+    expires: Instant,
+}
+fn alias_projection(
+    device: DeviceId,
+    observed: Option<&ObservedAlias>,
+    claim: Option<&PeerAliasClaim>,
+) -> (String, EnvironmentAliasSource, &'static str, Option<i64>) {
+    if let (Some(observed), Some(claim)) = (observed, claim)
+        && observed.revision == claim.revision
+        && observed.alias == claim.effective_alias
+        && observed.source == claim.source
+        && claim.confirmed_at_ms.is_some()
+    {
+        return (
+            observed.alias.clone(),
+            observed.source,
+            "confirmed",
+            claim.confirmed_at_ms,
+        );
+    }
+    if let Some(observed) = observed
+        && claim.is_none_or(|claim| observed.revision >= claim.revision)
+    {
+        return (observed.alias.clone(), observed.source, "signed", None);
+    }
+    if let Some(claim) = claim {
+        if let Some(confirmed_at_ms) = claim.confirmed_at_ms {
+            return (
+                claim.effective_alias.clone(),
+                claim.source,
+                "confirmed",
+                Some(confirmed_at_ms),
+            );
+        }
+        let age_ms = now().saturating_sub(claim.observed_at_ms);
+        if age_ms <= CANDIDATE_TTL.as_millis() as i64 {
+            return (
+                claim.effective_alias.clone(),
+                claim.source,
+                "signed",
+                None,
+            );
+        }
+    }
+    (
+        super::network_management::stable_environment_alias(device),
+        EnvironmentAliasSource::StableId,
+        "none",
+        None,
+    )
+}
+fn alias_confirmation_eligible(result: &PeerSyncResult) -> bool {
+    result.events_complete
+        && !result.local_missing_originals
+        && !result.peer_missing_originals
+        && result.local_projection_complete != Some(false)
+        && result.peer_projection_complete != Some(false)
 }
 struct Shared {
     generation: u64,
@@ -116,7 +195,8 @@ struct Shared {
     forced: HashSet<(ProfileId, DeviceId)>,
     candidates: HashMap<DeviceId, Vec<Candidate>>,
     // Unverified advertisements stay outside route selection and auto-sync.
-    nearby: HashMap<DeviceId, NearbyCandidate>,
+    nearby: HashMap<NearbyKey, NearbyCandidate>,
+    observed_aliases: HashMap<(DeviceId, String), ObservedAlias>,
     route_cursor: usize,
     auto_deferred: bool,
     auto_error: Option<&'static str>,
@@ -774,14 +854,201 @@ async fn run_scan_probe(
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+const DISCOVERY_PROTOCOL_V1: &str = "exomind-discovery/1";
+const DISCOVERY_PROTOCOL_V2: &str = "exomind-discovery/2";
+const DISCOVERY_ALIAS_DOMAIN: &[u8] = b"exomind-discovery-alias/2\0";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AnnouncementAlias {
+    effective_alias: String,
+    source: EnvironmentAliasSource,
+    revision: u64,
+}
+
+#[derive(Debug, Clone)]
 struct Announcement {
+    device_id: DeviceId,
+    fingerprint_sha256: String,
+    listen_port: u16,
+    alias: Option<AnnouncementAlias>,
+}
+
+#[derive(Serialize)]
+struct LegacyAnnouncement<'a> {
+    protocol: &'static str,
+    device_id: DeviceId,
+    fingerprint_sha256: &'a str,
+    listen_port: u16,
+}
+
+#[derive(Serialize)]
+struct EnrichedAnnouncement<'a> {
+    protocol: &'static str,
+    device_id: DeviceId,
+    fingerprint_sha256: &'a str,
+    listen_port: u16,
+    effective_alias: &'a str,
+    alias_source: EnvironmentAliasSource,
+    alias_revision: u64,
+    signer_spki_der_base64: &'a str,
+    signature_base64: &'a str,
+}
+
+#[derive(Serialize)]
+struct EnrichedAnnouncementPayload<'a> {
+    protocol: &'static str,
+    device_id: DeviceId,
+    fingerprint_sha256: &'a str,
+    listen_port: u16,
+    effective_alias: &'a str,
+    alias_source: EnvironmentAliasSource,
+    alias_revision: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyAnnouncementWire {
     protocol: String,
     device_id: DeviceId,
     fingerprint_sha256: String,
     listen_port: u16,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnrichedAnnouncementWire {
+    protocol: String,
+    device_id: DeviceId,
+    fingerprint_sha256: String,
+    listen_port: u16,
+    effective_alias: String,
+    alias_source: EnvironmentAliasSource,
+    alias_revision: u64,
+    signer_spki_der_base64: String,
+    signature_base64: String,
+}
+
+impl Announcement {
+    fn legacy_bytes(&self) -> Option<Vec<u8>> {
+        serde_json::to_vec(&LegacyAnnouncement {
+            protocol: DISCOVERY_PROTOCOL_V1,
+            device_id: self.device_id,
+            fingerprint_sha256: &self.fingerprint_sha256,
+            listen_port: self.listen_port,
+        })
+        .ok()
+    }
+
+    fn enriched_bytes(&self, identity: &super::Identity) -> Option<Vec<u8>> {
+        let alias = self.alias.as_ref()?;
+        let payload = EnrichedAnnouncementPayload {
+            protocol: DISCOVERY_PROTOCOL_V2,
+            device_id: self.device_id,
+            fingerprint_sha256: &self.fingerprint_sha256,
+            listen_port: self.listen_port,
+            effective_alias: &alias.effective_alias,
+            alias_source: alias.source,
+            alias_revision: alias.revision,
+        };
+        let mut message = DISCOVERY_ALIAS_DOMAIN.to_vec();
+        message.extend(serde_json::to_vec(&payload).ok()?);
+        let signature = identity.sign_message(&message).ok()?;
+        serde_json::to_vec(&EnrichedAnnouncement {
+            protocol: DISCOVERY_PROTOCOL_V2,
+            device_id: self.device_id,
+            fingerprint_sha256: &self.fingerprint_sha256,
+            listen_port: self.listen_port,
+            effective_alias: &alias.effective_alias,
+            alias_source: alias.source,
+            alias_revision: alias.revision,
+            signer_spki_der_base64: &BASE64.encode(&identity.info.spki_der),
+            signature_base64: &BASE64.encode(signature),
+        })
+        .ok()
+    }
+}
+
+fn parse_announcement(bytes: &[u8]) -> Option<Announcement> {
+    if let Ok(value) = serde_json::from_slice::<EnrichedAnnouncementWire>(bytes) {
+        if value.protocol == DISCOVERY_PROTOCOL_V2 {
+            let spki = BASE64.decode(value.signer_spki_der_base64).ok()?;
+            let signature = BASE64.decode(value.signature_base64).ok()?;
+            if spki.len() > 64 || signature.len() != 64 {
+                return None;
+            }
+            let signer = super::DeviceIdentityInfo {
+                device_id: value.device_id,
+                spki_der: spki,
+                fingerprint_sha256: value.fingerprint_sha256.clone(),
+            };
+            let normalized =
+                super::network_management::normalize_environment_alias(&value.effective_alias)
+                    .ok()?;
+            if normalized != value.effective_alias {
+                return None;
+            }
+            let payload = EnrichedAnnouncementPayload {
+                protocol: DISCOVERY_PROTOCOL_V2,
+                device_id: value.device_id,
+                fingerprint_sha256: &value.fingerprint_sha256,
+                listen_port: value.listen_port,
+                effective_alias: &value.effective_alias,
+                alias_source: value.alias_source,
+                alias_revision: value.alias_revision,
+            };
+            let mut message = DISCOVERY_ALIAS_DOMAIN.to_vec();
+            message.extend(serde_json::to_vec(&payload).ok()?);
+            super::identity::verify_message(&signer, &message, &signature).ok()?;
+            return Some(Announcement {
+                device_id: value.device_id,
+                fingerprint_sha256: value.fingerprint_sha256,
+                listen_port: value.listen_port,
+                alias: Some(AnnouncementAlias {
+                    effective_alias: normalized,
+                    source: value.alias_source,
+                    revision: value.alias_revision,
+                }),
+            });
+        }
+    }
+    let value = serde_json::from_slice::<LegacyAnnouncementWire>(bytes).ok()?;
+    if value.protocol != DISCOVERY_PROTOCOL_V1 {
+        return None;
+    }
+    Some(Announcement {
+        device_id: value.device_id,
+        fingerprint_sha256: value.fingerprint_sha256,
+        listen_port: value.listen_port,
+        alias: None,
+    })
+}
+
+fn discovery_frames(
+    identity: &super::Identity,
+    listen_port: u16,
+    alias: Option<AnnouncementAlias>,
+) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+    let identity_info = &identity.info;
+    let base = Announcement {
+        device_id: identity_info.device_id,
+        fingerprint_sha256: identity_info.fingerprint_sha256.clone(),
+        listen_port,
+        alias: None,
+    };
+    // Legacy discovery is independent of alias/wire-signing availability.
+    let legacy = base.legacy_bytes();
+    let enriched = alias.and_then(|alias| {
+        Announcement {
+            device_id: identity_info.device_id,
+            fingerprint_sha256: identity_info.fingerprint_sha256.clone(),
+            listen_port,
+            alias: Some(alias),
+        }
+        .enriched_bytes(identity)
+    });
+    (legacy, enriched)
+}
+
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1080,6 +1347,7 @@ impl PeerNetwork {
                 forced: HashSet::new(),
                 candidates: HashMap::new(),
                 nearby: HashMap::new(),
+                observed_aliases: HashMap::new(),
                 route_cursor: 0,
                 auto_deferred: false,
                 auto_error: None,
@@ -1190,6 +1458,7 @@ impl PeerNetwork {
             state.progress.clear();
             state.candidates.clear();
             state.nearby.clear();
+            state.observed_aliases.clear();
             state.auto_deferred = false;
             state.auto_error = None;
             #[cfg(test)]
@@ -1256,6 +1525,7 @@ impl PeerNetwork {
             state.addresses.clear();
             state.candidates.clear();
             state.nearby.clear();
+            state.observed_aliases.clear();
             for value in state.progress.values_mut() {
                 value.busy = false;
                 value.busy_id = None;
@@ -1284,7 +1554,12 @@ impl PeerNetwork {
                 m.device_id == self.host.device_id && !m.revoked && m.state == PeerJoinState::Ready
             })
             .map(|m| m.generation);
-        let state = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
+        let alias_claims = self.host.peer_alias_claims(&self.owner)?;
+        let mut state = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
+        let at = Instant::now();
+        state
+            .observed_aliases
+            .retain(|_, alias| alias.expires > at);
         let mut peers = Vec::new();
         for member in members
             .into_iter()
@@ -1308,9 +1583,17 @@ impl PeerNetwork {
                     })
             });
             let revoked = member.revoked;
+            let key = (member.device_id, member.pin.clone());
+            let observed = state.observed_aliases.get(&key);
+            let (effective_alias, alias_source, alias_verification, alias_confirmed_at_ms) =
+                alias_projection(member.device_id, observed, alias_claims.get(&key));
             peers.push(PeerConnectionView {
                 device_id: member.device_id,
                 fingerprint_sha256: member.pin,
+                effective_alias,
+                alias_source,
+                alias_verification,
+                alias_confirmed_at_ms,
                 member_generation: member.generation,
                 member_state: if revoked {
                     "revoked"
@@ -1390,15 +1673,19 @@ impl PeerNetwork {
     /// Returns only bounded, unverified discovery hints; no profile is inspected.
     pub fn nearby_candidates(&self) -> Result<Vec<NearbyPeerCandidate>, HostError> {
         self.host.qualify_transport(&self.owner)?;
+        let alias_claims = self.host.peer_alias_claims(&self.owner)?;
         let mut state = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
         let at = Instant::now();
         state.nearby.retain(|_, candidate| candidate.expires > at);
+        state
+            .observed_aliases
+            .retain(|_, alias| alias.expires > at);
 
         let wall_now = now();
         let mut output = state
             .nearby
             .iter()
-            .map(|(device_id, candidate)| {
+            .map(|(key, candidate)| {
                 let remaining_ms = candidate
                     .expires
                     .saturating_duration_since(at)
@@ -1410,15 +1697,38 @@ impl PeerNetwork {
                     .map(ToString::to_string)
                     .collect::<Vec<_>>();
                 addresses.sort();
+                let observed = state
+                    .observed_aliases
+                    .get(&(key.device_id, key.pin.clone()));
+                let (
+                    effective_alias,
+                    alias_source,
+                    alias_verification,
+                    alias_confirmed_at_ms,
+                ) = alias_projection(
+                    key.device_id,
+                    observed,
+                    alias_claims.get(&(key.device_id, key.pin.clone())),
+                );
                 NearbyPeerCandidate {
-                    device_id: *device_id,
+                    device_id: key.device_id,
+                    fingerprint_sha256: key.pin.clone(),
+                    effective_alias,
+                    alias_source,
+                    alias_verification,
+                    alias_confirmed_at_ms,
                     addresses,
                     expires_at_ms: wall_now.saturating_add(remaining_ms),
                     verification_state: "unverified",
                 }
             })
             .collect::<Vec<_>>();
-        output.sort_by_key(|candidate| candidate.device_id.to_string());
+        output.sort_by_key(|candidate| {
+            (
+                candidate.device_id.to_string(),
+                candidate.fingerprint_sha256.clone(),
+            )
+        });
         Ok(output)
     }
 
@@ -1874,7 +2184,9 @@ impl PeerNetwork {
                     if shared.generation != generation {
                         return Err((HostError::PeerCancelled, reports));
                     }
-                    shared.nearby.remove(&offer.issuer.device_id);
+                    shared
+                        .nearby
+                        .retain(|key, _| key.device_id != offer.issuer.device_id);
                     shared
                         .forced
                         .insert((status.profile_id, offer.issuer.device_id));
@@ -2176,8 +2488,7 @@ impl Worker {
         source: SocketAddr,
         generation: u64,
     ) -> Result<(), HostError> {
-        if value.protocol != "exomind-discovery/1"
-            || value.listen_port == 0
+        if value.listen_port == 0
             || value.device_id == self.host.device_id
             || source.ip().is_unspecified()
             || source.ip().is_multicast()
@@ -2197,15 +2508,91 @@ impl Worker {
             .map(|member| (member.profile_id, member.device_id))
             .collect::<Vec<_>>();
         let address = SocketAddr::new(source.ip(), value.listen_port);
+        let key = NearbyKey {
+            device_id: value.device_id,
+            pin: value.fingerprint_sha256.clone(),
+        };
+        let alias_claim = if value.alias.is_some() {
+            self.host.peer_alias_claim(
+                &self.owner,
+                value.device_id,
+                &value.fingerprint_sha256,
+            )?
+        } else {
+            None
+        };
+        let stale_alias = {
+            let state = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
+            if state.generation != generation {
+                return Ok(());
+            } else {
+                value.alias.as_ref().is_some_and(|alias| {
+                    let previous = state
+                        .observed_aliases
+                        .get(&(value.device_id, value.fingerprint_sha256.clone()));
+                    let previous_stale = previous.is_some_and(|previous| {
+                        previous.revision > alias.revision
+                            || (previous.revision == alias.revision
+                                && (previous.alias != alias.effective_alias
+                                    || previous.source != alias.source))
+                    });
+                    let claim_stale = alias_claim.as_ref().is_some_and(|claim| {
+                        claim.revision > alias.revision
+                            || (claim.revision == alias.revision
+                                && (claim.effective_alias != alias.effective_alias
+                                    || claim.source != alias.source))
+                    });
+                    previous_stale || claim_stale
+                })
+            }
+        };
+        if stale_alias {
+            return Ok(());
+        }
+        if !matching.is_empty()
+            && let Some(alias) = value.alias.as_ref()
+            && !self.host.record_observed_peer_alias(
+                &self.owner,
+                value.device_id,
+                &value.fingerprint_sha256,
+                &alias.effective_alias,
+                alias.source,
+                alias.revision,
+                now(),
+            )?
+        {
+            return Ok(());
+        }
         let mut state = self.shared.lock().map_err(|_| HostError::StatePoisoned)?;
         if state.generation != generation || state.addresses.contains(&address) {
             return Ok(());
         }
         let at = Instant::now();
         state.nearby.retain(|_, candidate| candidate.expires > at);
+        state
+            .observed_aliases
+            .retain(|_, alias| alias.expires > at);
+        if let Some(alias) = value.alias {
+            if !state.observed_aliases.contains_key(&(
+                value.device_id,
+                value.fingerprint_sha256.clone(),
+            )) && state.observed_aliases.len() >= MAX_CANDIDATE_DEVICES
+            {
+                return Ok(());
+            }
+            state.observed_aliases.insert(
+                (value.device_id, value.fingerprint_sha256.clone()),
+                ObservedAlias {
+                    alias: alias.effective_alias,
+                    source: alias.source,
+                    revision: alias.revision,
+                    expires: at + CANDIDATE_TTL,
+                },
+            );
+        }
         if matching.is_empty() {
             // Presence never becomes a route, forced sync, membership, or grant.
-            if let Some(candidate) = state.nearby.get_mut(&value.device_id) {
+            if let Some(candidate) = state.nearby.get_mut(&key) {
                 if !candidate.addresses.contains(&address) {
                     if candidate.addresses.len() >= MAX_DEVICE_CANDIDATES {
                         return Ok(());
@@ -2220,7 +2607,7 @@ impl Worker {
                 return Ok(());
             }
             state.nearby.insert(
-                value.device_id,
+                key,
                 NearbyCandidate {
                     addresses: vec![address],
                     expires: at + CANDIDATE_TTL,
@@ -2228,7 +2615,7 @@ impl Worker {
             );
             return Ok(());
         }
-        state.nearby.remove(&value.device_id);
+        state.nearby.remove(&key);
         state.candidates.retain(|_, values| {
             values.retain(|c| c.expires > at);
             !values.is_empty()
@@ -2271,6 +2658,9 @@ impl Worker {
             } => {
                 let key = (profile_id, device_id);
                 if self.valid_result(key, member_generation, &result).is_ok() {
+                    if alias_confirmation_eligible(&result) {
+                        self.confirm_aliases(device_id, generation);
+                    }
                     self.publish(key, generation, member_generation, None, &Ok(Some(result)));
                 }
             }
@@ -2278,11 +2668,15 @@ impl Worker {
                 profile_id,
                 device_id,
                 ..
-            } => self.touch((profile_id, device_id), generation),
+            } => {
+                self.touch((profile_id, device_id), generation);
+            }
             PeerServiceOutcome::Probed {
                 profile_id,
                 device_id,
-            } => self.touch((profile_id, device_id), generation),
+            } => {
+                self.touch((profile_id, device_id), generation);
+            }
             PeerServiceOutcome::Joined(status) => {
                 let peer = if status.issuer_device_id == self.host.device_id {
                     status.joiner_device_id
@@ -2292,7 +2686,7 @@ impl Worker {
                 self.touch((status.profile_id, peer), generation);
                 if let Ok(mut state) = self.shared.lock() {
                     if state.generation == generation {
-                        state.nearby.remove(&peer);
+                        state.nearby.retain(|key, _| key.device_id != peer);
                         state.forced.insert((status.profile_id, peer));
                     }
                 }
@@ -2398,6 +2792,55 @@ impl Worker {
                     p.connection = "idle";
                 }
             }
+        }
+    }
+    fn confirm_aliases(&self, device: DeviceId, generation: u64) {
+        let Ok(members) = self.memberships() else {
+            return;
+        };
+        let pins = members
+            .into_iter()
+            .filter(|member| {
+                member.device_id == device
+                    && !member.revoked
+                    && member.state == PeerJoinState::Ready
+            })
+            .map(|member| member.pin)
+            .collect::<Vec<_>>();
+        let observations = {
+            let Ok(shared) = self.shared.lock() else {
+                return;
+            };
+            if shared.generation != generation {
+                return;
+            }
+            pins.into_iter()
+                .filter_map(|pin| {
+                    shared
+                        .observed_aliases
+                        .get(&(device, pin.clone()))
+                        .map(|alias| {
+                            (
+                                pin,
+                                alias.alias.clone(),
+                                alias.source,
+                                alias.revision,
+                            )
+                        })
+                })
+                .collect::<Vec<_>>()
+        };
+        let confirmed_at_ms = now();
+        for (pin, effective_alias, source, revision) in observations {
+            let _ = self.host.record_confirmed_peer_alias(
+                &self.owner,
+                device,
+                &pin,
+                &effective_alias,
+                source,
+                revision,
+                confirmed_at_ms,
+            );
         }
     }
     fn observed_probe(
@@ -2512,6 +2955,9 @@ impl Worker {
                 .map(|_| Some(value)),
             other => other,
         };
+        if matches!(&result, Ok(Some(value)) if alias_confirmation_eligible(value)) {
+            self.confirm_aliases(route.device, generation);
+        }
         self.publish(key, generation, member.generation, Some(id), &result);
         result
     }
@@ -2692,11 +3138,11 @@ impl Worker {
                 },
                 result=listener.accept(cancel.clone())=>{match result {Ok(channel)=>{if incoming.track_channel(&channel).is_err(){drop(channel);break;}if incoming_jobs.len()>=8{drop(channel);continue;}let network=self.clone();let completion=incoming.clone();let route_cancel=cancel.clone();let lease=match self.host.peers.register(false){Ok(l)=>l,Err(_)=>break};incoming_jobs.spawn(async move{let _lease=lease;if let Ok(outcome)=network.host.accept_peer_service_owned_scoped(&network.owner,channel,Some(completion),Some(route_cancel)).await{network.incoming(generation,outcome);}});},Err(HostError::PeerTimeout|HostError::PeerTls)=>{},Err(_)=>break}},
                 received=async{match &udp {Some(socket)=>socket.recv_from(&mut packet).await,None=>std::future::pending().await}}=>{
-                    if let Ok((n,source))=received{if n<=1024{if let Ok(value)=serde_json::from_slice::<Announcement>(&packet[..n]){let _=self.remember_announcement(value,source,generation);}}}
+                    if let Ok((n,source))=received{if n<=1024{if let Some(value)=parse_announcement(&packet[..n]){let _=self.remember_announcement(value,source,generation);}}}
                 },
                 _=interval.tick()=>{
                     if let Ok(mut state)=self.shared.lock(){if state.generation!=generation{break;}state.addresses=endpoints(listener.addr());}
-                    if let Some(socket)=&udp {if let Ok(identity)=self.host.device_identity(&self.owner){if let Ok(bytes)=serde_json::to_vec(&Announcement{protocol:"exomind-discovery/1".into(),device_id:self.host.device_id,fingerprint_sha256:identity.fingerprint_sha256,listen_port:listener.addr().port()}){let _=socket.try_send_to(&bytes,SocketAddr::from((DISCOVERY_GROUP,discovery_port())));let _=socket.try_send_to(&bytes,SocketAddr::from((Ipv4Addr::BROADCAST,discovery_port())));}}}
+                    if let Some(socket)=&udp {if let Ok(identity)=self.host.transport_identity(&self.owner){let alias=self.host.environment_alias_announcement(&self.owner).ok().map(|(effective_alias,source,revision)|AnnouncementAlias{effective_alias,source,revision});let (legacy,enriched)=discovery_frames(&identity,listener.addr().port(),alias);for bytes in [legacy,enriched].into_iter().flatten(){let _=socket.try_send_to(&bytes,SocketAddr::from((DISCOVERY_GROUP,discovery_port())));let _=socket.try_send_to(&bytes,SocketAddr::from((Ipv4Addr::BROADCAST,discovery_port())));}}}
                     if jobs.len()>=2{continue;}if let Ok(mut routes)=self.routes(){if !routes.is_empty(){let mut state=match self.shared.lock(){Ok(s)=>s,Err(_)=>return};let count=routes.len();routes.rotate_left(state.route_cursor%count);state.route_cursor=state.route_cursor.wrapping_add(1);routes.sort_by_key(|r|!state.forced.contains(&(r.profile,r.device)));}for route in routes {if jobs.len()>=2{break;}let key=(route.profile,route.device);let force;{let mut state=match self.shared.lock(){Ok(s)=>s,Err(_)=>return};force=state.forced.remove(&key);if state.progress.get(&key).is_some_and(|p|p.busy||(!force&&p.retry.is_some_and(|at|at>Instant::now()))){continue;}}
                         let network=self.clone();let cancel=cancel.clone();jobs.spawn(async move{let _=network.attempt(route,cancel,generation,force).await;});
                     }}

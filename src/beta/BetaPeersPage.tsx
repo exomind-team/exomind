@@ -17,6 +17,7 @@ import { BetaPeerJoinError, joinFailureEndpointReports } from './peers-client';
 import type { BetaNearbyCandidate, BetaInvitation, BetaInvitationEndpointReport, BetaInvitationPreview, BetaJoinResult, BetaNetworkScan, BetaPeer, BetaPeerStatus, BetaPeersClient, BetaScanScope } from './peers-client';
 import { BetaNearbyDevices } from './NearbyDeviceCandidates';
 import { BetaDeviceName } from './BetaDeviceName';
+import { BetaEnvironmentAliasSetting } from './BetaEnvironmentAliasSetting';
 import { useBetaDeviceNames } from './device-names';
 import { writeBetaMessageClipboard } from './beta-message-clipboard';
 
@@ -40,6 +41,21 @@ function membershipState(peer: BetaPeer): string {
   if (peer.member_state === 'revoked') return '成员资格已撤销';
   if (peer.member_state === 'pending') return '成员资格待确认';
   return '成员资格已接受';
+}
+const ALIAS_SOURCE_LABEL: Record<BetaPeer['alias_source'], string> = {
+  custom: '自定义名称',
+  os_default: '系统默认名称',
+  stable_id: '稳定短标识',
+};
+function peerAliasState(peer: BetaPeer): string {
+  if (peer.alias_verification === 'confirmed') {
+    const at = peer.alias_confirmed_at_ms === null
+      ? ''
+      : `，上次确认 ${new Date(peer.alias_confirmed_at_ms).toLocaleString()}`;
+    return `名称与设备身份已通过完整同步确认${at}`;
+  }
+  if (peer.alias_verification === 'signed') return '名称签名有效，尚未通过下一次完整同步确认';
+  return '尚未收到签名名称，当前显示稳定短标识';
 }
 const ENDPOINT_DISPOSITION_LABEL: Record<BetaInvitationEndpointReport['disposition'], string> = {
   attempted: '已尝试',
@@ -452,6 +468,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
         {status && <p className="px-4 pb-4 text-xs leading-relaxed text-muted">{status.network_enabled ? '已授权设备会自动连接与补齐。记录和原件分别确认。' : '同步已关闭，本机记录仍可继续保存。'}</p>}
         {status && <details className="px-4 pb-4 text-xs text-muted"><summary className="cursor-pointer">本机设备与同步地址</summary><dl className="mt-3 space-y-3 select-text"><div><dt>设备身份</dt><dd className="break-all">{status.device_id}</dd></div><div><dt>当前同步地址</dt><dd data-testid="beta-local-sync-addresses" className="mt-1 space-y-1 break-all">{status.local_addresses.length ? status.local_addresses.map(address => <p key={address}>{address}</p>) : status.network_enabled ? '尚未确认可用的同步地址' : '设备同步已关闭'}</dd></div></dl><p className="mt-3">这些地址供已授权设备连接；本机 HTTP 服务地址可在「当下」标题上方查看。</p></details>}
       </SettingsSection>
+      <BetaEnvironmentAliasSetting peers={peers} deviceId={deviceId} copyText={copyText}/>
       <SettingsSection title="潜在设备">
         <div className="space-y-3 px-4 pb-4">
           <p className="text-xs leading-relaxed text-secondary">
@@ -683,11 +700,11 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
         {status.peers.length === 0 ? <p className="px-4 py-4 text-sm text-secondary">还没有其他设备加入。</p> : status.peers.map((peer, index) => <div key={peer.device_id}>
           {index > 0 && <Divider/>}
           <div className="space-y-2 px-4 py-4">
-            <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-sm font-medium text-foreground"><BetaDeviceName localDeviceId={deviceId} deviceId={peer.device_id}/></div><p className="mt-1 text-xs text-secondary">{membershipState(peer)}</p><p className="mt-1 text-xs text-secondary">{peerState(peer)}</p></div>
+            <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-words text-sm font-medium text-foreground">{peer.effective_alias}</p><p className="mt-1 text-xs text-secondary">实例名来源：{ALIAS_SOURCE_LABEL[peer.alias_source]} · {peerAliasState(peer)}</p><p className="mt-1 text-xs text-secondary">本机备注：<BetaDeviceName localDeviceId={deviceId} deviceId={peer.device_id}/></p><p className="mt-1 text-xs text-secondary">{membershipState(peer)}</p><p className="mt-1 text-xs text-secondary">{peerState(peer)}</p></div>
               <Button variant="outline" size="sm" disabled={!!operation || !!statusError || !status.network_enabled || peer.member_state !== 'ready'} onClick={() => void perform('sync', async life => { await peers.sync(profileId, peer.device_id); if (isCurrent(life)) await refresh(life); })}>立即同步</Button></div>
             <p className="flex items-center gap-1 text-xs text-muted">数据同步：{peer.last_sync_at_ms === null ? (peer.member_state === 'ready' ? '尚未确认' : peer.member_state === 'pending' ? '等待成员资格确认' : '已停止') : <><span>上次数据同步确认 </span><EventTimestamp timestamp={peer.last_sync_at_ms} now={now} mode={dateMode}/></>}</p>
             {!!peer.history_gaps?.length&&<details className="space-y-2 text-xs text-secondary"><summary className="cursor-pointer">部分历史还不能完整中转（{peer.history_gaps.length} 项）</summary><p>上次同步发现：部分已保存历史的可验证转发前缀尚未补齐。请让仍持有原身份的来源设备用新版上线，或核对来源授权；现有资料保留。已知附件可独立获取。</p>{peer.history_gaps.map(gap=><div key={`${gap.direction}:${gap.origin_device_id}`} className="rounded-lg border border-border-card p-2"><BetaDeviceName localDeviceId={deviceId} deviceId={gap.origin_device_id}/><p>{gap.direction==='to_peer'?'本机 → 对方':'对方 → 本机'} · 保存位置 {gap.materialized_seq} · 可验证转发位置 {gap.available_seq??'尚未建立'}</p></div>)}</details>}
-            <details className="text-xs text-muted"><summary className="cursor-pointer py-1">连接详情</summary><dl className="space-y-2 py-2"><div><dt>设备身份</dt><dd className="break-all font-mono">{peer.device_id}</dd></div><div><dt>身份指纹</dt><dd className="break-all font-mono">{peer.fingerprint_sha256}</dd></div>{peer.last_error_code && <div><dt>最近错误</dt><dd className="break-all">{peer.last_error_code}</dd></div>}{!!peer.endpoints.length && <div><dt>连接地址</dt><dd className="break-all">{peer.endpoints.join('、')}</dd></div>}</dl>
+            <details className="text-xs text-muted"><summary className="cursor-pointer py-1">连接详情</summary><dl className="space-y-2 py-2"><div><dt>实例名状态</dt><dd>{peerAliasState(peer)}</dd></div><div><dt>设备身份</dt><dd className="break-all font-mono">{peer.device_id}</dd></div><div><dt>身份指纹</dt><dd className="break-all font-mono">{peer.fingerprint_sha256}</dd></div>{peer.last_error_code && <div><dt>最近错误</dt><dd className="break-all">{peer.last_error_code}</dd></div>}{!!peer.endpoints.length && <div><dt>连接地址</dt><dd className="break-all">{peer.endpoints.join('、')}</dd></div>}</dl>
               <Button variant="outline" size="sm" disabled={!!operation || !!statusError || !!copyingInvitationId} onClick={() => void perform('replace', async life => { const result = await peers.createInvitation(profileId, peer.device_id); if (isCurrent(life)) publishInvitation(life,result); })}>重新授权此设备</Button>
               {peer.member_state !== 'revoked' && <Button variant="ghost" size="sm" disabled={!!operation} onClick={() => setRevoke(peer)}><ShieldOff size={14}/>撤销设备授权</Button>}
             </details>

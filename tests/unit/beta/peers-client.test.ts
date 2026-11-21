@@ -6,7 +6,7 @@ const D='22222222-2222-4222-8222-222222222222';
 const R='33333333-3333-4333-8333-333333333333';
 const B='44444444-4444-4444-8444-444444444444';
 const I='55555555-5555-4555-8555-555555555555';
-const peer=()=>({device_id:B,fingerprint_sha256:'a'.repeat(64),member_generation:2,member_state:'ready',connection_state:'idle',endpoints:['127.0.0.1:4310'],last_sync_at_ms:null,last_error_code:null,event_sync:'pending',originals_sync:'unknown'});
+const peer=()=>({device_id:B,fingerprint_sha256:'a'.repeat(64),effective_alias:'外心 44444444',alias_source:'stable_id',alias_verification:'none',alias_confirmed_at_ms:null,member_generation:2,member_state:'ready',connection_state:'idle',endpoints:['127.0.0.1:4310'],last_sync_at_ms:null,last_error_code:null,event_sync:'pending',originals_sync:'unknown'});
 const status=()=>({runtime_id:R,device_id:D,profile_id:P,network_enabled:true,local_addresses:['127.0.0.1:4310'],peers:[peer()]});
 
 describe('Native peer management boundary',()=>{
@@ -36,7 +36,7 @@ describe('Native peer management boundary',()=>{
 
 describe('Nearby device discovery boundary',()=> {
   it('reads only short-lived unverified candidates without a profile argument',async()=>{
-    const candidate={device_id:B,addresses:['127.0.0.1:4310'],expires_at_ms:Date.now()+20_000,verification_state:'unverified'};
+    const candidate={device_id:B,fingerprint_sha256:'a'.repeat(64),effective_alias:'外心 44444444',alias_source:'stable_id',alias_verification:'none',alias_confirmed_at_ms:null,addresses:['127.0.0.1:4310'],expires_at_ms:Date.now()+20_000,verification_state:'unverified'};
     let reply:unknown=[candidate];
     const call=vi.fn(async(name:string)=>name==='beta_peer_nearby_candidates'?reply:null);
     const client=nativeBetaPeersClient(call);
@@ -57,6 +57,40 @@ describe('Nearby device discovery boundary',()=> {
       reply=invalid;
       await expect(client.nearbyCandidates()).rejects.toMatchObject({code:'invalid_peer_response'});
     }
+  });
+});
+
+describe('Environment alias boundary',()=>{
+  it('reads and writes the device-global alias through explicit commands',async()=>{
+    const initial={device_id:D,effective_alias:'Travel Room PC',source:'os_default',custom_alias:null,max_chars:64};
+    const saved={...initial,source:'custom',custom_alias:'Travel Room PC'};
+    const call=vi.fn(async(name:string)=>name==='beta_peer_get_environment_alias'?initial:saved);
+    const client=nativeBetaPeersClient(call);
+    expect(await client.environmentAlias()).toEqual(initial);
+    expect(await client.setEnvironmentAlias(' Travel Room PC ')).toEqual(saved);
+    expect(await client.setEnvironmentAlias(null)).toEqual(saved);
+    expect(call).toHaveBeenCalledWith('beta_peer_get_environment_alias');
+    expect(call).toHaveBeenCalledWith('beta_peer_set_environment_alias',{alias:' Travel Room PC '});
+    expect(call).toHaveBeenCalledWith('beta_peer_set_environment_alias',{alias:null});
+  });
+  it('rejects malformed aliases and confirmation combinations',async()=>{
+    const alias={device_id:D,effective_alias:'Travel Room PC',source:'os_default',custom_alias:null,max_chars:64};
+    let reply:unknown=alias;
+    const client=nativeBetaPeersClient(vi.fn(async()=>reply));
+    await expect(client.environmentAlias()).resolves.toEqual(alias);
+    for(const invalid of [
+      {...alias,extra:true},
+      {...alias,source:'custom'},
+      {...alias,custom_alias:'Other'},
+      {...alias,effective_alias:' Travel Room PC '},
+      {...alias,effective_alias:'bad\u0000name'},
+      {...alias,max_chars:256},
+    ]){
+      reply=invalid;
+      await expect(client.environmentAlias()).rejects.toMatchObject({code:'invalid_peer_response'});
+    }
+    reply={...status(),peers:[{...peer(),alias_verification:'signed',alias_confirmed_at_ms:1000}]};
+    await expect(client.status(P)).rejects.toMatchObject({code:'invalid_peer_response'});
   });
 });
 

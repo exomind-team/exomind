@@ -12,6 +12,7 @@ mod source_history;
 mod network;
 mod network_management;
 mod network_store;
+pub use network_management::{EnvironmentAliasSource, EnvironmentAliasView};
 mod original_admission;
 mod original_auto_store;
 pub use original_auto_store::{
@@ -25,7 +26,7 @@ pub use network::{
     PeerNetwork, PeerNetworkStatus, PeerOriginalStatus, ScanScope,
 };
 mod service;
-pub use network_store::PeerNetworkSettings;
+pub use network_store::{MAX_ENVIRONMENT_ALIAS_CHARS, PeerNetworkSettings};
 pub use service::{PeerProbe, PeerServiceKind, PeerServiceOutcome};
 mod synchronization;
 pub use synchronization::{PeerSnapshot, PeerSyncOptions, PeerSyncResult};

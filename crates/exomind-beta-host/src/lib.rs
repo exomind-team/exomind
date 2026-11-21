@@ -50,7 +50,8 @@ mod peers;
 mod record_organization;
 pub use peers::{
     ApprovePeerInvitationReplacement, CreatePeerInvitation, DEFAULT_ORIGINAL_AUTO_BYTES,
-    DeviceIdentityInfo, IssuedPeerInvitation, MAX_ORIGINAL_AUTO_BYTES, MIN_ORIGINAL_AUTO_BYTES,
+    DeviceIdentityInfo, EnvironmentAliasSource, EnvironmentAliasView, IssuedPeerInvitation,
+    MAX_ENVIRONMENT_ALIAS_CHARS, MAX_ORIGINAL_AUTO_BYTES, MIN_ORIGINAL_AUTO_BYTES,
     NearbyPeerCandidate, OriginalAutoBackoff, OriginalAutoPolicy, OriginalAutoPolicyCommand,
     NetworkScanResult, OriginalAutoQueueStatus,
     OriginalAutoSuppression, OriginalAutoSuppressionCommand, OriginalLocalIntent,

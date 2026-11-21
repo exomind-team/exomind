@@ -23,7 +23,7 @@ describe('Native on-demand original transport boundary',()=>{
     const count=call.mock.calls.length;await expect(client.fetch(P,O,D,'00000000-0000-0000-0000-000000000000')).rejects.toMatchObject({code:'invalid_original_transfer_response'});expect(call).toHaveBeenCalledTimes(count);
   });
   it('lists only sources whose membership is ready and does not start any transfer or pairing',async()=>{
-    const peer={device_id:D,fingerprint_sha256:'b'.repeat(64),member_generation:1,member_state:'ready',connection_state:'waiting',endpoints:[],last_sync_at_ms:null,last_error_code:null,event_sync:'complete',originals_sync:'unknown'};
+    const peer={device_id:D,fingerprint_sha256:'b'.repeat(64),effective_alias:'外心 33333333',alias_source:'stable_id',alias_verification:'none',alias_confirmed_at_ms:null,member_generation:1,member_state:'ready',connection_state:'waiting',endpoints:[],last_sync_at_ms:null,last_error_code:null,event_sync:'complete',originals_sync:'unknown'};
     const call=vi.fn(async()=>({runtime_id:R,device_id:O,profile_id:P,network_enabled:true,local_addresses:[],peers:[peer,{...peer,device_id:R,member_state:'revoked'}]}));
     const client=nativeOriginalAcquisition(call as Parameters<typeof nativeOriginalAcquisition>[0]);
     expect(await client.sources(P)).toEqual({network_enabled:true,devices:[D]});expect(call).toHaveBeenCalledTimes(1);expect(call).toHaveBeenCalledWith('beta_peer_status',{profileId:P});

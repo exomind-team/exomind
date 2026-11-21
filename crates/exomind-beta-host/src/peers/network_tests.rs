@@ -11,6 +11,39 @@ fn transport_options() -> PeerTransportOptions {
     }
 }
 
+fn legacy_announcement(
+    device_id: DeviceId,
+    fingerprint_sha256: String,
+    listen_port: u16,
+) -> Announcement {
+    Announcement {
+        device_id,
+        fingerprint_sha256,
+        listen_port,
+        alias: None,
+    }
+}
+
+fn enriched_announcement(
+    device_id: DeviceId,
+    fingerprint_sha256: String,
+    listen_port: u16,
+    effective_alias: impl Into<String>,
+    source: EnvironmentAliasSource,
+    revision: u64,
+) -> Announcement {
+    Announcement {
+        device_id,
+        fingerprint_sha256,
+        listen_port,
+        alias: Some(AnnouncementAlias {
+            effective_alias: effective_alias.into(),
+            source,
+            revision,
+        }),
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stop_and_restart_retain_incoming_scope_until_its_blocking_work_drains() {
     let _discovery = crate::peers::test_discovery::lease().await;
@@ -97,7 +130,7 @@ async fn stop_and_restart_retain_incoming_scope_until_its_blocking_work_drains()
     network.stop().await.unwrap();
     drop(unrelated);
     stopped(host).await;
-    let reopened = BetaHost::open(root.path()).unwrap();
+    let reopened = Arc::new(BetaHost::open(root.path()).unwrap());
     assert_eq!(
         reopened
             .device_identity(&reopened.owner_session().unwrap())
@@ -245,6 +278,585 @@ fn host() -> (TempDir, Arc<BetaHost>, Session) {
     )
     .unwrap();
     (root, host, owner)
+}
+
+#[test]
+fn environment_alias_is_normalized_persisted_and_device_global() {
+    let (root, host, owner) = host();
+    let device_id = host.device_id;
+    let initial = host.environment_alias(&owner).unwrap();
+    assert_eq!(host.environment_alias_announcement(&owner).unwrap().2, 0);
+    assert_eq!(initial.device_id, device_id);
+    assert!(!initial.effective_alias.is_empty());
+    assert_eq!(initial.custom_alias, None);
+    assert!(matches!(
+        initial.source,
+        super::super::EnvironmentAliasSource::OsDefault
+            | super::super::EnvironmentAliasSource::StableId
+    ));
+
+    let saved = host
+        .set_environment_alias(&owner, Some("  Travel\t\t Room\nPC  ".into()))
+        .unwrap();
+    assert_eq!(saved.effective_alias, "Travel Room PC");
+    assert_eq!(saved.custom_alias.as_deref(), Some("Travel Room PC"));
+    assert_eq!(saved.source, super::super::EnvironmentAliasSource::Custom);
+    assert_eq!(host.environment_alias_announcement(&owner).unwrap().2, 1);
+
+    let before_invalid = host.environment_alias(&owner).unwrap();
+    for invalid in [
+        String::new(),
+        "   ".into(),
+        "bad\u{0}value".into(),
+        "bad\u{7f}value".into(),
+        "x".repeat(super::super::MAX_ENVIRONMENT_ALIAS_CHARS + 1),
+    ] {
+        assert!(matches!(
+            host.set_environment_alias(&owner, Some(invalid)),
+            Err(HostError::InvalidRequest)
+        ));
+        assert_eq!(host.environment_alias(&owner).unwrap(), before_invalid);
+    }
+
+    host.stop().unwrap();
+    let reopened = BetaHost::open(root.path()).unwrap();
+    let reopened_owner = reopened.owner_session().unwrap();
+    assert_eq!(reopened.device_id, device_id);
+    assert_eq!(
+        reopened.environment_alias(&reopened_owner).unwrap(),
+        saved
+    );
+    let reset = reopened
+        .set_environment_alias(&reopened_owner, None)
+        .unwrap();
+    assert_eq!(reset.custom_alias, None);
+    assert_eq!(
+        reopened
+            .environment_alias_announcement(&reopened_owner)
+            .unwrap()
+            .2,
+        2
+    );
+    assert!(matches!(
+        reset.source,
+        super::super::EnvironmentAliasSource::OsDefault
+            | super::super::EnvironmentAliasSource::StableId
+    ));
+    reopened.stop().unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_environment_alias_uses_the_host_name_by_default() {
+    let (_root, host, owner) = host();
+    let alias = host.environment_alias(&owner).unwrap();
+    assert_eq!(
+        alias.source,
+        super::super::EnvironmentAliasSource::OsDefault
+    );
+    assert!(!alias.effective_alias.is_empty());
+    assert!(!alias.effective_alias.chars().any(char::is_control));
+    host.stop().unwrap();
+}
+
+#[test]
+fn default_environment_name_changes_advance_the_wire_revision_once() {
+    let (root, host, _owner) = host();
+    host.stop().unwrap();
+    let database = rusqlite::Connection::open(root.path().join("host-auth.sqlite3")).unwrap();
+    assert_eq!(
+        super::super::network_store::advance_environment_alias_announcement(
+            &database,
+            "DESKTOP-A",
+            EnvironmentAliasSource::OsDefault,
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        super::super::network_store::advance_environment_alias_announcement(
+            &database,
+            "DESKTOP-A",
+            EnvironmentAliasSource::OsDefault,
+        )
+        .unwrap(),
+        0
+    );
+    assert_eq!(
+        super::super::network_store::advance_environment_alias_announcement(
+            &database,
+            "DESKTOP-B",
+            EnvironmentAliasSource::OsDefault,
+        )
+        .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn corrupt_oversized_environment_alias_fails_closed_before_loading_the_string() {
+    let (root, host, _owner) = host();
+    host.stop().unwrap();
+    let database = rusqlite::Connection::open(root.path().join("host-auth.sqlite3")).unwrap();
+    database.pragma_update(None, "ignore_check_constraints", true).unwrap();
+    database
+        .execute(
+            "UPDATE peer_environment_alias SET custom_alias=?1 WHERE singleton=1",
+            ["x".repeat(super::super::MAX_ENVIRONMENT_ALIAS_CHARS + 1)],
+        )
+        .unwrap();
+    assert!(matches!(
+        super::super::network_store::environment_alias_state(&database),
+        Err(HostError::PeerSyncRecoveryRequired)
+    ));
+}
+
+#[test]
+fn discovery_frames_keep_legacy_presence_and_reject_a_forged_signed_alias() {
+    let (_root, host, owner) = host();
+    let identity = host.transport_identity(&owner).unwrap();
+    let (legacy, enriched) = discovery_frames(
+        &identity,
+        43344,
+        Some(AnnouncementAlias {
+            effective_alias: "Travel Room PC".into(),
+            source: EnvironmentAliasSource::Custom,
+            revision: 1,
+        }),
+    );
+    let legacy = parse_announcement(&legacy.unwrap()).unwrap();
+    assert!(legacy.alias.is_none());
+    assert_eq!(legacy.device_id, identity.info.device_id);
+
+    let enriched = enriched.unwrap();
+    let signed = parse_announcement(&enriched).unwrap();
+    assert_eq!(
+        signed.alias,
+        Some(AnnouncementAlias {
+            effective_alias: "Travel Room PC".into(),
+            source: EnvironmentAliasSource::Custom,
+            revision: 1,
+        })
+    );
+
+    let (legacy_only, no_enriched) = discovery_frames(&identity, 43344, None);
+    assert!(legacy_only.is_some());
+    assert!(no_enriched.is_none());
+
+    let mut forged: serde_json::Value = serde_json::from_slice(&enriched).unwrap();
+    forged["effective_alias"] = serde_json::Value::String("Forged PC".into());
+    assert!(parse_announcement(&serde_json::to_vec(&forged).unwrap()).is_none());
+    host.stop().unwrap();
+}
+
+#[test]
+fn legacy_presence_does_not_extend_a_signed_alias_ttl() {
+    let (_root, host, owner) = host();
+    let network = PeerNetwork::new(host.clone(), owner).unwrap();
+    let device = DeviceId::new();
+    let pin = "a".repeat(64);
+    let initial_expiry = Instant::now() + Duration::from_millis(100);
+    network.shared.lock().unwrap().observed_aliases.insert(
+        (device, pin.clone()),
+        ObservedAlias {
+            alias: "Signed once".into(),
+            source: EnvironmentAliasSource::Custom,
+            revision: 1,
+            expires: initial_expiry,
+        },
+    );
+    network
+        .worker()
+        .remember_announcement(
+            legacy_announcement(device, pin.clone(), 43344),
+            "192.0.2.30:43344".parse().unwrap(),
+            0,
+        )
+        .unwrap();
+    let stored_expiry = network
+        .shared
+        .lock()
+        .unwrap()
+        .observed_aliases
+        .get(&(device, pin))
+        .unwrap()
+        .expires;
+    assert_eq!(stored_expiry, initial_expiry);
+    host.stop().unwrap();
+}
+
+#[test]
+fn unpaired_signed_alias_is_visible_in_memory_but_does_not_consume_claim_storage() {
+    let (_root, host, owner) = host();
+    let network = PeerNetwork::new(host.clone(), owner.clone()).unwrap();
+    let device = DeviceId::new();
+    network
+        .worker()
+        .remember_announcement(
+            enriched_announcement(
+                device,
+                "a".repeat(64),
+                43344,
+                "Unpaired nearby",
+                EnvironmentAliasSource::Custom,
+                1,
+            ),
+            "192.0.2.31:43344".parse().unwrap(),
+            0,
+        )
+        .unwrap();
+    assert!(network.nearby_candidates().unwrap().iter().any(|candidate| {
+        candidate.device_id == device && candidate.effective_alias == "Unpaired nearby"
+    }));
+    assert!(host.peer_alias_claims(&owner).unwrap().is_empty());
+    drop(network);
+    host.stop().unwrap();
+}
+
+#[test]
+fn unconfirmed_alias_claim_hides_after_ttl_but_confirmed_claim_does_not() {
+    let device = DeviceId::new();
+    let stale = PeerAliasClaim {
+        effective_alias: "Stale signed name".into(),
+        source: EnvironmentAliasSource::Custom,
+        revision: 1,
+        observed_at_ms: now() - CANDIDATE_TTL.as_millis() as i64 - 1,
+        confirmed_at_ms: None,
+    };
+    assert_eq!(alias_projection(device, None, Some(&stale)).2, "none");
+
+    let fresh = PeerAliasClaim {
+        observed_at_ms: now(),
+        ..stale.clone()
+    };
+    assert_eq!(alias_projection(device, None, Some(&fresh)).2, "signed");
+
+    let confirmed = PeerAliasClaim {
+        confirmed_at_ms: Some(now()),
+        ..stale
+    };
+    assert_eq!(
+        alias_projection(device, None, Some(&confirmed)).2,
+        "confirmed"
+    );
+}
+
+#[test]
+fn alias_confirmation_requires_complete_records_and_no_reported_original_gap() {
+    let mut result = PeerSyncResult {
+        events_complete: true,
+        ..PeerSyncResult::default()
+    };
+    assert!(alias_confirmation_eligible(&result));
+    result.local_missing_originals = true;
+    assert!(!alias_confirmation_eligible(&result));
+    result.local_missing_originals = false;
+    result.peer_missing_originals = true;
+    assert!(!alias_confirmation_eligible(&result));
+    result.peer_missing_originals = false;
+    result.local_projection_complete = Some(false);
+    assert!(!alias_confirmation_eligible(&result));
+    result.local_projection_complete = Some(true);
+    result.peer_projection_complete = Some(false);
+    assert!(!alias_confirmation_eligible(&result));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn signed_alias_confirmation_survives_restart_and_changed_alias_invalidates_old_value() {
+    let _discovery = crate::peers::test_discovery::lease().await;
+    let (root, a, oa) = host();
+    let (_rb, b, ob) = host();
+    let profile = pair_hosts(&a, &oa, &b, &ob).await;
+    let pin = b.device_identity(&ob).unwrap().fingerprint_sha256;
+    let network = PeerNetwork::new(a.clone(), oa.clone()).unwrap();
+    let generation = network.shared.lock().unwrap().generation;
+
+    let initial = network.status(profile).unwrap();
+    let peer = initial
+        .peers
+        .iter()
+        .find(|peer| peer.device_id == b.device_id)
+        .unwrap();
+    assert_eq!(peer.alias_verification, "none");
+    assert_eq!(peer.alias_source, EnvironmentAliasSource::StableId);
+    assert_eq!(peer.alias_confirmed_at_ms, None);
+
+    let unbound_pin = "f".repeat(64);
+    network.shared.lock().unwrap().observed_aliases.insert(
+        (b.device_id, unbound_pin.clone()),
+        ObservedAlias {
+            alias: "Unbound key".into(),
+            source: EnvironmentAliasSource::Custom,
+            revision: 1,
+            expires: Instant::now() + CANDIDATE_TTL,
+        },
+    );
+    network.worker().confirm_aliases(b.device_id, generation);
+    assert!(a.peer_alias_claims(&oa).unwrap().is_empty());
+    network
+        .shared
+        .lock()
+        .unwrap()
+        .observed_aliases
+        .remove(&(b.device_id, unbound_pin));
+
+    network.shared.lock().unwrap().observed_aliases.insert(
+        (b.device_id, pin.clone()),
+        ObservedAlias {
+            alias: "Travel Room PC".into(),
+            source: EnvironmentAliasSource::Custom,
+            revision: 1,
+            expires: Instant::now() + CANDIDATE_TTL,
+        },
+    );
+    let claimed = network.status(profile).unwrap();
+    let peer = claimed
+        .peers
+        .iter()
+        .find(|peer| peer.device_id == b.device_id)
+        .unwrap();
+    assert_eq!(peer.effective_alias, "Travel Room PC");
+    assert_eq!(peer.alias_verification, "signed");
+    assert_eq!(peer.alias_confirmed_at_ms, None);
+    assert!(a.peer_alias_claims(&oa).unwrap().is_empty());
+
+    network.worker().confirm_aliases(b.device_id, generation);
+    let confirmed = network.status(profile).unwrap();
+    let peer = confirmed
+        .peers
+        .iter()
+        .find(|peer| peer.device_id == b.device_id)
+        .unwrap();
+    assert_eq!(peer.alias_verification, "confirmed");
+    assert!(peer.alias_confirmed_at_ms.is_some());
+
+    network.stop().await.unwrap();
+    stopped(a).await;
+    stopped(b.clone()).await;
+
+    let reopened = Arc::new(BetaHost::open(root.path()).unwrap());
+    let reopened_owner = reopened.owner_session().unwrap();
+    let reopened_network = PeerNetwork::new(reopened.clone(), reopened_owner.clone()).unwrap();
+    let persisted = reopened_network.status(profile).unwrap();
+    let peer = persisted
+        .peers
+        .iter()
+        .find(|peer| peer.device_id == b.device_id)
+        .unwrap();
+    assert_eq!(peer.effective_alias, "Travel Room PC");
+    assert_eq!(peer.alias_verification, "confirmed");
+    assert!(peer.alias_confirmed_at_ms.is_some());
+
+    let generation = reopened_network.shared.lock().unwrap().generation;
+    reopened_network
+        .worker()
+        .remember_announcement(
+            enriched_announcement(
+                b.device_id,
+                pin.clone(),
+                43344,
+                "Renamed PC",
+                EnvironmentAliasSource::Custom,
+                2,
+            ),
+            "192.0.2.20:43344".parse().unwrap(),
+            generation,
+        )
+        .unwrap();
+    let renamed = reopened_network.status(profile).unwrap();
+    let peer = renamed
+        .peers
+        .iter()
+        .find(|peer| peer.device_id == b.device_id)
+        .unwrap();
+    assert_eq!(peer.effective_alias, "Renamed PC");
+    assert_eq!(peer.alias_verification, "signed");
+    assert_eq!(peer.alias_confirmed_at_ms, None);
+    let renamed_claim = reopened
+        .peer_alias_claims(&reopened_owner)
+        .unwrap()
+        .remove(&(b.device_id, pin.clone()))
+        .unwrap();
+    assert_eq!(renamed_claim.effective_alias, "Renamed PC");
+    assert_eq!(renamed_claim.revision, 2);
+    assert_eq!(renamed_claim.confirmed_at_ms, None);
+
+    reopened_network
+        .shared
+        .lock()
+        .unwrap()
+        .observed_aliases
+        .clear();
+    reopened_network
+        .worker()
+        .remember_announcement(
+            enriched_announcement(
+                b.device_id,
+                pin.clone(),
+                43344,
+                "Replayed old name",
+                EnvironmentAliasSource::Custom,
+                1,
+            ),
+            "192.0.2.21:43344".parse().unwrap(),
+            generation,
+        )
+        .unwrap();
+    let after_replay = reopened_network.status(profile).unwrap();
+    let peer = after_replay
+        .peers
+        .iter()
+        .find(|peer| peer.device_id == b.device_id)
+        .unwrap();
+    assert_eq!(peer.effective_alias, "Renamed PC");
+
+    reopened_network.stop().await.unwrap();
+    reopened.stop().unwrap();
+    let reopened_again = Arc::new(BetaHost::open(root.path()).unwrap());
+    let owner_again = reopened_again.owner_session().unwrap();
+    let network_again = PeerNetwork::new(reopened_again.clone(), owner_again).unwrap();
+    let after_restart = network_again.status(profile).unwrap();
+    let peer = after_restart
+        .peers
+        .iter()
+        .find(|peer| peer.device_id == b.device_id)
+        .unwrap();
+    assert_eq!(peer.alias_verification, "signed");
+    assert_eq!(peer.alias_source, EnvironmentAliasSource::Custom);
+    assert_eq!(peer.effective_alias, "Renamed PC");
+    assert_eq!(peer.alias_confirmed_at_ms, None);
+    network_again.stop().await.unwrap();
+    reopened_again.stop().unwrap();
+}
+
+#[test]
+fn auth_five_alias_migration_preserves_network_settings_and_rolls_back_on_failure() {
+    let (root, host, owner) = host();
+    host.save_peer_network_settings(
+        &owner,
+        PeerNetworkSettings {
+            enabled: true,
+            preferred_port: 43355,
+        },
+    )
+    .unwrap();
+    host.stop().unwrap();
+
+    let path = root.path().join("host-auth.sqlite3");
+    let mut database = rusqlite::Connection::open(&path).unwrap();
+    database
+        .execute_batch(
+            "DROP TABLE peer_environment_alias;
+             DROP TABLE peer_environment_alias_claims;
+             PRAGMA user_version=5;",
+        )
+        .unwrap();
+    super::super::membership_store::migrate(&mut database).unwrap();
+    assert_eq!(
+        database
+            .pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
+            .unwrap(),
+        6
+    );
+    assert_eq!(
+        super::super::network_store::settings(&database).unwrap(),
+        PeerNetworkSettings {
+            enabled: true,
+            preferred_port: 43355,
+        }
+    );
+    assert_eq!(
+        super::super::network_store::custom_environment_alias(&database).unwrap(),
+        None
+    );
+    drop(database);
+
+    let mut database = rusqlite::Connection::open(&path).unwrap();
+    database
+        .execute_batch(
+            "DROP TABLE peer_environment_alias;
+             DROP TABLE peer_environment_alias_claims;
+             CREATE TABLE peer_environment_alias(not_the_schema TEXT NOT NULL);
+             PRAGMA user_version=5;",
+        )
+        .unwrap();
+    super::super::network_store::validate_v5(&database).unwrap();
+    let before: (bool, u16) = database
+        .query_row(
+            "SELECT enabled,preferred_port FROM peer_network_settings WHERE singleton=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    let version: i64 = database
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert!(super::super::membership_store::migrate(&mut database).is_err());
+    assert_eq!(
+        database
+            .pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
+            .unwrap(),
+        version
+    );
+    super::super::network_store::validate_v5(&database).unwrap();
+    let after: (bool, u16) = database
+        .query_row(
+            "SELECT enabled,preferred_port FROM peer_network_settings WHERE singleton=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(after, before);
+    database
+        .execute_batch(
+            "DROP TABLE peer_environment_alias;
+             CREATE TABLE peer_environment_alias_claims(not_the_schema TEXT NOT NULL);
+             PRAGMA user_version=5;",
+        )
+        .unwrap();
+    let version_before_mid_ddl_failure: i64 = database
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert!(super::super::membership_store::migrate(&mut database).is_err());
+    assert_eq!(
+        database
+            .pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))
+            .unwrap(),
+        version_before_mid_ddl_failure
+    );
+    let alias_table_rolled_back: bool = database
+        .query_row(
+            "SELECT NOT EXISTS(SELECT 1 FROM sqlite_master WHERE name='peer_environment_alias')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(alias_table_rolled_back);
+    super::super::network_store::validate_v5(&database).unwrap();
+    assert_eq!(
+        database
+            .query_row(
+                "SELECT enabled,preferred_port FROM peer_network_settings WHERE singleton=1",
+                [],
+                |row| Ok((row.get::<_, bool>(0)?, row.get::<_, u16>(1)?)),
+            )
+            .unwrap(),
+        before
+    );
+    drop(database);
+    let error = match BetaHost::open(root.path()) {
+        Err(error) => error,
+        Ok(_) => panic!("corrupt migration unexpectedly opened"),
+    };
+    assert!(
+        matches!(
+            &error,
+            &HostError::PeerSyncRecoveryRequired
+                | &HostError::PeerSyncUnavailable
+                | &HostError::PeerMembershipRecoveryRequired
+        ),
+        "{error:?}"
+    );
 }
 
 async fn stopped(host: Arc<BetaHost>) {
@@ -1698,13 +2310,9 @@ async fn discovery_is_only_a_ttl_hint_until_pinned_service_promotes_it_and_keeps
     let unknown = DeviceId::new();
     let mut hints = vec![];
     for device in [unknown, b.device_id] {
-        let bytes = serde_json::to_vec(&Announcement {
-            protocol: "exomind-discovery/1".into(),
-            device_id: device,
-            fingerprint_sha256: pin.clone(),
-            listen_port: bad.port(),
-        })
-        .unwrap();
+        let bytes = legacy_announcement(device, pin.clone(), bad.port())
+            .legacy_bytes()
+            .unwrap();
         hints.push(bytes);
     }
     until_hint(
@@ -1778,13 +2386,9 @@ async fn discovery_is_only_a_ttl_hint_until_pinned_service_promotes_it_and_keeps
             }
         }
     });
-    let bytes = serde_json::to_vec(&Announcement {
-        protocol: "exomind-discovery/1".into(),
-        device_id: b.device_id,
-        fingerprint_sha256: pin,
-        listen_port: address.port(),
-    })
-    .unwrap();
+    let bytes = legacy_announcement(b.device_id, pin, address.port())
+        .legacy_bytes()
+        .unwrap();
     until_hint(
         "verified candidate synchronized without persisting loopback",
         &socket,
@@ -2017,12 +2621,7 @@ async fn invalid_discovery_advertisements_never_write_peer_routes() {
     };
     let source: std::net::SocketAddr = "127.0.0.1:53101".parse().unwrap();
     let valid_port = 53301;
-    let announcement = |device_id, fingerprint_sha256: String, listen_port| Announcement {
-        protocol: "exomind-discovery/1".into(),
-        device_id,
-        fingerprint_sha256,
-        listen_port,
-    };
+    let announcement = legacy_announcement;
 
     // A matching pin may create only an in-memory, expiring candidate.
     worker
@@ -2345,13 +2944,8 @@ async fn nearby_discovery_is_visible_bounded_and_never_becomes_peer_access() {
     network.set_enabled(true).await.unwrap();
 
     let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let announcement = Announcement {
-        protocol: "exomind-discovery/1".into(),
-        device_id: b.device_id,
-        fingerprint_sha256: pin.clone(),
-        listen_port: service_address.port(),
-    };
-    let bytes = serde_json::to_vec(&announcement).unwrap();
+    let announcement = legacy_announcement(b.device_id, pin.clone(), service_address.port());
+    let bytes = announcement.legacy_bytes().unwrap();
     let target = SocketAddr::from((Ipv4Addr::LOCALHOST, discovery_port()));
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     let mut nearby = Vec::new();
@@ -2377,6 +2971,11 @@ async fn nearby_discovery_is_visible_bounded_and_never_becomes_peer_access() {
         .unwrap();
     assert_eq!(candidate.addresses, vec![service_address.to_string()]);
     assert_eq!(candidate.verification_state, "unverified");
+    assert_eq!(candidate.fingerprint_sha256, pin);
+    assert_eq!(candidate.alias_source, EnvironmentAliasSource::StableId);
+    assert_eq!(candidate.alias_verification, "none");
+    assert_eq!(candidate.alias_confirmed_at_ms, None);
+    assert!(candidate.effective_alias.starts_with("外心 "));
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -2394,8 +2993,13 @@ async fn nearby_discovery_is_visible_bounded_and_never_becomes_peer_access() {
             .collect::<Vec<_>>(),
         vec![
             "addresses",
+            "alias_confirmed_at_ms",
+            "alias_source",
+            "alias_verification",
             "device_id",
+            "effective_alias",
             "expires_at_ms",
+            "fingerprint_sha256",
             "verification_state"
         ]
     );
@@ -2433,12 +3037,7 @@ async fn nearby_discovery_is_visible_bounded_and_never_becomes_peer_access() {
     for _ in 0..3 {
         worker
             .remember_announcement(
-                Announcement {
-                    protocol: "exomind-discovery/1".into(),
-                    device_id: b.device_id,
-                    fingerprint_sha256: pin.clone(),
-                    listen_port: service_address.port(),
-                },
+                legacy_announcement(b.device_id, pin.clone(), service_address.port()),
                 source,
                 generation,
             )
@@ -2455,12 +3054,7 @@ async fn nearby_discovery_is_visible_bounded_and_never_becomes_peer_access() {
     for port in 41000..41008 {
         worker
             .remember_announcement(
-                Announcement {
-                    protocol: "exomind-discovery/1".into(),
-                    device_id: b.device_id,
-                    fingerprint_sha256: pin.clone(),
-                    listen_port: port,
-                },
+                legacy_announcement(b.device_id, pin.clone(), port),
                 source,
                 generation,
             )
@@ -2481,12 +3075,11 @@ async fn nearby_discovery_is_visible_bounded_and_never_becomes_peer_access() {
     for index in 0..(MAX_CANDIDATE_DEVICES - 1) {
         worker
             .remember_announcement(
-                Announcement {
-                    protocol: "exomind-discovery/1".into(),
-                    device_id: DeviceId::new(),
-                    fingerprint_sha256: pin.clone(),
-                    listen_port: 40_000 + index as u16,
-                },
+                legacy_announcement(
+                    DeviceId::new(),
+                    pin.clone(),
+                    40_000 + index as u16,
+                ),
                 source,
                 generation,
             )
@@ -2495,12 +3088,7 @@ async fn nearby_discovery_is_visible_bounded_and_never_becomes_peer_access() {
     let overflow = DeviceId::new();
     worker
         .remember_announcement(
-            Announcement {
-                protocol: "exomind-discovery/1".into(),
-                device_id: overflow,
-                fingerprint_sha256: pin,
-                listen_port: 49_999,
-            },
+            legacy_announcement(overflow, pin, 49_999),
             source,
             generation,
         )

@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use serde::{Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
-pub(crate) const AUTH_VERSION: i64 = 5;
+pub(crate) const AUTH_VERSION: i64 = 6;
 const LAYOUT: &str = "exomind-peer-membership/1";
 pub(super) const MAX_JSON: usize = 16384;
 pub(super) const MAX_MEMBERS: i64 = 256;
@@ -84,12 +84,15 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), HostError> {
             super::sync_store::create_schema(&tx)?;
         }
         super::network_store::create(&tx)?;
-        // Complete and validate the historical chain at its own version.
-        // Never stamp 5 while skipping either the network4 or auto5 tables.
+        // Complete and validate each historical step before adding the next.
         tx.pragma_update(None, "user_version", 4)
             .map_err(unavailable)?;
         validate_v4(&tx)?;
         super::original_auto_store::create(&tx)?;
+        tx.pragma_update(None, "user_version", 5)
+            .map_err(unavailable)?;
+        validate_v5(&tx)?;
+        super::network_store::create_alias(&tx)?;
         tx.pragma_update(None, "user_version", AUTH_VERSION)
             .map_err(unavailable)?;
         tx.commit().map_err(unavailable)?;
@@ -101,6 +104,30 @@ pub(crate) fn migrate(connection: &mut Connection) -> Result<(), HostError> {
             .map_err(unavailable)?;
         validate_v4(&tx)?;
         super::original_auto_store::create(&tx)?;
+        tx.pragma_update(None, "user_version", 5)
+            .map_err(unavailable)?;
+        validate_v5(&tx)?;
+        super::network_store::create_alias(&tx)?;
+        tx.pragma_update(None, "user_version", AUTH_VERSION)
+            .map_err(unavailable)?;
+        tx.commit().map_err(unavailable)?;
+    } else if version == 5 {
+        validate_v5(connection)?;
+        let alias_table: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name='peer_environment_alias'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(unavailable)?;
+        if alias_table != 0 {
+            return Err(HostError::PeerSyncRecoveryRequired);
+        }
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(unavailable)?;
+        validate_v5(&tx)?;
+        super::network_store::create_alias(&tx)?;
         tx.pragma_update(None, "user_version", AUTH_VERSION)
             .map_err(unavailable)?;
         tx.commit().map_err(unavailable)?;
@@ -130,7 +157,19 @@ fn validate_v4(connection: &Connection) -> Result<(), HostError> {
     }
     validate_membership_layout(connection)?;
     super::sync_store::validate(connection)?;
-    super::network_store::validate(connection)
+    super::network_store::validate_v5(connection)
+}
+fn validate_v5(connection: &Connection) -> Result<(), HostError> {
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .map_err(unavailable)?;
+    if version != 5 {
+        return Err(HostError::PeerMembershipRecoveryRequired);
+    }
+    validate_membership_layout(connection)?;
+    super::sync_store::validate(connection)?;
+    super::network_store::validate_v5(connection)?;
+    super::original_auto_store::validate(connection)
 }
 fn validate_membership_layout(connection: &Connection) -> Result<(), HostError> {
     for (name, schema) in SCHEMAS {

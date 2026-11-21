@@ -1254,6 +1254,8 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             peer_commands::beta_peer_status,
             peer_commands::beta_peer_nearby_candidates,
             peer_commands::beta_peer_network_enabled,
+            peer_commands::beta_peer_get_environment_alias,
+            peer_commands::beta_peer_set_environment_alias,
             peer_commands::beta_peer_scan_scopes,
             peer_commands::beta_peer_scan_start,
             peer_commands::beta_peer_scan_status,

@@ -558,6 +558,10 @@ fn legacy_auth(version: i64) -> Connection {
     c.execute_batch("PRAGMA user_version=1;CREATE TABLE owner(singleton INTEGER PRIMARY KEY CHECK(singleton=1),token_hash TEXT NOT NULL);CREATE TABLE grants(id TEXT PRIMARY KEY,profile_id TEXT NOT NULL,kind TEXT NOT NULL,agent_id TEXT,token_hash TEXT UNIQUE NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);INSERT INTO owner VALUES(1,'synthetic-owner-hash');INSERT INTO grants VALUES('synthetic-grant','synthetic-P','observer',NULL,'synthetic-grant-hash',0);").unwrap();
     super::super::membership_store::migrate(&mut c).unwrap();
     drop_auto(&c);
+    if version <= 4 {
+        c.execute_batch("DROP TABLE peer_environment_alias;DROP TABLE peer_environment_alias_claims;")
+            .unwrap();
+    }
     if version <= 3 {
         c.execute_batch("DROP TABLE peer_network_routes;DROP TABLE peer_network_settings;")
             .unwrap();
@@ -581,7 +585,7 @@ fn legacy_auth_one_two_three_four_complete_every_required_step() {
         assert_eq!(
             c.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
                 .unwrap(),
-            5
+            super::super::membership_store::AUTH_VERSION
         );
         validate(&c).unwrap();
         for (name, value) in before {
