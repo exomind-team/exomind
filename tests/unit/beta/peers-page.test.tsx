@@ -109,6 +109,43 @@ describe('Beta device joining UI',()=>{
     await act(async()=>{flight.resolve({profile_id:P,peer_device_id:B,state:'ready'});await flight.promise;});
     expect(joined).not.toHaveBeenCalled();expect(input).toHaveValue('new-invitation');expect(screen.queryByText('加入「目标档案」')).not.toBeInTheDocument();
   });
+  it('automatically copies a freshly generated invitation through the supplied clipboard edge',async()=>{
+    const client=peers();const copyText=vi.fn(async()=>{});
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})} copyText={copyText}/>);
+
+    fireEvent.click(await screen.findByRole('button',{name:'生成邀请'}));
+
+    expect(await screen.findByText('邀请已生成并复制到剪贴板')).toBeInTheDocument();
+    expect(copyText).toHaveBeenCalledOnce();
+    expect(copyText).toHaveBeenCalledWith('opaque-secret');
+    expect(screen.getByLabelText('完整邀请')).toHaveValue('opaque-secret');
+  });
+  it('keeps a generated invitation visible when automatic copy fails and lets the user retry',async()=>{
+    const client=peers();const copyText=vi.fn(async()=>{}).mockRejectedValueOnce(new Error('clipboard denied'));
+    render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})} copyText={copyText}/>);
+
+    fireEvent.click(await screen.findByRole('button',{name:'生成邀请'}));
+
+    expect(await screen.findByText(/邀请已生成，但自动复制失败/)).toBeInTheDocument();
+    expect(screen.getByLabelText('完整邀请')).toHaveValue('opaque-secret');
+    const retry=screen.getByRole('button',{name:'复制邀请'});
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+    expect(await screen.findByText('完整邀请已复制')).toBeInTheDocument();
+    expect(copyText).toHaveBeenCalledTimes(2);
+  });
+  it('ignores copy feedback from an invitation owned by a previous profile scope',async()=>{
+    const client=peers();const pending=deferred<void>();const copyText=vi.fn(()=>pending.promise);
+    const view=render(<BetaPeersPage {...props} profileId={P} profileName="档案P" peers={client} onJoined={vi.fn(async()=>{})} copyText={copyText}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'生成邀请'}));
+    await waitFor(()=>expect(copyText).toHaveBeenCalledOnce());
+
+    view.rerender(<BetaPeersPage {...props} peers={client} profileId={Q} profileName="档案Q" onJoined={vi.fn(async()=>{})} copyText={copyText}/>);
+    await act(async()=>{pending.resolve();await pending.promise;});
+
+    expect(screen.queryByText('邀请已生成并复制到剪贴板')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('完整邀请')).not.toBeInTheDocument();
+  });
 });
 
 describe('Nearby device selection',()=>{

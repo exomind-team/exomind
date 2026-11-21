@@ -17,6 +17,7 @@ import type { BetaNearbyCandidate, BetaInvitation, BetaInvitationPreview, BetaPe
 import { BetaNearbyDevices } from './NearbyDeviceCandidates';
 import { BetaDeviceName } from './BetaDeviceName';
 import { useBetaDeviceNames } from './device-names';
+import { writeBetaMessageClipboard } from './beta-message-clipboard';
 
 type Life = { active: boolean };
 type NearbySelection = { device_id: string; address: string };
@@ -32,7 +33,7 @@ function peerState(peer: BetaPeer): string {
   if (peer.originals_sync === 'pending') return '记录已补齐，原件按需';
   return '记录已补齐，原件状态待确认';
 }
-export function BetaPeersPage({ peers, profileId, profileName, runtimeId, deviceId, onJoined, onEventsChanged, visible = true }: {
+export function BetaPeersPage({ peers, profileId, profileName, runtimeId, deviceId, onJoined, onEventsChanged, visible = true, copyText = writeBetaMessageClipboard }: {
   peers: BetaPeersClient | null;
   profileId: string;
   profileName: string;
@@ -41,6 +42,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   onJoined: (profileId: string) => Promise<void>;
   onEventsChanged?: (profileId: string) => void;
   visible?: boolean;
+  copyText?: (value: string) => Promise<void>;
 }) {
   const scope = useMemo(() => ({ peers, profileId, runtimeId, deviceId }), [peers, profileId, runtimeId, deviceId]);
   const names=useBetaDeviceNames(deviceId),peerLabel=(peer:BetaPeer)=>names.label(peer.device_id);
@@ -61,8 +63,10 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   const [preview, setPreview] = useState<BetaInvitationPreview | null>(null);
   const [pendingJoin, setPendingJoin] = useState<string | null>(null);
   const [revoke, setRevoke] = useState<BetaPeer | null>(null);
+  const [copyingInvitationId, setCopyingInvitationId] = useState<string | null>(null);
   const inputRevision = useRef(0);
   const operationFlight = useRef<Life | null>(null);
+  const copySequence = useRef(0);
   const eventsChanged = useRef(onEventsChanged); eventsChanged.current = onEventsChanged;
   const observedSync = useRef<string | null>(null);
   const readSequence = useRef(0);
@@ -106,8 +110,8 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   }
   useEffect(() => {
     const life: Life = { active: true }; lifecycle.current = life;
-    setStatus(null); setNearby([]); setNearbyError(''); setNearbySelection(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setInvitationText(''); setDialAddress(''); setShowDialAddress(false); setPendingJoin(null); setRevoke(null); observedSync.current = null; inputRevision.current++;
-    return () => { life.active = false; if (operationFlight.current === life) operationFlight.current = null; };
+    setStatus(null); setNearby([]); setNearbyError(''); setNearbySelection(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setInvitationText(''); setDialAddress(''); setShowDialAddress(false); setPendingJoin(null); setRevoke(null); setCopyingInvitationId(null); observedSync.current = null; inputRevision.current++; copySequence.current++;
+    return () => { life.active = false; copySequence.current++; if (operationFlight.current === life) operationFlight.current = null; };
   }, [scope]);
   useEffect(() => {
     const life = lifecycle.current;
@@ -136,6 +140,26 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
     try { await action(life); }
     catch (failure) { if (isCurrent(life)) setError(errorMessage(failure)); }
     finally { if (isCurrent(life)) { operationFlight.current = null; setOperation(null); } }
+  }
+  async function copyInvitation(life: Life, invitation: BetaInvitation, automatic: boolean) {
+    const sequence = ++copySequence.current;
+    setCopyingInvitationId(invitation.invitation_id);
+    setError('');
+    setNotice('');
+    try {
+      await copyText(invitation.invitation_text);
+      if (!isCurrent(life) || sequence !== copySequence.current) return;
+      setNotice(automatic ? '邀请已生成并复制到剪贴板' : '完整邀请已复制');
+    } catch (failure) {
+      if (!isCurrent(life) || sequence !== copySequence.current) return;
+      setError(`${automatic ? '邀请已生成，但自动复制失败' : '邀请复制失败'}：${errorMessage(failure)}。完整邀请仍保留，请全选文本手动复制或重试。`);
+    } finally {
+      if (isCurrent(life) && sequence === copySequence.current) setCopyingInvitationId(null);
+    }
+  }
+  function publishInvitation(life: Life, invitation: BetaInvitation) {
+    setCreated(invitation);
+    void copyInvitation(life, invitation, true);
   }
   async function join(life: Life) {
     if (!peers || !preview) return;
@@ -194,15 +218,14 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
       {statusError && <p role="alert" className="text-sm text-destructive">状态暂未更新：{statusError}{status ? '。以下保留上次确认结果。' : ''}</p>}
       {notice && <p role="status" className="text-sm text-secondary">{notice}</p>}
       {profileId && <SettingsSection title="邀请另一设备">
-        <SettingRow icon={<Plus className="size-4 text-muted"/>} label="生成完整邀请" right={<Button variant="outline" size="sm" disabled={!!operation} onClick={() => void perform('create', async life => {
-          const result = await peers.createInvitation(profileId); if (isCurrent(life)) setCreated(result);
+        <SettingRow icon={<Plus className="size-4 text-muted"/>} label="生成完整邀请" right={<Button variant="outline" size="sm" disabled={!!operation || !!copyingInvitationId} onClick={() => void perform('create', async life => {
+          const result = await peers.createInvitation(profileId); if (isCurrent(life)) publishInvitation(life,result);
         })}>{operation === 'create' ? '正在生成…' : '生成邀请'}</Button>}/>
         {created && <div className="space-y-3 px-4 pb-4">
           <Textarea aria-label="完整邀请" readOnly value={created.invitation_text} onFocus={event => event.currentTarget.select()} className="min-h-20 text-xs"/>
-          <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-muted">有效期至 {new Date(created.expires_at_ms).toLocaleString()}</span><Button variant="outline" size="sm" onClick={() => void perform('copy', async life => {
-            if (!navigator.clipboard?.writeText) throw new Error('当前环境无法自动复制，请全选邀请文本后复制');
-            await navigator.clipboard.writeText(created.invitation_text); if (isCurrent(life)) setNotice('完整邀请已复制');
-          })}><Copy size={14}/>复制邀请</Button></div>
+          <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-muted">有效期至 {new Date(created.expires_at_ms).toLocaleString()}</span><Button variant="outline" size="sm" disabled={!!operation || !!copyingInvitationId} onClick={() => void perform('copy', async life => {
+            await copyInvitation(life, created, false);
+          })}><Copy size={14}/>{copyingInvitationId === created.invitation_id ? '正在复制…' : '复制邀请'}</Button></div>
         </div>}
       </SettingsSection>}
       <SettingsSection title="加入已有档案">
@@ -244,7 +267,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
             {peer.last_sync_at_ms !== null && <div className="flex items-center gap-1 text-xs text-muted"><span>上次确认</span><EventTimestamp timestamp={peer.last_sync_at_ms} now={now} mode={dateMode}/></div>}
             {!!peer.history_gaps?.length&&<details className="space-y-2 text-xs text-secondary"><summary className="cursor-pointer">部分历史还不能完整中转（{peer.history_gaps.length} 项）</summary><p>上次同步发现：部分已保存历史的可验证转发前缀尚未补齐。请让仍持有原身份的来源设备用新版上线，或核对来源授权；现有资料保留。已知附件可独立获取。</p>{peer.history_gaps.map(gap=><div key={`${gap.direction}:${gap.origin_device_id}`} className="rounded-lg border border-border-card p-2"><BetaDeviceName localDeviceId={deviceId} deviceId={gap.origin_device_id}/><p>{gap.direction==='to_peer'?'本机 → 对方':'对方 → 本机'} · 保存位置 {gap.materialized_seq} · 可验证转发位置 {gap.available_seq??'尚未建立'}</p></div>)}</details>}
             <details className="text-xs text-muted"><summary className="cursor-pointer py-1">连接详情</summary><dl className="space-y-2 py-2"><div><dt>设备身份</dt><dd className="break-all font-mono">{peer.device_id}</dd></div><div><dt>身份指纹</dt><dd className="break-all font-mono">{peer.fingerprint_sha256}</dd></div>{peer.last_error_code && <div><dt>最近错误</dt><dd className="break-all">{peer.last_error_code}</dd></div>}{!!peer.endpoints.length && <div><dt>连接地址</dt><dd className="break-all">{peer.endpoints.join('、')}</dd></div>}</dl>
-              <Button variant="outline" size="sm" disabled={!!operation || !!statusError} onClick={() => void perform('replace', async life => { const result = await peers.createInvitation(profileId, peer.device_id); if (isCurrent(life)) setCreated(result); })}>重新授权此设备</Button>
+              <Button variant="outline" size="sm" disabled={!!operation || !!statusError || !!copyingInvitationId} onClick={() => void perform('replace', async life => { const result = await peers.createInvitation(profileId, peer.device_id); if (isCurrent(life)) publishInvitation(life,result); })}>重新授权此设备</Button>
               {peer.member_state !== 'revoked' && <Button variant="ghost" size="sm" disabled={!!operation} onClick={() => setRevoke(peer)}><ShieldOff size={14}/>撤销设备授权</Button>}
             </details>
           </div>
