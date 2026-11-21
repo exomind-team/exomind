@@ -18,7 +18,6 @@ pub mod mobile_display_commands;
 pub mod now_workbench_overlay_commands;
 #[cfg(feature = "alpha-legacy-runtime")]
 pub mod runtime_commands;
-#[cfg(feature = "alpha-legacy-runtime")]
 pub mod shortcut_commands;
 #[cfg(feature = "alpha-legacy-runtime")]
 pub mod timeblock_end_alert_commands;

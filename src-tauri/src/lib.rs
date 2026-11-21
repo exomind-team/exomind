@@ -63,10 +63,11 @@ use commands::runtime_commands::{
 use commands::shortcut_commands::{
     ensure_voice_overlay_window, foreground_window_get, main_window_shortcut_get,
     main_window_shortcut_set, main_window_shortcut_take_pending_activation,
-    register_main_window_shortcut, register_voice_shortcut, simulate_enter, simulate_paste,
+    quick_exit_shortcut_get, quick_exit_shortcut_set, register_main_window_shortcut,
+    register_quick_exit_shortcut, register_voice_shortcut, simulate_enter, simulate_paste,
     voice_overlay_hide, voice_overlay_set_bottom_offset, voice_overlay_show,
     voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, MainWindowShortcutState,
-    VoiceShortcutState,
+    QuickExitShortcutState, VoiceShortcutState,
 };
 #[cfg(feature = "alpha-legacy-runtime")]
 use commands::timeblock_end_alert_commands::{
@@ -336,6 +337,8 @@ pub fn run() {
     let runtime_process_state_for_setup = runtime_process_state.clone();
     let voice_shortcut_state = VoiceShortcutState::new();
     let main_window_shortcut_state = MainWindowShortcutState::new();
+    let quick_exit_shortcut_state =
+        QuickExitShortcutState::with_exit_handler(crate::app_lifecycle::request_exit);
     let volcano_asr_stream_state = std::sync::Arc::new(VolcanoAsrStreamState::default());
     let mut log_targets = vec![
         Target::new(TargetKind::Stdout),
@@ -403,6 +406,7 @@ pub fn run() {
         .manage(app_lifecycle::AppExitState::default())
         .manage(voice_shortcut_state)
         .manage(main_window_shortcut_state)
+        .manage(quick_exit_shortcut_state)
         .manage(volcano_asr_stream_state)
         .setup(move |app| {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -438,6 +442,8 @@ pub fn run() {
                 &main_window_shortcut_state,
                 &voice_shortcut_state,
             );
+            let quick_exit_shortcut_state = app.state::<QuickExitShortcutState>();
+            register_quick_exit_shortcut(app.handle(), &quick_exit_shortcut_state);
             if let Err(error) = ensure_voice_overlay_window(app.handle()) {
                 log::warn!("failed to prewarm voice overlay window: {error}");
             }
@@ -576,6 +582,8 @@ pub fn run() {
             main_window_shortcut_set,
             main_window_shortcut_get,
             main_window_shortcut_take_pending_activation,
+            quick_exit_shortcut_set,
+            quick_exit_shortcut_get,
             voice_recording_set_active,
             foreground_window_get,
             // Windows 桌面停靠 / Windows AppBar

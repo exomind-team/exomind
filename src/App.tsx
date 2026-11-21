@@ -23,6 +23,7 @@ import {
   getMainWindowShortcutService,
   initMainWindowShortcutService,
 } from "@/services/main-window-shortcut.service";
+import { initQuickExitShortcutRuntime } from "@/services/quick-exit-shortcut-runtime";
 import { getNowWorkbenchOverlayService } from "@/services/now-workbench-overlay.service";
 import "./App.css";
 
@@ -31,6 +32,7 @@ function App() {
     initUpdateChecker();
     initVoiceShortcutService();
     initMainWindowShortcutService();
+    void initQuickExitShortcutRuntime();
     void getNowWorkbenchOverlayService().init();
     return () => {
       destroyUpdateChecker();

@@ -37,6 +37,8 @@ static VOICE_CANCEL_KEY_DOWN: AtomicBool = AtomicBool::new(false);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 static MAIN_WINDOW_SHORTCUT_KEY_DOWN: AtomicBool = AtomicBool::new(false);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+static QUICK_EXIT_SHORTCUT_KEY_DOWN: AtomicBool = AtomicBool::new(false);
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 static VOICE_OVERLAY_BOTTOM_MARGIN: AtomicI32 = AtomicI32::new(DEFAULT_VOICE_OVERLAY_BOTTOM_MARGIN);
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -119,6 +121,51 @@ impl MainWindowShortcutState {
 
     fn take_pending_activation(&self) -> bool {
         self.pending_activation.swap(false, Ordering::SeqCst)
+    }
+}
+
+/// Quick-exit shortcut runtime state（快速退出快捷键状态）.
+///
+/// Defaults to unassigned: quick exit never owns a destructive global chord
+/// until the user explicitly captures one in settings.
+#[derive(Default)]
+pub struct QuickExitShortcutState {
+    shortcut: Mutex<Option<String>>,
+    request_exit: Option<QuickExitRequest>,
+}
+
+type QuickExitRequest = fn(&AppHandle, i32);
+
+impl QuickExitShortcutState {
+    pub fn new() -> Self {
+        Self {
+            shortcut: Mutex::new(None),
+            request_exit: None,
+        }
+    }
+
+    pub fn with_exit_handler(request_exit: QuickExitRequest) -> Self {
+        Self {
+            shortcut: Mutex::new(None),
+            request_exit: Some(request_exit),
+        }
+    }
+
+    fn get(&self) -> Option<String> {
+        self.shortcut
+            .lock()
+            .map(|value| value.clone())
+            .unwrap_or(None)
+    }
+
+    fn set(&self, shortcut: Option<String>) {
+        if let Ok(mut value) = self.shortcut.lock() {
+            *value = shortcut;
+        }
+    }
+
+    fn exit_handler(&self) -> Option<QuickExitRequest> {
+        self.request_exit
     }
 }
 
@@ -375,6 +422,448 @@ fn normalize_shortcut(raw_shortcut: &str) -> Result<String, String> {
         return Err("voice shortcut cannot be empty".to_string());
     }
     Ok(normalized.to_string())
+}
+
+/// Validate and canonicalize a quick-exit accelerator string.
+///
+/// The capture UI produces the same canonical form (`Cmd` first on macOS,
+/// then `Ctrl`/`Alt`/`Shift`, then one supported primary key), so this mirrors
+/// the front-end contract and remains the authoritative OS-facing gate.
+fn normalize_quick_exit_accelerator(raw_accelerator: &str) -> Result<String, String> {
+    let normalized = raw_accelerator.trim();
+    if normalized.is_empty() {
+        return Err("quick exit shortcut cannot be empty".to_string());
+    }
+    if let Some(reason) = reserved_quick_exit_accelerator_reason(normalized) {
+        return Err(format!(
+            "quick exit shortcut {normalized} is reserved by the operating system: {reason}"
+        ));
+    }
+
+    let mut has_ctrl = false;
+    let mut has_alt = false;
+    let mut has_shift = false;
+    #[cfg(target_os = "macos")]
+    let mut has_cmd = false;
+    let mut seen_modifiers = std::collections::HashSet::new();
+    let mut primary_key: Option<String> = None;
+
+    for token in normalized.split('+') {
+        let token = token.trim();
+        if token.is_empty() {
+            return Err(format!(
+                "invalid quick exit shortcut {normalized}: empty token"
+            ));
+        }
+
+        match token.to_ascii_uppercase().as_str() {
+            "CTRL" | "CONTROL" => {
+                if !seen_modifiers.insert("Ctrl") {
+                    return Err(format!(
+                        "invalid quick exit shortcut {normalized}: duplicate Ctrl modifier"
+                    ));
+                }
+                has_ctrl = true;
+            }
+            "ALT" | "OPTION" => {
+                if !seen_modifiers.insert("Alt") {
+                    return Err(format!(
+                        "invalid quick exit shortcut {normalized}: duplicate Alt modifier"
+                    ));
+                }
+                has_alt = true;
+            }
+            "SHIFT" => {
+                if !seen_modifiers.insert("Shift") {
+                    return Err(format!(
+                        "invalid quick exit shortcut {normalized}: duplicate Shift modifier"
+                    ));
+                }
+                has_shift = true;
+            }
+            "CMD" | "COMMAND" | "SUPER" => {
+                #[cfg(target_os = "macos")]
+                {
+                    if !seen_modifiers.insert("Cmd") {
+                        return Err(format!(
+                            "invalid quick exit shortcut {normalized}: duplicate Cmd modifier"
+                        ));
+                    }
+                    has_cmd = true;
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    return Err(format!(
+                        "quick exit shortcut {normalized} uses an OS-reserved modifier"
+                    ));
+                }
+            }
+            "META" | "COMMANDORCONTROL" | "CMDORCTRL" | "CMDORCONTROL" | "COMMANDORCTRL" => {
+                return Err(format!(
+                    "quick exit shortcut {normalized} uses an OS-reserved modifier"
+                ));
+            }
+            other => {
+                if primary_key.is_some() {
+                    return Err(format!(
+                        "invalid quick exit shortcut {normalized}: more than one primary key"
+                    ));
+                }
+                if !is_supported_quick_exit_key(other) {
+                    return Err(format!("unsupported quick exit shortcut key {other}"));
+                }
+                primary_key = Some(canonical_quick_exit_key(other));
+            }
+        }
+    }
+
+    let primary_key = primary_key
+        .ok_or_else(|| format!("invalid quick exit shortcut {normalized}: missing key"))?;
+    #[cfg(target_os = "macos")]
+    let has_required_modifier = has_ctrl || has_alt || has_shift || has_cmd;
+    #[cfg(not(target_os = "macos"))]
+    let has_required_modifier = has_ctrl || has_alt || has_shift;
+    if !has_required_modifier {
+        return Err(format!(
+            "quick exit shortcut {normalized} needs at least one modifier"
+        ));
+    }
+
+    let mut parts = Vec::with_capacity(5);
+    #[cfg(target_os = "macos")]
+    if has_cmd {
+        parts.push("Cmd");
+    }
+    if has_ctrl {
+        parts.push("Ctrl");
+    }
+    if has_alt {
+        parts.push("Alt");
+    }
+    if has_shift {
+        parts.push("Shift");
+    }
+    parts.push(&primary_key);
+    let accelerator = parts.join("+");
+    if is_reserved_quick_exit_accelerator(&accelerator) {
+        return Err(format!(
+            "quick exit shortcut {accelerator} is reserved by the operating system"
+        ));
+    }
+    Ok(accelerator)
+}
+
+fn reserved_quick_exit_accelerator_reason(accelerator: &str) -> Option<&'static str> {
+    let mut has_ctrl = false;
+    let mut has_alt = false;
+    let mut has_shift = false;
+    let mut has_cmd = false;
+    let mut primary_key: Option<String> = None;
+    let mut seen_modifiers = std::collections::HashSet::new();
+
+    for token in accelerator.split('+') {
+        let token = token.trim();
+        if token.is_empty() {
+            return None;
+        }
+        let upper = token.to_ascii_uppercase();
+        let modifier = match upper.as_str() {
+            "CTRL" | "CONTROL" => Some("Ctrl"),
+            "ALT" | "OPTION" => Some("Alt"),
+            "SHIFT" => Some("Shift"),
+            "CMD" | "COMMAND" | "SUPER" => Some("Cmd"),
+            _ => None,
+        };
+        if let Some(modifier) = modifier {
+            if !seen_modifiers.insert(modifier) {
+                return None;
+            }
+            match modifier {
+                "Ctrl" => has_ctrl = true,
+                "Alt" => has_alt = true,
+                "Shift" => has_shift = true,
+                "Cmd" => has_cmd = true,
+                _ => unreachable!(),
+            }
+            continue;
+        }
+        if primary_key.replace(upper).is_some() {
+            return None;
+        }
+    }
+
+    let primary_key = primary_key?;
+    #[cfg(target_os = "macos")]
+    {
+        if has_cmd && primary_key == "TAB" {
+            return Some("Cmd+Tab is reserved for macOS application switching");
+        }
+        if has_cmd && primary_key == "SPACE" {
+            return Some("Cmd+Space is reserved for macOS Spotlight");
+        }
+        let _ = (has_ctrl, has_alt, has_shift);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if has_ctrl && has_alt && primary_key == "DELETE" {
+            return Some("Ctrl+Alt+Delete is reserved by Windows");
+        }
+        if has_ctrl && has_shift && primary_key == "ESCAPE" {
+            return Some("Ctrl+Shift+Escape is reserved by Windows Task Manager");
+        }
+        if has_alt && primary_key == "F4" {
+            return Some("Alt+F4 is reserved by Windows");
+        }
+        let _ = has_cmd;
+    }
+    None
+}
+
+fn is_reserved_quick_exit_accelerator(accelerator: &str) -> bool {
+    let normalized = accelerator.to_ascii_lowercase();
+    #[cfg(target_os = "macos")]
+    {
+        normalized == "cmd+tab" || normalized == "cmd+space"
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        normalized == "ctrl+alt+delete"
+            || normalized == "ctrl+shift+escape"
+            || normalized == "alt+f4"
+    }
+}
+
+fn is_supported_quick_exit_key(token: &str) -> bool {
+    let upper = token.to_ascii_uppercase();
+    if upper == "SPACE" {
+        return true;
+    }
+    if let Some(digits) = upper.strip_prefix('F') {
+        return digits
+            .parse::<u8>()
+            .map(|number| (1..=12).contains(&number))
+            .unwrap_or(false);
+    }
+    let mut chars = upper.chars();
+    matches!((chars.next(), chars.next()), (Some(c), None) if c.is_ascii_alphabetic() || c.is_ascii_digit())
+}
+
+fn canonical_quick_exit_key(token: &str) -> String {
+    let upper = token.to_ascii_uppercase();
+    if upper == "SPACE" {
+        "Space".to_string()
+    } else {
+        upper
+    }
+}
+
+/// Register the configured quick-exit shortcut at startup（启动时注册快速退出快捷键）.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn register_quick_exit_shortcut(app: &AppHandle, state: &QuickExitShortcutState) {
+    if let Some(shortcut) = state.get() {
+        if let Err(error) =
+            register_quick_exit_shortcut_listener(app, &shortcut, state.exit_handler())
+        {
+            log::warn!("failed to register quick exit shortcut {shortcut}: {error}");
+        }
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn register_quick_exit_shortcut(_app: &AppHandle, _state: &QuickExitShortcutState) {}
+
+/// Apply quick-exit hotkey change at runtime（运行时热更新快速退出快捷键）.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn apply_quick_exit_shortcut(
+    app: &AppHandle,
+    state: &QuickExitShortcutState,
+    voice_state: &VoiceShortcutState,
+    main_window_state: &MainWindowShortcutState,
+    raw_shortcut: Option<&str>,
+) -> Result<Option<String>, String> {
+    apply_quick_exit_shortcut_with_registry(
+        state,
+        &voice_state.get(),
+        main_window_state.get().as_deref(),
+        raw_shortcut,
+        &TauriQuickExitShortcutRegistry {
+            app,
+            exit_handler: state.exit_handler(),
+        },
+    )
+}
+
+// The transition is exercised with a controlled registry in tests, mirroring
+// the main-window shortcut OS adapter boundary.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+trait QuickExitShortcutRegistry {
+    fn is_registered(&self, shortcut: &str) -> bool;
+    fn unregister(&self, shortcut: &str) -> Result<(), String>;
+    fn register(&self, shortcut: &str) -> Result<(), String>;
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+struct TauriQuickExitShortcutRegistry<'a> {
+    app: &'a AppHandle,
+    exit_handler: Option<QuickExitRequest>,
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl QuickExitShortcutRegistry for TauriQuickExitShortcutRegistry<'_> {
+    fn is_registered(&self, shortcut: &str) -> bool {
+        self.app.global_shortcut().is_registered(shortcut)
+    }
+
+    fn unregister(&self, shortcut: &str) -> Result<(), String> {
+        self.app
+            .global_shortcut()
+            .unregister(shortcut)
+            .map_err(|error| error.to_string())
+    }
+
+    fn register(&self, shortcut: &str) -> Result<(), String> {
+        register_quick_exit_shortcut_listener(self.app, shortcut, self.exit_handler)
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn apply_quick_exit_shortcut_with_registry(
+    state: &QuickExitShortcutState,
+    voice_shortcut: &str,
+    main_window_shortcut: Option<&str>,
+    raw_shortcut: Option<&str>,
+    registry: &impl QuickExitShortcutRegistry,
+) -> Result<Option<String>, String> {
+    let next_shortcut = raw_shortcut
+        .map(normalize_quick_exit_accelerator)
+        .transpose()?;
+    let mut current = state
+        .shortcut
+        .lock()
+        .map_err(|_| "failed to lock quick exit shortcut state".to_string())?;
+    let was_registered = current
+        .as_deref()
+        .is_some_and(|shortcut| registry.is_registered(shortcut));
+
+    if *current == next_shortcut && (next_shortcut.is_none() || was_registered) {
+        return Ok(current.clone());
+    }
+
+    if let Some(next_shortcut_value) = next_shortcut.as_ref() {
+        if current.as_deref() != Some(next_shortcut_value)
+            && registry.is_registered(next_shortcut_value)
+        {
+            return Err(format!(
+                "shortcut {next_shortcut_value} is already registered by this application"
+            ));
+        }
+        if voice_shortcut.eq_ignore_ascii_case(next_shortcut_value) {
+            return Err(format!(
+                "shortcut conflicts with voice shortcut {voice_shortcut}"
+            ));
+        }
+        if let Some(main_window_shortcut) = main_window_shortcut {
+            if main_window_shortcut.eq_ignore_ascii_case(next_shortcut_value) {
+                return Err(format!(
+                    "shortcut conflicts with main window shortcut {main_window_shortcut}"
+                ));
+            }
+        }
+    }
+
+    if let Some(current_value) = current.as_deref().filter(|_| was_registered) {
+        registry.unregister(current_value)?;
+    }
+
+    if let Some(next_shortcut_value) = next_shortcut.as_ref() {
+        if let Err(error) = registry.register(next_shortcut_value) {
+            let message =
+                format!("failed to register quick exit shortcut {next_shortcut_value}: {error}");
+            if let Some(current_value) = current.as_deref().filter(|_| was_registered) {
+                if let Err(restore_error) = registry.register(current_value) {
+                    return Err(format!(
+                        "{message}; failed to restore previous shortcut {current_value}: {restore_error}"
+                    ));
+                }
+            }
+            return Err(message);
+        }
+    }
+
+    *current = next_shortcut.clone();
+    Ok(next_shortcut)
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn apply_quick_exit_shortcut(
+    _app: &AppHandle,
+    state: &QuickExitShortcutState,
+    _voice_state: &VoiceShortcutState,
+    _main_window_state: &MainWindowShortcutState,
+    raw_shortcut: Option<&str>,
+) -> Result<Option<String>, String> {
+    let next_shortcut = raw_shortcut
+        .map(normalize_quick_exit_accelerator)
+        .transpose()?;
+    state.set(next_shortcut.clone());
+    Ok(next_shortcut)
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn register_quick_exit_shortcut_listener(
+    app: &AppHandle,
+    shortcut: &str,
+    exit_handler: Option<QuickExitRequest>,
+) -> Result<(), String> {
+    if app.global_shortcut().is_registered(shortcut) {
+        return Err(format!(
+            "shortcut {shortcut} is already registered by this application"
+        ));
+    }
+    app.global_shortcut()
+        .on_shortcut(shortcut, move |app, _shortcut, event| {
+            handle_quick_exit_shortcut_event(app, event, exit_handler);
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+enum QuickExitEdge {
+    Dispatch,
+    SuppressRepeat,
+    Release,
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn quick_exit_edge(state: ShortcutState, key_down: &AtomicBool) -> QuickExitEdge {
+    match state {
+        ShortcutState::Pressed => {
+            if key_down.swap(true, Ordering::SeqCst) {
+                QuickExitEdge::SuppressRepeat
+            } else {
+                QuickExitEdge::Dispatch
+            }
+        }
+        ShortcutState::Released => {
+            key_down.store(false, Ordering::SeqCst);
+            QuickExitEdge::Release
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn handle_quick_exit_shortcut_event(
+    app: &AppHandle,
+    event: ShortcutEvent,
+    exit_handler: Option<QuickExitRequest>,
+) {
+    match quick_exit_edge(event.state, &QUICK_EXIT_SHORTCUT_KEY_DOWN) {
+        QuickExitEdge::Dispatch => match exit_handler {
+            Some(request_exit) => request_exit(app, 0),
+            None => log::error!("quick exit shortcut has no application shutdown handler"),
+        },
+        QuickExitEdge::SuppressRepeat | QuickExitEdge::Release => {}
+    }
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -993,6 +1482,32 @@ pub async fn main_window_shortcut_take_pending_activation(
     Ok(state.take_pending_activation())
 }
 
+/// Update quick-exit shortcut by settings page（设置页更新快速退出快捷键）.
+#[tauri::command]
+pub async fn quick_exit_shortcut_set(
+    app: AppHandle,
+    state: State<'_, QuickExitShortcutState>,
+    voice_state: State<'_, VoiceShortcutState>,
+    main_window_state: State<'_, MainWindowShortcutState>,
+    shortcut: Option<String>,
+) -> Result<Option<String>, String> {
+    apply_quick_exit_shortcut(
+        &app,
+        &state,
+        &voice_state,
+        &main_window_state,
+        shortcut.as_deref(),
+    )
+}
+
+/// Read current quick-exit shortcut（读取当前快速退出快捷键）.
+#[tauri::command]
+pub async fn quick_exit_shortcut_get(
+    state: State<'_, QuickExitShortcutState>,
+) -> Result<Option<String>, String> {
+    Ok(state.get())
+}
+
 /// Sync recording lifecycle（同步录音生命周期）to arm/disarm global Esc cancel.
 #[tauri::command]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1062,12 +1577,17 @@ pub async fn foreground_window_focus(_window_handle: String) -> Result<bool, Str
 
 #[cfg(test)]
 mod tests {
+    use super::normalize_quick_exit_accelerator;
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    use super::{apply_quick_exit_shortcut_with_registry, quick_exit_edge, QuickExitEdge};
     use super::{
         MonitorGeometry, SyntheticPasteModifier, SyntheticShortcutStep, calculate_overlay_position,
         choose_voice_overlay_anchor, cursor_in_monitor, paste_shortcut_character,
         paste_shortcut_modifier, paste_shortcut_steps, transparent_overlay_background_color,
     };
     use tauri::window::Color;
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    use tauri_plugin_global_shortcut::ShortcutState;
 
     #[derive(Default)]
     struct ControlledMainWindowShortcutRegistry {
@@ -1094,6 +1614,297 @@ mod tests {
             self.registered.borrow_mut().insert(shortcut.to_string());
             Ok(())
         }
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[derive(Default)]
+    struct ControlledQuickExitShortcutRegistry {
+        registered: std::cell::RefCell<std::collections::HashSet<String>>,
+        occupied: std::cell::RefCell<std::collections::HashSet<String>>,
+        attempts: std::cell::RefCell<Vec<String>>,
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    impl super::QuickExitShortcutRegistry for ControlledQuickExitShortcutRegistry {
+        fn is_registered(&self, shortcut: &str) -> bool {
+            self.registered.borrow().contains(shortcut)
+        }
+
+        fn unregister(&self, shortcut: &str) -> Result<(), String> {
+            self.registered.borrow_mut().remove(shortcut);
+            Ok(())
+        }
+
+        fn register(&self, shortcut: &str) -> Result<(), String> {
+            self.attempts.borrow_mut().push(shortcut.to_string());
+            if self.occupied.borrow().contains(shortcut) {
+                return Err("shortcut is occupied".to_string());
+            }
+            self.registered.borrow_mut().insert(shortcut.to_string());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn quick_exit_accelerator_canonicalizes_modifier_order_and_key() {
+        assert_eq!(
+            normalize_quick_exit_accelerator("shift+alt+ctrl+a").unwrap(),
+            "Ctrl+Alt+Shift+A"
+        );
+        assert_eq!(
+            normalize_quick_exit_accelerator("  Alt+F5 ").unwrap(),
+            "Alt+F5"
+        );
+        assert_eq!(
+            normalize_quick_exit_accelerator("Ctrl+Space").unwrap(),
+            "Ctrl+Space"
+        );
+        assert_eq!(
+            normalize_quick_exit_accelerator("Control+3").unwrap(),
+            "Ctrl+3"
+        );
+    }
+
+    #[test]
+    fn quick_exit_accelerator_rejects_lone_keys() {
+        assert!(normalize_quick_exit_accelerator("A")
+            .unwrap_err()
+            .contains("modifier"));
+        assert!(normalize_quick_exit_accelerator("F5")
+            .unwrap_err()
+            .contains("modifier"));
+    }
+
+    #[test]
+    fn quick_exit_accelerator_rejects_reserved_and_unsupported_keys() {
+        assert!(normalize_quick_exit_accelerator("Ctrl+Meta+A")
+            .unwrap_err()
+            .contains("OS-reserved"));
+        assert!(normalize_quick_exit_accelerator("Ctrl+Enter")
+            .unwrap_err()
+            .contains("unsupported"));
+        assert!(normalize_quick_exit_accelerator("Ctrl+Escape")
+            .unwrap_err()
+            .contains("unsupported"));
+        assert!(normalize_quick_exit_accelerator("Ctrl+Backspace")
+            .unwrap_err()
+            .contains("unsupported"));
+        assert!(normalize_quick_exit_accelerator("Ctrl+A+B")
+            .unwrap_err()
+            .contains("more than one"));
+        assert!(normalize_quick_exit_accelerator("")
+            .unwrap_err()
+            .contains("empty"));
+    }
+
+    #[test]
+    fn quick_exit_accelerator_rejects_duplicate_modifiers() {
+        assert!(normalize_quick_exit_accelerator("Ctrl+Ctrl+A")
+            .unwrap_err()
+            .contains("duplicate"));
+        assert!(normalize_quick_exit_accelerator("Control+Alt+Ctrl+A")
+            .unwrap_err()
+            .contains("duplicate"));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn quick_exit_accelerator_rejects_platform_reserved_combinations() {
+        assert!(normalize_quick_exit_accelerator("Ctrl+Alt+Delete")
+            .unwrap_err()
+            .contains("reserved"));
+        assert!(normalize_quick_exit_accelerator("Ctrl+Shift+Escape")
+            .unwrap_err()
+            .contains("reserved"));
+        assert!(normalize_quick_exit_accelerator("Alt+F4")
+            .unwrap_err()
+            .contains("reserved"));
+        assert!(normalize_quick_exit_accelerator("Cmd+A")
+            .unwrap_err()
+            .contains("OS-reserved"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn quick_exit_accelerator_accepts_command_on_macos() {
+        assert_eq!(
+            normalize_quick_exit_accelerator("cmd+shift+a").unwrap(),
+            "Cmd+Shift+A"
+        );
+        assert!(normalize_quick_exit_accelerator("Cmd+Tab")
+            .unwrap_err()
+            .contains("reserved"));
+        assert!(normalize_quick_exit_accelerator("Cmd+Space")
+            .unwrap_err()
+            .contains("reserved"));
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn quick_exit_assigning_and_clearing_registers_and_releases() {
+        let state = super::QuickExitShortcutState::new();
+        let registry = ControlledQuickExitShortcutRegistry::default();
+
+        apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            Some("Ctrl+Alt+X"),
+            &registry,
+        )
+        .unwrap();
+        assert!(registry.registered.borrow().contains("Ctrl+Alt+X"));
+        assert_eq!(state.get().as_deref(), Some("Ctrl+Alt+X"));
+
+        apply_quick_exit_shortcut_with_registry(&state, "Alt+Q", Some("Ctrl+E"), None, &registry)
+            .unwrap();
+        assert!(registry.registered.borrow().is_empty());
+        assert_eq!(state.get(), None);
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn quick_exit_rejects_duplicate_voice_shortcut_without_touching_registry() {
+        let state = super::QuickExitShortcutState::new();
+        let registry = ControlledQuickExitShortcutRegistry::default();
+
+        let error = apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            Some("Alt+Q"),
+            &registry,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("voice shortcut Alt+Q"));
+        assert!(registry.registered.borrow().is_empty());
+        assert_eq!(state.get(), None);
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn quick_exit_rejects_duplicate_main_window_shortcut() {
+        let state = super::QuickExitShortcutState::new();
+        let registry = ControlledQuickExitShortcutRegistry::default();
+
+        let error = apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            Some("Ctrl+E"),
+            &registry,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("main window shortcut Ctrl+E"));
+        assert!(registry.registered.borrow().is_empty());
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn quick_exit_failure_restores_the_owned_previous_key() {
+        let previous = "Ctrl+Alt+X";
+        let replacement = "Ctrl+Shift+Z";
+        let state = super::QuickExitShortcutState::new();
+        let registry = ControlledQuickExitShortcutRegistry::default();
+        registry.registered.borrow_mut().insert(previous.into());
+        registry.occupied.borrow_mut().insert(replacement.into());
+        state.set(Some(previous.into()));
+
+        assert_eq!(state.get().as_deref(), Some(previous));
+        assert!(registry.registered.borrow().contains(previous));
+        assert!(registry.attempts.borrow().is_empty());
+
+        let error = apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            Some(replacement),
+            &registry,
+        )
+        .unwrap_err();
+
+        assert!(error.contains(replacement));
+        assert!(registry.registered.borrow().contains(previous));
+        assert!(!registry.registered.borrow().contains(replacement));
+        assert_eq!(state.get().as_deref(), Some(previous));
+        assert_eq!(
+            registry.attempts.borrow().clone(),
+            vec![replacement.to_string(), previous.to_string()]
+        );
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn quick_exit_rejects_a_key_owned_by_another_capability() {
+        let state = super::QuickExitShortcutState::new();
+        let registry = ControlledQuickExitShortcutRegistry::default();
+        registry.registered.borrow_mut().insert("Ctrl+Alt+X".into());
+        registry
+            .registered
+            .borrow_mut()
+            .insert("Ctrl+Shift+Space".into());
+        state.set(Some("Ctrl+Alt+X".into()));
+
+        let error = apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            Some("Ctrl+Shift+Space"),
+            &registry,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("already registered"));
+        assert!(registry.registered.borrow().contains("Ctrl+Alt+X"));
+        assert!(registry.registered.borrow().contains("Ctrl+Shift+Space"));
+        assert_eq!(state.get().as_deref(), Some("Ctrl+Alt+X"));
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn quick_exit_reuses_same_key_when_already_registered() {
+        let state = super::QuickExitShortcutState::new();
+        let registry = ControlledQuickExitShortcutRegistry::default();
+        registry.registered.borrow_mut().insert("Ctrl+Alt+X".into());
+        state.set(Some("Ctrl+Alt+X".into()));
+
+        apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            Some("Ctrl+Alt+X"),
+            &registry,
+        )
+        .unwrap();
+
+        assert!(registry.attempts.borrow().is_empty());
+        assert!(registry.registered.borrow().contains("Ctrl+Alt+X"));
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn quick_exit_dispatches_exactly_one_exit_intent_per_press() {
+        use std::sync::atomic::AtomicBool;
+        let key_down = AtomicBool::new(false);
+
+        assert!(matches!(
+            quick_exit_edge(ShortcutState::Pressed, &key_down),
+            QuickExitEdge::Dispatch
+        ));
+        assert!(matches!(
+            quick_exit_edge(ShortcutState::Pressed, &key_down),
+            QuickExitEdge::SuppressRepeat
+        ));
+        assert!(matches!(
+            quick_exit_edge(ShortcutState::Released, &key_down),
+            QuickExitEdge::Release
+        ));
+        assert!(matches!(
+            quick_exit_edge(ShortcutState::Pressed, &key_down),
+            QuickExitEdge::Dispatch
+        ));
     }
 
     #[test]

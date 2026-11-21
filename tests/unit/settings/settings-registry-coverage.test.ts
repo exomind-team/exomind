@@ -114,6 +114,7 @@ describe('settings registry coverage audit', () => {
       'volcano-engine-key',
       'volcano-usage-summary',
       'volcano-asr-test',
+      'quick-exit-shortcut',
       'ai-registry',
       'data-transfer',
       'instance-diagnostics',

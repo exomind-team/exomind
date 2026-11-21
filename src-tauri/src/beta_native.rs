@@ -39,6 +39,9 @@ mod window_icon;
 #[path = "beta_native_original_lifecycle_tests.rs"]
 mod original_lifecycle_tests;
 
+use crate::commands::shortcut_commands::{
+    self as shortcut_commands, MainWindowShortcutState, QuickExitShortcutState, VoiceShortcutState,
+};
 use exomind_beta_host::{
     BetaHost, DeadlineEnvelope, HostError, HostStatus, RunningServer, Session,
     SummaryModelConfiguration, SummaryModelConfigurationCommand,
@@ -1047,6 +1050,9 @@ fn report_startup_failure(app: &AppHandle, error: &HostError) {
 }
 
 pub fn run(mut context: tauri::Context<tauri::Wry>) {
+    let voice_shortcut_state = VoiceShortcutState::new();
+    let main_window_shortcut_state = MainWindowShortcutState::new();
+    let quick_exit_shortcut_state = QuickExitShortcutState::with_exit_handler(request_exit);
     let dev_origin = context
         .config()
         .build
@@ -1102,6 +1108,9 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
         .plugin(exomind_android_clipboard::init())
         .plugin(exomind_android_timeblock_end_alert::init())
         .plugin(exomind_android_keepalive::init())
+        .manage(voice_shortcut_state)
+        .manage(main_window_shortcut_state)
+        .manage(quick_exit_shortcut_state)
         .setup(move |app| {
             let port = match std::env::var("EXOMIND_BETA_PORT") {
                 Ok(value) => value
@@ -1164,6 +1173,11 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                     state.desktop_tray_ready.store(true, Ordering::Release);
                 }
                 state.desktop_preferences.start(app.handle(), &state);
+                let quick_exit_shortcut_state = app.state::<QuickExitShortcutState>();
+                shortcut_commands::register_quick_exit_shortcut(
+                    app.handle(),
+                    &quick_exit_shortcut_state,
+                );
             }
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let Some((config, directory)) = isolated_window.as_ref() {
@@ -1313,6 +1327,8 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             deadlines::beta_deadline_handoff_ack,
             beta_receipt,
             beta_request_exit,
+            shortcut_commands::quick_exit_shortcut_set,
+            shortcut_commands::quick_exit_shortcut_get,
             beta_desktop_status,
             desktop_settings::beta_desktop_preferences,
             desktop_settings::beta_set_desktop_shortcut,

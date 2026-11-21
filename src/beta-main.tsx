@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BetaApp } from './beta/BetaApp';
 import { applyBetaMobileDisplayPreference, initializeBetaUuid } from './beta/initialization';
 import { errorMessage } from './beta/drafts';
+import { initQuickExitShortcutRuntime } from './services/quick-exit-shortcut-runtime';
 import './index.css';
 import './beta/beta-ui.css';
 
@@ -19,6 +20,7 @@ function BetaEntry() {
 const root = ReactDOM.createRoot(document.getElementById('root')!);
 try {
   initializeBetaUuid();
+  void initQuickExitShortcutRuntime();
   root.render(<React.StrictMode><BetaEntry /></React.StrictMode>);
 } catch (failure) {
   root.render(<main className="flex h-full items-center justify-center bg-page p-5 dark:bg-page-dark"><p role="alert" className="text-destructive">{errorMessage(failure)}</p></main>);

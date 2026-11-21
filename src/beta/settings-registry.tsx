@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, type ReactNode } from 'react';
-import { Activity, Copy, FolderOpen, Keyboard, KeyRound, MapPin, Monitor, RefreshCw } from 'lucide-react';
+import { Activity, Command, Copy, FolderOpen, Keyboard, KeyRound, MapPin, Monitor, RefreshCw } from 'lucide-react';
 import type { SettingsItem } from '@/ui/app/config/settings/settings-types';
 import { DATE_DISPLAY_SETTING_OPTIONS, INPUT_SEND_SETTING_OPTIONS, PORTABLE_SETTINGS, THEME_SETTING_OPTIONS } from '@/ui/app/config/settings/portable-settings';
+import { QuickExitShortcutSetting } from '@/ui/app/components/settings/quick-exit-shortcut-setting';
 import { getBetaDateDisplayMode, getBetaDesktopAdaptiveEnabled, getBetaOverlayEnabled, getBetaTheme, setBetaDateDisplayMode, setBetaDesktopAdaptiveEnabled, setBetaOverlayEnabled, setBetaTheme, subscribeBetaDisplayPreference } from './preferences';
 import { getBetaInputSendMode, setBetaInputSendMode, subscribeBetaInputSendMode } from './input-preferences';
 import { betaDesktopPreferences } from './desktop-preferences';
@@ -88,6 +89,15 @@ export function createBetaSettingsRegistry(bindings: BetaSettingsBindings): Sett
   ];
   const desktop = betaDesktopPreferences.get();
   if (bindings.nativeDesktop) {
+    items.push({
+      id: 'quick-exit-shortcut',
+      label: '快速退出快捷键',
+      icon: Command,
+      category: 'input',
+      description: '设置一个全局快捷键，在任意窗口按下后退出应用；退出始终走应用生命周期并等待运行时停止。',
+      type: 'custom',
+      component: QuickExitShortcutSetting,
+    });
     if (desktop) {
       items.push({
         ...PORTABLE_SETTINGS.shortcut, type: 'string', stringStyle: 'dialog',

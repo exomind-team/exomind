@@ -30,7 +30,7 @@ export function BetaSettingsPage({ profileName, profileId='', deviceId='', summa
   const desktopLayout = useBetaDesktopAdaptiveEnabled() && wide;
   const native = isTauri();
   const android = native && /android/i.test(navigator.userAgent);
-  const nativeDesktop = native && !/Android|iPhone|iPad/i.test(navigator.userAgent);
+  const nativeDesktop = native && !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   const desktop = useSyncExternalStore(betaDesktopPreferences.subscribe, betaDesktopPreferences.get);
   const [desktopLoading, setDesktopLoading] = useState(nativeDesktop && !desktop);
   const [desktopError, setDesktopError] = useState('');

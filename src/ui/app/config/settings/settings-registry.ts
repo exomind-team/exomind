@@ -299,6 +299,7 @@ import {
   getEventlogBackendMode,
   setEventlogBackendMode,
 } from '@/config/domain-backend-mode';
+import { QuickExitShortcutSetting } from '@/ui/app/components/settings/quick-exit-shortcut-setting';
 import {
   getEventlogMarkdownMirrorEnabled,
   setEventlogMarkdownMirrorEnabled,
@@ -1248,6 +1249,16 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     get: () => getMainWindowShortcutQuickFocusEnabled(),
     set: (value: boolean) => setMainWindowShortcutQuickFocusEnabled(value),
     subscribe: subscribeMainWindowShortcutQuickFocusChanges,
+  },
+  {
+    id: 'quick-exit-shortcut',
+    label: '快速退出快捷键',
+    icon: Command,
+    category: 'input',
+    description: '设置一个全局快捷键，在任意窗口按下后退出应用；退出始终走应用生命周期并等待运行时停止。',
+    visible: desktopOperatingSystemOnly,
+    type: 'custom',
+    component: QuickExitShortcutSetting,
   },
   {
     id: 'tiled-workbench-navigation-shortcut-scheme',
