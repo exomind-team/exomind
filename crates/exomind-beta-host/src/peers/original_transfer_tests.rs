@@ -3,8 +3,8 @@ use crate::{
     CreatePeerInvitation, PeerCapabilities, PeerPin, PeerTransportListener, PeerTransportOptions,
 };
 use exomind_core::{
-    AgentId, CaptureCommand, CommandId, EventId, OriginalBytesState, OriginalLifecycleAction,
-    OriginalLifecycleCommand, OriginPageQuery,
+    AgentId, CaptureCommand, CommandId, DeviceId, EventId, OriginalBytesState,
+    OriginalLifecycleAction, OriginalLifecycleCommand, OriginPageQuery,
 };
 use tempfile::{TempDir, tempdir};
 
@@ -2253,6 +2253,36 @@ fn spawn_manual_peer_service(
     });
     (cancel, task)
 }
+
+fn seed_authenticated_same_host_route_for_fixture(
+    host: &BetaHost,
+    owner: &Session,
+    profile: ProfileId,
+    peer: DeviceId,
+    expected_pin: &str,
+    endpoint: std::net::SocketAddr,
+) {
+    let member = host
+        .peer_members(owner, profile)
+        .unwrap()
+        .into_iter()
+        .find(|member| member.device_id == peer)
+        .expect("the pinned Join must create the return-route owner");
+    assert!(
+        !member.revoked && member.state == crate::PeerJoinState::Ready,
+        "the return-route owner must remain authenticated and Ready"
+    );
+    assert_eq!(
+        member.pin, expected_pin,
+        "the fixture route must belong to the peer authenticated by the Join pin"
+    );
+    // Production deliberately rejects loopback/self candidates after Join.
+    // Seed the authenticated same-host listener directly so the remaining
+    // product path still exercises a fresh pinned TLS auto-acquisition.
+    host.save_peer_routes(owner, profile, peer, vec![endpoint])
+        .unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn one_way_invitation_learns_return_route_and_auto_fetches_without_second_claim() {
     let _discovery = crate::peers::test_discovery::lease().await;
@@ -2275,9 +2305,9 @@ async fn one_way_invitation_learns_return_route_and_auto_fetches_without_second_
         .unwrap();
     }
 
-    // The inviter is a plain Host listener, with no discovery socket. The only
-    // return address it can learn from this Join is the authenticated service
-    // header's listener port paired with the observed TCP peer IP.
+    // The inviter is a plain Host listener, with no discovery socket. It can
+    // authenticate the service header's listener port and observed TCP peer IP,
+    // but production must reject that loopback same-host result as a route.
     let mut issuer_listener = tablet
         .listen_peer_transport(
             &tablet_owner,
@@ -2340,7 +2370,25 @@ async fn one_way_invitation_learns_return_route_and_auto_fetches_without_second_
         );
 
     let learned_endpoint = std::net::SocketAddr::new(tcp_source.ip(), pc_listener.port());
-    let route_learned_from_join = tablet.peer_routes(&tablet_owner).unwrap().iter().any(|route| {
+    let unsafe_return_route_rejected =
+        !tablet.peer_routes(&tablet_owner).unwrap().iter().any(|route| {
+            route.profile == profile
+                && route.device == pc.device_id
+                && route.endpoints.contains(&learned_endpoint)
+        });
+    let pc_fingerprint = pc
+        .device_identity(&pc_owner)
+        .unwrap()
+        .fingerprint_sha256;
+    seed_authenticated_same_host_route_for_fixture(
+        &tablet,
+        &tablet_owner,
+        profile,
+        pc.device_id,
+        &pc_fingerprint,
+        learned_endpoint,
+    );
+    let authenticated_route_seeded = tablet.peer_routes(&tablet_owner).unwrap().iter().any(|route| {
         route.profile == profile
             && route.device == pc.device_id
             && route.endpoints.contains(&learned_endpoint)
@@ -2404,6 +2452,11 @@ async fn one_way_invitation_learns_return_route_and_auto_fetches_without_second_
     // later serves on the learned listener port without a discovery publisher;
     // auto acquisition must open a fresh pinned TLS connection.
     pc_network.stop().await.unwrap();
+    let source_host = pc.clone();
+    tokio::task::spawn_blocking(move || source_host.peers.wait_empty(Duration::from_secs(6)))
+        .await
+        .unwrap()
+        .unwrap();
     let source_listener = pc
         .listen_peer_transport(&pc_owner, learned_endpoint, transport())
         .await
@@ -2447,8 +2500,12 @@ async fn one_way_invitation_learns_return_route_and_auto_fetches_without_second_
     assert!(source_server_error.is_none(), "unexpected manual service failure: {source_server_error:?}");
     assert!(join_ready, "the single original invitation must establish a ready member");
     assert!(
-        route_learned_from_join,
-        "the invitee's authenticated listener address must be learned by the inviter"
+        unsafe_return_route_rejected,
+        "production Join must not persist the invitee's loopback listener address"
+    );
+    assert!(
+        authenticated_route_seeded,
+        "the test fixture must seed the authenticated invitee listener route"
     );
     assert!(
         listener_port_not_tcp_source_port,
@@ -2460,7 +2517,7 @@ async fn one_way_invitation_learns_return_route_and_auto_fetches_without_second_
     );
     assert!(
         retrieved,
-        "a fresh auto-acquisition session must use the learned return route"
+        "a fresh auto-acquisition session must use the seeded authenticated return route"
     );
     assert!(bytes_match, "the automatically fetched bytes must match the invited peer");
     assert_eq!(generations_after, generations_before, "route use must not rejoin or regrant");
@@ -2517,9 +2574,8 @@ async fn proxied_single_invitation_auto_fetches_through_authenticated_return_can
     let pc_candidate: std::net::SocketAddr =
         format!("127.0.0.2:{listen_port}").parse().unwrap();
     // Fixture topology: two actual Host TLS listeners use different loopback
-    // IPs and one port. The normal Join API sends only the current service /1
-    // header; this expected-red case requires the peer candidate to be carried
-    // in the authenticated service exchange, not guessed from the TCP source.
+    // IPs and one port. Production must reject either loopback/self result as a
+    // route even though the pinned candidate is dialable on this machine.
     let mut pc_listener = pc
         .listen_peer_transport(&pc_owner, pc_candidate, transport())
         .await
@@ -2629,7 +2685,25 @@ async fn proxied_single_invitation_auto_fetches_through_authenticated_return_can
 
     let observed_self = observed_source
         .is_some_and(|source| source.ip() == std::net::Ipv4Addr::LOCALHOST && source.port() != listen_port);
-    let route_learned = tablet.peer_routes(&tablet_owner).unwrap().iter().any(|route| {
+    let unsafe_return_route_rejected =
+        !tablet.peer_routes(&tablet_owner).unwrap().iter().any(|route| {
+            route.profile == profile
+                && route.device == pc.device_id
+                && route.endpoints.contains(&pc_candidate)
+        });
+    let pc_fingerprint = pc
+        .device_identity(&pc_owner)
+        .unwrap()
+        .fingerprint_sha256;
+    seed_authenticated_same_host_route_for_fixture(
+        &tablet,
+        &tablet_owner,
+        profile,
+        pc.device_id,
+        &pc_fingerprint,
+        pc_candidate,
+    );
+    let authenticated_route_seeded = tablet.peer_routes(&tablet_owner).unwrap().iter().any(|route| {
         route.profile == profile
             && route.device == pc.device_id
             && route.endpoints.contains(&pc_candidate)
@@ -2648,8 +2722,7 @@ async fn proxied_single_invitation_auto_fetches_through_authenticated_return_can
 
     // A direct pinned TLS handshake proves the source candidate is reachable.
     // No service header is selected, so this probe does not teach or persist it.
-    let pc_pin =
-        PeerPin::from_sha256(&pc.device_identity(&pc_owner).unwrap().fingerprint_sha256).unwrap();
+    let pc_pin = PeerPin::from_sha256(&pc_fingerprint).unwrap();
     let (candidate_client, candidate_server) = tokio::join!(
         tablet.connect_peer_transport(
             &tablet_owner,
@@ -2740,7 +2813,7 @@ async fn proxied_single_invitation_auto_fetches_through_authenticated_return_can
     let auto_queue = tablet_network.original_auto_queue_status().unwrap();
     let missing_route_wait_is_explained = auto_retrieved
         || (auto_queue.deferred && auto_queue.last_error_code == Some("original_source_waiting"));
-    let route_learned_after_auto = tablet.peer_routes(&tablet_owner).unwrap().iter().any(|route| {
+    let authenticated_route_after_auto = tablet.peer_routes(&tablet_owner).unwrap().iter().any(|route| {
         route.profile == profile
             && route.device == pc.device_id
             && route.endpoints.contains(&pc_candidate)
@@ -2769,8 +2842,9 @@ async fn proxied_single_invitation_auto_fetches_through_authenticated_return_can
         && observed_self
         && candidate_dialable
         && candidate_accepted
-        && route_learned
-        && route_learned_after_auto
+        && unsafe_return_route_rejected
+        && authenticated_route_seeded
+        && authenticated_route_after_auto
         && metadata_missing_locally
         && auto_retrieved
         && bytes_match
@@ -2779,6 +2853,6 @@ async fn proxied_single_invitation_auto_fetches_through_authenticated_return_can
         && source_server_error.is_none();
     assert!(
         behavior_passed,
-        "one signed Join through a self-addressing byte proxy must publish a bounded return candidate and auto-fetch over a fresh pinned TLS session without regrant; joiner_ready={joiner_ready}, inviter_ready={inviter_ready}, proxy_completed={proxy_completed}, observed_self={observed_self}, candidate_dialable={candidate_dialable}, route_after_join={route_learned}, metadata_missing={metadata_missing_locally}, auto_retrieved={auto_retrieved}, bytes_match={bytes_match}, queue={auto_queue:?}, route_after_auto={route_learned_after_auto}, wait_explained={missing_route_wait_is_explained}, generations={generations_after_join:?}->{generations_after_auto:?}, service_error={source_server_error:?}"
+        "one signed Join through a self-addressing byte proxy must reject the unsafe route, then auto-fetch through the fixture-seeded authenticated route over a fresh pinned TLS session without regrant; joiner_ready={joiner_ready}, inviter_ready={inviter_ready}, proxy_completed={proxy_completed}, observed_self={observed_self}, candidate_dialable={candidate_dialable}, unsafe_route_rejected={unsafe_return_route_rejected}, route_seeded={authenticated_route_seeded}, metadata_missing={metadata_missing_locally}, auto_retrieved={auto_retrieved}, bytes_match={bytes_match}, queue={auto_queue:?}, route_after_auto={authenticated_route_after_auto}, wait_explained={missing_route_wait_is_explained}, generations={generations_after_join:?}->{generations_after_auto:?}, service_error={source_server_error:?}"
     );
 }
