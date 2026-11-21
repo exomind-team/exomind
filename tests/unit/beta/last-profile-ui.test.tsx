@@ -15,6 +15,35 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); resetLocks(); }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); if (locks) Object.defineProperty(navigator, 'locks', locks); else Reflect.deleteProperty(navigator, 'locks'); });
 
 describe('Beta reopens the last successfully opened local profile', () => {
+  it('disambiguates same-name profiles and records into the explicitly selected profile', async () => {
+    const duplicateProfiles = [
+      { profile_id: '123456789-a', display_name: '同名档案' },
+      { profile_id: '123456789-b', display_name: '同名档案' },
+    ];
+    const client = fakeClient();
+    client.profiles.mockResolvedValue(duplicateProfiles);
+    render(<BetaApp client={client} intentJournal={memoryIntentJournal()}/>);
+
+    const select = await screen.findByRole('combobox', { name: '当前档案' });
+    await waitFor(() => expect(select).toBeEnabled());
+    await selectField(select, '123456789-b');
+    await waitFor(() => expect(select).toHaveTextContent('同名档案 · 123456789-b'));
+
+    fireEvent.click(screen.getByRole('button', { name: '管理档案' }));
+    expect(screen.getByRole('button', { name: '同名档案 · 123456789-a' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '同名档案 · 123456789-b' })).toBeVisible();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+
+    fireEvent.change(await screen.findByRole('textbox', { name: '记录当下' }), {
+      target: { value: '明确写入第二个同名档案' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await screen.findByText('本机已保存');
+
+    expect(client.capture).toHaveBeenCalledTimes(1);
+    expect(client.capture.mock.calls[0][0].profile_id).toBe('123456789-b');
+  });
+
   it('enables profile selection when the writer becomes ready without a persistence state change', async () => {
     const originalOpen = BetaDraftController.open.bind(BetaDraftController);
     vi.spyOn(BetaDraftController, 'open').mockImplementation(async (...args) => {

@@ -12,6 +12,7 @@ import { nativeOverlayWindow, nativeWorkspaceBind, nativeWorkspaceProfiles } fro
 import { overlayScopeKey,type OverlayAction,type OverlayResponse,type OverlayScope,type OverlayView } from './protocol';
 import { useOverlayWindowLayout } from './window-layout';
 import { shouldSubmitOnEnter } from '../input-preferences';
+import { betaProfileLabels } from '../profile-display';
 import { runActionOnPrimaryModifierEnter } from '@/ui/app/components/dialog-submit-shortcuts';
 
 const message=(error:unknown)=>error instanceof Error?error.message:'浮窗操作尚未确认，请保留输入并重试';
@@ -39,8 +40,9 @@ export function BetaOverlaySurface({session}:{session:OverlaySession}){
 }
 function WorkspaceProfileChoice({session,error}:{session:OverlaySession;error:string|null}){
   const [profiles,setProfiles]=useState<{profile_id:string;display_name:string}[]>([]),[failure,setFailure]=useState(''),[busy,setBusy]=useState(false);
+  const labels=betaProfileLabels(profiles);
   useEffect(()=>{let active=true;void nativeWorkspaceProfiles().then(value=>{if(active)setProfiles(value);}).catch(error=>{if(active)setFailure(message(error));});return()=>{active=false;};},[session]);
-  return<div className="space-y-3 rounded-[24px] bg-[#1C1917] p-5 text-sm text-[#FAFAF9]"><p role="status">{error||'选择本机档案'}</p>{profiles.map(profile=><Button key={profile.profile_id} variant="outline" disabled={busy} onClick={()=>{setBusy(true);void nativeWorkspaceBind(profile.profile_id).then(()=>session.refresh()).catch(error=>setFailure(message(error))).finally(()=>setBusy(false));}}>{profile.display_name}</Button>)}{!profiles.length&&!failure&&<p>尚未找到本机档案，请先创建或加入档案。</p>}{failure&&<p role="alert">{failure}</p>}</div>;
+  return<div className="space-y-3 rounded-[24px] bg-[#1C1917] p-5 text-sm text-[#FAFAF9]"><p role="status">{error||'选择本机档案'}</p>{profiles.map(profile=><Button key={profile.profile_id} variant="outline" disabled={busy} onClick={()=>{setBusy(true);void nativeWorkspaceBind(profile.profile_id).then(()=>session.refresh()).catch(error=>setFailure(message(error))).finally(()=>setBusy(false));}}>{labels.get(profile.profile_id)?.text??profile.display_name}</Button>)}{!profiles.length&&!failure&&<p>尚未找到本机档案，请先创建或加入档案。</p>}{failure&&<p role="alert">{failure}</p>}</div>;
 }
 function ConnectedSurface({session,view,onRetire,hasRetained}:{session:OverlaySession;view:OverlayView;onRetire:(value:RetainedScope)=>void;hasRetained:boolean}){
   const state=useSyncExternalStore(session.subscribe,session.snapshot);

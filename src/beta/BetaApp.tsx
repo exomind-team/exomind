@@ -66,6 +66,7 @@ import { BetaMessageLocationBoundary, BetaMessageReferenceDraft, type BetaMessag
 import { locateBetaMessageReference } from './beta-message-locator';
 import { buildBetaMessageReferenceUri, insertBetaMessageReference, removeBetaMessageReference } from './message-references';
 import type { BetaMessageReference, BetaMessageReferenceIdentity, BetaMessageReferenceSource } from './message-references';
+import { betaProfileLabels } from './profile-display';
 
 const SESSION_KEY = 'exomind:beta:connection';
 
@@ -224,7 +225,8 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     } catch (failure) { if (current === generation.current) setError(errorMessage(failure)); }
     finally { if (current === generation.current) setCreating(false); }
   }
-  const profileName=profiles.find(profile=>profile.profile_id===profileId)?.display_name??'';
+  const profileLabels=useMemo(()=>betaProfileLabels(profiles),[profiles]);
+  const profileName=profileId?profileLabels.get(profileId)?.text??profileId:'';
   function refreshArchiveProfiles() {
     const current = generation.current, scope = selectionScope.current;
     if (!scope || scope.generation !== current) return;
@@ -282,7 +284,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   useEffect(()=>{if(handoff.pending||handoff.failed)setSection('now');},[handoff.pending?.handoff_id,handoff.failed]);
   const workspaceTools = <>{client.originalExports&&<BetaOriginalExportCenter client={client} profileId={profileId} visible={section==='now'}/>}<BetaRuntimeLocation endpoint={endpoint} compact/>
     {isTauri()&&!/Android|iPhone|iPad/i.test(navigator.userAgent)&&<Tooltip content="在浮窗打开当前档案"><Button size="icon" variant="ghost" aria-label="专注浮窗"  onClick={()=>{void invoke('beta_workspace_bind',{profileId}).then(()=>setBetaOverlayEnabled(true)).catch(failure=>setError(errorMessage(failure)));}}><PanelsTopLeft size={16}/></Button></Tooltip>}
-    <FieldSelect id="beta-profile" label="当前档案" title="当前档案" className="max-w-28" value={profileId} disabled={!switchGuardReady||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profile.display_name}))}/>
+    <FieldSelect id="beta-profile" label="当前档案" title="当前档案" className="max-w-28" value={profileId} disabled={!switchGuardReady||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profileLabels.get(profile.profile_id)?.text??profile.display_name}))}/>
     <Tooltip content={`档案：${profileName || '未选择'}`}><Button variant="ghost" size="icon" aria-label="管理档案"  onClick={()=>setProfileDialog(true)}><FolderOpen size={16}/></Button></Tooltip>
     {onDisconnect&&<Button variant="ghost" size="sm" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}</>;
   return <><BetaAppShell section={section} onSectionChange={setSection} profileName={profileName} onProfileClick={()=>setProfileDialog(true)}
@@ -291,7 +293,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     now={<PageShell title="当下" hideHeader={!!status&&!!profileId} className="min-h-0 overflow-hidden" headerClassName="shrink-0" contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
     headerAction={<div className="flex max-w-[15rem] items-center gap-1">{status&&profileId&&<>
       <label className="sr-only" htmlFor="beta-profile">当前档案</label>
-      <FieldSelect id="beta-profile" label="当前档案" className="max-w-36" value={profileId} disabled={!switchGuardReady||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profile.display_name}))}/>
+      <FieldSelect id="beta-profile" label="当前档案" className="max-w-36" value={profileId} disabled={!switchGuardReady||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profileLabels.get(profile.profile_id)?.text??profile.display_name}))}/>
       </>}
       <Button variant="ghost" size="sm" aria-label="管理档案" onClick={()=>setProfileDialog(true)}>档案</Button>
       {onDisconnect&&<Button variant="ghost" size="sm" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}
@@ -314,7 +316,7 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
 
 function DeviceWorkspace({ workspace, client, deviceId, profileId, profiles, status, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync,onReturnToProfile }: { workspace: BetaWorkspacePresentation; client: BetaClient; deviceId: string; profileId: string; profiles:BetaProfile[]; status:BetaStatus; sourceStore?: FileSourceStore; intentJournal?:LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:ProfileSwitchGuardGate; active:boolean;eventRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void;onReturnToProfile:(profileId:string)=>void }) {
   const summaryOwner=useRef<SummaryTasksController|null>(null);
-  const profileNames=useMemo(()=>new Map(profiles.map(profile=>[profile.profile_id,profile.display_name])),[profiles]);
+  const profileNames=useMemo(()=>new Map([...betaProfileLabels(profiles)].map(([profileId,label])=>[profileId,label.text])),[profiles]);
   const profileNameFor=useCallback((id:string)=>profileNames.get(id)??id,[profileNames]);
   const profileName=profileNameFor(profileId);
   type Owners={capture:BetaDraftController;focus:BetaTimeblockController|null;profileId:string};

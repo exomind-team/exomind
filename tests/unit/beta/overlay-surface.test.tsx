@@ -4,6 +4,7 @@ import { StrictMode } from 'react';
 import { BetaOverlaySurface } from '@/beta/overlay/BetaOverlayPage';
 import type { OverlaySession,OverlaySessionState } from '@/beta/overlay/session';
 import type { OverlayAction,OverlayResponse,OverlayView } from '@/beta/overlay/protocol';
+import { nativeWorkspaceBind, nativeWorkspaceProfiles } from '@/beta/overlay/native-port';
 import { B,C,D,P,Q,R,activeSnapshot } from './timeblock-fixtures';
 import { deferred } from './fixtures';
 
@@ -22,11 +23,26 @@ function fixture(active=true){
     if(action.kind==='end_action')update({...view,remote:{...view.remote!,active:{...view.remote!.active!,phase:'feedback_pending'},pending_feedback:[action.block_id]}});
     return{ok:true as const,view,receipt:null};
   });
-  const session={snapshot:()=>state,subscribe:(fn:()=>void)=>{listeners.add(fn);return()=>{listeners.delete(fn);};},send,retry:vi.fn()} as unknown as OverlaySession;
+  const session={snapshot:()=>state,subscribe:(fn:()=>void)=>{listeners.add(fn);return()=>{listeners.delete(fn);};},send,retry:vi.fn(),refresh:vi.fn()} as unknown as OverlaySession;
   const pending=(requests:OverlaySessionState['pending'])=>{state={...state,pending:requests};listeners.forEach(fn=>fn());};
   return{session,send,update,disconnect,pending,view:()=>view};
 }
 describe('real Beta overlay uses shared Alpha presentation and Native workspace actions',()=>{
+  it('disambiguates same-name profile choices and binds the selected identity',async()=>{
+    vi.mocked(nativeWorkspaceProfiles).mockResolvedValueOnce([
+      {profile_id:'123456789-a',display_name:'同名档案'},
+      {profile_id:'123456789-b',display_name:'同名档案'},
+    ]);
+    vi.mocked(nativeWorkspaceBind).mockResolvedValueOnce({device_id:D,runtime_id:R,profile_id:'123456789-b',ui_owner_generation:C});
+    const f=fixture();
+    f.disconnect();
+    render(<BetaOverlaySurface session={f.session}/>);
+
+    expect(await screen.findByRole('button',{name:'同名档案 · 123456789-a'})).toBeVisible();
+    fireEvent.click(screen.getByRole('button',{name:'同名档案 · 123456789-b'}));
+    await waitFor(()=>expect(nativeWorkspaceBind).toHaveBeenCalledWith('123456789-b'));
+    expect(f.session.refresh).toHaveBeenCalledTimes(1);
+  });
   it('B14-U04: transport edits do not pulse feedback buttons while domain submissions still block duplicates',async()=>{
     const f=fixture();f.update({...f.view(),remote:{...f.view().remote!,active:{...f.view().remote!.active!,phase:'feedback_pending'},pending_feedback:[B]},feedback:{[B]:{text:'retained feedback',revision:1}}});
     render(<BetaOverlaySurface session={f.session}/>);fireEvent.click(screen.getByTestId('new-focus-end-button'));const button=await screen.findByTestId('now-overlay-feedback-confirm');
