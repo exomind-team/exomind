@@ -1,5 +1,6 @@
 {
-  "source_ref": "97b642f9770609c9fe8d77a6d67e53a71b7b815a",
-  "expected_sha": "97b642f9770609c9fe8d77a6d67e53a71b7b815a",
-  "expected_version": "0.6.0-beta25"
+  "source_ref": "22876363ee6025e58f6241e9f3e2fa57b3149a9a",
+  "expected_sha": "22876363ee6025e58f6241e9f3e2fa57b3149a9",
+  "expected_version": "0.6.0-beta26",
+  "android_test_package_suffix": "beta26testci"
 }

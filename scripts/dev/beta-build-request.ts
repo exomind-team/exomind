@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 export const BETA_BUILD_REQUEST_PATH = '.github/beta-build-candidate.json';
 const BETA_BUILD_REQUEST_KEYS = ['expected_sha', 'expected_version', 'source_ref'];
+const BETA_BUILD_REQUEST_OPTIONAL_KEYS = ['android_test_package_suffix'];
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 const BETA_VERSION_PATTERN = /^0\.6\.0-beta[1-9][0-9]*$/;
 const LOCKED_ANDROID_VERSION_CODES: Readonly<Partial<Record<string, number>>> = {
@@ -36,7 +37,8 @@ export type BetaBuildRequestErrorCode =
   | 'invalid_push_range'
   | 'candidate_head_mismatch'
   | 'beta_identity_mismatch'
-  | 'version_code_mismatch';
+  | 'version_code_mismatch'
+  | 'invalid_test_package_suffix';
 
 export class BetaBuildRequestError extends Error {
   constructor(readonly code: BetaBuildRequestErrorCode, message: string) {
@@ -49,12 +51,14 @@ export type BetaBuildRequestFields = {
   source_ref: string;
   expected_sha: string;
   expected_version: string;
+  android_test_package_suffix: string;
 };
 
 export type BetaBuildRequest = {
   sourceRef: string;
   expectedSha: string;
   expectedVersion: string;
+  androidTestPackageSuffix: string;
   recipeSha: string;
 };
 
@@ -80,8 +84,11 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function parseRequestFields(value: unknown): BetaBuildRequestFields {
   const record = asRecord(value);
-  if (!record || Object.keys(record).sort().join('\0') !== [...BETA_BUILD_REQUEST_KEYS].sort().join('\0')) {
-    fail('request_schema', 'Request must contain exactly source_ref, expected_sha, and expected_version.');
+  const allowedKeys = [...BETA_BUILD_REQUEST_KEYS, ...BETA_BUILD_REQUEST_OPTIONAL_KEYS];
+  if (!record
+    || Object.keys(record).some(key => !allowedKeys.includes(key))
+    || BETA_BUILD_REQUEST_KEYS.some(key => !(key in record))) {
+    fail('request_schema', 'Request must contain source_ref, expected_sha, expected_version, and only a supported optional test suffix.');
   }
 
   const { source_ref, expected_sha, expected_version } = record;
@@ -103,10 +110,24 @@ function parseRequestFields(value: unknown): BetaBuildRequestFields {
     fail('invalid_version', 'expected_version must use the canonical 0.6.0-betaN format.');
   }
 
+  let android_test_package_suffix = '';
+  if ('android_test_package_suffix' in record) {
+    const suffix = record.android_test_package_suffix;
+    if (typeof suffix !== 'string') {
+      fail('request_schema', 'android_test_package_suffix must be a string when present.');
+    }
+    const betaNumber = /^0\.6\.0-beta([1-9][0-9]*)$/.exec(expected_version)?.[1];
+    if (!betaNumber || suffix !== `beta${betaNumber}testci`) {
+      fail('invalid_test_package_suffix', 'Test package suffix must match the requested Beta version, for example beta26testci.');
+    }
+    android_test_package_suffix = suffix;
+  }
+
   return {
     source_ref: normalizedSourceRef,
     expected_sha: normalizedExpectedSha,
     expected_version,
+    android_test_package_suffix,
   };
 }
 
@@ -151,6 +172,7 @@ export function resolveBetaBuildRequest(input: BetaBuildRequestInput): BetaBuild
     sourceRef: fields.source_ref,
     expectedSha: fields.expected_sha,
     expectedVersion: fields.expected_version,
+    androidTestPackageSuffix: fields.android_test_package_suffix,
     recipeSha,
   };
 }
@@ -250,6 +272,9 @@ function resolveFromEnvironment(): void {
       source_ref: process.env.SOURCE_REF ?? '',
       expected_sha: process.env.EXPECTED_SHA ?? '',
       expected_version: process.env.EXPECTED_VERSION ?? '',
+      ...(process.env.ANDROID_TEST_PACKAGE_SUFFIX
+        ? { android_test_package_suffix: process.env.ANDROID_TEST_PACKAGE_SUFFIX }
+        : {}),
     };
   }
 
@@ -258,6 +283,7 @@ function resolveFromEnvironment(): void {
     source_ref: request.sourceRef,
     sha: request.expectedSha,
     version: request.expectedVersion,
+    android_test_package_suffix: request.androidTestPackageSuffix,
     recipe_sha: request.recipeSha,
   });
   console.log(JSON.stringify({
@@ -283,6 +309,7 @@ function verifyCandidateFromEnvironment(): void {
     sourceRef: sourceSha,
     expectedSha: sourceSha,
     expectedVersion,
+    androidTestPackageSuffix: process.env.ANDROID_TEST_PACKAGE_SUFFIX ?? '',
     recipeSha,
   };
   validateBetaCandidateIdentity(request, actualHead, config);

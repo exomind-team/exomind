@@ -91,8 +91,19 @@ describe('Beta build request validation', () => {
       sourceRef: CANDIDATE_SHA,
       expectedSha: CANDIDATE_SHA,
       expectedVersion: '0.6.0-beta16',
+      androidTestPackageSuffix: '',
       recipeSha: RECIPE_SHA,
     });
+  });
+
+  it('carries only a test package suffix that matches the requested Beta version', () => {
+    const request=resolveBetaBuildRequest(pushInput({
+      requestText:JSON.stringify({...candidateRequest,expected_version:'0.6.0-beta26',android_test_package_suffix:'beta26testci'}),
+    }));
+    expect(request.androidTestPackageSuffix).toBe('beta26testci');
+    expectCode(()=>resolveBetaBuildRequest(pushInput({
+      requestText:JSON.stringify({...candidateRequest,expected_version:'0.6.0-beta26',android_test_package_suffix:'beta25testci'}),
+    })),'invalid_test_package_suffix');
   });
 
   it('rejects unknown request keys with a schema-specific error', () => {
