@@ -102,6 +102,16 @@ describe('isolated Beta Android preparation', () => {
     expect(work.snapshot().strings).toBe(after.strings);
     expect(repeated.changedFiles).toEqual([]);
   });
+  it('supports a parallel revision suffix with a distinguishable test label',async()=>{
+    const {prepareBetaAndroid}=await import('../../../scripts/dev/beta-android-prepare');const work=fixture();
+    const gradle=readFileSync(work.files.gradle,'utf8');
+    writeFileSync(work.files.gradle,gradle.replace(/\n}\s*$/, '\n    buildTypes {\n        getByName("debug") {\n            isJniDebuggable = true\n        }\n    }\n}\n'));
+    prepareBetaAndroid(work.root,{ndkVersion:null,testPackageSuffix:'beta26testci2'});
+    const after=work.snapshot();
+    expect(after.gradle).toContain('applicationIdSuffix = ".beta26testci2"');
+    expect(after.strings).toContain('<string name="app_name">外心 Beta26 测试 CI 2</string>');
+    expect(after.strings).toContain('<string name="main_activity_title">外心 Beta26 测试 CI 2</string>');
+  });
   it('rejects a test suffix that does not identify this Beta version before writing',async()=>{
     const {prepareBetaAndroid}=await import('../../../scripts/dev/beta-android-prepare');const work=fixture();
     const before=work.snapshot();

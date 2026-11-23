@@ -397,10 +397,10 @@ function betaTestSuffix(version: string, requestedSuffix: string): string {
   const match = /^0\.6\.0-beta([1-9][0-9]*)$/.exec(version);
   if (!match) reject('An isolated Beta test package requires a canonical Beta version');
   const expected = `beta${match[1]}testci`;
-  if (requestedSuffix !== expected) {
-    reject(`Android test suffix must be ${expected} for ${version}`);
+  if (requestedSuffix !== expected && !new RegExp(`^${expected}[1-9][0-9]{0,2}$`).test(requestedSuffix)) {
+    reject(`Android test suffix must be ${expected} or a numbered variant such as ${expected}2 for ${version}`);
   }
-  return expected;
+  return requestedSuffix;
 }
 
 function ensureDebugApplicationIdSuffix(gradle: string, suffix: string): string {
@@ -473,7 +473,10 @@ export function prepareBetaAndroid(projectRoot: string, options: {ndkVersion?: s
   ).manifestXml;
   const nextManifest = ensureShareHandoffActivity(ensureBetaApplicationIcons(audioManifest));
   const nextActivity = applyBetaImeInsets(ensureAndroidSystemBarsInMainActivity(activity, { ensureConfigurationChanged: true }).activityKotlin);
-  const testLabel = testSuffix ? `外心 Beta${version.match(/-beta([1-9][0-9]*)$/)?.[1]} 测试 CI` : undefined;
+  const testRevision = testSuffix?.match(/^beta[1-9][0-9]*testci([1-9][0-9]{0,2})$/)?.[1];
+  const testLabel = testSuffix
+    ? `外心 Beta${version.match(/-beta([1-9][0-9]*)$/)?.[1]} 测试 CI${testRevision ? ` ${testRevision}` : ''}`
+    : undefined;
   const nextStrings = strings && testLabel
     ? updateAndroidString(updateAndroidString(strings, 'app_name', productName, testLabel), 'main_activity_title', productName, testLabel)
     : strings;
@@ -496,7 +499,7 @@ if (import.meta.main) {
     const args = process.argv.slice(2);
     if ((args.length !== 2 && args.length !== 4) || args[0] !== '--project-root' || !args[1]
       || (args.length === 4 && (args[2] !== '--test-package-suffix' || !args[3]))) {
-      reject('Usage: bun scripts/dev/beta-android-prepare.ts --project-root <absolute Beta staging root> [--test-package-suffix beta26testci]');
+      reject('Usage: bun scripts/dev/beta-android-prepare.ts --project-root <absolute Beta staging root> [--test-package-suffix beta26testci[-rN]]');
     }
     const result = prepareBetaAndroid(args[1], args.length === 4 ? { testPackageSuffix: args[3] } : {});
     process.stdout.write(JSON.stringify(result) + '\n');

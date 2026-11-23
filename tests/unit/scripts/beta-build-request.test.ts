@@ -99,9 +99,9 @@ describe('Beta build request validation', () => {
 
   it('carries only a test package suffix that matches the requested Beta version', () => {
     const request=resolveBetaBuildRequest(pushInput({
-      requestText:JSON.stringify({...candidateRequest,expected_version:'0.6.0-beta26',android_test_package_suffix:'beta26testci'}),
+      requestText:JSON.stringify({...candidateRequest,expected_version:'0.6.0-beta26',android_test_package_suffix:'beta26testci2'}),
     }));
-    expect(request.androidTestPackageSuffix).toBe('beta26testci');
+    expect(request.androidTestPackageSuffix).toBe('beta26testci2');
     expectCode(()=>resolveBetaBuildRequest(pushInput({
       requestText:JSON.stringify({...candidateRequest,expected_version:'0.6.0-beta26',android_test_package_suffix:'beta25testci'}),
     })),'invalid_test_package_suffix');

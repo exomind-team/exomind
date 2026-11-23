@@ -31,7 +31,7 @@ on:
         type: boolean
         default: false
       android_test_package_suffix:
-        description: Installable test-only Android package suffix that does not replace Beta25
+        description: Version-matched test package suffix; use a numbered variant such as beta26testci2 to keep parallel installs separate
         required: false
         type: string
         default: ''
@@ -459,9 +459,11 @@ jobs:
           const suffix=process.env.ANDROID_TEST_PACKAGE_SUFFIX??'';
           const betaNumber=/^0\.6\.0-beta([1-9][0-9]*)$/.exec(process.env.BETA_VERSION)?.[1];
           assert.ok(betaNumber,'The source resolver must supply a canonical Beta version');
-          if(suffix)assert.equal(suffix,`beta${betaNumber}testci`);
+          const testSuffixPattern=new RegExp(`^beta${betaNumber}testci(?:[1-9][0-9]{0,2})?$`);
+          if(suffix)assert.ok(testSuffixPattern.test(suffix),'Android test suffix must be isolated and match the Beta version');
           const packageName=`com.exomind.app.v06.beta${suffix?`.${suffix}`:''}`;
-          const appLabel=suffix?`外心 Beta${betaNumber} 测试 CI`:'ExoMind Beta';
+          const testRevision=new RegExp(`^beta${betaNumber}testci([1-9][0-9]{0,2})$`).exec(suffix)?.[1];
+          const appLabel=suffix?`外心 Beta${betaNumber} 测试 CI${testRevision?` ${testRevision}`:''}`:'ExoMind Beta';
           const seen=new Set(),files=[];
           for(const source of apks){
             const badging=execFileSync(path.join(tools,'aapt'),['dump','badging',source],{encoding:'utf8',timeout:10000});

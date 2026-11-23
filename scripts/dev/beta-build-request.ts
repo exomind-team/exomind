@@ -117,8 +117,9 @@ function parseRequestFields(value: unknown): BetaBuildRequestFields {
       fail('request_schema', 'android_test_package_suffix must be a string when present.');
     }
     const betaNumber = /^0\.6\.0-beta([1-9][0-9]*)$/.exec(expected_version)?.[1];
-    if (!betaNumber || suffix !== `beta${betaNumber}testci`) {
-      fail('invalid_test_package_suffix', 'Test package suffix must match the requested Beta version, for example beta26testci.');
+    const expectedSuffix = betaNumber ? `beta${betaNumber}testci` : '';
+    if (!betaNumber || (suffix !== expectedSuffix && !new RegExp(`^${expectedSuffix}[1-9][0-9]{0,2}$`).test(suffix))) {
+      fail('invalid_test_package_suffix', 'Test package suffix must match the requested Beta version, such as beta26testci2.');
     }
     android_test_package_suffix = suffix;
   }
