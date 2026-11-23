@@ -6,6 +6,7 @@ use super::{
     PeerTransportOptions,
     network_store::{PeerAliasClaim, PeerNetworkSettings, Route},
 };
+use super::transport::{PeerTransportScanProbe, probe_peer_transport};
 use crate::{BetaHost, HostError, Session};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use exomind_core::{DeviceId, ProfileId};
@@ -17,10 +18,12 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    net::{TcpStream, UdpSocket},
+    net::UdpSocket,
     sync::Semaphore,
     task::{JoinHandle, JoinSet},
 };
+#[cfg(test)]
+use tokio::net::TcpStream;
 use uuid::Uuid;
 #[path = "original_network.rs"]
 mod original_network;
@@ -317,9 +320,11 @@ const MAX_SCAN_INTERFACES: usize = 8;
 const MAX_SCAN_HOSTS: usize = 1024;
 const MAX_SCAN_IN_FLIGHT: usize = 32;
 const MAX_SCAN_DISCOVERED_ADDRESSES: usize = 64;
+const MAX_SCAN_PEER_TRANSPORT_CANDIDATES: usize = 64;
 const SCAN_REQUEST_TIMEOUT: Duration = Duration::from_millis(800);
 const SCAN_TOTAL_BUDGET: Duration = Duration::from_secs(15);
 const MIN_MANUAL_SCAN_PREFIX: u8 = 8;
+const MIN_INTERFACE_SCAN_PREFIX: u8 = 8;
 const SCAN_SERVICE_PORT: u16 = 43344;
 
 /// A discovered local interface scope. Only eligible IPv4 scopes are scanned;
@@ -348,6 +353,19 @@ pub struct NetworkScanResult {
     pub skipped: usize,
     pub cancelled: bool,
     pub discovered_addresses: Vec<String>,
+    /// Endpoints that completed the Beta Peer Transport TLS/ALPN identity
+    /// handshake. This proves current key possession, not profile membership
+    /// or trust against an invitation.
+    pub peer_transport_count: usize,
+    /// Bounded, displayable sample of protocol-identified endpoints.
+    pub peer_transport_candidates: Vec<ScanPeerTransportCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ScanPeerTransportCandidate {
+    pub address: String,
+    pub fingerprint_sha256: String,
+    pub service_version: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -389,6 +407,35 @@ fn mask_ipv4(ip: Ipv4Addr, prefix: u8) -> Ipv4Addr {
 fn scan_cidr_string(network: Ipv4Addr, prefix: u8) -> String {
     let network = mask_ipv4(network, prefix);
     format!("{network}/{prefix}")
+}
+
+fn scan_kind_priority(kind: &str) -> u8 {
+    match kind {
+        "easytier" | "manual" => 0,
+        "overlay" => 1,
+        "physical_lan" => 2,
+        _ => 3,
+    }
+}
+
+fn scan_scope_host_count(prefix: u8) -> u64 {
+    let total = if prefix == 0 {
+        1u64 << 32
+    } else if prefix <= 32 {
+        1u64 << (32 - prefix)
+    } else {
+        u64::MAX
+    };
+    total.saturating_sub(if prefix < 31 { 2 } else { 0 })
+}
+
+fn scan_request_priority(request: &ScanRequest) -> (u8, u64, u32, String) {
+    (
+        scan_kind_priority(request.kind),
+        scan_scope_host_count(request.prefix),
+        u32::from(request.network),
+        request.interface_name.clone(),
+    )
 }
 
 fn sanitize_scope_name(name: &str) -> String {
@@ -492,20 +539,44 @@ fn classify_scan_interface(
 }
 
 fn build_scan_scopes_from(
-    interfaces: impl Iterator<Item = (String, IpAddr)>,
+    interfaces: impl Iterator<Item = (String, IpAddr, Option<u8>)>,
 ) -> Vec<ScanScope> {
     let mut output = Vec::new();
     let mut seen_scope_ids = HashSet::new();
-    for (name, ip) in interfaces {
-        let (kind, eligible, reason) = classify_scan_interface(&name, ip);
-        let (scope_id, prefix, network) = match ip {
+    for (name, ip, interface_prefix) in interfaces {
+        let (kind, mut eligible, mut reason) = classify_scan_interface(&name, ip);
+        let (scope_id, prefix, network, valid_ipv4_prefix) = match ip {
             IpAddr::V4(v4) => {
-                let prefix = 24u8;
-                let network = scan_cidr_string(v4, prefix);
-                (derive_scope_id(&name, &network), prefix, network)
+                match interface_prefix.filter(|prefix| *prefix <= 32) {
+                    Some(prefix) => {
+                        let network = scan_cidr_string(v4, prefix);
+                        (derive_scope_id(&name, &network), prefix, network, true)
+                    }
+                    None => (
+                        derive_scope_id(&name, &v4.to_string()),
+                        0u8,
+                        String::new(),
+                        false,
+                    ),
+                }
             }
-            IpAddr::V6(_) => (derive_scope_id(&name, &ip.to_string()), 0u8, String::new()),
+            IpAddr::V6(_) => (
+                derive_scope_id(&name, &ip.to_string()),
+                0u8,
+                String::new(),
+                false,
+            ),
         };
+        if eligible && matches!(ip, IpAddr::V4(_)) && !valid_ipv4_prefix {
+            eligible = false;
+            reason = Some("invalid_netmask");
+        } else if eligible && prefix < MIN_INTERFACE_SCAN_PREFIX {
+            eligible = false;
+            reason = Some("scope_too_broad");
+        } else if eligible && prefix == 32 {
+            eligible = false;
+            reason = Some("no_remote_hosts");
+        }
         if !seen_scope_ids.insert(scope_id.clone()) {
             continue;
         }
@@ -519,8 +590,14 @@ fn build_scan_scopes_from(
             reason,
         });
     }
-    // The scan hard-cap limits selectable scopes; extra eligible interfaces
-    // stay visible as explanatory ineligible rows instead of disappearing.
+    // Keep the highest-value ranges inside the hard selectable-scope cap.
+    output.sort_by_key(|scope| (
+        !scope.eligible,
+        scan_kind_priority(scope.kind),
+        scan_scope_host_count(scope.prefix),
+        scope.interface_name.clone(),
+    ));
+    // Extra eligible interfaces stay visible as explanatory ineligible rows.
     let mut eligible_seen = 0usize;
     for scope in &mut output {
         if scope.eligible {
@@ -532,13 +609,12 @@ fn build_scan_scopes_from(
             }
         }
     }
-    output.sort_by_key(|scope| {
-        (
-            !scope.eligible,
-            scope.kind != "physical_lan",
-            scope.interface_name.clone(),
-        )
-    });
+    output.sort_by_key(|scope| (
+        !scope.eligible,
+        scan_kind_priority(scope.kind),
+        scan_scope_host_count(scope.prefix),
+        scope.interface_name.clone(),
+    ));
     output
 }
 
@@ -548,9 +624,11 @@ fn discover_scan_scopes() -> Vec<ScanScope> {
             .unwrap_or_default()
             .into_iter()
             .map(|interface| {
-                let name = interface.name.clone();
-                let ip = interface.ip();
-                (name, ip)
+                let name = interface.name;
+                match interface.addr {
+                    if_addrs::IfAddr::V4(address) => (name, IpAddr::V4(address.ip), Some(address.prefixlen)),
+                    if_addrs::IfAddr::V6(address) => (name, IpAddr::V6(address.ip), None),
+                }
             }),
     )
 }
@@ -611,6 +689,7 @@ fn build_scan_requests(
             prefix,
         });
     }
+    let mut manual_requests = Vec::new();
     let mut seen_manual = HashSet::new();
     for cidr in manual_cidrs {
         let cidr = cidr.trim();
@@ -625,7 +704,7 @@ fn build_scan_requests(
         if !seen_manual.insert((network, prefix)) {
             continue;
         }
-        requests.push(ScanRequest {
+        manual_requests.push(ScanRequest {
             scope_id: format!("manual:{}", scan_cidr_string(network, prefix)),
             interface_name: cidr.to_string(),
             kind: "manual",
@@ -633,6 +712,12 @@ fn build_scan_requests(
             prefix,
         });
     }
+    manual_requests.sort_by_key(|request| (
+        scan_scope_host_count(request.prefix),
+        u32::from(request.network),
+    ));
+    requests.sort_by_key(scan_request_priority);
+    let requests = manual_requests.into_iter().chain(requests).collect::<Vec<_>>();
     if requests.is_empty() {
         return Err(HostError::InvalidRequest);
     }
@@ -739,6 +824,7 @@ fn local_scan_self_ips() -> HashSet<Ipv4Addr> {
         .collect()
 }
 
+#[cfg(test)]
 async fn tcp_probe_open(
     address: SocketAddr,
     timeout: Duration,
@@ -752,8 +838,8 @@ async fn tcp_probe_open(
     }
 }
 
-/// One finite TCP probe pass. It only ever produces unverified open-port
-/// address candidates; it never writes routes, memberships, grants or facts.
+/// One finite peer-transport probe pass. It never writes routes, memberships,
+/// grants or facts; non-peer open ports remain unverified candidates.
 /// Passive UDP announcements and known endpoints remain the responsibility of
 /// the already-running discovery worker (`Worker::run`); this pass opens no
 /// additional UDP socket, so it cannot race the listener's discovery lease.
@@ -769,8 +855,10 @@ async fn run_scan_probe(
     let mut scheduled: HashSet<Ipv4Addr> = HashSet::new();
     let mut hosts: Vec<Ipv4Addr> = Vec::new();
     let mut skipped = 0usize;
-    for scope in scopes {
-        let remaining = MAX_SCAN_HOSTS.saturating_sub(hosts.len());
+    for (scope_index, scope) in scopes.iter().enumerate() {
+        let remaining_total = MAX_SCAN_HOSTS.saturating_sub(hosts.len());
+        let remaining_scopes = scopes.len().saturating_sub(scope_index).max(1);
+        let remaining = remaining_total.div_ceil(remaining_scopes);
         let enumerated =
             enumerate_scan_hosts(scope.network, scope.prefix, self_ips, &mut scheduled, remaining);
         skipped = skipped.saturating_add(enumerated.skipped);
@@ -782,7 +870,8 @@ async fn run_scan_probe(
 
     let mut attempted = 0usize;
     let mut discovered = 0usize;
-    let mut discovered_addresses = Vec::new();
+    let mut peer_transport_count = 0usize;
+    let mut candidates: Vec<(SocketAddr, Option<super::transport::PeerTransportScanIdentity>)> = Vec::new();
     let semaphore = Arc::new(Semaphore::new(MAX_SCAN_IN_FLIGHT));
     let budget_start = Instant::now();
     let mut join_set = JoinSet::new();
@@ -808,8 +897,8 @@ async fn run_scan_probe(
         join_set.spawn(async move {
             let _permit = permit;
             let address = SocketAddr::new(IpAddr::V4(host), service_port);
-            let opened = tcp_probe_open(address, SCAN_REQUEST_TIMEOUT, &probe_cancel).await;
-            (host, address, opened)
+            let probe = probe_peer_transport(address, SCAN_REQUEST_TIMEOUT, &probe_cancel).await;
+            (host, address, probe)
         });
         let snapshot = NetworkScanResult {
             scan_id,
@@ -821,7 +910,9 @@ async fn run_scan_probe(
             discovered,
             skipped,
             cancelled: false,
-            discovered_addresses: discovered_addresses.iter().map(ToString::to_string).collect(),
+            discovered_addresses: Vec::new(),
+            peer_transport_count: 0,
+            peer_transport_candidates: Vec::new(),
         };
         if let Ok(mut slot) = progress.lock() {
             *slot = snapshot;
@@ -829,15 +920,42 @@ async fn run_scan_probe(
     }
 
     while let Some(result) = join_set.join_next().await {
-        if let Ok((_host, address, opened)) = result {
-            if opened {
-                discovered += 1;
-                if discovered_addresses.len() < MAX_SCAN_DISCOVERED_ADDRESSES {
-                    discovered_addresses.push(address);
+        if let Ok((_host, address, probe)) = result {
+            match probe {
+                PeerTransportScanProbe::Closed | PeerTransportScanProbe::Cancelled => {}
+                PeerTransportScanProbe::OpenUnverified => {
+                    discovered += 1;
+                    candidates.push((address, None));
+                }
+                PeerTransportScanProbe::PeerTransport(identity) => {
+                    discovered += 1;
+                    peer_transport_count += 1;
+                    candidates.push((address, Some(identity)));
                 }
             }
         }
     }
+
+    candidates.sort_by(|(left_address, left_identity), (right_address, right_identity)| {
+        left_identity
+            .is_none()
+            .cmp(&right_identity.is_none())
+            .then_with(|| left_address.to_string().cmp(&right_address.to_string()))
+    });
+    let discovered_addresses = candidates
+        .iter()
+        .take(MAX_SCAN_DISCOVERED_ADDRESSES)
+        .map(|(address, _)| address.to_string())
+        .collect::<Vec<_>>();
+    let peer_transport_candidates = candidates
+        .iter()
+        .filter_map(|(address, identity)| identity.as_ref().map(|identity| ScanPeerTransportCandidate {
+            address: address.to_string(),
+            fingerprint_sha256: identity.fingerprint_sha256.clone(),
+            service_version: identity.service_version,
+        }))
+        .take(MAX_SCAN_PEER_TRANSPORT_CANDIDATES)
+        .collect::<Vec<_>>();
 
     let cancelled = cancel.is_cancelled();
     NetworkScanResult {
@@ -850,7 +968,9 @@ async fn run_scan_probe(
         discovered,
         skipped,
         cancelled,
-        discovered_addresses: discovered_addresses.iter().map(ToString::to_string).collect(),
+        discovered_addresses,
+        peer_transport_count,
+        peer_transport_candidates,
     }
 }
 
@@ -1795,6 +1915,8 @@ impl PeerNetwork {
             skipped: 0,
             cancelled: false,
             discovered_addresses: Vec::new(),
+            peer_transport_count: 0,
+            peer_transport_candidates: Vec::new(),
         };
         let progress = Arc::new(Mutex::new(initial.clone()));
         let mut state = self.scan.lock().map_err(|_| HostError::StatePoisoned)?;

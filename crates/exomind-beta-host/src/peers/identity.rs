@@ -114,6 +114,14 @@ fn certified(raw: &[u8]) -> Result<Arc<CertifiedKey>, HostError> {
         key,
     )))
 }
+
+/// Creates a non-persistent key for bounded peer-transport discovery probes.
+/// It carries no device id and is never reused as a profile identity.
+pub(super) fn ephemeral_probe_key() -> Result<Arc<CertifiedKey>, HostError> {
+    let raw = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
+        .map_err(|_| HostError::PeerIdentityUnavailable)?;
+    certified(raw.as_ref())
+}
 fn anchor(info: &DeviceIdentityInfo) -> String {
     format!(
         "{LAYOUT}\n{}\n{}\n",

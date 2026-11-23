@@ -19,11 +19,11 @@ import { BetaNearbyDevices } from './NearbyDeviceCandidates';
 import { BetaDeviceName } from './BetaDeviceName';
 import { BetaEnvironmentAliasSetting } from './BetaEnvironmentAliasSetting';
 import { useBetaDeviceNames } from './device-names';
-import { writeBetaMessageClipboard } from './beta-message-clipboard';
+import { readBetaMessageClipboard, writeBetaMessageClipboard } from './beta-message-clipboard';
 
 type Life = { active: boolean };
 type NearbySelection = { device_id: string; address: string };
-type JoinFailureView = { message: string; endpoints: BetaInvitationEndpointReport[] };
+type JoinFailureView = { endpoints: BetaInvitationEndpointReport[] };
 function peerState(peer: BetaPeer): string {
   if (peer.member_state === 'revoked') return '同步已停止';
   if (peer.member_state === 'pending') return '尚未建立数据同步';
@@ -73,13 +73,18 @@ function invitationEndpointSummary(report: BetaInvitationEndpointReport): string
 }
 function buildInvitationDiagnostic(preview: BetaInvitationPreview, failure: JoinFailureView | null): string {
   const endpoints = failure?.endpoints.length ? failure.endpoints : preview.endpoints;
+  const endpointCounts = new Map<string, number>();
+  for (const report of endpoints) {
+    const summary = invitationEndpointSummary(report);
+    endpointCounts.set(summary, (endpointCounts.get(summary) ?? 0) + 1);
+  }
   const lines = [
     '邀请检查结果',
     '结构：邀请格式与签名有效',
     `协议/schema：${preview.compatible ? '兼容' : '不兼容'}`,
     '档案成员资格：尚未接受',
-    ...(failure ? [`上次加入尝试：${failure.message}`] : []),
-    ...endpoints.map(report => `${report.endpoint} ${invitationEndpointSummary(report)}`),
+    ...(failure ? ['上次加入尝试：未完成，成员资格保持未接受'] : []),
+    `连接来源结果（不含地址）：${[...endpointCounts.entries()].map(([summary, count]) => `${summary}×${count}`).join('、') || '暂无结果'}`,
   ];
   return lines.join('\n');
 }
@@ -99,9 +104,23 @@ function scanScopeReasonLabel(reason: string): string {
     multicast_address: '组播地址',
     broadcast_address: '广播地址',
     ipv6_not_scanned: 'IPv6 保留，不参与有界扫描',
+    invalid_netmask: '接口子网掩码无效，未扫描',
+    scope_too_broad: '接口范围超过 /8，请手动缩小扫描 CIDR',
+    no_remote_hosts: '该接口范围没有其他主机',
     scope_limit: '已达扫描接口上限（8 个）',
   };
   return labels[reason] ?? reason;
+}
+function canonicalScanCidr(value: string): string | null {
+  const match=/^\s*(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})\s*$/.exec(value);
+  if(!match)return null;
+  const octets=match[1].split('.').map(Number),prefix=Number(match[2]);
+  if(octets.some(octet=>octet<0||octet>255)||prefix<8||prefix>32)return null;
+  const ip=octets.reduce((result,octet)=>((result<<8)|octet)>>>0,0);
+  const mask=prefix===0?0:(0xffffffff<<(32-prefix))>>>0;
+  const network=(ip&mask)>>>0;
+  const address=[24,16,8,0].map(shift=>(network>>>shift)&255).join('.');
+  return `${address}/${prefix}`;
 }
 // Redaction contract: a scan diagnostic copies only bounded counts, the stage,
 // cancellation state, a stable short scan prefix and whitelisted scope reason
@@ -124,9 +143,9 @@ function buildScanDiagnostic(scan: BetaNetworkScan | null, scopes: readonly Beta
     ...(scan ? [
       `扫描标识：${scan.scan_id.slice(0, 8)}…`,
       `阶段：${scan.stage}`,
-      `尝试：${scan.attempted} · 发现：${scan.discovered} · 跳过：${scan.skipped}`,
+      `尝试：${scan.attempted} · 开放端口候选：${scan.discovered} · Beta Peer Transport 握手：${scan.peer_transport_count} · 跳过：${scan.skipped}`,
       `已取消：${scan.cancelled ? '是' : '否'}`,
-      `开放端口候选：${scan.discovered_addresses.length} 个`,
+      `候选样本：${scan.discovered_addresses.length} 个（地址已从诊断中省略）`,
     ] : ['扫描尚未完成']),
     `可选范围：${scopes.filter(scope => scope.eligible).length} 个（物理局域网 ${kindCount('physical_lan')}、EasyTier ${kindCount('easytier')}、覆盖网 ${kindCount('overlay')}、手动 ${kindCount('manual')}、其他 ${kindCount('other')}）`,
     `不可用范围原因：${reasons}`,
@@ -135,7 +154,7 @@ function buildScanDiagnostic(scan: BetaNetworkScan | null, scopes: readonly Beta
   ];
   return lines.join('\n');
 }
-export function BetaPeersPage({ peers, profileId, profileName, runtimeId, deviceId, onJoined, onEventsChanged, visible = true, copyText = writeBetaMessageClipboard }: {
+export function BetaPeersPage({ peers, profileId, profileName, runtimeId, deviceId, onJoined, onEventsChanged, visible = true, copyText = writeBetaMessageClipboard, readClipboardText = readBetaMessageClipboard }: {
   peers: BetaPeersClient | null;
   profileId: string;
   profileName: string;
@@ -145,6 +164,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   onEventsChanged?: (profileId: string) => void;
   visible?: boolean;
   copyText?: (value: string) => Promise<void>;
+  readClipboardText?: () => Promise<string>;
 }) {
   const scope = useMemo(() => ({ peers, profileId, runtimeId, deviceId }), [peers, profileId, runtimeId, deviceId]);
   const names=useBetaDeviceNames(deviceId),peerLabel=(peer:BetaPeer)=>names.label(peer.device_id);
@@ -159,6 +179,8 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   const [operation, setOperation] = useState<string | null>(null);
   const [created, setCreated] = useState<BetaInvitation | null>(null);
   const [invitationText, setInvitationText] = useState('');
+  const [showClipboardConfirm, setShowClipboardConfirm] = useState(false);
+  const [clipboardReadError, setClipboardReadError] = useState('');
   const [dialAddress, setDialAddress] = useState('');
   const [nearbySelection, setNearbySelection] = useState<NearbySelection | null>(null);
   const [showDialAddress, setShowDialAddress] = useState(false);
@@ -262,6 +284,62 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
     const life = lifecycle.current;
     if (life) void loadScanScopes(life);
   }
+  async function inspectInvitationText(life: Life, text: string, revision: number) {
+    let result: BetaInvitationPreview;
+    try { result = await peers!.inspectInvitation(text.trim()); }
+    catch (failure) {
+      if (!isCurrent(life) || revision !== inputRevision.current) return;
+      throw failure;
+    }
+    if (!isCurrent(life) || revision !== inputRevision.current) return;
+    if (nearbySelection && nearbySelection.device_id !== result.issuer_device_id) {
+      setNearbySelection(null); setDialAddress(''); setShowDialAddress(false);
+      setNotice('所选候选设备与完整邀请的身份不一致，已清除候选地址。');
+    }
+    setPreview(result);
+    setJoinFailure(null);
+  }
+  async function pasteClipboardAndInspectInvitation() {
+    await perform('inspect', async life => {
+      setClipboardReadError('');
+      let text: string;
+      try { text = await readClipboardText(); }
+      catch {
+        if (isCurrent(life)) setClipboardReadError('无法读取剪贴板文字；请检查系统权限，或取消后直接在邀请框中使用系统粘贴。');
+        return;
+      }
+      if (!isCurrent(life)) return;
+      const invitation = text.trim();
+      if (!invitation) {
+        setClipboardReadError('剪贴板中没有可检查的文本；请取消后手动粘贴完整邀请。');
+        return;
+      }
+      if (invitation.length > 32768) {
+        setClipboardReadError('剪贴板文本超过 32,768 个字符上限，未执行检查；请确认复制的是完整邀请。');
+        return;
+      }
+      inputRevision.current++;
+      const revision = inputRevision.current;
+      setInvitationText(invitation);
+      setPreview(null);
+      setJoinFailure(null);
+      setPendingJoin(null);
+      if (!nearbySelection) { setDialAddress(''); setShowDialAddress(false); }
+      try {
+        await inspectInvitationText(life, invitation, revision);
+      } catch {
+        if (isCurrent(life) && revision === inputRevision.current) {
+          setClipboardReadError('邀请已粘贴到文本框，但检查未完成；文本已保留，可关闭此窗口后重试“检查邀请”。');
+          return;
+        }
+      }
+      if (isCurrent(life) && revision === inputRevision.current) {
+        setShowClipboardConfirm(false);
+        setClipboardReadError('');
+        setNotice('剪贴板邀请已检查；成员资格尚未接受，加入仍需单独确认。');
+      }
+    });
+  }
   function toggleScope(scopeId: string, selected: boolean) {
     setSelectedScopeIds(current => selected
       ? (current.includes(scopeId) ? current : [...current, scopeId])
@@ -325,6 +403,15 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
     setScanError('');
     setScanPollPaused(false);
     const cidr = manualCidr.trim();
+    const manualNetwork = canonicalScanCidr(cidr);
+    const duplicatesSelectedScope = !!manualNetwork && scanScopes.some(scope =>
+      selectedScopeIds.includes(scope.scope_id) && scope.network === manualNetwork,
+    );
+    if (cidr && selectedScopeIds.length >= 8 && !duplicatesSelectedScope) {
+      setScanError('最多扫描 8 个范围；手动 CIDR 会优先探测，请先取消勾选至少一个自动范围。');
+      setScanBusy(false);
+      return;
+    }
     let result: BetaNetworkScan;
     try {
       result = await peers.scanNearby({ scopeIds: selectedScopeIds, ...(cidr ? { manualCidrs: [cidr] } : {}) });
@@ -367,7 +454,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   }
   useEffect(() => {
     const life: Life = { active: true }; lifecycle.current = life;
-    setStatus(null); setNearby([]); setNearbyError(''); setNearbySelection(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setJoinFailure(null); setInvitationText(''); setDialAddress(''); setShowDialAddress(false); setPendingJoin(null); setRevoke(null); setCopyingInvitationId(null); observedSync.current = null; inputRevision.current++; copySequence.current++;
+    setStatus(null); setNearby([]); setNearbyError(''); setNearbySelection(null); setError(''); setStatusError(''); setNotice(''); setOperation(null); setCreated(null); setPreview(null); setJoinFailure(null); setInvitationText(''); setShowClipboardConfirm(false); setClipboardReadError(''); setDialAddress(''); setShowDialAddress(false); setPendingJoin(null); setRevoke(null); setCopyingInvitationId(null); observedSync.current = null; inputRevision.current++; copySequence.current++;
     scanSequence.current++; scanScopesLoaded.current = false; scanFailuresRef.current = 0; setScanScopes([]); setScanScopesError(''); setSelectedScopeIds([]); setManualCidr(''); setNetworkEnabled(null); setNetworkEnabledError(''); setScan(null); setScanError(''); setScanBusy(false); setScanPollPaused(false);
     if (scanTimer.current) { clearTimeout(scanTimer.current); scanTimer.current = undefined; }
     return () => { life.active = false; copySequence.current++; scanSequence.current++; if (scanTimer.current) { clearTimeout(scanTimer.current); scanTimer.current = undefined; } if (operationFlight.current === life) operationFlight.current = null; };
@@ -438,7 +525,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
     catch (failure) {
       if (!isCurrent(life) || revision !== inputRevision.current) return;
       const reports = failure instanceof BetaPeerJoinError ? failure.endpoints : joinFailureEndpointReports(failure);
-      if (reports && reports.length > 0) setJoinFailure({ message: errorMessage(failure), endpoints: reports });
+      if (reports && reports.length > 0) setJoinFailure({ endpoints: reports });
       throw failure;
     }
     if (!isCurrent(life) || revision !== inputRevision.current) return;
@@ -456,6 +543,8 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   const allUnreachable = shownEndpoints.length > 0
     && shownEndpoints.every(report => report.disposition === 'unreachable' || report.disposition === 'skipped')
     && shownEndpoints.some(report => report.disposition === 'unreachable');
+  const peerTransportAddressSet = new Set((scan?.peer_transport_candidates ?? []).map(candidate => candidate.address));
+  const openUnverifiedAddresses = (scan?.discovered_addresses ?? []).filter(address => !peerTransportAddressSet.has(address));
   if (!peers) return <PageShell title="设备同步" contentClassName="overflow-y-auto"><div className="mx-auto max-w-3xl px-5 py-8"><SettingsSection title="当前连接"><p className="px-4 py-4 text-sm text-secondary">此连接尚未提供设备同步管理。独立应用会使用本机服务连接设备。</p></SettingsSection></div></PageShell>;
   if (!runtimeId || !deviceId) return <PageShell title="设备同步"><p role="status" className="px-5 py-8 text-sm text-secondary">本机服务尚未就绪，请在当下页面完成连接后继续。</p></PageShell>;
   return <PageShell title="设备同步" contentClassName="overflow-y-auto" headerAction={profileId && <Button variant="ghost" size="icon" aria-label="刷新同步状态" disabled={!!operation} onClick={() => void perform('refresh', refresh)}><RefreshCw size={16}/></Button>}>
@@ -472,7 +561,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
       <SettingsSection title="潜在设备">
         <div className="space-y-3 px-4 pb-4">
           <p className="text-xs leading-relaxed text-secondary">
-            扫描只发起一次有界探测。TCP 43344 开放端口只作为未验证地址候选，不会建立路由、成员授权或档案写入。
+            扫描只发起一次有界探测：先试手动 CIDR，再优先 EasyTier／覆盖网和较小子网。Beta 传输握手只确认当前端点的协议与 TLS 指纹；邀请仍会独立核对签名身份，扫描不会建立路由或成员授权。
           </p>
           {scanScopesError && (
             <div className="space-y-2">
@@ -553,31 +642,50 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
           </div>}
           {scan && scan.finished_at_ms === 0 && (
             <p role="status" className="text-xs text-secondary">
-              {scan.stage === 'cancelling' ? '正在取消扫描' : '正在扫描'} · 已尝试 {scan.attempted} · 已跳过 {scan.skipped}；开放端口将在扫描结束后汇总确认
+              {scan.stage === 'cancelling' ? '正在取消扫描' : '正在扫描并识别 Beta Peer Transport'} · 已尝试 {scan.attempted} · 已跳过 {scan.skipped}；协议候选在扫描结束后汇总
             </p>
           )}
           {scan && scan.finished_at_ms > 0 && (
             <div className="space-y-2">
               <p role="status" className="text-xs text-secondary">
-                扫描结束 · 已尝试 {scan.attempted} · 已发现 {scan.discovered} · 已跳过 {scan.skipped}{scan.cancelled ? ' · 已取消' : ''}
+                扫描结束 · 已尝试 {scan.attempted} · 开放端口候选 {scan.discovered} · Beta 传输握手 {scan.peer_transport_count} · 已跳过 {scan.skipped}{scan.cancelled ? ' · 已取消' : ''}
               </p>
-              {scan.discovered_addresses.length > 0 && (
+              {scan.peer_transport_candidates.length > 0 && (
                 <div className="space-y-1">
-                  <ul aria-label="未验证地址候选" className="space-y-1">
-                    {scan.discovered_addresses.map(address => (
-                      <li key={address} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                        <span className="min-w-0 break-all font-mono text-secondary">{address} · 开放端口，未验证身份</span>
+                  <ul aria-label="Beta 对等传输候选" className="space-y-1">
+                    {scan.peer_transport_candidates.map(candidate => (
+                      <li key={candidate.address} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="min-w-0 break-all font-mono text-secondary">{candidate.address} · Beta Peer Transport {candidate.service_version} · TLS 指纹 {candidate.fingerprint_sha256.slice(0, 12)}…</span>
                         <Button variant="outline" size="sm" disabled={!!operation}
-                          onClick={() => { setDialAddress(address); setShowDialAddress(true); setNotice('该地址只是开放端口候选，仍需粘贴完整邀请并核对设备身份。'); }}>
+                          onClick={() => { setDialAddress(candidate.address); setShowDialAddress(true); setNotice('该端点完成了 Beta 传输身份握手；是否匹配邀请身份仍以“检查邀请”结果为准。'); }}>
                           使用地址
                         </Button>
                       </li>
                     ))}
                   </ul>
-                  {scan.discovered > scan.discovered_addresses.length && (
-                    <p className="text-xs text-secondary">另有 {scan.discovered - scan.discovered_addresses.length} 个开放端口未展示（最多展示 64 个）。</p>
+                  <p className="text-xs leading-relaxed text-secondary">扫描只证明该端点当前控制所示 TLS 公钥并支持 Beta 传输协议；尚未核对邀请，也未加入档案。</p>
+                  {scan.peer_transport_count > scan.peer_transport_candidates.length && (
+                    <p className="text-xs text-secondary">另有 {scan.peer_transport_count - scan.peer_transport_candidates.length} 个 Beta 传输候选未展示（最多展示 64 个）。</p>
                   )}
                 </div>
+              )}
+              {openUnverifiedAddresses.length > 0 && (
+                <div className="space-y-1">
+                  <ul aria-label="未验证地址候选" className="space-y-1">
+                    {openUnverifiedAddresses.map(address => (
+                      <li key={address} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="min-w-0 break-all font-mono text-secondary">{address} · TCP 开放，未识别 Beta 传输协议</span>
+                        <Button variant="outline" size="sm" disabled={!!operation}
+                          onClick={() => { setDialAddress(address); setShowDialAddress(true); setNotice('该地址仅是开放端口候选；检查邀请时仍会严格核对 TLS 指纹。'); }}>
+                          使用地址
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {scan.discovered > scan.discovered_addresses.length && (
+                <p className="text-xs text-secondary">另有 {scan.discovered - scan.discovered_addresses.length} 个开放端口候选未展示；已按 Beta 传输握手结果优先排序。</p>
               )}
               {scan.discovered === 0 && (
                 <p className="text-xs leading-relaxed text-secondary">
@@ -642,23 +750,15 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
         <div className="space-y-3 px-4 py-4">
           <label htmlFor="beta-peer-invitation" className="text-sm font-medium text-foreground">另一设备的完整邀请</label>
           {nearbySelection && <p role="status" className="break-all text-xs text-secondary">{'已选择设备 ' + nearbySelection.device_id + ' · 候选地址 ' + nearbySelection.address + '。仍需检查完整邀请并明确确认加入。'}</p>}
-          <Textarea id="beta-peer-invitation" value={invitationText} maxLength={32768} placeholder="粘贴完整邀请" className="min-h-24 text-xs" onChange={event => { setInvitationText(event.target.value); setPreview(null); setJoinFailure(null); setPendingJoin(null); if (!nearbySelection) { setDialAddress(''); setShowDialAddress(false); } inputRevision.current++; }}/>
-          <Button variant="outline" disabled={!!operation || !invitationText.trim()} onClick={() => void perform('inspect', async life => {
-            const revision = inputRevision.current;
-            let result: BetaInvitationPreview;
-            try { result = await peers.inspectInvitation(invitationText.trim()); }
-            catch (failure) {
-              if (!isCurrent(life) || revision !== inputRevision.current) return;
-              throw failure;
-            }
-            if (!isCurrent(life) || revision !== inputRevision.current) return;
-            if (nearbySelection && nearbySelection.device_id !== result.issuer_device_id) {
-              setNearbySelection(null); setDialAddress(''); setShowDialAddress(false);
-              setNotice('所选候选设备与完整邀请的身份不一致，已清除候选地址。');
-            }
-            setPreview(result);
-            setJoinFailure(null);
-          })}><Link2 size={14}/>{operation === 'inspect' ? '正在检查…' : '检查邀请'}</Button>
+          <Textarea id="beta-peer-invitation" value={invitationText} maxLength={32768} placeholder="粘贴完整邀请" className="min-h-24 text-xs" onChange={event => { setInvitationText(event.target.value); setPreview(null); setJoinFailure(null); setPendingJoin(null); setClipboardReadError(''); if (!nearbySelection) { setDialAddress(''); setShowDialAddress(false); } inputRevision.current++; }}/>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" className="min-h-11" disabled={!!operation || !invitationText.trim()} onClick={() => void perform('inspect', async life => {
+              await inspectInvitationText(life, invitationText, inputRevision.current);
+            })}><Link2 size={14}/>{operation === 'inspect' ? '正在检查…' : '检查邀请'}</Button>
+            <Button variant="outline" className="min-h-11" disabled={!!operation} onClick={() => { setClipboardReadError(''); setShowClipboardConfirm(true); }}>
+              从剪贴板粘贴并检查
+            </Button>
+          </div>
           {preview && <div className="space-y-3 rounded-xl bg-surface p-3 text-sm">
             <p className="font-medium text-foreground">加入「{preview.profile_name}」</p>
             <p className="text-xs leading-relaxed text-secondary">{profileId && profileId !== preview.profile_id ? `当前「${profileName}」会保留，加入确认后才切换档案。` : '加入成功后才会进入同步阶段；记录与原件是否完成以设备卡的最后确认为准。'}</p>
@@ -712,6 +812,25 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
         </div>)}
       </SettingsSection>}
     </div>
+    <Dialog open={showClipboardConfirm} onOpenChange={open => {
+      if (!open && operation !== 'inspect') { setShowClipboardConfirm(false); setClipboardReadError(''); }
+    }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>读取剪贴板中的邀请？</DialogTitle>
+          <DialogDescription>
+            继续后只读取剪贴板纯文本，填入邀请框，并检查格式、签名、过期时间与连接来源。来源检查会对邀请列出的地址做只读 TLS 身份探测；不会创建成员资格或切换档案。若你不想读取剪贴板，可以取消后在邀请框中手动粘贴。
+          </DialogDescription>
+        </DialogHeader>
+        {clipboardReadError && <p role="alert" className="text-sm text-destructive">{clipboardReadError}</p>}
+        <DialogFooter>
+          <Button variant="outline" disabled={operation === 'inspect'} onClick={() => { setShowClipboardConfirm(false); setClipboardReadError(''); }}>取消</Button>
+          <Button className="min-h-11" disabled={operation === 'inspect'} onClick={() => void pasteClipboardAndInspectInvitation()}>
+            {operation === 'inspect' ? '正在读取并检查…' : '读取并检查邀请'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Dialog open={!!revoke} onOpenChange={open => { if (!open && !operation) setRevoke(null); }}>
       <DialogContent><DialogHeader><DialogTitle>撤销此设备授权？</DialogTitle><DialogDescription>停止此设备后续的读取、追加和补齐。已经保存到其他设备的副本不会被远程抹除。</DialogDescription></DialogHeader>
         <p className="text-sm text-secondary">{revoke && peerLabel(revoke)} · {profileName}</p>

@@ -63,6 +63,13 @@ export interface BetaNetworkScan {
   skipped: number;
   cancelled: boolean;
   discovered_addresses: string[];
+  peer_transport_count: number;
+  peer_transport_candidates: BetaPeerTransportScanCandidate[];
+}
+export interface BetaPeerTransportScanCandidate {
+  address: string;
+  fingerprint_sha256: string;
+  service_version: 'v1' | 'v2';
 }
 export interface BetaInvitation {
   invitation_text: string; invitation_id: string; expires_at_ms: number; local_addresses: string[];
@@ -105,10 +112,11 @@ export interface BetaPeersClient {
 }
 type Call = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 const invalid = (): never => { throw new BetaApiError('invalid_peer_response', '设备同步响应无效，请查证后重试'); };
-function object(value: unknown, keys: string[]): Record<string, unknown> {
+function object(value: unknown, keys: string[], optional: string[] = []): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid();
   const item = value as Record<string, unknown>;
-  if (Object.keys(item).some(key => !keys.includes(key)) || keys.some(key => !(key in item))) return invalid();
+  const allowed = new Set([...keys, ...optional]);
+  if (Object.keys(item).some(key => !allowed.has(key)) || keys.some(key => !(key in item))) return invalid();
   return item;
 }
 function text(value: unknown, max = 4096): string { if (typeof value !== 'string' || value.length > max) return invalid(); return value; }
@@ -209,13 +217,23 @@ function scanScope(value: unknown): BetaScanScope {
   };
 }
 function networkScan(value: unknown): BetaNetworkScan {
-  const item=object(value,['scan_id','started_at_ms','finished_at_ms','stage','scopes','attempted','discovered','skipped','cancelled','discovered_addresses']);
+  const item=object(value,['scan_id','started_at_ms','finished_at_ms','stage','scopes','attempted','discovered','skipped','cancelled','discovered_addresses'],['peer_transport_count','peer_transport_candidates']);
   if(!Array.isArray(item.scopes)||item.scopes.length>MAX_SCAN_SCOPES)return invalid();
   const scopes=item.scopes.map(scanScope);
   if(new Set(scopes.map(scope=>scope.scope_id)).size!==scopes.length)return invalid();
   if(!Array.isArray(item.discovered_addresses)||item.discovered_addresses.length>MAX_SCAN_DISCOVERED_ADDRESSES)return invalid();
   const discovered_addresses=item.discovered_addresses.map(endpointAddress);
   if(new Set(discovered_addresses).size!==discovered_addresses.length)return invalid();
+  const rawPeerCandidates=item.peer_transport_candidates??[];
+  if(!Array.isArray(rawPeerCandidates)||rawPeerCandidates.length>64)return invalid();
+  const peer_transport_candidates=rawPeerCandidates.map(raw=>{
+    const candidate=object(raw,['address','fingerprint_sha256','service_version']);
+    const address=endpointAddress(candidate.address);
+    const fingerprint_sha256=text(candidate.fingerprint_sha256,64);
+    if(!/^[a-f0-9]{64}$/.test(fingerprint_sha256)||!discovered_addresses.includes(address))return invalid();
+    return {address,fingerprint_sha256,service_version:choice(candidate.service_version,['v1','v2'] as const)};
+  });
+  if(new Set(peer_transport_candidates.map(candidate=>candidate.address)).size!==peer_transport_candidates.length)return invalid();
   const cancelled=boolean(item.cancelled);
   const finished=integer(item.finished_at_ms,0);
   const stage=choice(item.stage,SCAN_STAGES);
@@ -225,6 +243,8 @@ function networkScan(value: unknown): BetaNetworkScan {
   const attempted=integer(item.attempted,0,1024);
   const discovered=integer(item.discovered,0,1024);
   if(discovered>attempted)return invalid();
+  const peer_transport_count=item.peer_transport_count===undefined?0:integer(item.peer_transport_count,0,discovered);
+  if(peer_transport_count<peer_transport_candidates.length)return invalid();
   const skipped=integer(item.skipped,0);
   if(cancelled&&stage!=='cancelled')return invalid();
   return {
@@ -238,6 +258,8 @@ function networkScan(value: unknown): BetaNetworkScan {
     skipped,
     cancelled,
     discovered_addresses,
+    peer_transport_count,
+    peer_transport_candidates,
   };
 }
 const ENDPOINT_DISPOSITIONS=['attempted','skipped','reachable','identity_mismatch','unreachable','protocol_mismatch'] as const;

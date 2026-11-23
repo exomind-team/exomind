@@ -3148,6 +3148,8 @@ mod scan {
             skipped: 0,
             cancelled: false,
             discovered_addresses: vec![],
+            peer_transport_count: 0,
+            peer_transport_candidates: vec![],
         }
     }
 
@@ -3324,12 +3326,12 @@ mod scan {
     #[test]
     fn build_scan_scopes_from_keeps_unique_rows_and_dedups_ineligible_duplicates() {
         let interfaces = vec![
-            ("eth0".to_string(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))),
-            ("eth0".to_string(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 20))),
-            ("lo".to_string(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
-            ("lo".to_string(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
-            ("eth0".to_string(), IpAddr::V6("fe80::1".parse().unwrap())),
-            ("eth0".to_string(), IpAddr::V6("2001:db8::1".parse().unwrap())),
+            ("eth0".to_string(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20)), Some(24)),
+            ("eth0".to_string(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 20)), Some(16)),
+            ("lo".to_string(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), Some(8)),
+            ("lo".to_string(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), Some(8)),
+            ("eth0".to_string(), IpAddr::V6("fe80::1".parse().unwrap()), None),
+            ("eth0".to_string(), IpAddr::V6("2001:db8::1".parse().unwrap()), None),
         ];
         let scopes = build_scan_scopes_from(interfaces.into_iter());
         let ids = scopes
@@ -3339,6 +3341,57 @@ mod scan {
         assert_eq!(ids.len(), scopes.len(), "scope ids must be unique");
         assert_eq!(scopes.len(), 5);
         assert_eq!(scopes.iter().filter(|scope| scope.eligible).count(), 2);
+        assert_eq!(scopes[0].network, "192.168.1.0/24");
+        assert_eq!(scopes[1].network, "10.0.0.0/16");
+    }
+
+    #[test]
+    fn scan_scope_uses_real_interface_prefix_and_rejects_missing_or_overbroad_masks() {
+        let scopes = build_scan_scopes_from(vec![
+            ("tier0".to_string(), IpAddr::V4(Ipv4Addr::new(100, 64, 12, 34)), Some(20)),
+            ("bad0".to_string(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), None),
+            ("wide0".to_string(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), Some(7)),
+            ("host0".to_string(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), Some(32)),
+        ].into_iter());
+        let tier = scopes.iter().find(|scope| scope.interface_name == "tier0").unwrap();
+        assert_eq!(tier.network, "100.64.0.0/20");
+        assert!(tier.eligible);
+        assert_eq!(scopes.iter().find(|scope| scope.interface_name == "bad0").unwrap().reason, Some("invalid_netmask"));
+        assert_eq!(scopes.iter().find(|scope| scope.interface_name == "wide0").unwrap().reason, Some("scope_too_broad"));
+        assert_eq!(scopes.iter().find(|scope| scope.interface_name == "host0").unwrap().reason, Some("no_remote_hosts"));
+    }
+
+    #[test]
+    fn interface_limit_keeps_overlay_scopes_before_physical_lan_scopes() {
+        let mut interfaces = (0..9).map(|index| (
+            format!("eth{index}"),
+            IpAddr::V4(Ipv4Addr::new(192, 168, index as u8, 10)),
+            Some(24),
+        )).collect::<Vec<_>>();
+        interfaces.push(("tun0".to_string(), IpAddr::V4(Ipv4Addr::new(100, 64, 1, 10)), Some(24)));
+        let scopes = build_scan_scopes_from(interfaces.into_iter());
+        assert_eq!(scopes.iter().filter(|scope| scope.eligible).count(), MAX_SCAN_INTERFACES);
+        assert!(scopes.iter().find(|scope| scope.interface_name == "tun0").unwrap().eligible);
+        assert_eq!(scopes.iter().filter(|scope| scope.reason == Some("scope_limit")).count(), 2);
+    }
+
+    #[test]
+    fn scan_requests_prioritize_manual_small_ranges_then_easytier_overlay_and_small_subnets() {
+        let scopes = vec![
+            ScanScope { scope_id: "physical".into(), interface_name: "eth0".into(), kind: "physical_lan", prefix: 24, eligible: true, network: "192.168.1.0/24".into(), reason: None },
+            ScanScope { scope_id: "overlay".into(), interface_name: "tun0".into(), kind: "overlay", prefix: 24, eligible: true, network: "100.64.0.0/24".into(), reason: None },
+            ScanScope { scope_id: "easytier".into(), interface_name: "easytier0".into(), kind: "easytier", prefix: 20, eligible: true, network: "10.137.0.0/20".into(), reason: None },
+        ];
+        let requests = build_scan_requests(
+            vec!["physical".into(), "overlay".into(), "easytier".into()],
+            vec!["10.138.0.0/16".into(), "10.137.1.0/28".into()],
+            &scopes,
+        ).unwrap();
+        assert_eq!(requests[0].scope_id, "manual:10.137.1.0/28");
+        assert_eq!(requests[1].scope_id, "manual:10.138.0.0/16");
+        assert_eq!(requests[2].scope_id, "easytier");
+        assert_eq!(requests[3].scope_id, "overlay");
+        assert_eq!(requests[4].scope_id, "physical");
     }
 
     #[test]

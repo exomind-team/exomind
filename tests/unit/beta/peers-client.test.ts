@@ -156,7 +156,7 @@ describe('Nearby scan boundary',()=> {
   const scope=()=>({scope_id:'eth0:192.168.1.0/24',interface_name:'eth0',kind:'physical_lan',prefix:24,eligible:true,network:'192.168.1.0/24',reason:null});
   const scan=(overrides:Record<string,unknown>={})=>({
     scan_id:S,started_at_ms:1000,finished_at_ms:2000,stage:'complete',scopes:[scope()],
-    attempted:10,discovered:2,skipped:1,cancelled:false,discovered_addresses:['192.168.1.7:43344'],...overrides,
+    attempted:10,discovered:2,skipped:1,cancelled:false,discovered_addresses:['192.168.1.7:43344'],peer_transport_count:0,peer_transport_candidates:[],...overrides,
   });
   it('reads network enabled without a profile argument',async()=>{
     let reply:unknown=true;
@@ -187,6 +187,15 @@ describe('Nearby scan boundary',()=> {
     const client=nativeBetaPeersClient(vi.fn(async()=>reply));
     expect(await client.scanScopes()).toHaveLength(2);
   });
+  it('returns Beta transport fingerprints as protocol candidates, separate from open-port counts',async()=>{
+    const candidate={address:'192.168.1.7:43344',fingerprint_sha256:'a'.repeat(64),service_version:'v2'};
+    const reply=scan({peer_transport_count:2,peer_transport_candidates:[candidate]});
+    const client=nativeBetaPeersClient(vi.fn(async(name:string)=>name==='beta_peer_scan_status'?reply:null));
+    const result=await client.scanStatus(S);
+    expect(result.discovered).toBe(2);
+    expect(result.peer_transport_count).toBe(2);
+    expect(result.peer_transport_candidates).toEqual([candidate]);
+  });
   it('rejects malformed scopes, stages, counts and duplicate endpoints',async()=>{
     const cases:unknown[]=[
       [{...scope(),kind:'mystery'}],
@@ -206,6 +215,9 @@ describe('Nearby scan boundary',()=> {
       scan({attempted:2,discovered:3}),
       scan({discovered_addresses:['192.168.1.7:43344','192.168.1.7:43344']}),
       scan({discovered_addresses:Array.from({length:65},(_,i)=>`192.168.1.${i+1}:43344`)}),
+      scan({peer_transport_count:1,peer_transport_candidates:[{address:'192.168.1.8:43344',fingerprint_sha256:'a'.repeat(64),service_version:'v2'}]}),
+      scan({peer_transport_count:0,peer_transport_candidates:[{address:'192.168.1.7:43344',fingerprint_sha256:'a'.repeat(64),service_version:'v2'}]}),
+      scan({peer_transport_count:1,peer_transport_candidates:[{address:'192.168.1.7:43344',fingerprint_sha256:'A'.repeat(64),service_version:'v2'}]}),
       scan({cancelled:true,stage:'complete'}),
       scan({scopes:[scope(),scope()]}),
     ];

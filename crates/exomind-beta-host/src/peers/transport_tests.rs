@@ -195,6 +195,66 @@ async fn peer_client_completed_real_tls_without_expected_alpn_is_still_rejected(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn discovery_probe_verifies_beta_transport_key_without_profile_or_invitation_state() {
+    let (_root, remote, remote_owner) = host();
+    let remote_identity = remote.transport_identity(&remote_owner).unwrap();
+    let expected_fingerprint = remote_identity.info.fingerprint_sha256.clone();
+    let config = server_config(&remote_identity).unwrap();
+    let listener = TcpListener::bind(address()).await.unwrap();
+    let endpoint = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (socket, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut stream = tokio::time::timeout(
+            Duration::from_secs(2),
+            tokio_rustls::TlsAcceptor::from(config).accept(socket),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let mut buffer = [0u8; 1];
+        let _ = tokio::time::timeout(Duration::from_millis(250), stream.read(&mut buffer)).await;
+    });
+
+    let result =
+        probe_peer_transport(endpoint, Duration::from_secs(2), &PeerCancellation::new()).await;
+    assert!(matches!(
+        result,
+        PeerTransportScanProbe::PeerTransport(PeerTransportScanIdentity {
+            fingerprint_sha256,
+            service_version: "v2"
+        }) if fingerprint_sha256 == expected_fingerprint
+    ));
+    tokio::time::timeout(Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(remote.profiles(&remote_owner).unwrap().is_empty());
+    stop(remote).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn discovery_probe_keeps_other_open_tcp_services_unverified() {
+    let listener = TcpListener::bind(address()).await.unwrap();
+    let endpoint = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut header = [0u8; 5];
+        let _ = tokio::time::timeout(Duration::from_secs(1), socket.read_exact(&mut header)).await;
+    });
+
+    let result =
+        probe_peer_transport(endpoint, Duration::from_secs(2), &PeerCancellation::new()).await;
+    assert!(matches!(result, PeerTransportScanProbe::OpenUnverified));
+    tokio::time::timeout(Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn peer_client_malformed_tls_record_remains_protocol_rejected() {
     let (_root, client, owner) = host();
     let expected = pin(&client, &owner);

@@ -357,9 +357,17 @@ fn client_config(
     pin: PeerPin,
     mismatch: Arc<AtomicBool>,
 ) -> Result<Arc<ClientConfig>, HostError> {
+    client_config_for_key(identity.certified.clone(), Some(pin), mismatch)
+}
+
+fn client_config_for_key(
+    certified: Arc<rustls::sign::CertifiedKey>,
+    pin: Option<PeerPin>,
+    mismatch: Arc<AtomicBool>,
+) -> Result<Arc<ClientConfig>, HostError> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let verifier = Arc::new(Verifier {
-        pin: Some(pin),
+        pin,
         mismatch,
         provider: provider.clone(),
     });
@@ -369,7 +377,7 @@ fn client_config(
         .dangerous()
         .with_custom_certificate_verifier(verifier)
         .with_client_cert_resolver(Arc::new(
-            rustls::client::AlwaysResolvesClientRawPublicKeys::new(identity.certified.clone()),
+            rustls::client::AlwaysResolvesClientRawPublicKeys::new(certified),
         ));
     config.alpn_protocols = vec![ALPN_V2.to_vec(), ALPN_V1.to_vec()];
     config.enable_early_data = false;
@@ -382,6 +390,79 @@ fn client_config(
 struct VerifiedTransportPeer {
     pin: PeerPin,
     service_version: PeerServiceVersion,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct PeerTransportScanIdentity {
+    pub fingerprint_sha256: String,
+    pub service_version: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum PeerTransportScanProbe {
+    Closed,
+    OpenUnverified,
+    PeerTransport(PeerTransportScanIdentity),
+    Cancelled,
+}
+
+impl PeerServiceVersion {
+    fn label(self) -> &'static str {
+        match self {
+            Self::V1 => "v1",
+            Self::V2 => "v2",
+        }
+    }
+}
+
+/// Identifies only the service protocol and the peer's current TLS public key.
+/// Each probe uses a fresh, non-persistent client key; it sends no invitation,
+/// profile id, membership request or durable device identity.
+pub(super) async fn probe_peer_transport(
+    address: SocketAddr,
+    timeout: Duration,
+    cancel: &PeerCancellation,
+) -> PeerTransportScanProbe {
+    let deadline = tokio::time::Instant::now() + timeout;
+    let socket = tokio::select! {
+        _ = cancel.cancelled() => return PeerTransportScanProbe::Cancelled,
+        result = tokio::time::timeout_at(deadline, TcpStream::connect(address)) => {
+            match result {
+                Ok(Ok(socket)) => socket,
+                _ => return PeerTransportScanProbe::Closed,
+            }
+        }
+    };
+    let certified = match super::identity::ephemeral_probe_key() {
+        Ok(certified) => certified,
+        Err(_) => return PeerTransportScanProbe::OpenUnverified,
+    };
+    let config = match client_config_for_key(certified, None, Arc::new(AtomicBool::new(false))) {
+        Ok(config) => config,
+        Err(_) => return PeerTransportScanProbe::OpenUnverified,
+    };
+    let server_name = match ServerName::try_from("exomind-peer.invalid") {
+        Ok(server_name) => server_name.to_owned(),
+        Err(_) => return PeerTransportScanProbe::OpenUnverified,
+    };
+    let result = tokio::select! {
+        _ = cancel.cancelled() => return PeerTransportScanProbe::Cancelled,
+        result = tokio::time::timeout_at(
+            deadline,
+            tokio_rustls::TlsConnector::from(config).connect(server_name, socket),
+        ) => result,
+    };
+    let Ok(Ok(stream)) = result else {
+        return PeerTransportScanProbe::OpenUnverified;
+    };
+    let stream: tokio_rustls::TlsStream<TcpStream> = stream.into();
+    match verified(&stream) {
+        Ok(peer) => PeerTransportScanProbe::PeerTransport(PeerTransportScanIdentity {
+            fingerprint_sha256: peer.pin.as_sha256(),
+            service_version: peer.service_version.label(),
+        }),
+        Err(_) => PeerTransportScanProbe::OpenUnverified,
+    }
 }
 fn verified(
     stream: &tokio_rustls::TlsStream<TcpStream>,
