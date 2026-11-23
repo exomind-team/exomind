@@ -22,6 +22,8 @@ mod grants;
 mod local_sources;
 #[path = "beta_native_open_cache.rs"]
 mod open_cache;
+#[path = "beta_native_share_handoff.rs"]
+mod share_handoff;
 #[path = "beta_native_original_lifecycle.rs"]
 mod original_lifecycle;
 #[path = "beta_overlay.rs"]
@@ -42,6 +44,7 @@ mod original_lifecycle_tests;
 use crate::commands::shortcut_commands::{
     self as shortcut_commands, MainWindowShortcutState, QuickExitShortcutState, VoiceShortcutState,
 };
+use exomind_android_share_handoff::AndroidShareHandoffExt;
 use exomind_beta_host::{
     BetaHost, DeadlineEnvelope, HostError, HostStatus, RunningServer, Session,
     SummaryModelConfiguration, SummaryModelConfigurationCommand,
@@ -303,6 +306,7 @@ struct NativeState {
     desktop_tray_ready: AtomicBool,
     desktop_preferences: desktop_settings::DesktopPreferences,
     overlay: Mutex<overlay::Broker>,
+    overlay_window_creation: Mutex<()>,
 }
 
 impl NativeState {
@@ -335,6 +339,7 @@ impl NativeState {
             desktop_tray_ready: AtomicBool::new(false),
             desktop_preferences: desktop_settings::DesktopPreferences::open(root),
             overlay: Mutex::new(overlay::Broker::default()),
+            overlay_window_creation: Mutex::new(()),
         })
     }
 
@@ -1111,6 +1116,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(exomind_android_clipboard::init())
         .plugin(exomind_android_timeblock_end_alert::init())
+        .plugin(exomind_android_share_handoff::init())
         .plugin(exomind_android_keepalive::init())
         .manage(voice_shortcut_state)
         .manage(main_window_shortcut_state)
@@ -1124,6 +1130,17 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                 Err(_) => return Err("EXOMIND_BETA_PORT must be valid Unicode".into()),
             };
             let native_root = data_root(app.handle())?;
+            let handoff_root = app
+                .path()
+                .app_data_dir()?
+                .join(share_handoff::DIRECTORY_NAME);
+            let handoffs = share_handoff::Store::new(handoff_root);
+            if let Err(error) =
+                handoffs.recover(|id| app.android_share_handoff().is_receiving(id).unwrap_or(true))
+            {
+                log::warn!("Beta share handoff recovery unavailable: {}", error.code);
+            }
+            app.manage(handoffs.clone());
             let archive_root = profile_archive_paths::recovery_root(&native_root)?;
             let state = match NativeState::open(&native_root, &archive_root, dev_origin.clone()) {
                 Ok(state) => Arc::new(state),
@@ -1309,6 +1326,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             local_sources::beta_local_source_status,
             local_sources::beta_write_local_source_chunk,
             local_sources::beta_write_local_source_binary,
+            local_sources::beta_write_local_source_base64,
             local_sources::beta_finish_local_source,
             local_sources::beta_read_local_source_range,
             local_sources::beta_remove_local_source,
@@ -1333,9 +1351,20 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             beta_timeline_period_page,
             beta_deadline_envelope,
             deadlines::beta_deadline_alert_status,
+            deadlines::beta_deadline_alert_channel_state,
+            deadlines::beta_deadline_alert_open_channel_settings,
             deadlines::beta_deadline_alert_request_permission,
             deadlines::beta_deadline_handoff_pending,
             deadlines::beta_deadline_handoff_ack,
+            share_handoff::beta_share_handoff_list,
+            share_handoff::beta_share_handoff_get,
+            share_handoff::beta_share_handoff_bind_profile,
+            share_handoff::beta_share_handoff_read_chunk,
+            share_handoff::beta_import_share_handoff_item,
+            share_handoff::beta_share_handoff_cancel,
+            share_handoff::beta_share_handoff_ack_text,
+            share_handoff::beta_share_handoff_ack_item,
+            share_handoff::beta_share_handoff_discard,
             beta_receipt,
             beta_request_exit,
             shortcut_commands::quick_exit_shortcut_set,
@@ -1390,14 +1419,25 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
         })
         .build(context)
         .expect("failed to build isolated Beta application");
-    app.run(|app, event| {
-        if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+    app.run(|app, event| match event {
+        tauri::RunEvent::Resumed => {
+            if let Some(store) = app.try_state::<share_handoff::Store>() {
+                match store.announce_pending(app) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        log::warn!("Beta share handoff recovery unavailable: {}", error.code)
+                    }
+                }
+            }
+        }
+        tauri::RunEvent::ExitRequested { api, code, .. } => {
             let state = app.state::<Arc<NativeState>>();
             if !state.exit_ready.load(Ordering::Acquire) {
                 api.prevent_exit();
                 request_exit(app, code.unwrap_or(0));
             }
         }
+        _ => {}
     });
 }
 

@@ -4,6 +4,7 @@ import {afterEach,describe,expect,it,vi} from 'vitest';
 import {NativeFileSourceStore,productionFileSources} from '@/beta/native-source-store';
 import {hashFileSource,readFileSource} from '@/beta/file-source-store';
 import {BetaDraftController} from '@/beta/drafts';
+import type {SharedHandoffAttachmentFile} from '@/beta/native-attachment-types';
 import {deferred,fakeClient,memoryStorage} from './fixtures';
 const platform=vi.hoisted(()=>({native:false,invoke:vi.fn()}));
 vi.mock('@tauri-apps/api/core',async(original)=>({...await original<typeof import('@tauri-apps/api/core')>(),isTauri:()=>platform.native,invoke:platform.invoke}));
@@ -17,6 +18,65 @@ describe('bounded Native source storage',()=>{
     const call=vi.fn(async(name:string,args:Record<string,unknown>)=>{if(name==='beta_begin_local_source')return{...ready(bytes),next_offset:0,state:'copying'};if(name==='beta_write_local_source_chunk'){const part=args.bytes as number[];lengths.push(part.length);return{...ready(bytes),next_offset:Number(args.offset)+part.length,state:'copying'};}if(name==='beta_finish_local_source')return gate.promise;throw Error('unexpected call');});
     const store=new NativeFileSourceStore(call as ConstructorParameters<typeof NativeFileSourceStore>[0]);let completed=false;const pending=store.put(key,new Blob([bytes])).then(()=>completed=true);
     await vi.waitFor(()=>expect(call).toHaveBeenCalledWith('beta_finish_local_source',{key}));expect(completed).toBe(false);expect(lengths).toEqual([256*1024,17]);gate.resolve(ready(bytes));await pending;expect(completed).toBe(true);
+  });
+  it('uses bounded JSON base64 chunks for Android Tauri instead of Raw IPC',async()=>{
+    platform.native=true;vi.stubGlobal('navigator',{userAgent:'Mozilla/5.0 (Linux; Android 15; Tauri)'});
+    const bytes=new Uint8Array(256*1024+17);for(let index=0;index<bytes.length;index++)bytes[index]=index%251;
+    const stored=new Uint8Array(bytes.length),chunks:Array<{offset:number;encoded:string}>=[];
+    platform.invoke.mockImplementation(async(name:string,args?:Record<string,unknown>,options?:unknown)=>{
+      if(name==='beta_begin_local_source')return{...ready(bytes),state:'copying',next_offset:0};
+      if(name==='beta_write_local_source_base64'){
+        const offset=Number(args?.offset),encoded=String(args?.bytesBase64),decoded=new Uint8Array(Buffer.from(encoded,'base64'));
+        chunks.push({offset,encoded});stored.set(decoded,offset);
+        return{...ready(bytes),state:'copying',next_offset:offset+decoded.length};
+      }
+      if(name==='beta_finish_local_source')return ready(bytes);
+      throw new Error(`unexpected Android IPC ${name} ${String(options)}`);
+    });
+    const store=productionFileSources();await store.put(key,new Blob([bytes]));
+    expect(chunks.map(chunk=>chunk.offset)).toEqual([0,256*1024]);
+    expect(chunks.every(chunk=>chunk.encoded.length<=Math.ceil(256*1024/3)*4)).toBe(true);
+    expect(stored).toEqual(bytes);
+    expect(platform.invoke.mock.calls.some(([name])=>name==='beta_write_local_source_binary')).toBe(false);
+  });
+  it('imports a share handoff by opaque IDs into a Native local source key without exposing a path',async()=>{
+    const bytes=new Uint8Array([1,2,3,4]);let onProgress:((event:{payload:unknown})=>void)|undefined;
+    const listener=vi.fn(async(_event:string,handler:(event:{payload:unknown})=>void)=>{onProgress=handler;return vi.fn();});
+    const call=vi.fn(async(name:string,args:Record<string,unknown>)=>{
+      if(name==='beta_import_share_handoff_item'){
+        onProgress?.({payload:{request_id:String(args.request_id),handoff_id:'handoff-1',item_id:'item-1',phase:'copying',completed:4,total:4}});
+        return ready(bytes);
+      }
+      throw new Error(`unexpected share import command ${name}`);
+    });
+    const store=new NativeFileSourceStore(call as ConstructorParameters<typeof NativeFileSourceStore>[0],undefined,listener as ConstructorParameters<typeof NativeFileSourceStore>[2]);
+    const shared:SharedHandoffAttachmentFile={kind:'shared_handoff_file',handoffId:'handoff-1',itemId:'item-1',profileId:'profile-a',name:'shared.png',size:bytes.length,type:'image/png'};
+    const work={cancelled:()=>false,progress:vi.fn()};
+
+    await store.importSharedHandoff(key,shared,work);
+
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call.mock.calls[0][0]).toBe('beta_import_share_handoff_item');
+    expect(call.mock.calls[0][1]).toMatchObject({source_key:key,handoff_id:'handoff-1',item_id:'item-1',profile_id:'profile-a',expected_size:4,request_id:expect.any(String)});
+    expect(call.mock.calls[0][1]).not.toHaveProperty('path');
+    expect(work.progress).toHaveBeenCalledWith('copying',4,4);
+  });
+  it('cancels the matching Native share import when its draft attachment is removed',async()=>{
+    const bytes=new Uint8Array([1,2,3,4]),gate=deferred<unknown>();let requestId='';
+    const call=vi.fn(async(name:string,args:Record<string,unknown>)=>{
+      if(name==='beta_import_share_handoff_item'){requestId=String(args.request_id);return gate.promise;}
+      if(name==='beta_cancel_attachment_work')return true;
+      throw new Error(`unexpected share import command ${name}`);
+    });
+    const listener=vi.fn(async()=>vi.fn()),store=new NativeFileSourceStore(call as ConstructorParameters<typeof NativeFileSourceStore>[0],undefined,listener as ConstructorParameters<typeof NativeFileSourceStore>[2]);
+    const shared:SharedHandoffAttachmentFile={kind:'shared_handoff_file',handoffId:'handoff-1',itemId:'item-1',profileId:'profile-a',name:'shared.png',size:bytes.length,type:'image/png'};
+    const abort=new AbortController(),work={signal:abort.signal,cancelled:()=>abort.signal.aborted,progress:vi.fn()};
+    const pending=store.importSharedHandoff(key,shared,work);
+    await vi.waitFor(()=>expect(call).toHaveBeenCalledWith('beta_import_share_handoff_item',expect.objectContaining({request_id:expect.any(String)})));
+    abort.abort();
+    await vi.waitFor(()=>expect(call).toHaveBeenCalledWith('beta_cancel_attachment_work',{requestId}));
+    gate.resolve(ready(bytes));
+    await expect(pending).rejects.toMatchObject({code:'selection_removed'});
   });
   it('returns a range reader and hashes a 96 MiB source without any whole-file request',async()=>{
     const size=96*1024*1024,lengths:number[]=[],expected=createHash('sha256');const block=new Uint8Array(256*1024);for(let offset=0;offset<size;offset+=block.length)expected.update(block);

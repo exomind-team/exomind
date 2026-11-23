@@ -44,26 +44,17 @@ export function NowInputRowView({
   pasteFeedback = 'idle', pasteFailureLabel = '',
 }: NowInputRowViewProps) {
   return (
-    <div className="shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]" data-testid="new-now-input-row">
+    <div className="mb-3 shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5] focus-within:pb-[env(safe-area-inset-bottom,0px)] dark:border-[#292524] dark:bg-[#0C0A09] md:mb-0" data-testid="new-now-input-row">
       <div className="px-4 py-2">
-        {beforeControls}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onAttachmentClick}
-            disabled={!onAttachmentClick}
-            className={`flex h-9 shrink-0 items-center justify-center rounded-full bg-[#EDECE9] px-2 text-stone-500 dark:bg-[#292524] dark:text-[#A8A29E] ${attachmentFeedback === 'pending' ? 'min-w-[56px]' : 'w-9'}`}
-            aria-label={attachmentFeedback === 'pending' ? '待开发' : '附件'}
-            data-testid="new-now-attachment-button"
-          >
-            {attachmentFeedback === 'pending'
-              ? <span className="text-[10px] font-medium leading-none">待开发</span>
-              : <Image size={16} />}
-          </button>
-
-          {voiceControl ?? <button type="button" disabled aria-label="语音暂不可用" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#EDECE9] text-stone-500 dark:bg-[#292524] dark:text-[#A8A29E]"><Mic size={16} /></button>}
-
-          <div className="relative flex-1">
+        {beforeControls && <div
+          role="region"
+          aria-label="输入工具与附件"
+          tabIndex={0}
+          className="mb-2 min-h-0 max-h-[min(32dvh,max(0px,calc(100dvh-18rem)))] overflow-y-auto overscroll-contain focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:max-h-none sm:overflow-visible"
+          data-testid="new-now-input-tools"
+        >{beforeControls}</div>}
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative order-1 min-w-0 flex-1 sm:order-2">
             <Textarea
               ref={inputRef}
               value={value}
@@ -95,17 +86,36 @@ export function NowInputRowView({
             </div>
           </div>
 
-          <Button
-            type="button"
-            size="icon"
-            onClick={() => { void onSend(); }}
-            disabled={sendDisabled}
-            aria-label={sendLabel}
-            className="h-9 w-9 shrink-0 rounded-full bg-[#C75B3A] text-white hover:bg-[#B24D2F] data-[disabled]:bg-[#D1D5DB] data-[disabled]:text-white"
-            data-testid="new-now-send-button"
-          >
-            <SendHorizontal size={16} />
-          </Button>
+          <div className="order-2 flex items-center justify-between sm:contents">
+            <div className="flex items-center gap-2 sm:order-1">
+              <button
+                type="button"
+                onClick={onAttachmentClick}
+                disabled={!onAttachmentClick}
+                className={`flex h-9 shrink-0 items-center justify-center rounded-full bg-[#EDECE9] px-2 text-stone-500 dark:bg-[#292524] dark:text-[#A8A29E] ${attachmentFeedback === 'pending' ? 'min-w-[56px]' : 'w-9'}`}
+                aria-label={attachmentFeedback === 'pending' ? '待开发' : '附件'}
+                data-testid="new-now-attachment-button"
+              >
+                {attachmentFeedback === 'pending'
+                  ? <span className="text-[10px] font-medium leading-none">待开发</span>
+                  : <Image size={16} />}
+              </button>
+
+              {voiceControl ?? <button type="button" disabled aria-label="语音暂不可用" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#EDECE9] text-stone-500 dark:bg-[#292524] dark:text-[#A8A29E]"><Mic size={16} /></button>}
+            </div>
+
+            <Button
+              type="button"
+              size="icon"
+              onClick={() => { void onSend(); }}
+              disabled={sendDisabled}
+              aria-label={sendLabel}
+              className="h-9 w-9 shrink-0 self-end rounded-full bg-[#C75B3A] text-white hover:bg-[#B24D2F] data-[disabled]:bg-[#D1D5DB] data-[disabled]:text-white sm:order-3 sm:self-auto"
+              data-testid="new-now-send-button"
+            >
+              <SendHorizontal size={16} />
+            </Button>
+          </div>
         </div>
         {afterControls}
       </div>

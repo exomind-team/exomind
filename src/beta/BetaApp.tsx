@@ -2,7 +2,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { BetaTimelineItemRow } from './BetaTimelineItemRow';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type MutableRefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
-import { FileText, FolderOpen, PanelsTopLeft, X } from 'lucide-react';
+import { FileText, PanelsTopLeft, X } from 'lucide-react';
 import { PageShell } from '@/ui/app/components/PageShell';
 import { NowInputRowView, resizeNowInputTextarea } from '@/ui/app/components/NowInputRowView';
 import { Button } from '@/components/ui/button';
@@ -31,7 +31,7 @@ import { BetaAppShell, type BetaSection } from './BetaAppShell';
 import { BetaSettingsPage } from './BetaSettingsPage';
 import { BetaPeersPage } from './BetaPeersPage';
 import { nativeBetaPeersClient, type BetaPeersClient } from './peers-client';
-import { setBetaDateDisplayMode, setBetaOverlayEnabled, useBetaDateDisplayMode, useBetaThemePresentation } from './preferences';
+import { openBetaOverlayForProfile, setBetaDateDisplayMode, useBetaDateDisplayMode, useBetaThemePresentation } from './preferences';
 import { mergeTimelineItems, refreshTimelineWindow } from './timeline-refresh';
 import { BetaProfileDialog } from './BetaProfileDialog';
 import { BetaProfileArchiveEntry } from './BetaProfileArchives';
@@ -67,18 +67,23 @@ import { locateBetaMessageReference } from './beta-message-locator';
 import { buildBetaMessageReferenceUri, insertBetaMessageReference, removeBetaMessageReference } from './message-references';
 import type { BetaMessageReference, BetaMessageReferenceIdentity, BetaMessageReferenceSource } from './message-references';
 import { betaProfileLabels } from './profile-display';
+import { BetaShareHandoffInbox } from './BetaShareHandoffInbox';
+import { nativeBetaShareHandoffsClient, type BetaShareHandoffsClient } from './share-handoff-client';
+import { countPendingBetaShareHandoffs, useBetaShareHandoffQueue, type BetaShareHandoffQueueSnapshot } from './share-handoff-queue';
 
 const SESSION_KEY = 'exomind:beta:connection';
 
 /** A separate entry: no legacy runtime/profile/event-store bootstrap. */
-export function BetaApp({ client: injected, sourceStore, intentJournal, intentPredecessor, peers: injectedPeers, handoffs: injectedHandoffs }: { client?: BetaClient; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; peers?:BetaPeersClient|null; handoffs?:BetaDeadlineHandoffsClient|null }) {
+export function BetaApp({ client: injected, sourceStore, intentJournal, intentPredecessor, peers: injectedPeers, handoffs: injectedHandoffs, shareHandoffs: injectedShareHandoffs }: { client?: BetaClient; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; peers?:BetaPeersClient|null; handoffs?:BetaDeadlineHandoffsClient|null; shareHandoffs?:BetaShareHandoffsClient|null }) {
   useEffect(() => keepBetaEditableInViewport(), []);
   useBetaThemePresentation();
   const [native] = useState(() => isTauri());
   const [nativePeers] = useState(() => native ? nativeBetaPeersClient() : null);
   const [nativeHandoffs] = useState(() => native ? nativeBetaDeadlineHandoffsClient() : null);
+  const [nativeShareHandoffs] = useState(() => native ? nativeBetaShareHandoffsClient() : null);
   const peers = injectedPeers === undefined ? injected ? null : nativePeers : injectedPeers;
   const handoffs = injectedHandoffs === undefined ? injected ? null : nativeHandoffs : injectedHandoffs;
+  const shareHandoffs = injectedShareHandoffs === undefined ? injected ? null : nativeShareHandoffs : injectedShareHandoffs;
   const [client, setClient] = useState<BetaClient | null>(() => injected ?? (native ? nativeBetaClient() : null));
   const [endpoint, setEndpoint] = useState(() => {
     try { return (JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? '{}') as { endpoint?: string }).endpoint ?? window.location.origin; }
@@ -98,7 +103,7 @@ export function BetaApp({ client: injected, sourceStore, intentJournal, intentPr
       setError(''); setClient(next);
     } catch (failure) { setError(errorMessage(failure)); }
   }
-  if (client) return <ConnectedBeta key={native ? 'native' : undefined} endpoint={!native && !injected ? endpoint : undefined} client={client} peers={peers} handoffs={handoffs} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor}
+  if (client) return <ConnectedBeta key={native ? 'native' : undefined} endpoint={!native && !injected ? endpoint : undefined} client={client} peers={peers} handoffs={handoffs} shareHandoffs={shareHandoffs} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor}
     onDisconnect={!native && !injected ? () => { setClient(null); setToken(''); sessionStorage.removeItem(SESSION_KEY); } : undefined} />;
   return <PageShell title="外心" subtitle="Beta · 连接本机服务" contentClassName="overflow-y-auto">
     <form onSubmit={connect} className="mx-auto flex max-w-lg flex-col gap-4 px-5 py-8">
@@ -119,7 +124,7 @@ type MessageLocationFlight={sequence:number;profileId:string;eventId:string;clie
 type BetaTimelineMode = 'all' | BetaTimelinePeriod;
 type BetaTimelinePageOwner = {client:BetaClient;profileId:string;query:string;tag:string;mode:BetaTimelineMode;from_ms:number|null;to_ms:number|null};
 type TagReturnView={client:BetaClient;profileId:string;query:string;search:string;tagSearch:string;tag:string;mode:BetaTimelineMode;from_ms:number|null;to_ms:number|null;page:BetaTimelinePage|null;top:number;followTail:boolean};
-function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, intentJournal, intentPredecessor, endpoint }: { client: BetaClient; peers:BetaPeersClient|null; handoffs:BetaDeadlineHandoffsClient|null; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; endpoint?: string }) {
+function ConnectedBeta({ client, peers, handoffs, shareHandoffs, onDisconnect, sourceStore, intentJournal, intentPredecessor, endpoint }: { client: BetaClient; peers:BetaPeersClient|null; handoffs:BetaDeadlineHandoffsClient|null; shareHandoffs:BetaShareHandoffsClient|null; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; endpoint?: string }) {
   const [status, setStatus] = useState<BetaStatus | null>(null);
   const [profiles, setProfiles] = useState<BetaProfile[]>([]);
   const [profileId, setProfileId] = useState('');
@@ -133,6 +138,9 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   const [section,setSection]=useState<BetaSection>('now');
   const [inputFocusRequest, setInputFocusRequest] = useState(0);
   const workspace = useBetaWorkspacePresentation();
+  const openIncomingShare=useCallback(()=>setSection('now'),[]);
+  const shareQueue=useBetaShareHandoffQueue(shareHandoffs,profileId,openIncomingShare);
+  const pendingShareCount=countPendingBetaShareHandoffs(shareQueue.state.handoffs);
   useEffect(() => {
     if (!isTauri() || /Android|iPhone|iPad/i.test(navigator.userAgent)) return;
     let active = true; let unlisten: (() => void) | undefined;
@@ -283,9 +291,8 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
   const handoff=useBetaDeadlineHandoff(handoffs,status?`${status.device_id}:${status.runtime_id??''}:${generation.current}`:'',!!status&&switchGuardReady&&!switching&&!creating,openDeadlineHandoff);
   useEffect(()=>{if(handoff.pending||handoff.failed)setSection('now');},[handoff.pending?.handoff_id,handoff.failed]);
   const workspaceTools = <>{client.originalExports&&<BetaOriginalExportCenter client={client} profileId={profileId} visible={section==='now'}/>}<BetaRuntimeLocation endpoint={endpoint} compact/>
-    {isTauri()&&!/Android|iPhone|iPad/i.test(navigator.userAgent)&&<Tooltip content="在浮窗打开当前档案"><Button size="icon" variant="ghost" aria-label="专注浮窗"  onClick={()=>{void invoke('beta_workspace_bind',{profileId}).then(()=>setBetaOverlayEnabled(true)).catch(failure=>setError(errorMessage(failure)));}}><PanelsTopLeft size={16}/></Button></Tooltip>}
+    {isTauri()&&!/Android|iPhone|iPad/i.test(navigator.userAgent)&&<Tooltip content="在浮窗打开当前档案"><Button size="icon" variant="ghost" aria-label="专注浮窗"  onClick={()=>{void openBetaOverlayForProfile(profileId).catch(failure=>setError(errorMessage(failure)));}}><PanelsTopLeft size={16}/></Button></Tooltip>}
     <FieldSelect id="beta-profile" label="当前档案" title="当前档案" className="max-w-28" value={profileId} disabled={!switchGuardReady||switching||creating} onValueChange={value=>{void changeProfile(value);}} options={profiles.map(profile=>({value:profile.profile_id,label:profileLabels.get(profile.profile_id)?.text??profile.display_name}))}/>
-    <Tooltip content={`档案：${profileName || '未选择'}`}><Button variant="ghost" size="icon" aria-label="管理档案"  onClick={()=>setProfileDialog(true)}><FolderOpen size={16}/></Button></Tooltip>
     {onDisconnect&&<Button variant="ghost" size="sm" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}</>;
   return <><BetaAppShell section={section} onSectionChange={setSection} profileName={profileName} onProfileClick={()=>setProfileDialog(true)}
     sync={<BetaPeersPage peers={peers} visible={section==='sync'} profileId={profileId} profileName={profileName} runtimeId={status?.runtime_id??''} deviceId={status?.device_id??''} onJoined={joined} onEventsChanged={changed=>{if(changed===profileId)setEventRevision(value=>value+1);}}/>}
@@ -298,7 +305,13 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
       <Button variant="ghost" size="sm" aria-label="管理档案" onClick={()=>setProfileDialog(true)}>档案</Button>
       {onDisconnect&&<Button variant="ghost" size="sm" disabled={persistenceBusy} onClick={onDisconnect}>断开</Button>}
     </div>}
-    headerBottom={status&&!profileId&&<div className="space-y-2"><p className="text-xs text-muted">先创建本机档案，或从同步页加入已授权档案。</p>
+     headerBottom={status&&!profileId&&<div className="space-y-2"><p className="text-xs text-muted">先创建本机档案，或从同步页加入已授权档案。</p>
+       {shareQueue.state.loading&&!shareQueue.state.handoffs.length&&<p role="status" className="text-xs text-muted">正在查证待处理的系统分享…</p>}
+       {pendingShareCount>0&&<div className="flex flex-wrap items-center gap-2 rounded-xl border border-border-page px-3 py-2">
+         <p role="status" className="min-w-0 flex-1 text-xs text-secondary">有 {pendingShareCount} 条系统分享待处理；选择档案后查看内容并继续处理。此处不会显示分享内容。</p>
+         <Button type="button" size="sm" variant="outline" onClick={()=>setProfileDialog(true)}>选择或创建档案</Button>
+       </div>}
+       {shareQueue.state.error&&<div className="flex flex-wrap items-center gap-2"><p role="alert" className="min-w-0 flex-1 text-xs text-destructive">系统分享状态未知；暂不能确认是否已在本机暂存。请保留来源应用中的原始内容。</p><Button type="button" size="sm" variant="outline" onClick={()=>{void shareQueue.refresh();}}>重新读取</Button></div>}
       <form onSubmit={create} className="flex min-w-0 flex-[1_1_16rem] gap-2">
         <Input aria-label="新档案名称" className="min-w-0 max-w-48" placeholder="新档案名称" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={creating} />
         <Button type="submit" variant="outline" disabled={creating || persistenceBusy || !name.trim()}>{creating ? '创建中…' : '创建档案'}</Button>
@@ -310,11 +323,11 @@ function ConnectedBeta({ client, peers, handoffs, onDisconnect, sourceStore, int
     {loading && <p role="status" className="p-5 text-sm text-muted">正在连接…</p>}
     {error && <div role="alert" className="flex items-center gap-2 px-5 py-3 text-sm text-destructive">{error}
       {!status && <Button variant="outline" onClick={() => setReload(value => value + 1)}>重新连接</Button>}</div>}
-    {status && <DeviceWorkspace key={`${status.device_id}`} workspace={workspace} active={section==='now'} eventRevision={eventRevision} client={client} deviceId={status.device_id} profileId={profileId} profiles={profiles} status={status} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} deadlineLocation={deadlineLocation} onDeadlineLocated={(id,hint,attempt)=>{const waiter=locationWaiter.current;if(waiter?.id===id&&waiter.attempt===attempt)waiter.finish(undefined,hint);}} onConfigureSummary={()=>setSection('settings')} onOpenSync={peers?()=>setSection('sync'):undefined} onReturnToProfile={target=>{void changeProfile(target);}} />}
+     {status && <DeviceWorkspace key={`${status.device_id}`} workspace={workspace} active={section==='now'} eventRevision={eventRevision} client={client} shareHandoffs={shareHandoffs} shareQueue={shareQueue.state} refreshShareHandoffs={shareQueue.refresh} deviceId={status.device_id} profileId={profileId} profiles={profiles} status={status} sourceStore={sourceStore} intentJournal={intentJournal} intentPredecessor={intentPredecessor} onPersistenceBusy={setPersistenceBusy} prepareSwitch={prepareSwitch} deadlineLocation={deadlineLocation} onDeadlineLocated={(id,hint,attempt)=>{const waiter=locationWaiter.current;if(waiter?.id===id&&waiter.attempt===attempt)waiter.finish(undefined,hint);}} onConfigureSummary={()=>setSection('settings')} onOpenSync={peers?()=>setSection('sync'):undefined} onReturnToProfile={target=>{void changeProfile(target);}} />}
   </PageShell>}/><BetaProfileDialog open={profileDialog} onOpenChange={setProfileDialog} profiles={profiles} profileId={profileId} loading={loading} disabled={persistenceBusy||switching||!switchGuardReady} creating={creating} name={name} onNameChange={setName} onCreate={create} onSelect={changeProfile} error={error} archiveActions={<BetaProfileArchiveEntry client={client.profileArchives} profileId={profileId} profileName={profileName} onProfilesChanged={refreshArchiveProfiles} />}/></>;
 }
 
-function DeviceWorkspace({ workspace, client, deviceId, profileId, profiles, status, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync,onReturnToProfile }: { workspace: BetaWorkspacePresentation; client: BetaClient; deviceId: string; profileId: string; profiles:BetaProfile[]; status:BetaStatus; sourceStore?: FileSourceStore; intentJournal?:LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:ProfileSwitchGuardGate; active:boolean;eventRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void;onReturnToProfile:(profileId:string)=>void }) {
+function DeviceWorkspace({ workspace, client, deviceId, profileId, profiles, status, sourceStore, intentJournal, intentPredecessor, onPersistenceBusy, prepareSwitch, active, eventRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync,onReturnToProfile,shareHandoffs,shareQueue,refreshShareHandoffs }: { workspace: BetaWorkspacePresentation; client: BetaClient; deviceId: string; profileId: string; profiles:BetaProfile[]; status:BetaStatus; sourceStore?: FileSourceStore; intentJournal?:LocalIntentJournal; intentPredecessor?:IntentPredecessor; onPersistenceBusy:(busy:boolean)=>void; prepareSwitch:ProfileSwitchGuardGate; active:boolean;eventRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void;onReturnToProfile:(profileId:string)=>void;shareHandoffs:BetaShareHandoffsClient|null;shareQueue:BetaShareHandoffQueueSnapshot;refreshShareHandoffs:()=>Promise<void> }) {
   const summaryOwner=useRef<SummaryTasksController|null>(null);
   const profileNames=useMemo(()=>new Map([...betaProfileLabels(profiles)].map(([profileId,label])=>[profileId,label.text])),[profiles]);
   const profileNameFor=useCallback((id:string)=>profileNames.get(id)??id,[profileNames]);
@@ -424,7 +437,7 @@ function DeviceWorkspace({ workspace, client, deviceId, profileId, profiles, sta
   </div>;
   if(!owners||owners.profileId!==profileId)return <p role="status" className="p-5 text-xs text-muted">正在恢复本机草稿…</p>;
   if(!profileId)return null;
-  return <ProfileWorkspace workspace={workspace} key={profileId} visible={active} externalRevision={eventRevision} client={client} status={status} controller={owners.capture} focus={owners.focus} deviceId={deviceId} profileId={profileId} profileName={profileName} profileNameFor={profileNameFor} deadlineLocation={deadlineLocation} onDeadlineLocated={onDeadlineLocated} onConfigureSummary={onConfigureSummary} onOpenSync={onOpenSync} onReturnToProfile={onReturnToProfile} audioRecorder={audioRecorder} correctionOwner={correctionOwner} correctionOwnerError={correctionOwnerError} addRecordedFile={addRecordedFile} intentJournal={intentJournal} summaryOwner={summaryOwner}/>;
+  return <ProfileWorkspace workspace={workspace} key={profileId} visible={active} externalRevision={eventRevision} client={client} shareHandoffs={shareHandoffs} shareQueue={shareQueue} refreshShareHandoffs={refreshShareHandoffs} status={status} controller={owners.capture} focus={owners.focus} deviceId={deviceId} profileId={profileId} profileName={profileName} profileNameFor={profileNameFor} deadlineLocation={deadlineLocation} onDeadlineLocated={onDeadlineLocated} onConfigureSummary={onConfigureSummary} onOpenSync={onOpenSync} onReturnToProfile={onReturnToProfile} audioRecorder={audioRecorder} correctionOwner={correctionOwner} correctionOwnerError={correctionOwnerError} addRecordedFile={addRecordedFile} intentJournal={intentJournal} summaryOwner={summaryOwner}/>;
 }
 
 function isTimelinePeriodBudgetError(failure:unknown): boolean {
@@ -443,7 +456,7 @@ async function readTimeline(client:BetaClient,profileId:string,query:BetaQuery,t
   if(client.timelinePage&&typedTimelineAvailable)return client.timelinePage(profileId,query);
   const page=await client.eventsPage(profileId,query);return{...page,items:page.items.map(record=>({kind:'capture' as const,record}))};
 }
-function ProfileWorkspace({ workspace, client, status, controller, focus, deviceId,profileId,profileName,profileNameFor, visible, externalRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync,onReturnToProfile,audioRecorder,correctionOwner,correctionOwnerError,addRecordedFile,intentJournal,summaryOwner }: { workspace: BetaWorkspacePresentation; client: BetaClient; status:BetaStatus; controller: BetaDraftController; focus:BetaTimeblockController|null; deviceId:string;profileId: string;profileName:string;profileNameFor:(profileId:string)=>string;visible:boolean;externalRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void;onReturnToProfile:(profileId:string)=>void;audioRecorder:BetaAudioRecordingController;correctionOwner:BetaRecordCorrectionOwner|null;correctionOwnerError:string;addRecordedFile:(profileId:string,file:File,sourceId:string)=>Promise<void>;intentJournal?:LocalIntentJournal;summaryOwner:MutableRefObject<SummaryTasksController|null> }) {
+function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refreshShareHandoffs, status, controller, focus, deviceId,profileId,profileName,profileNameFor, visible, externalRevision, deadlineLocation, onDeadlineLocated,onConfigureSummary,onOpenSync,onReturnToProfile,audioRecorder,correctionOwner,correctionOwnerError,addRecordedFile,intentJournal,summaryOwner }: { workspace: BetaWorkspacePresentation; client: BetaClient; shareHandoffs:BetaShareHandoffsClient|null; shareQueue:BetaShareHandoffQueueSnapshot; refreshShareHandoffs:()=>Promise<void>; status:BetaStatus; controller: BetaDraftController; focus:BetaTimeblockController|null; deviceId:string;profileId: string;profileName:string;profileNameFor:(profileId:string)=>string;visible:boolean;externalRevision:number;deadlineLocation:DeadlineLocation|null;onDeadlineLocated:(id:string,hint:string,attempt:number)=>void;onConfigureSummary:()=>void;onOpenSync?:()=>void;onReturnToProfile:(profileId:string)=>void;audioRecorder:BetaAudioRecordingController;correctionOwner:BetaRecordCorrectionOwner|null;correctionOwnerError:string;addRecordedFile:(profileId:string,file:File,sourceId:string)=>Promise<void>;intentJournal?:LocalIntentJournal;summaryOwner:MutableRefObject<SummaryTasksController|null> }) {
   const drafts = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const deviceNames=useBetaDeviceNames(deviceId);
   const { layout, change: changeLayout } = workspace;
@@ -464,6 +477,7 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
   const deferredRefresh = useRef(false);
   const inputSendMode = useBetaInputSendMode();
   const [page, setPage] = useState<BetaTimelinePage | null>(null);
+  const [timelineMode, setTimelineMode] = useState<'browse' | 'select-export'>('browse');
   const pageRef=useRef(page);pageRef.current=page;
   const pageOwner=useRef<BetaTimelinePageOwner>({client,profileId,query:'',tag:'',mode:'all',from_ms:null,to_ms:null});
   const tagReturnView=useRef<TagReturnView|null>(null);
@@ -654,7 +668,7 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
   }
   async function submit(commandId?: string) {
     if (!commandId && clipboardFlight.current) return;
-    setError('');
+    setError(''); setMessageDraftNotice('');
     try {
       const receipt = commandId ? await controller.retry(commandId) : await controller.submit(profileId);
       if (receipt && alive.current) setRevision(value => value + 1);
@@ -768,7 +782,8 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
         const latest=controller.snapshot().drafts[profileId];
         if(!alive.current||!latest||latest.text!==inserted.text||latest.revision!==insertedRevision||!textareaRef.current)return;
         textareaRef.current.focus({preventScroll:true});
-        textareaRef.current.setSelectionRange(selectionStart+inserted.cursorOffsetDelta,selectionEnd+inserted.cursorOffsetDelta);
+        const mapDraftOffset=(offset:number)=>inserted.referencePrefixLength+Math.max(0,offset-inserted.removedLeadingWhitespace);
+        textareaRef.current.setSelectionRange(mapDraftOffset(selectionStart),mapDraftOffset(selectionEnd));
         resizeNowInputTextarea(textareaRef.current);
       });
     }catch(failure){setError(errorMessage(failure));}
@@ -841,9 +856,17 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
   const pending = drafts.pending.filter(item => item.command.profile_id === profileId && item.state !== 'committed');
   const busy = pending.some(item => item.state === 'pending' && item.draft_revision === draft?.revision);
   const preparing = draft?.files?.some(file => !file.original || file.state === 'preparing') ?? false;
-  const attachmentsBusy=workspaceActive&&!!draft?.files?.some(file=>file.state==='preparing'||file.state==='uploading');
+  const attachmentsBusy=workspaceActive&&(
+    !!draft?.files?.some(file=>file.state==='preparing'||file.state==='uploading')
+    ||pending.some(item=>item.files?.some(file=>file.state==='preparing'||file.state==='uploading'))
+  );
   const [attachmentNow,setAttachmentNow]=useState(Date.now);
   useEffect(()=>{if(!attachmentsBusy)return;setAttachmentNow(Date.now());const timer=setInterval(()=>setAttachmentNow(Date.now()),1000);return()=>clearInterval(timer);},[attachmentsBusy]);
+  function submitAndDismissKeyboard(){
+    const blocked=clipboardFlight.current||(!draft?.text.trim()&&!draft?.files?.length)||preparing||busy||clipboardBusy||!!drafts.persistenceError;
+    void submit();
+    if(!blocked)textareaRef.current?.blur();
+  }
   const currentCommitted = draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision);
   const hasDraftContent = !!draft?.text.trim() || !!draft?.files?.length || !!draft?.tags?.length;
   const captureStatus = drafts.persistenceState === 'failed' ? 'error' : clipboardBusy || drafts.persistenceState === 'pending' || pending.length ? 'pending' : currentCommitted ? 'committed' : hasDraftContent ? 'draft' : 'idle';
@@ -862,6 +885,7 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
     return <BetaTimelineItemRow key={item.record.event_id} item={item} client={client}
       deviceId={deviceId} revision={revision} now={now} dateMode={mode} recordsActive={recordsActive}
       deviceLabel={deviceNames.label} onQuote={quoteMessage} onOpenReference={openMessageReference} rangeExport={rangeExportActions}
+      exportMode={timelineMode === 'select-export'}
       onCorrect={client.recordOrganization?record=>setCorrectionTarget(record):undefined}
       sourceLabel={messageReferenceSourceLabel} onInspectSummary={record=>{setReviewTarget(record);setReviewsOpen(true);}}
       onOpenSource={sourceReader||correctionSourceReader?source=>setSummarySource({profileId,source}):undefined} />;
@@ -904,7 +928,8 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
     }
     {messageLocation?.state.kind==='profile-mismatch'&&messageLocationBoundary}
     <BetaWorkspacePane kind="records" state={layout.minimal ? 'expanded' : layout.records} chrome={!layout.minimal&&layout.records!=='expanded'} onToggle={()=>changeLayout({records:layout.records==='collapsed'?'expanded':'collapsed'})}>
-    {rangeExportOwner && <BetaUserRangeExportControls owner={rangeExportOwner} state={rangeExportSnapshot} profileNameFor={profileNameFor} />}
+    {rangeExportOwner && <BetaUserRangeExportControls owner={rangeExportOwner} state={rangeExportSnapshot}
+      mode={timelineMode} onModeChange={setTimelineMode} profileNameFor={profileNameFor} />}
     {!periodViewActive&&!typedTimelineAvailable&&<p className="px-5 py-1 text-[11px] text-muted">此连接仅提供兼容记录历史，尚未提供完整时间线</p>}
     {periodUnavailable&&<p role="status" className="px-5 py-1 text-[11px] text-muted">{client.serviceScope==='tauri-native-beta-v1'?'此本机 Beta 版本尚不支持日／周／月范围浏览；现有历史仍可阅读。更新应用后可用。':'当前 Beta 服务尚不支持日／周／月范围浏览；现有历史仍可阅读。请更新服务后重试。'}</p>}
     {!layout.minimal&&<BetaHistoryToolbar onCollapse={()=>changeLayout({records:'collapsed'})} searchOpen={searchOpen||!!query||!!tagFilter} onSearch={()=>setSearchOpen(value=>!value)} onRefresh={()=>setRevision(value=>value+1)} onReview={()=>{setReviewTarget(null);setReviewsOpen(true);}}/>}
@@ -970,8 +995,13 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
       textareaLabel="记录当下"
       voiceControl={client.originals ? <BetaAudioRecorder controller={audioRecorder} profileId={profileId} profileName={profileName} profileNameFor={profileNameFor} onAddFile={addRecordedFile} onReturnToProfile={onReturnToProfile}/> : false}
       sendLabel="发送"
-      onValueChange={(next, element) => { setMessageDraftNotice('');try { controller.setDraft(profileId, next); resizeNowInputTextarea(element); } catch (failure) { setError(errorMessage(failure)); } }}
-      onKeyDown={event => { if (!event.nativeEvent.isComposing && shouldSubmitOnEnter(inputSendMode, event)) { event.preventDefault(); void submit(); } }}
+      onValueChange={(next, element) => { try {
+        const cancelledPreSend = controller.setDraft(profileId, next);
+        const notice = '上一条预发送已取消；原文与附件已恢复到当前草稿，尚未提交。';
+        setMessageDraftNotice(previous => cancelledPreSend ? notice : previous === notice ? previous : '');
+        resizeNowInputTextarea(element);
+      } catch (failure) { setError(errorMessage(failure)); } }}
+      onKeyDown={event => { if (!event.nativeEvent.isComposing && shouldSubmitOnEnter(inputSendMode, event)) { event.preventDefault(); submitAndDismissKeyboard(); } }}
       onPaste={event => {
         const files = clipboardImageFiles(event.clipboardData);
         if (!files.length) {if(isTauri()){event.preventDefault();void pasteClipboard(readBetaClipboard);}return;}
@@ -983,10 +1013,13 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
       onPasteClick={() => pasteClipboard(readBetaClipboard)}
       pasteFeedback={pasteFeedback}
       pasteFailureLabel="未粘贴"
-      onSend={() => submit()}
+      onSend={submitAndDismissKeyboard}
       onAttachmentClick={client.originals ? () => {void chooseFiles();} : undefined}
       sendDisabled={(!draft?.text.trim() && !draft?.files?.length) || preparing || busy || clipboardBusy || !!drafts.persistenceError}
       beforeControls={<>
+       {shareHandoffs&&(shareQueue.handoffs.length>0||shareQueue.loading||shareQueue.error)&&<BetaShareHandoffInbox
+         client={shareHandoffs} queue={{...shareQueue,refresh:refreshShareHandoffs}} controller={controller} profileId={profileId} profileName={profileName} profileNameFor={profileNameFor} onSwitchProfile={onReturnToProfile}/>
+       }
       <BetaCaptureTagsEditor tags={draft?.tags??[]} onChange={tags=>controller.setTags(profileId,tags)}/>
       <input ref={fileInput} type="file" multiple hidden aria-label="选择原件" onChange={event => {
         const selected = Array.from(event.target.files ?? []); event.target.value = '';
@@ -997,20 +1030,21 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
       }} />
       <BetaMessageReferenceDraft value={draft?.text??''} onOpen={reference=>{void openMessageReference(reference);}} onRemove={removeDraftReference} sourceLabel={messageReferenceSourceLabel}/>
       {messageDraftNotice&&<p role="status" className="mb-2 text-xs text-secondary">{messageDraftNotice}</p>}
-      {!!draft?.files?.length && <div className="mb-2 flex max-h-[28dvh] flex-col gap-2 overflow-y-auto overscroll-contain" aria-label="原件队列">
+      {!!draft?.files?.length && <div className="mb-2 flex max-h-none flex-col gap-2 overflow-visible sm:max-h-[28dvh] sm:overflow-y-auto sm:overscroll-contain" aria-label="原件队列">
+        {draft.files.length>1&&<p role="status" className="text-[11px] text-secondary">附件 {draft.files.filter(file=>file.state==='verified').length}/{draft.files.length} 件已校验；任何附件未就绪时，记录都不会提交。</p>}
         {draft.files.map(file => <div key={file.id} className="flex items-center gap-2 rounded-2xl border border-[#E7E5E4] bg-white/90 px-3 py-2 shadow-sm dark:border-[#292524] dark:bg-[#1C1917]">
           {file.original && <BetaImagePreview identity={`${deviceId}:${profileId}:${file.id}:${file.original.sha256}`} sourceScope={client} visible={workspaceActive} fileName={file.file_name} mediaType={file.media_type} byteLength={file.byte_length} load={() => controller.previewSource(profileId, file.id)} thumbnail />}
           {(!file.original || !file.media_type.startsWith('image/')) && <FileText size={16} className="shrink-0 text-[#C75B3A] dark:text-[#FDBA74]" />}
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-medium text-stone-700 dark:text-stone-100">{file.file_name}</p>
-            <p className="text-[10px] text-stone-500 dark:text-[#A8A29E]">{formatBytes(file.byte_length)} · {file.state === 'verified' ? '原件已暂存，尚未提交记录' : file.state === 'preparing' ? '正在复制并校验本机源…' : file.state === 'uploading' ? `正在暂存 ${formatBytes(file.next_offset)}` : file.state === 'source_missing' ? '本机源缺失，请重选' : '暂存未完成'}</p>
-            {file.message && <p className="text-xs text-destructive">{file.message}</p>}
+            <p className="text-[10px] text-stone-500 dark:text-[#A8A29E]">{formatBytes(file.byte_length)} · {file.state === 'verified' ? '附件已校验就绪 · 记录尚未提交' : file.state === 'preparing' ? '正在复制并校验本机源…' : file.state === 'uploading' ? `正在暂存 ${formatBytes(file.next_offset)}` : file.state === 'source_missing' ? '本机源缺失，请重选' : '暂存未完成'}</p>
+            {file.message && <p role={file.state==='preparing'||file.state==='uploading'?'status':'alert'} className={file.state==='preparing'||file.state==='uploading'?'text-xs text-secondary':'text-xs text-destructive'}>{file.message}</p>}
             <BetaAttachmentProgress name={file.file_name} progress={drafts.fileProgress[file.id]} now={attachmentNow} active={workspaceActive&&(file.state==='preparing'||file.state==='uploading')}/>
           </div>
           {(file.state === 'failed' || file.state === 'source_missing') && <>
-            {file.original && <Button size="sm" variant="ghost" onClick={() => {
+            {(file.original||controller.hasRetainedFileSource(profileId,file.id)) && <Button size="sm" variant="ghost" onClick={() => {
               void controller.resumeFile(profileId, file.id).catch(failure => { if (alive.current) setError(errorMessage(failure)); });
-            }}>恢复暂存</Button>}
+            }}>重试上传</Button>}
             <Button size="sm" variant="ghost" onClick={() => {void chooseFiles(file.id);}}>重新选择</Button>
           </>}
           <Tooltip content={pending.some(item=>item.files?.some(selected=>selected.id===file.id))?'仅从下一份草稿移除；已提交的固定整组不受影响':file.state==='preparing'||file.state==='uploading'?'取消准备并移除附件（当前步骤完成后停止）':'移除附件'}><Button type="button" size="icon" variant="ghost" className="h-9 w-9 shrink-0 rounded-full text-muted [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
@@ -1019,12 +1053,19 @@ function ProfileWorkspace({ workspace, client, status, controller, focus, device
       </div>}
       {drafts.persistenceError && <p role="alert" className="mb-2 text-xs text-destructive">{drafts.persistenceError}</p>}
       {drafts.persistenceState==='failed'&&<Button variant="outline" size="sm" className="mb-2" onClick={()=>{void controller.flush().catch(failure=>setError(errorMessage(failure)));}}>重试记录草稿暂存</Button>}
-      {pending.map(item => <div key={item.command.command_id} role={item.state==='pending'?'status':'alert'} className="mb-2 flex items-center gap-2 text-xs text-secondary">
-        <div className="min-w-0 flex-1"><p>{item.state === 'pending' ? item.capture_attempted === false ? '正在准备固定整组原件…' : '正在确认保存…' : item.state === 'failed' ? '原件或本机暂存未就绪，记录未提交' : `结果待确认${item.error_code ? `（${item.error_code}）` : ''}`}</p><p className="truncate">{item.command.text}</p>{!!item.command.originals?.length && <p className="truncate">{item.command.originals.map(file => file.file_name).join('、')}</p>}{item.message && <p>{item.message}</p>}</div>
+      {pending.map(item => <div key={item.command.command_id} className="mb-2 flex items-start gap-2 text-xs text-secondary">
+        <div className="min-w-0 flex-1"><p role={item.state==='pending'?'status':'alert'}>{item.state === 'pending' ? item.capture_attempted === false ? item.files?.some(file=>file.state!=='verified') ? '已在本机排队；等待附件暂存完成，事件记录尚未提交' : '已在本机排队；事件记录尚未提交' : '正在发送事件记录并等待回执确认' : item.state === 'failed' ? item.capture_attempted===false&&item.error_code==='draft_cache_unavailable'?'本机命令暂存未确认，记录尚未发送':item.capture_attempted===false?'附件尚未全部就绪，记录未提交':'记录提交结果待查证' : `结果待确认${item.error_code ? `（${item.error_code}）` : ''}`}</p><p className="truncate">{item.command.text}</p>
+        {item.files?.length ? <div className="mt-1 space-y-1" role="group" aria-label="待发送附件进度">{item.files.map(file=><div key={file.id} className="min-w-0">
+          <p className="truncate text-[10px]">{file.file_name} · {file.state==='verified'?'附件已暂存，等待事件提交':file.state==='preparing'?'正在准备本机副本':file.state==='uploading'?`正在暂存 ${formatBytes(file.next_offset)} / ${formatBytes(file.byte_length)}`:file.state==='source_missing'?'本机源缺失':file.message??'暂存未完成'}</p>
+          <BetaAttachmentProgress name={file.file_name} progress={drafts.fileProgress[file.id]} now={attachmentNow} active={workspaceActive&&(file.state==='preparing'||file.state==='uploading')}/>
+        </div>)}</div> : !!item.command.originals?.length && <p className="truncate">{item.command.originals.map(file => file.file_name).join('、')}</p>}
+        <p className="text-[10px] text-muted">{item.capture_attempted === false
+          ? '尚未提交；继续输入会取消这次预发送，并把原文和附件恢复到当前草稿。'
+          : '已进入发送或回执查证；继续输入会形成下一条草稿，不会改写原命令。'}{item.message && ` ${item.message}`}</p></div>
         {item.state !== 'pending' && <Button variant="outline" size="sm" onClick={() => void submit(item.command.command_id)}>查证并重试</Button>}
       </div>)}
       </>}
-      inputStatus={<BetaCaptureStatus state={captureStatus} message={clipboardBusy?'正在粘贴…':drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':pending.length ? '待确认的提交会保留原文与原命令' : currentCommitted ? '本机已保存' : hasDraftContent?'记录草稿已暂存 · 尚未提交':`${inputSendShortcutLabel(inputSendMode)} · 支持粘贴图片`}/> }
+      inputStatus={<BetaCaptureStatus state={captureStatus} message={clipboardBusy?'正在粘贴…':drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':pending.some(item=>item.state==='pending'&&item.capture_attempted===false)?'上一条尚未提交；继续输入会取消预发送并恢复原文与附件':pending.some(item=>item.state==='pending')?'上一条已进入发送和回执确认；当前输入属于下一条记录':pending.length?'上一条提交仍待查证；当前输入不会改写原命令':currentCommitted ? '本机已保存' : hasDraftContent?'记录草稿已暂存 · 尚未提交':`${inputSendShortcutLabel(inputSendMode)} · 支持粘贴图片`}/> }
     />
   </div>;
 }

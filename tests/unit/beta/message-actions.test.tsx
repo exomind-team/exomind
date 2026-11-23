@@ -31,7 +31,7 @@ describe('Beta message actions', () => {
 
     expect(screen.queryByRole('button', { name: '复制消息正文' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('beta-message-action-feedback')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '更多消息操作' }));
+    fireEvent.click(screen.getByRole('button', { name: '显示消息操作' }));
     fireEvent.click(screen.getByRole('button', { name: '复制消息正文' }));
 
     await waitFor(() => expect(writeClipboardText).toHaveBeenCalledWith(PRIVATE_BODY + '\n保持换行'));
@@ -48,7 +48,7 @@ describe('Beta message actions', () => {
       writeClipboardText={writeClipboardText}
     />);
 
-    fireEvent.click(screen.getByRole('button', { name: '更多消息操作' }));
+    fireEvent.click(screen.getByRole('button', { name: '显示消息操作' }));
     fireEvent.click(screen.getByRole('button', { name: '复制外心档案内定位链接' }));
 
     await waitFor(() => expect(writeClipboardText).toHaveBeenCalledWith(buildBetaMessageReferenceUri({ profileId: PROFILE, eventId: EVENT })));
@@ -71,7 +71,7 @@ describe('Beta message actions', () => {
       writeClipboardText={writeClipboardText}
     />);
 
-    fireEvent.click(screen.getByRole('button', { name: '更多消息操作' }));
+    fireEvent.click(screen.getByRole('button', { name: '显示消息操作' }));
     fireEvent.click(screen.getByRole('button', { name: '复制消息正文' }));
     fireEvent.click(screen.getByRole('button', { name: '复制外心档案内定位链接' }));
     await act(async () => { resolveFirst?.(); });
@@ -85,7 +85,7 @@ describe('Beta message actions', () => {
     let complete!: () => void;
     const writeClipboardText = vi.fn(() => new Promise<void>(resolve => { complete = resolve; }));
     const view = render(<BetaMessageActions profileId={PROFILE} eventId={EVENT} content={PRIVATE_BODY} align="start" writeClipboardText={writeClipboardText}/>);
-    fireEvent.click(screen.getByRole('button', { name: '更多消息操作' }));
+    fireEvent.click(screen.getByRole('button', { name: '显示消息操作' }));
     fireEvent.click(screen.getByRole('button', { name: '复制消息正文' }));
     view.rerender(<BetaMessageActions profileId={PROFILE} eventId="33333333-3333-4333-8333-333333333333" content="另一条合成消息" align="start" writeClipboardText={writeClipboardText}/>);
     await act(async () => { complete(); });
@@ -96,20 +96,25 @@ describe('Beta message actions', () => {
     const onQuote = vi.fn();
     render(<BetaMessageActions profileId={PROFILE} eventId={EVENT} content={PRIVATE_BODY} align="end" onQuote={onQuote} />);
 
-    const toggle = screen.getByRole('button', { name: '更多消息操作' });
+    const toggle = screen.getByRole('button', { name: '显示消息操作' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle).not.toHaveAttribute('title');
     expect(toggle.className).toContain('[@media(pointer:coarse)]:min-h-11');
     expect(toggle.className).toContain('[@media(pointer:coarse)]:opacity-100');
+    expect(toggle.className).toContain('h-6 min-h-6');
+    expect(toggle).toHaveTextContent('操作');
     const user = userEvent.setup();
     toggle.focus();
     await user.keyboard('{Enter}');
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     const quote = screen.getByRole('button', { name: '引用消息' });
     expect(quote.tagName).toBe('BUTTON');
-    expect(quote.className).toContain('min-h-9');
+    expect(quote.classList.contains('h-7')).toBe(true);
+    expect(quote.classList.contains('min-h-7')).toBe(true);
+    expect(quote.className).toContain('text-xs');
     expect(quote.className).toContain('[@media(pointer:coarse)]:min-h-11');
     expect(quote.className).toContain('touch-manipulation');
+    expect(quote.classList.contains('shrink-0')).toBe(true);
     expect(quote.className).toContain('focus-visible:ring-1');
     await user.tab();
     await user.tab();
@@ -122,12 +127,53 @@ describe('Beta message actions', () => {
     expect(onQuote).toHaveBeenNthCalledWith(2, { profileId: PROFILE, eventId: EVENT, text: PRIVATE_BODY });
   });
 
+  it('keeps export selection out of browsing actions and only exposes it in the explicit export mode', () => {
+    const selection = { kind: 'event' as const, event_id: EVENT };
+    const onToggleExportSelection = vi.fn();
+    const props = {
+      profileId: PROFILE,
+      eventId: EVENT,
+      content: 'Synthetic message for export mode coverage',
+      align: 'start' as const,
+      exportChoices: [{ selection, label: '此消息' }],
+      selectedExportSelections: [],
+      onToggleExportSelection,
+    };
+    const view = render(<BetaMessageActions {...props} exportMode={false} />);
+    expect(screen.getByRole('button', { name: '显示消息操作' }).classList.contains('opacity-0')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '显示消息操作' }));
+    expect(screen.queryByRole('button', { name: '选入导出' })).not.toBeInTheDocument();
+
+    view.rerender(<BetaMessageActions {...props} exportMode />);
+    const toggle = screen.getByRole('button', { name: '显示消息操作' });
+    expect(toggle.classList.contains('opacity-100')).toBe(true);
+    const actionPanel = document.getElementById(toggle.getAttribute('aria-controls')!);
+    expect(actionPanel?.classList.contains('w-full')).toBe(true);
+    expect(actionPanel?.classList.contains('min-w-0')).toBe(true);
+    expect(actionPanel?.classList.contains('max-w-full')).toBe(true);
+    const select = screen.getByRole('button', { name: '选入导出' });
+    expect(select).toBeVisible();
+    const selectionGroup = screen.getByRole('group', { name: '此消息' });
+    expect(selectionGroup.classList.contains('min-w-0')).toBe(true);
+    expect(selectionGroup.classList.contains('max-w-full')).toBe(true);
+    fireEvent.click(select);
+    expect(onToggleExportSelection).toHaveBeenCalledWith(selection);
+  });
+
+  it('does not auto-expand the action menu from a click on its surrounding area', () => {
+    render(<BetaMessageActions profileId={PROFILE} eventId={EVENT} content="Synthetic selectable text" align="start" />);
+    const actions = screen.getByTestId('beta-message-actions');
+    expect(actions.classList.contains('min-w-0')).toBe(true);
+    fireEvent.click(actions);
+    expect(screen.getByRole('button', { name: '显示消息操作' })).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('keeps attachment-only citation metadata separate from an empty body', () => {
     const onQuote = vi.fn();
     render(<BetaMessageActions profileId={PROFILE} eventId={EVENT} content="" align="start"
       referenceLabel="附件记录" referenceMetadata="附件名：receipt.pdf" onQuote={onQuote}/>);
 
-    fireEvent.click(screen.getByRole('button', { name: '更多消息操作' }));
+    fireEvent.click(screen.getByRole('button', { name: '显示消息操作' }));
     expect(screen.getByRole('button', { name: '复制消息正文' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '复制外心档案内定位链接' })).toBeEnabled();
     const quote = screen.getByRole('button', { name: '引用消息' });
@@ -171,6 +217,36 @@ describe('Beta message actions', () => {
     expect(screen.getByText(/来自记录正文中的 Markdown 行/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /在外心档案内回看原文/ }));
     expect(onOpen).toHaveBeenCalledWith({ profileId: PROFILE, eventId: EVENT });
+  });
+
+  it('shows the saved excerpt, marks unloaded originals, and opens by keyboard or touch target', async () => {
+    const onOpen = vi.fn();
+    const quoted = buildBetaMessageReferenceLine({ profileId: PROFILE, eventId: EVENT, text: '合成正文摘要\n合成尾文本' });
+    const uriOnly = buildBetaMessageReferenceUri({ profileId: PROFILE, eventId: '33333333-3333-4333-8333-333333333333' });
+    render(<BetaMessageReferenceLinks value={quoted + '\n' + uriOnly} onOpen={onOpen} />);
+
+    expect(screen.getByText('合成正文摘要')).toBeInTheDocument();
+    expect(screen.getByText('合成尾文本')).toBeInTheDocument();
+    expect(screen.getByText('暂无可读摘要；原文尚未载入，点击后从当前档案定位')).toBeInTheDocument();
+    expect(screen.queryByText(PROFILE)).not.toBeInTheDocument();
+    expect(screen.queryByText(EVENT)).not.toBeInTheDocument();
+    expect(screen.queryByText('33333333-3333-4333-8333-333333333333')).not.toBeInTheDocument();
+
+    const [quotedLink, missingLink] = screen.getAllByRole('button', { name: /档案内回看/ });
+    expect(quotedLink.className).toContain('[@media(pointer:coarse)]:min-h-11');
+    quotedLink.focus();
+    await userEvent.setup().keyboard('{Enter}');
+    expect(onOpen).toHaveBeenNthCalledWith(1, { profileId: PROFILE, eventId: EVENT });
+    fireEvent.click(missingLink);
+    expect(onOpen).toHaveBeenNthCalledWith(2, { profileId: PROFILE, eventId: '33333333-3333-4333-8333-333333333333' });
+  });
+
+  it('labels a source known to the current timeline as loaded without reading its original again', () => {
+    const line = buildBetaMessageReferenceLine({ profileId: PROFILE, eventId: EVENT, text: '合成引用摘要' });
+    render(<BetaMessageReferenceLinks value={line} onOpen={vi.fn()} sourceLabel={() => '设备 A'} />);
+
+    expect(screen.getByText('来自 设备 A')).toBeInTheDocument();
+    expect(screen.getByText('预览来自引用时保存的正文摘要；原文已载入当前时间线')).toBeInTheDocument();
   });
 
   it('keeps an explicit return seam for the original reading position and the latest record', () => {

@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ChevronDown, Copy, Link2, MoreHorizontal, PencilLine, Quote, X } from 'lucide-react';
+import { ChevronDown, Copy, Link2, PencilLine, Quote, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { UserRangeSelection } from './user-range-export-client';
 import { writeBetaMessageClipboard } from './beta-message-clipboard';
@@ -21,8 +21,10 @@ type ClipboardFeedback =
   | null;
 
 const CLIPBOARD_FEEDBACK_MS = 2000;
-const ACTION_BUTTON_CLASS = 'min-h-9 [@media(pointer:coarse)]:min-h-11 touch-manipulation px-3';
-const ACTION_TRIGGER_CLASS = 'h-8 w-8 min-h-8 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:opacity-100';
+const ACTION_BUTTON_CLASS = 'min-h-9 shrink-0 [@media(pointer:coarse)]:min-h-11 touch-manipulation px-3';
+const MESSAGE_ACTION_BUTTON_CLASS = 'h-7 min-h-7 shrink-0 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-h-11 touch-manipulation px-2 py-1 text-xs [&_svg]:size-3.5';
+const ACTION_TRIGGER_CLASS = 'min-h-6 rounded-md px-1.5 py-1 text-[10px] text-muted opacity-0 pointer-events-none hover:bg-secondary focus-visible:opacity-100 focus-visible:pointer-events-auto group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:opacity-100';
+const EXPORT_MODE_ACTION_TRIGGER_CLASS = 'min-h-6 rounded-md px-1.5 py-1 text-[10px] text-muted opacity-100 pointer-events-auto hover:bg-secondary focus-visible:ring-1 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11';
 
 function OnDemandExplanation({ label, children }: { label: string; children: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
@@ -63,6 +65,9 @@ export interface BetaMessageActionsProps {
   exportChoices?: readonly BetaMessageExportChoice[];
   selectedExportSelections?: readonly UserRangeSelection[];
   onToggleExportSelection?: (selection: UserRangeSelection) => void;
+  exportMode?: boolean;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
 function feedbackText(feedback: ClipboardFeedback): string {
@@ -91,13 +96,26 @@ function MessageReferenceSummary({
 }) {
   const label = reference.label || '消息引用';
   const humanSource = sourceLabel?.(reference);
+  let previewState: string;
+  if (reference.metadata) {
+    previewState = '仅显示引用时记录的元数据；原件正文未读取';
+  } else if (humanSource) {
+    previewState = label === '消息引用' && !reference.excerpt
+      ? '暂无可读摘要；原文已载入当前时间线，点击定位回看'
+      : '预览来自引用时保存的正文摘要；原文已载入当前时间线';
+  } else {
+    previewState = label === '消息引用' && !reference.excerpt
+      ? '暂无可读摘要；原文尚未载入，点击后从当前档案定位'
+      : '预览来自引用时保存的正文摘要；原文尚未载入，点击后从当前档案定位';
+  }
   return (
     <div className="min-w-0 flex-1">
       <div className="text-[10px] font-semibold text-brand-accent">引用</div>
-      <div className="truncate text-xs font-medium text-strong">{label}</div>
+      <div className="break-words text-xs font-medium text-strong [overflow-wrap:anywhere]">{label}</div>
       {humanSource ? <div className="truncate text-[10px] text-muted">来自 {humanSource}</div> : null}
-      {reference.metadata ? <div className="truncate text-[10px] text-secondary">引用元数据：{reference.metadata}</div> : null}
-      {reference.excerpt ? <div className="truncate text-[10px] text-secondary">{reference.excerpt}</div> : null}
+      {reference.metadata ? <div className="break-words text-[10px] text-secondary [overflow-wrap:anywhere]">引用元数据：{reference.metadata}</div> : null}
+      {reference.excerpt ? <div className="whitespace-normal break-words text-[10px] text-secondary [overflow-wrap:anywhere]">{reference.excerpt}</div> : null}
+      <div className="text-[10px] text-muted">{previewState}</div>
     </div>
   );
 }
@@ -115,9 +133,17 @@ export function BetaMessageActions({
   exportChoices,
   selectedExportSelections = [],
   onToggleExportSelection,
+  exportMode = false,
+  expanded: controlledExpanded,
+  onExpandedChange,
 }: BetaMessageActionsProps) {
   const [feedback, setFeedback] = useState<ClipboardFeedback>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [internalExpanded, setInternalExpanded] = useState(false);
+  const expanded = controlledExpanded ?? internalExpanded;
+  const setExpanded = (next: boolean) => {
+    if (controlledExpanded === undefined) setInternalExpanded(next);
+    onExpandedChange?.(next);
+  };
   const requestSequence = useRef(0);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -141,7 +167,7 @@ export function BetaMessageActions({
       requestSequence.current += 1;
       clearTimeout(feedbackTimer.current);
     };
-  }, [profileId, eventId, content, writeClipboardText]);
+  }, [profileId, eventId, content, writeClipboardText, onExpandedChange]);
 
   async function copy(action: ClipboardAction, value: string): Promise<void> {
     const sequence = ++requestSequence.current;
@@ -177,7 +203,7 @@ export function BetaMessageActions({
   const feedbackMessage = feedbackText(visibleFeedback);
   return (
     <div
-      className={'relative flex flex-wrap items-center gap-1 ' + alignmentClass}
+      className={'relative flex min-w-0 max-w-full flex-wrap items-center gap-1 ' + alignmentClass}
       data-testid="beta-message-actions"
       onKeyDown={event => {
         if (event.key === 'Escape' && expanded) {
@@ -190,22 +216,22 @@ export function BetaMessageActions({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        className={'absolute -top-2 right-0 z-10 rounded-full ' + ACTION_TRIGGER_CLASS}
-        aria-label="更多消息操作"
+        size="sm"
+        className={'absolute -top-2 right-0 z-10 h-6 min-h-6 px-1.5 py-1 text-[10px] ' + (exportMode ? EXPORT_MODE_ACTION_TRIGGER_CLASS : ACTION_TRIGGER_CLASS)}
+        aria-label="显示消息操作"
         aria-expanded={expanded}
         aria-controls={actionsId}
-        onClick={() => setExpanded(value => !value)}
+        onClick={() => setExpanded(!expanded)}
         ref={trigger}
         data-testid="beta-message-actions-toggle"
       >
-        <MoreHorizontal aria-hidden="true" />
+        操作
       </Button>
-      <div id={actionsId} hidden={!expanded} className="flex flex-wrap items-center gap-1">
+      <div id={actionsId} hidden={!expanded} className={'flex w-full min-w-0 max-w-full flex-wrap items-center gap-1 ' + (align === 'end' ? 'justify-end' : 'justify-start')}>
         <Button
           type="button"
           variant="ghost"
-          className={ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
+          className={MESSAGE_ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
           aria-label="复制消息正文"
           disabled={content.trim().length === 0}
           onClick={() => { void copy('body', content); }}
@@ -217,7 +243,7 @@ export function BetaMessageActions({
         <Button
           type="button"
           variant="ghost"
-          className={ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
+          className={MESSAGE_ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
           aria-label="复制外心档案内定位链接"
           disabled={!referenceUri}
           onClick={() => { if (referenceUri) void copy('link', referenceUri); }}
@@ -230,7 +256,7 @@ export function BetaMessageActions({
           <Button
             type="button"
             variant="ghost"
-            className={ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
+            className={MESSAGE_ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
             aria-label="引用消息"
             onClick={() => {
               setExpanded(false);
@@ -252,7 +278,7 @@ export function BetaMessageActions({
           <Button
             type="button"
             variant="ghost"
-            className={ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
+            className={MESSAGE_ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
             aria-label="查看更正与原文"
             onClick={() => { setExpanded(false); onCorrect(); }}
             data-testid="beta-message-correction"
@@ -261,15 +287,15 @@ export function BetaMessageActions({
             <span>更正与原文</span>
           </Button>
         ) : null}
-      {expanded && onToggleExportSelection && exportChoices?.map(choice => {
+      {expanded && exportMode && onToggleExportSelection && exportChoices?.map(choice => {
         const key = choice.selection.kind === 'event' ? 'event:' + choice.selection.event_id : 'timeblock:' + choice.selection.block_id;
         const pressed = selectedExportSelections.some(selection => (selection.kind === 'event' ? 'event:' + selection.event_id : 'timeblock:' + selection.block_id) === key);
-        return <div key={key} role="group" aria-label={choice.label} className="flex flex-wrap items-center gap-1">
+        return <div key={key} role="group" aria-label={choice.label} className="flex min-w-0 max-w-full flex-wrap items-center gap-1">
           <span className="px-2 text-xs text-muted">{choice.label}</span>
           <Button
             type="button"
             variant={pressed ? 'secondary' : 'ghost'}
-            className={ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
+            className={MESSAGE_ACTION_BUTTON_CLASS + ' focus-visible:ring-1'}
             aria-label="选入导出"
             aria-pressed={pressed}
             onClick={() => onToggleExportSelection(choice.selection)}
@@ -371,7 +397,7 @@ export function BetaMessageReferenceLinks({
 
   return (
     <section
-      className="mt-2 flex flex-col gap-2"
+      className="mt-2 flex max-w-full flex-col gap-2"
       aria-label="消息中的外心档案内引用原文"
       data-testid="beta-message-reference-links"
     >
@@ -381,7 +407,7 @@ export function BetaMessageReferenceLinks({
       {references.map(reference => (
         <div
           key={referenceKey(reference)}
-          className="flex min-w-0 flex-wrap items-center gap-2 rounded-2xl border border-card bg-card px-3 py-2"
+          className="flex min-w-0 max-w-full flex-wrap items-center gap-2 rounded-2xl border border-card bg-card px-3 py-2"
           data-testid="beta-message-reference-link"
         >
           <MessageReferenceSummary reference={reference} sourceLabel={sourceLabel} />

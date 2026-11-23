@@ -6,7 +6,7 @@ import { ORIGINAL_CHUNK_BYTES, type BetaOriginal, type BetaStage } from './origi
 import { openDurableIntentStorage, type DurableIntentStorage, type LocalIntentJournal, type IntentPredecessor } from './local-intent-journal';
 import { productionIntentStorage } from './native-intent-journal';
 import type { AttachmentProgress, FileSourceWork } from './attachment-progress';
-import { hasNativeAttachmentSources, isNativeAttachment, type AttachmentSelection } from './native-attachment-types';
+import { hasNativeAttachmentSources, isNativeAttachment, isSharedHandoffAttachment, type AttachmentSelection } from './native-attachment-types';
 import { MAX_BETA_EVENT_TAG_BYTES, MAX_BETA_EVENT_TAGS } from './record-organization-client';
 
 export interface DraftFile {
@@ -23,6 +23,7 @@ interface Draft {
   revision: number;
   tags?: string[];
   files?: DraftFile[];
+  imported_handoffs?: string[];
   restored_command_id?: string;
 }
 export interface PendingCapture {
@@ -30,11 +31,81 @@ export interface PendingCapture {
   state: 'pending' | 'unknown' | 'failed' | 'committed';
   message?: string; error_code?: string; receipt?: BetaReceipt;
   files?: DraftFile[]; capture_attempted?: boolean;
+  /** Local-only source text restored after failure when send-boundary trim changed it. */
+  editable_text?: string;
 }
 interface Confirmation { receipt: BetaReceipt; draft_revision: number }
 interface PersistedState { version: 1; drafts: Record<string, Draft>; pending: PendingCapture[]; confirmed: Confirmation[] }
-export interface DraftSnapshot extends PersistedState { persistenceError: string | null; persistenceState: 'idle' | 'pending' | 'failed'; fileProgress: Readonly<Record<string,AttachmentProgress>> }
+export type AttachmentQueueStage = 'preparation' | 'upload';
+export interface AttachmentQueueProgress {
+  kind: 'queued' | 'retry';
+  stage: AttachmentQueueStage;
+  position?: number;
+  retryIndex?: number;
+  retryDelayMs?: number;
+}
+export interface BetaAttachmentProgress extends AttachmentProgress { queue?: AttachmentQueueProgress }
+export interface DraftSnapshot extends PersistedState { persistenceError: string | null; persistenceState: 'idle' | 'pending' | 'failed'; fileProgress: Readonly<Record<string,BetaAttachmentProgress>> }
 type DraftStorage = Pick<Storage, 'getItem' | 'setItem'>;
+
+interface QueuedAttachmentWork<T> {
+  id: string;
+  run: () => Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+}
+
+/** FIFO work slots keep each Native/Host operation bounded while allowing
+ * distinct attachment identities to make progress independently. */
+class BoundedAttachmentQueue<T> {
+  private readonly waiting: QueuedAttachmentWork<T>[] = [];
+  private active = 0;
+
+  constructor(private readonly limit: number, private readonly changed: (id: string, position: number | null) => void) {}
+
+  enqueue(id: string, run: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.waiting.push({ id, run, resolve, reject });
+      this.notifyWaiting();
+      this.drain();
+    });
+  }
+
+  cancel(id: string, error: unknown): boolean {
+    const index = this.waiting.findIndex(item => item.id === id);
+    if (index < 0) return false;
+    const [item] = this.waiting.splice(index, 1);
+    item.reject(error);
+    this.notifyWaiting();
+    this.drain();
+    return true;
+  }
+
+  cancelAll(error: unknown): void {
+    const waiting = this.waiting.splice(0);
+    for (const item of waiting) item.reject(error);
+  }
+
+  private notifyWaiting(): void {
+    this.waiting.forEach((item, index) => this.changed(item.id, index + 1));
+  }
+
+  private drain(): void {
+    while (this.active < this.limit && this.waiting.length) {
+      const item = this.waiting.shift()!;
+      this.active++;
+      this.changed(item.id, null);
+      this.notifyWaiting();
+      void Promise.resolve().then(item.run).then(item.resolve, item.reject).finally(() => {
+        this.active--;
+        this.drain();
+      });
+    }
+  }
+}
+
+const PREPARATION_WORKER_LIMIT = 2;
+const UPLOAD_WORKER_LIMIT = 2;
 function durable(storage: DraftStorage): storage is DurableIntentStorage {
   const candidate = storage as Partial<DurableIntentStorage>;
   return candidate.durable === true && typeof candidate.commit === 'function' && typeof candidate.snapshot === 'function' && typeof candidate.subscribe === 'function';
@@ -46,6 +117,22 @@ export function errorMessage(error: unknown): string {
 }
 function errorCode(error: unknown): string {
   return error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'unavailable';
+}
+const AUTOMATIC_UPLOAD_RETRY_DELAYS_MS=[250,500,1000] as const;
+const MAX_IMPORTED_HANDOFF_IDS=128;
+const MAX_CAPTURE_TEXT_BYTES=128*1024;
+type UploadRetryDelay=(milliseconds:number)=>Promise<void>;
+const waitForUploadRetry:UploadRetryDelay=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
+const RETRYABLE_UPLOAD_ERROR_CODES=new Set([
+  'unavailable','network_error','network_unavailable','transport_error','timeout','temporarily_unavailable','service_unavailable',
+  'local_source_unavailable','source_store_unavailable','source_store_failed','source_incomplete','storage_failed','offline',
+  'original_not_ready','original_no_progress','busy','operation_busy',
+]);
+function retryableUploadError(error:unknown):boolean{
+  if(error instanceof BetaApiError){if(error.status===408||error.status===429||error.status>=500)return true;return RETRYABLE_UPLOAD_ERROR_CODES.has(error.code);}
+  if(error instanceof TypeError)return true;
+  if(error instanceof Error)return 'code' in error&&typeof error.code==='string'&&RETRYABLE_UPLOAD_ERROR_CODES.has(error.code);
+  return !!error&&typeof error==='object'&&'code' in error&&typeof error.code==='string'&&RETRYABLE_UPLOAD_ERROR_CODES.has(error.code);
 }
 function validOriginal(item: BetaOriginal): boolean {
   return !!item && typeof item.original_id === 'string' && typeof item.sha256 === 'string' && /^[a-f0-9]{64}$/.test(item.sha256)
@@ -85,6 +172,10 @@ function load(raw: string | null, deviceId: string): PersistedState {
   for (const [profile, draft] of Object.entries(value.drafts)) {
     if (typeof draft.text !== 'string' || !Number.isSafeInteger(draft.revision) || draft.revision < 0
       || (draft.tags !== undefined && (!Array.isArray(draft.tags) || !validTags(draft.tags)))
+      || (draft.imported_handoffs !== undefined && (!Array.isArray(draft.imported_handoffs)
+        || draft.imported_handoffs.length > MAX_IMPORTED_HANDOFF_IDS
+        || draft.imported_handoffs.some(id => typeof id !== 'string' || !id.trim() || id.length > 128 || /[\u0000-\u001f\u007f\s]/.test(id))
+        || new Set(draft.imported_handoffs).size !== draft.imported_handoffs.length))
       || (draft.restored_command_id !== undefined
         && (typeof draft.restored_command_id !== 'string' || !draft.restored_command_id.trim()))
       || (draft.files !== undefined && !Array.isArray(draft.files))) throw new Error('Invalid draft');
@@ -101,6 +192,7 @@ function load(raw: string | null, deviceId: string): PersistedState {
     if (!command || typeof command.command_id !== 'string' || typeof command.event_id !== 'string'
       || typeof command.profile_id !== 'string' || typeof command.text !== 'string' || !Number.isSafeInteger(command.occurred_at_ms)
       || !Array.isArray(command.tags) || !validTags(command.tags)
+      || (entry.editable_text !== undefined && typeof entry.editable_text !== 'string')
       || !['pending','unknown','failed','committed'].includes(entry.state) || !Number.isSafeInteger(entry.draft_revision) || entry.draft_revision < 0) throw new Error('Invalid pending capture');
     if (entry.state === 'committed') confirmed.push({ receipt: validateReceipt(entry.receipt, command), draft_revision: entry.draft_revision });
     if (entry.state === 'pending') entry.state = 'unknown';
@@ -126,9 +218,11 @@ export class BetaDraftController {
   private readonly sources: FileSourceStore;
   private readonly ownsSources: boolean;
   private readonly uploads = new Map<string, Promise<BetaStage>>();
+  private readonly sourceHandles = new Map<string,AttachmentSelection>();
+  private readonly preparations = new Map<string,Promise<void>>();
   private readonly fileCancellation=new Map<string,AbortController>();
-  private preparationTail:Promise<void>=Promise.resolve();
-  private uploadTail: Promise<unknown> = Promise.resolve();
+  private readonly preparationQueue: BoundedAttachmentQueue<void>;
+  private readonly uploadQueue: BoundedAttachmentQueue<BetaStage>;
   private unsubscribePersistence: (() => void) | undefined;
   private closing: Promise<void> | undefined;
 
@@ -149,7 +243,8 @@ export class BetaDraftController {
   }
 
   constructor(private readonly client: BetaClient, private readonly deviceId: string, private readonly storage: DraftStorage,
-    private readonly uuid: () => string = betaUuid, private readonly clock: () => number = Date.now, sources?: FileSourceStore) {
+    private readonly uuid: () => string = betaUuid, private readonly clock: () => number = Date.now, sources?: FileSourceStore,
+    private readonly uploadRetryDelay:UploadRetryDelay=waitForUploadRetry) {
     this.sources = sources ?? productionFileSources(); this.ownsSources = !sources;
     this.key = `exomind:beta:drafts:${deviceId}`;
     try { this.state = { ...load(storage.getItem(this.key), deviceId), persistenceError: null, persistenceState: 'idle', fileProgress:{} }; }
@@ -157,6 +252,10 @@ export class BetaDraftController {
       this.restoreBlocked = true;
       this.state = { version: 1, drafts: {}, pending: [], confirmed: [], persistenceError: '草稿缓存无法读取，已停止写入以保留原缓存', persistenceState: 'failed', fileProgress:{} };
     }
+    this.preparationQueue = new BoundedAttachmentQueue(PREPARATION_WORKER_LIMIT,
+      (id, position) => this.queueProgress(id, 'preparation', position));
+    this.uploadQueue = new BoundedAttachmentQueue(UPLOAD_WORKER_LIMIT,
+      (id, position) => this.queueProgress(id, 'upload', position));
     let external=durable(storage)?storage.snapshot().externalRevision??0:0;
     if (durable(storage)) this.unsubscribePersistence = storage.subscribe(() => {
       if (this.disposed || this.restoreBlocked) return;
@@ -167,8 +266,15 @@ export class BetaDraftController {
 
   snapshot = (): DraftSnapshot => this.state;
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
+  hasRetainedFileSource = (profileId:string,id:string):boolean => this.needed(profileId,id)&&this.sourceHandles.has(id);
   dispose(): void {
     if (!this.disposed) { this.disposed = true; this.listeners.clear(); this.unsubscribePersistence?.(); }
+    const cancelled = new BetaApiError('inactive_session', '当前记录窗口已关闭；排队附件仍保留在草稿中');
+    this.preparationQueue.cancelAll(cancelled);
+    this.uploadQueue.cancelAll(cancelled);
+    for(const cancellation of this.fileCancellation.values())cancellation.abort();
+    this.fileCancellation.clear();
+    this.sourceHandles.clear();
     if (!this.closing) {
       this.closing = (async () => { try { if (durable(this.storage)) await this.storage.commit(); }
         finally { if (durable(this.storage)) this.storage.close?.(); if (this.ownsSources) this.sources.close?.(); } })();
@@ -200,11 +306,83 @@ export class BetaDraftController {
     this.listeners.forEach(listener => listener());
   }
 
-  setDraft(profileId: string, text: string): void {
+  setDraft(profileId: string, text: string): boolean {
     const previous = this.state.drafts[profileId] ?? { text: '', revision: 0, tags: [] };
+    const cancelledBeforeCapture = this.state.pending.filter(entry =>
+      entry.command.profile_id === profileId
+      && entry.capture_attempted === false
+      && (entry.state === 'pending' || entry.state === 'failed'));
+    if (cancelledBeforeCapture.length) {
+      const cancelledIds = new Set(cancelledBeforeCapture.map(entry => entry.command.command_id));
+      const textParts = [
+        ...cancelledBeforeCapture.map(entry => entry.editable_text ?? entry.command.text),
+        text,
+      ].filter(part => part.length > 0);
+      const filesById = new Map<string, DraftFile>();
+      for (const entry of cancelledBeforeCapture) {
+        for (const file of entry.files ?? []) {
+          filesById.set(file.id, { ...file, ...(file.original ? { original: { ...file.original } } : {}) });
+        }
+      }
+      for (const file of previous.files ?? []) {
+        filesById.set(file.id, { ...file, ...(file.original ? { original: { ...file.original } } : {}) });
+      }
+      const tags = Array.from(new Set([
+        ...cancelledBeforeCapture.flatMap(entry => entry.command.tags),
+        ...(previous.tags ?? []),
+      ]));
+      const files = Array.from(filesById.values());
+      this.publish({
+        ...this.state,
+        drafts: { ...this.state.drafts, [profileId]: {
+          ...previous,
+          text: textParts.join('\n\n'),
+          revision: previous.revision + 1,
+          tags,
+          ...(files.length ? { files } : {}),
+          restored_command_id: undefined,
+        } },
+        pending: this.state.pending.filter(entry => !cancelledIds.has(entry.command.command_id)),
+      }, true);
+      return true;
+    }
     this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: {
       ...previous, text, revision: previous.revision + 1, restored_command_id: undefined,
     } } });
+    return false;
+  }
+
+  /** Append shared text once to the selected profile's durable draft. The
+   * handoff ID stays with the draft so duplicate Android intents cannot append
+   * the same text again before the Native handoff is acknowledged. */
+  async appendSharedHandoffText(profileId: string, handoffId: string, text: string): Promise<boolean> {
+    this.active();
+    if (!profileId.trim() || !handoffId.trim() || handoffId.length > 128
+      || /[\u0000-\u001f\u007f\s]/.test(handoffId) || typeof text !== 'string' || !text.length) {
+      throw new BetaApiError('invalid_share_handoff', '系统分享内容无效，未改动当前草稿');
+    }
+    const previous = this.state.drafts[profileId] ?? { text: '', revision: 0, tags: [] };
+    const imported = previous.imported_handoffs ?? [];
+    if (imported.includes(handoffId)) {
+      // A previous append may have reached local storage before its durable
+      // acknowledgement failed. Reconfirm that same state before the caller
+      // acknowledges the Native handoff; never append the text twice.
+      if (durable(this.storage)) await this.requiredCommit();
+      this.active();
+      return false;
+    }
+    const imported_handoffs = [...imported, handoffId].slice(-MAX_IMPORTED_HANDOFF_IDS);
+    const nextText = previous.text ? `${previous.text}\n\n${text}` : text;
+    if(new TextEncoder().encode(nextText).byteLength>MAX_CAPTURE_TEXT_BYTES){
+      throw new BetaApiError('capture_text_too_large','分享文字与当前草稿合计超过单条记录上限；现有内容和分享均保留，请先发送或缩短当前草稿再重试');
+    }
+    this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: {
+      ...previous, text: nextText, revision: previous.revision + 1, imported_handoffs,
+      restored_command_id: undefined,
+    } } }, true);
+    if (durable(this.storage)) await this.requiredCommit();
+    this.active();
+    return true;
   }
 
   setTags(profileId: string, tags: readonly string[]): void {
@@ -231,6 +409,35 @@ export class BetaDraftController {
     }, required);
   }
   private active(): void { if (this.disposed) throw new BetaApiError('inactive_session', '当前记录窗口已关闭'); }
+  private findFile(id: string): DraftFile | undefined {
+    return Object.values(this.state.drafts).flatMap(draft => draft.files ?? []).find(file => file.id === id)
+      ?? this.state.pending.flatMap(item => item.files ?? []).find(file => file.id === id);
+  }
+  private queueProgress(id: string, stage: AttachmentQueueStage, position: number | null): void {
+    if (this.disposed) return;
+    const file = this.findFile(id);
+    if (!file) return;
+    const now = this.clock(), previous = this.state.fileProgress[id];
+    const progress: BetaAttachmentProgress = position === null
+      ? { phase: stage === 'preparation' ? 'copying' : 'staging',
+          completed: stage === 'preparation' ? 0 : file.next_offset, total: file.byte_length,
+          startedAt: previous?.startedAt ?? now, phaseStartedAt: now, updatedAt: now }
+      : { phase: 'queued', completed: null, total: file.byte_length, startedAt: previous?.startedAt ?? now,
+          phaseStartedAt: now, updatedAt: now, queue: { kind: 'queued', stage, position } };
+    this.state = { ...this.state, fileProgress: { ...this.state.fileProgress, [id]: progress } };
+    this.listeners.forEach(listener => listener());
+  }
+  private retryWaitProgress(profileId: string, id: string, stage: AttachmentQueueStage, retryIndex: number, delay: number): void {
+    if (this.disposed || !this.needed(profileId, id)) return;
+    const file = this.findFile(id);
+    if (!file) return;
+    const now = this.clock(), previous = this.state.fileProgress[id];
+    const progress: BetaAttachmentProgress = { phase: 'queued', completed: null, total: file.byte_length,
+      startedAt: previous?.startedAt ?? now, phaseStartedAt: now, updatedAt: now,
+      queue: { kind: 'retry', stage, retryIndex, retryDelayMs: delay } };
+    this.state = { ...this.state, fileProgress: { ...this.state.fileProgress, [id]: progress } };
+    this.listeners.forEach(listener => listener());
+  }
   private fileWork(profileId:string,file:DraftFile):FileSourceWork {
     let cancellation=this.fileCancellation.get(file.id);if(!cancellation){cancellation=new AbortController();this.fileCancellation.set(file.id,cancellation);}
     return {
@@ -239,8 +446,8 @@ export class BetaDraftController {
       progress:(phase,completed,total)=>{
         if(this.disposed||!this.needed(profileId,file.id))return;
         const now=this.clock(),previous=this.state.fileProgress[file.id];
-        if(previous?.phase===phase&&completed!==total&&now-previous.updatedAt<150)return;
-        const progress:AttachmentProgress={phase,completed,total,startedAt:previous?.startedAt??now,phaseStartedAt:previous?.phase===phase?previous.phaseStartedAt:now,updatedAt:now};
+        if(previous?.phase===phase&&previous.completed!==null&&previous.completed>0&&completed!==total&&now-previous.updatedAt<150)return;
+        const progress:BetaAttachmentProgress={phase,completed,total,startedAt:previous?.startedAt??now,phaseStartedAt:previous?.phase===phase?previous.phaseStartedAt:now,updatedAt:now};
         // Progress is observation, not a draft edit or durable journal write.
         this.state={...this.state,fileProgress:{...this.state.fileProgress,[file.id]:progress}};
         this.listeners.forEach(listener=>listener());
@@ -315,6 +522,7 @@ export class BetaDraftController {
       ...previous, revision: previous.revision + 1, files: [...(previous.files ?? []), ...incoming],
       restored_command_id: undefined,
     } } };
+    incomingInputs.forEach(({file},index)=>this.sourceHandles.set(incoming[index].id,file));
     let admitted=false;
     try { this.publish(next, true);admitted=true; if (durable(this.storage)) { await this.requiredCommit(); this.active(); } }
     catch (error) {
@@ -324,33 +532,29 @@ export class BetaDraftController {
       this.publish({...this.state,drafts:{...this.state.drafts,[profileId]:{...latest,revision:latest.revision+(admitted?0:1),files}}});
       return ids;
     }
-    for (let index = 0; index < incoming.length; index++) {
-      const file = incoming[index];
-      try {
-        const prepare=this.preparationTail.catch(()=>{}).then(async()=>{
-        this.selected(profileId,file.id);
-        // Complete the backend's durable source copy before publishing the
-        // original manifest or beginning Core stage/capture operations.
-        const input=incomingInputs[index].file,work=this.fileWork(profileId,file);
-        if(isNativeAttachment(input)){
-          if(!hasNativeAttachmentSources(this.sources))throw new BetaApiError('unsupported_file_source','当前环境不能读取系统文件，请通过附件重新选择');
-          await this.sources.importFile(file.source_key,input,work);
-        }else await this.sources.put(file.source_key,input,work);
-        this.selected(profileId,file.id); await this.prepareSource(profileId, file);
-        });this.preparationTail=prepare.catch(()=>{});await prepare;
-      } catch (error) {
+    await Promise.all(incoming.map(async (file, index) => {
+      try { await this.copyAndPrepare(profileId, file, incomingInputs[index].file); }
+      catch (error) {
         if (!this.disposed) this.patchFile(profileId, file.id, { state: 'failed', message: errorMessage(error) });
       }
-    }
+    }));
     return ids;
   }
 
   removeFile(profileId: string, id: string): void {
     this.active(); const previous = this.state.drafts[profileId]; if (!previous) return;
+    const retainedByPending = this.state.pending.some(item => item.command.profile_id === profileId && item.files?.some(file => file.id === id));
+    const fileProgress = retainedByPending ? this.state.fileProgress
+      : Object.fromEntries(Object.entries(this.state.fileProgress).filter(([fileId]) => fileId !== id));
     this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...previous,
       revision: previous.revision + 1, files: previous.files?.filter(file => file.id !== id),
-      restored_command_id: undefined } } });
-    if(!this.needed(profileId,id)){this.fileCancellation.get(id)?.abort();this.fileCancellation.delete(id);}
+      restored_command_id: undefined } }, fileProgress });
+    if(!this.needed(profileId,id)){
+      const cancelled = new BetaApiError('selection_removed', '附件已从草稿移除，尚未开始的准备已取消');
+      this.preparationQueue.cancel(id, cancelled);
+      this.uploadQueue.cancel(id, cancelled);
+      this.fileCancellation.get(id)?.abort();this.fileCancellation.delete(id);this.sourceHandles.delete(id);
+    }
     // A frozen pending submission may still need these bytes. Removing a next
     // draft selection never deletes the Core original or its browser source.
   }
@@ -379,7 +583,11 @@ export class BetaDraftController {
 
   private async resumeDraftFile(profileId: string, file: DraftFile): Promise<void> {
     try {
-      if (!file.original) await this.prepareSource(profileId, file);
+      if (!file.original) {
+        const source=this.sourceHandles.get(file.id);
+        if(source)await this.copyAndPrepare(profileId,file,source);
+        else await this.prepareSource(profileId,file);
+      }
       else await this.ensureUploaded(profileId, file);
     } catch (error) {
       if (!this.disposed) this.patchFile(profileId, file.id, { state: errorCode(error) === 'source_missing' ? 'source_missing' : 'failed', message: errorMessage(error) });
@@ -395,9 +603,41 @@ export class BetaDraftController {
 
   async resumeFiles(profileId: string): Promise<void> {
     const files = this.state.drafts[profileId]?.files ?? [];
-    for (const file of files) {
-      if (this.disposed) return;
-      await this.resumeDraftFile(profileId, file);
+    await Promise.all(files.map(file => this.disposed ? Promise.resolve() : this.resumeDraftFile(profileId, file)));
+  }
+
+  private copyAndPrepare(profileId:string,file:DraftFile,source:AttachmentSelection):Promise<void>{
+    const existing=this.preparations.get(file.id);if(existing)return existing;
+    const operation=this.withAutomaticUploadRetry(profileId,file.id,'preparing','preparation',()=>this.preparationQueue.enqueue(file.id,async()=>{
+        this.selected(profileId,file.id);
+        const work=this.fileWork(profileId,file);
+        if(isNativeAttachment(source)){
+          if(!hasNativeAttachmentSources(this.sources))throw new BetaApiError('unsupported_file_source','当前环境不能读取系统文件，请通过附件重新选择');
+          await this.sources.importFile(file.source_key,source,work);
+        }else if(isSharedHandoffAttachment(source)){
+          if(!hasNativeAttachmentSources(this.sources)||!this.sources.importSharedHandoff)throw new BetaApiError('unsupported_file_source','当前环境不能读取系统分享来源；分享内容仍保留，可以重试');
+          await this.sources.importSharedHandoff(file.source_key,source,work);
+        }else await this.sources.put(file.source_key,source,work);
+        this.selected(profileId,file.id);await this.prepareSource(profileId,file);
+      }));
+    const tracked=operation.then(()=>{this.sourceHandles.delete(file.id);}).finally(()=>{
+      if(this.preparations.get(file.id)===tracked)this.preparations.delete(file.id);
+    });
+    this.preparations.set(file.id,tracked);
+    return tracked;
+  }
+
+  private async withAutomaticUploadRetry<T>(profileId:string,id:string,busyState:'preparing'|'uploading',queueStage:AttachmentQueueStage,action:()=>Promise<T>):Promise<T>{
+    for(let retry=0;;retry++){
+      this.selected(profileId,id);
+      try{return await action();}
+      catch(error){
+        if(retry>=AUTOMATIC_UPLOAD_RETRY_DELAYS_MS.length||!retryableUploadError(error))throw error;
+        const delay=AUTOMATIC_UPLOAD_RETRY_DELAYS_MS[retry];
+        this.patchFile(profileId,id,{state:busyState,message:`暂存遇到暂时错误，${retry+1}/${AUTOMATIC_UPLOAD_RETRY_DELAYS_MS.length} 次自动重试将在 ${delay} 毫秒后进行`});
+        this.retryWaitProgress(profileId,id,queueStage,retry+1,delay);
+        await this.uploadRetryDelay(delay);
+      }
     }
   }
 
@@ -405,13 +645,16 @@ export class BetaDraftController {
     this.active(); const draft = this.state.drafts[profileId]; const file = draft?.files?.find(item => item.id === id);
     if (!draft || !file) throw new BetaApiError('source_missing', '当前草稿中找不到该原件');
     if (source.size !== file.byte_length) throw new BetaApiError('source_mismatch', '重新选择的文件长度不同，原提交保持不变');
-    if(!isNativeAttachment(source)){const sha=await hashFileSource(source,()=>this.disposed);this.active();if(file.original&&sha!==file.original.sha256)throw new BetaApiError('source_mismatch','重新选择的文件与原件 hash 不同，原提交保持不变');}
+    if(!isNativeAttachment(source)&&!isSharedHandoffAttachment(source)){const sha=await hashFileSource(source,()=>this.disposed);this.active();if(file.original&&sha!==file.original.sha256)throw new BetaApiError('source_mismatch','重新选择的文件与原件 hash 不同，原提交保持不变');}
+    this.sourceHandles.set(file.id,source);
     const current = this.state.drafts[profileId];
-    this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...current, revision: current.revision + 1,
-      files: current.files?.map(item => item.id === id ? { ...item, state: 'preparing' as const, message: undefined } : item),
-      restored_command_id: undefined } } }, true);
-    if (durable(this.storage)) { await this.requiredCommit(); this.active(); }
-    try { const work=this.fileWork(profileId,file);if(isNativeAttachment(source)){if(!hasNativeAttachmentSources(this.sources))throw new BetaApiError('unsupported_file_source','当前环境不能读取系统文件');await this.sources.importFile(file.source_key,source,work);}else await this.sources.put(file.source_key, source,work); this.selected(profileId,file.id); await this.prepareSource(profileId, file); }
+    try {
+      this.publish({ ...this.state, drafts: { ...this.state.drafts, [profileId]: { ...current, revision: current.revision + 1,
+        files: current.files?.map(item => item.id === id ? { ...item, state: 'preparing' as const, message: undefined } : item),
+        restored_command_id: undefined } } }, true);
+      if (durable(this.storage)) { await this.requiredCommit(); this.active(); }
+      await this.copyAndPrepare(profileId,file,source);
+    }
     catch (error) { if (!this.disposed) this.patchFile(profileId, id, { state: 'failed', message: errorMessage(error) }); throw error; }
   }
 
@@ -426,11 +669,13 @@ export class BetaDraftController {
 
   private ensureUploaded(profileId: string, file: DraftFile): Promise<BetaStage> {
     const existing = this.uploads.get(file.stage_id); if (existing) return existing;
-    const operation = this.uploadTail.catch(() => {}).then(() => this.uploadFile(profileId, file)).catch(error => {
+    const operation = this.withAutomaticUploadRetry(
+      profileId,file.id,'uploading','upload',()=>this.uploadQueue.enqueue(file.id,()=>this.uploadFile(profileId,file)),
+    ).catch(error => {
       if (!this.disposed) this.patchFile(profileId, file.id, { state: errorCode(error) === 'source_missing' ? 'source_missing' : 'failed', message: errorMessage(error) });
       throw error;
     });
-    this.uploads.set(file.stage_id, operation); this.uploadTail = operation.catch(() => {});
+    this.uploads.set(file.stage_id, operation);
     void operation.finally(() => { if (this.uploads.get(file.stage_id) === operation) this.uploads.delete(file.stage_id); }).catch(() => {});
     return operation;
   }
@@ -497,9 +742,17 @@ export class BetaDraftController {
       && entry.draft_revision === draft.revision && entry.state !== 'committed');
     if (previous) return this.retry(previous.command.command_id);
     const files = draft.files?.map(file => ({ ...file, original: { ...file.original! } })) ?? [];
+    const commandText = draft.text.trim();
+    const preserveEditableText = draft.text !== commandText
+      && new TextEncoder().encode(draft.text).byteLength <= MAX_CAPTURE_TEXT_BYTES;
     const command = freezeCommand({ command_id: this.uuid(), event_id: this.uuid(), profile_id: profileId,
-      occurred_at_ms: this.clock(), text: draft.text, tags: [...(draft.tags ?? [])], ...(files.length ? { originals: files.map(file => ({ ...file.original! })) } : {}) });
-    const pending: PendingCapture = { command, draft_revision: draft.revision, state: 'pending', ...(files.length ? { files, capture_attempted: false } : {}) };
+      occurred_at_ms: this.clock(), text: commandText, tags: [...(draft.tags ?? [])], ...(files.length ? { originals: files.map(file => ({ ...file.original! })) } : {}) });
+    const pending: PendingCapture = {
+      command, draft_revision: draft.revision, state: 'pending',
+      ...(preserveEditableText ? { editable_text: draft.text } : {}),
+      ...(files.length ? { files } : {}),
+      capture_attempted: false,
+    };
     const nextDraft = { text: '', revision: draft.revision + 1, tags: [], files: [] };
     this.publish({
       ...this.state,
@@ -568,7 +821,7 @@ export class BetaDraftController {
       drafts: {
         ...this.state.drafts,
         [profileId]: {
-          text: pending.command.text,
+          text: pending.editable_text ?? pending.command.text,
           revision: current.revision + 1,
           tags: [...pending.command.tags],
           files,
@@ -603,6 +856,8 @@ export class BetaDraftController {
   }
 
   private async perform(pending: PendingCapture, reconcileFirst: boolean): Promise<BetaReceipt | null> {
+    const stillPending = () => this.state.pending.some(entry => entry.command.command_id === pending.command.command_id);
+    if (!stillPending()) return null;
     if (durable(this.storage)) {
       try { await this.requiredCommit(); }
       catch (error) {
@@ -612,12 +867,13 @@ export class BetaDraftController {
         }
         return null;
       }
-      if (this.disposed) return null;
+      if (this.disposed || !stillPending()) return null;
     }
     if (reconcileFirst) {
       try {
         const receipt = await this.client.receipt(pending.command.profile_id, pending.command.command_id);
         if (receipt) return this.commit(pending, receipt);
+        if (!stillPending()) return null;
       } catch (error) {
         if (!this.disposed) {
           this.updatePending(pending.command.command_id, { state: 'unknown', message: errorMessage(error), error_code: errorCode(error) });
@@ -630,17 +886,22 @@ export class BetaDraftController {
     this.updatePending(pending.command.command_id, { state: 'pending', message: undefined, error_code: undefined });
     let captureAttempted = false;
     try {
-      for (const file of pending.files ?? []) await this.ensureUploaded(pending.command.profile_id, file);
-      if (this.disposed) return null;
+      await Promise.all((pending.files ?? []).map(file => this.ensureUploaded(pending.command.profile_id, file)));
+      if (this.disposed || !stillPending()) return null;
       const next = { ...this.state, pending: this.state.pending.map(item => item.command.command_id === pending.command.command_id ? { ...item, capture_attempted: true } : item) };
       this.publish(next, true);
-      if (durable(this.storage)) { await this.requiredCommit(); if (this.disposed) return null; }
+      if (durable(this.storage)) { await this.requiredCommit(); if (this.disposed || !stillPending()) return null; }
       captureAttempted = true;
       return this.commit(pending, await this.client.capture(pending.command));
     }
     catch (error) {
       if (!this.disposed) {
-        this.updatePending(pending.command.command_id, { state: captureAttempted ? 'unknown' : 'failed', message: errorMessage(error), error_code: errorCode(error) });
+        const requestMayHaveReachedService = pending.capture_attempted === true || captureAttempted;
+        this.updatePending(pending.command.command_id, {
+          state: requestMayHaveReachedService ? 'unknown' : 'failed',
+          capture_attempted: requestMayHaveReachedService,
+          message: errorMessage(error), error_code: errorCode(error),
+        });
         this.restoreEditableDraftFromPending(pending);
       }
       return null;

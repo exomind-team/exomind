@@ -168,6 +168,25 @@ class TimeblockEndAlertPlugin(private val activity: Activity) : Plugin(activity)
     requestPermissionForAlias("notifications", invoke, "onNotificationPermissionResult")
   }
 
+  @Command
+  fun notificationChannelState(invoke: Invoke) {
+    try {
+      invoke.resolve(BetaDeadlineAlerts.notificationChannelState(appContext, currentNotificationPermissionState()))
+    } catch (error: Exception) {
+      invoke.reject("Timeblock notification channel status is unavailable", error)
+    }
+  }
+
+  @Command
+  fun openNotificationChannelSettings(invoke: Invoke) {
+    try {
+      BetaDeadlineAlerts.openNotificationChannelSettings(activity)
+      invoke.resolve()
+    } catch (error: Exception) {
+      invoke.reject("Unable to open timeblock notification channel settings", error)
+    }
+  }
+
   @PermissionCallback
   fun onNotificationPermissionResult(invoke: Invoke) {
     notificationPermissionState(invoke)

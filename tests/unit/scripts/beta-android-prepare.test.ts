@@ -61,12 +61,14 @@ function fixture(namespace = beta) {
     gradle: join(root, 'src-tauri/gen/android/app/build.gradle.kts'),
     manifest: join(root, 'src-tauri/gen/android/app/src/main/AndroidManifest.xml'),
     activity: join(root, 'src-tauri/gen/android/app/src/main/java/com/exomind/app/v06/beta/MainActivity.kt'),
+    strings: join(root, 'src-tauri/gen/android/app/src/main/res/values/strings.xml'),
   };
   const put = (path: string, value: string) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, value); };
-  put(files.config, JSON.stringify({ identifier: beta, app: { windows: [{ label: 'main', url: 'beta.html' }] } }));
+  put(files.config, JSON.stringify({ productName: 'ExoMind Beta', version: '0.6.0-beta26', identifier: beta, app: { windows: [{ label: 'main', url: 'beta.html' }] } }));
   put(files.gradle, `android {\n    namespace = "${namespace}"\n    defaultConfig {\n        applicationId = "${beta}"\n    }\n}\n`);
   put(files.manifest, freshManifest);
   put(files.activity, freshActivity);
+  put(files.strings, '<resources>\n    <string name="app_name">ExoMind Beta</string>\n    <string name="main_activity_title">ExoMind Beta</string>\n</resources>\n');
   cpSync(join(process.cwd(),'src-tauri/icons/android'),join(root,'src-tauri/icons/android'),{recursive:true});
   return { root, files, snapshot: () => Object.fromEntries(Object.entries(files).map(([key,path]) => [key,readFileSync(path,'utf8')])) };
 }
@@ -81,6 +83,31 @@ describe('isolated Beta Android preparation', () => {
     const round=readFileSync(join(work.root,'src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml'),'utf8');expect(round).toContain('@mipmap/ic_launcher_foreground');
     expect(work.snapshot().manifest).toContain('android:icon="@mipmap/ic_launcher"');expect(work.snapshot().manifest).toContain('android:roundIcon="@mipmap/ic_launcher_round"');
     expect(prepareBetaAndroid(work.root,{ndkVersion:null}).changedFiles).toEqual([]);
+  });
+  it('creates an isolated, repeatable Android test identity without changing the Beta source namespace',async()=>{
+    const {prepareBetaAndroid}=await import('../../../scripts/dev/beta-android-prepare');const work=fixture();
+    const gradle=readFileSync(work.files.gradle,'utf8');
+    writeFileSync(work.files.gradle,gradle.replace(/\n}\s*$/, '\n    buildTypes {\n        getByName("debug") {\n            isJniDebuggable = true\n        }\n    }\n}\n'));
+
+    const prepared=prepareBetaAndroid(work.root,{ndkVersion:null,testPackageSuffix:'beta26testci'});
+    const after=work.snapshot();
+
+    expect(after.gradle).toContain(`namespace = "${beta}"`);
+    expect(after.gradle).toContain(`applicationId = "${beta}"`);
+    expect(after.gradle).toContain('applicationIdSuffix = ".beta26testci"');
+    expect(after.strings).toContain('<string name="app_name">外心 Beta26 测试 CI</string>');
+    expect(after.strings).toContain('<string name="main_activity_title">外心 Beta26 测试 CI</string>');
+    expect(prepared.changedFiles).toContain(work.files.strings);
+    const repeated=prepareBetaAndroid(work.root,{ndkVersion:null,testPackageSuffix:'beta26testci'});
+    expect(work.snapshot().strings).toBe(after.strings);
+    expect(repeated.changedFiles).toEqual([]);
+  });
+  it('rejects a test suffix that does not identify this Beta version before writing',async()=>{
+    const {prepareBetaAndroid}=await import('../../../scripts/dev/beta-android-prepare');const work=fixture();
+    const before=work.snapshot();
+
+    expect(()=>prepareBetaAndroid(work.root,{ndkVersion:null,testPackageSuffix:'beta25testci'})).toThrow(/beta26testci/);
+    expect(work.snapshot()).toEqual(before);
   });
   it('B12-08: pins the AGP strip NDK explicitly and preserves repeated preparation',async()=>{
     const {prepareBetaAndroid}=await import('../../../scripts/dev/beta-android-prepare');const work=fixture();
@@ -112,6 +139,9 @@ describe('isolated Beta Android preparation', () => {
     expect(after.activity).toContain('if (exomindFullscreen) cutout else bars or cutout');
     expect(after.activity).not.toMatch(/MulticastLock|WifiManager|WindowInsetsCompat\.CONSUMED/);
     expect(after.manifest).toContain('android:configChanges=');
+    expect(after.manifest).toContain('android:name="app.tauri.exomindsharehandoff.BetaShareHandoffActivity"');
+    expect(after.manifest.match(/android.intent.action.SEND_MULTIPLE/g)).toHaveLength(1);
+    expect(after.manifest.match(/android:mimeType="\*\/\*"/g)).toHaveLength(2);
     const permissionNames = [...after.manifest.matchAll(/<uses-permission\b[^>]*android:name="([^"]+)"/g)]
       .map(([, name]) => name);
     expect(permissionNames).toHaveLength(3);
@@ -124,6 +154,17 @@ describe('isolated Beta Android preparation', () => {
     expect(after.manifest.match(/android\.permission\.MODIFY_AUDIO_SETTINGS/g)).toHaveLength(1);
     expect(after.manifest).not.toMatch(/android\.permission\.(CAMERA|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE)/);
     expect(prepareBetaAndroid(work.root,{ndkVersion:null}).changedFiles).toEqual([]); expect(work.snapshot()).toEqual(after);
+  });
+  it('rejects altered share filters before writing and keeps the receiver permissionless', async () => {
+    const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
+    const work = fixture();
+    prepareBetaAndroid(work.root,{ndkVersion:null});
+    const prepared = readFileSync(work.files.manifest,'utf8');
+    expect(prepared).not.toMatch(/READ_MEDIA|READ_EXTERNAL_STORAGE|MANAGE_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE/);
+    writeFileSync(work.files.manifest,prepared.replace('android.intent.action.SEND_MULTIPLE','android.intent.action.VIEW'));
+    const before = work.snapshot();
+    expect(() => prepareBetaAndroid(work.root,{ndkVersion:null})).toThrow(/share|intent/i);
+    expect(work.snapshot()).toEqual(before);
   });
   it('preserves an existing audio permission without adding a duplicate', async () => {
     const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');

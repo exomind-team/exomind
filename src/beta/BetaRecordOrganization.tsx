@@ -12,7 +12,10 @@ import {
 } from '@/components/ui/dialog';
 import { BetaApiError, type BetaClient, type BetaEvent } from './client';
 import {
+  betaCorrectionTextByteLength,
+  betaCorrectionTextIssue,
   MAX_BETA_EVENT_TAG_BYTES, MAX_BETA_EVENT_TAGS,
+  MAX_BETA_CORRECTION_TEXT_BYTES,
   type BetaCorrectionEntry, type BetaRecordCorrectionCommand,
 } from './record-organization-client';
 import { BetaRecordCorrectionOwner, type BetaCorrectionOwnerSnapshot } from './record-correction-owner';
@@ -169,16 +172,20 @@ export function BetaRecordCorrectionDialog({
     ? ownerSnapshot.entries.filter(entry => entry.command.profile_id === profileId && entry.command.target_event_id === target.event_id)
     : [];
   const pending = targetEntries.find(entry => entry.status === 'pending');
+  const sending = targetEntries.find(entry => entry.status === 'sending');
   const savingIntent = targetEntries.find(entry => entry.status === 'saving');
   const saveFailed = targetEntries.find(entry => entry.status === 'save_failed');
   const acceptedEntries = targetEntries.filter(entry => entry.status === 'accepted');
-  const currentRecovery = pending ?? savingIntent ?? saveFailed ?? acceptedEntries[0];
+  const currentRecovery = sending ?? pending ?? savingIntent ?? saveFailed ?? acceptedEntries[0];
   const [entries, setEntries] = useState<BetaCorrectionEntry[]>([]);
   const [before, setBefore] = useState<number | null>(null);
   const [pageHighwater, setPageHighwater] = useState<number | undefined>();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [recoveryRetrying, setRecoveryRetrying] = useState(false);
+  const [recoveryActionMessage, setRecoveryActionMessage] = useState('');
   const [correctedText, setCorrectedText] = useState('');
+  const [requestFailure, setRequestFailure] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const sequence = useRef(0);
@@ -186,6 +193,9 @@ export function BetaRecordCorrectionDialog({
   const editScope = useRef<string | null>(null);
   const scope = useRef({ open, profileId, eventId: target?.event_id, client, highwater });
   scope.current = { open, profileId, eventId: target?.event_id, client, highwater };
+  const textHelpId = useId();
+  const textBytes = betaCorrectionTextByteLength(correctedText);
+  const textIssue = betaCorrectionTextIssue(correctedText);
 
   useEffect(() => {
     const current = ++sequence.current;
@@ -228,8 +238,8 @@ export function BetaRecordCorrectionDialog({
 
   const currentCorrection = latestMatchingCorrection(entries);
   const conflicting = entries.some(entry => entry.target_state === 'digest_conflict');
-  const recoveryError = ownerError || ownerSnapshot.error || '';
-  const targetIsBlocked = !!pending || !!savingIntent || !!saveFailed;
+  const recoveryReadError = ownerSnapshot.error || '';
+  const targetIsBlocked = !!pending || !!sending || !!savingIntent || !!saveFailed;
 
   async function loadOlder(): Promise<void> {
     if (!target || !client.recordOrganization || before === null || loading || pageHighwater === undefined) return;
@@ -270,18 +280,20 @@ export function BetaRecordCorrectionDialog({
   }
 
   async function submitCorrection(retry: boolean): Promise<void> {
-    if (!target || !owner || !client.recordOrganization || saving || recoveryError) return;
-    if (!retry && !correctedText.trim()) { setError('请先写下更正内容'); return; }
+    if (!target || !owner || !client.recordOrganization || saving || ownerError || (!retry && recoveryReadError)) return;
+    if (!retry && textIssue === 'empty') { setError('请先写下非空更正内容'); return; }
+    if (!retry && textIssue === 'invalid_unicode') { setError('更正内容包含无法传输的 Unicode 字符，请重新输入该字符'); return; }
+    if (!retry && textIssue === 'too_large') { setError('更正内容超过 128 KiB UTF-8 字节上限，请删减后再保存'); return; }
     if (!retry && !/^[a-f0-9]{64}$/.test(target.digest)) { setError('原始记录没有可验证的摘要，不能提交更正'); return; }
     const current = sequence.current;
-    setSaving(true); setError(''); setNotice('');
+    setSaving(true); setError(''); setRequestFailure(''); setNotice('');
     try {
       const result = retry
         ? await owner.retry(client, profileId, target.event_id)
         : await owner.submit(client, target, correctedText);
       if (!stillCurrent(current, result.command)) return;
       if (result.status === 'save_failed') {
-        setError('本机暂存失败；更正尚未发送。请重试本机暂存或取消这份未提交更正。');
+        setRequestFailure('本机恢复 journal 未确认保存；本次更正尚未发送。请重试本机暂存或取消这份未提交更正。');
         return;
       }
       if (result.status === 'pending') return;
@@ -290,7 +302,19 @@ export function BetaRecordCorrectionDialog({
         await refreshAfterReceipt(result.command, current);
       }
     } catch (failure) {
-      if (sequence.current === current && scope.current.open) setError(errorMessageForCorrections(failure));
+      if (sequence.current === current && scope.current.open) {
+        const detail = errorMessageForCorrections(failure);
+        if (failure instanceof BetaApiError && failure.code === 'invalid_correction') {
+          setRequestFailure(`本机更正校验拒绝了请求；本次更正尚未保存或发送。${detail}`);
+        } else if (failure instanceof BetaApiError && failure.code === 'invalid_request') {
+          setRequestFailure(`更正请求被明确拒绝；没有收到成功回执。错误没有指出具体字段。${detail} 输入仍保留，可修改后重试。`);
+        } else if (failure instanceof BetaApiError && failure.status >= 400 && failure.status < 500
+          && ![408, 425, 429].includes(failure.status)) {
+          setRequestFailure(`服务响应明确拒绝了更正；服务没有接受本次更正。${detail} 输入仍保留，可修改后重试。`);
+        } else {
+          setError(detail);
+        }
+      }
     } finally {
       if (sequence.current === current && scope.current.open) setSaving(false);
     }
@@ -313,8 +337,40 @@ export function BetaRecordCorrectionDialog({
     }
   }
 
-  const titleId = useId();
-  const textId = titleId + '-text';
+  async function copyCorrectionText(): Promise<void> {
+    if (!correctedText.trim()) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('当前环境不支持剪贴板写入');
+      await navigator.clipboard.writeText(correctedText);
+      setNotice('更正文本已复制；弹层中的输入仍保留。');
+      setRecoveryActionMessage('');
+    } catch (failure) {
+      setRecoveryActionMessage(`无法自动复制；当前输入仍保留在弹层中，请手动复制。${errorMessageForCorrections(failure)}`);
+    }
+  }
+
+  async function retryRecovery(): Promise<void> {
+    if (recoveryRetrying) return;
+    setRecoveryRetrying(true);
+    setRecoveryActionMessage('');
+    try {
+      if (owner) {
+        await owner.retryRecovery();
+        setNotice('已重试读取本机恢复 journal；当前输入仍保留。');
+        return;
+      }
+      if (correctedText.trim() && !window.confirm('刷新会关闭弹层并清空当前输入。请先复制更正文本；确认后刷新并重试本机恢复？')) {
+        return;
+      }
+      window.location.reload();
+    } catch (failure) {
+      setRecoveryActionMessage(`本机恢复仍不可用；未刷新页面，本次更正尚未发送，当前输入仍保留。${errorMessageForCorrections(failure)}`);
+    } finally {
+      setRecoveryRetrying(false);
+    }
+  }
+
+  const textId = useId();
   return (
     <Dialog open={open} onOpenChange={next => {
       if (!next) ++sequence.current;
@@ -323,12 +379,12 @@ export function BetaRecordCorrectionDialog({
       {open && target && (
         <DialogContent className="max-h-[88dvh] overflow-y-auto border-border-card bg-card text-card-foreground">
           <DialogHeader>
-            <DialogTitle id={titleId}>查看或更正记录</DialogTitle>
+            <DialogTitle>查看或更正记录</DialogTitle>
             <DialogDescription>更正会作为一条新记录保存，原始内容与来源保持不变。关闭弹层不会取消已提交的更正。</DialogDescription>
           </DialogHeader>
-          <section className="space-y-2 rounded-lg border border-border-subtle bg-page p-3" aria-label="原始记录">
+          <section className="space-y-2 rounded-lg border border-border-subtle bg-page dark:bg-page-dark p-3" aria-label="原始记录">
             <div className="flex items-center gap-2 text-xs text-secondary"><h3 className="font-semibold">原始记录</h3><EventTimestamp timestamp={target.occurred_at_ms} now={now} mode={dateMode}/></div>
-            <p className="whitespace-pre-wrap break-words text-sm text-foreground">{target.text}</p>
+            <p className="whitespace-pre-wrap break-words text-sm text-foreground selection:bg-active/40 selection:text-foreground">{target.text}</p>
             <p className="text-[11px] text-muted">原记录仍可通过记录历史和引用回看。</p>
           </section>
           <section className="space-y-2" aria-label="已有更正">
@@ -364,11 +420,22 @@ export function BetaRecordCorrectionDialog({
           </section>
           <div className="space-y-2">
             <label className="text-sm font-medium text-strong" htmlFor={textId}>写下更正内容</label>
-            <Textarea id={textId} value={correctedText} onChange={event => { setCorrectedText(event.target.value); setError(''); }}
-              placeholder="补充准确表述" rows={4} disabled={saving || targetIsBlocked || !owner} />
+            <Textarea id={textId} value={correctedText} onChange={event => { setCorrectedText(event.target.value); setError(''); setRequestFailure(''); setRecoveryActionMessage(''); }}
+              placeholder="补充准确表述" rows={4} aria-required="true" aria-describedby={textHelpId}
+              aria-invalid={textIssue === 'invalid_unicode' || textIssue === 'too_large'} disabled={saving || targetIsBlocked} />
+            <p id={textHelpId} className={`text-xs ${textIssue === 'too_large' || textIssue === 'invalid_unicode' ? 'text-destructive' : 'text-muted'}`}
+              role={textIssue === 'too_large' || textIssue === 'invalid_unicode' ? 'alert' : 'note'}>
+              {textIssue === 'empty' ? '请输入非空更正内容。'
+                : textIssue === 'invalid_unicode' ? '更正内容包含无法传输的 Unicode 字符，请重新输入该字符。'
+                  : textIssue === 'too_large' ? '更正内容超过上限；请删减至 128 KiB UTF-8 字节以内。'
+                    : '普通 Markdown 与换行会按原文保存，不解析引用或代码块。'}{' '}
+              <span>{textBytes.toLocaleString('zh-CN')} / {MAX_BETA_CORRECTION_TEXT_BYTES.toLocaleString('zh-CN')} UTF-8 字节</span>
+            </p>
             {currentRecovery?.status === 'pending' && <p className="text-xs text-secondary" role="status">{currentRecovery.message ?? '命令已持久保存，提交结果尚未确认；查证会复用同一命令和正文。'}</p>}
+            {currentRecovery?.status === 'sending' && <p className="text-xs text-secondary" role="status">{currentRecovery.message ?? '本机命令已持久保存；正在发送更正请求，尚未收到服务回执。'}</p>}
             {currentRecovery?.status === 'saving' && <p className="text-xs text-secondary" role="status">正在保存恢复命令；确认本机暂存后才会发送。</p>}
             {currentRecovery?.status === 'save_failed' && <p className="text-xs text-destructive" role="alert">恢复命令尚未持久保存，因此没有发送更正。{currentRecovery.message ? ` ${currentRecovery.message}` : ''}</p>}
+            {requestFailure && <p className="text-xs text-destructive" role="alert">{requestFailure}</p>}
             {acceptedEntries.map(entry => (
               <div key={entry.command.command_id} className="space-y-1">
                 <p className="text-xs text-secondary" role="status">{entry.message ?? '更正已记录，原始记录仍保留。'}</p>
@@ -376,8 +443,16 @@ export function BetaRecordCorrectionDialog({
                   onClick={() => void retryAcceptedCleanup(entry.command)}>重试清理本机恢复记录</Button>
               </div>
             ))}
-            {!owner && !ownerError && <p className="text-xs text-secondary" role="status">正在恢复本机更正记录…</p>}
-            {recoveryError && <p className="text-xs text-destructive" role="alert">本机更正恢复记录不可用；本次更正尚未发送：{recoveryError}</p>}
+            {!owner && !ownerError && <p className="text-xs text-secondary" role="status">正在恢复本机更正记录；恢复完成前不会发送新更正。</p>}
+            {ownerError && <p className="text-xs text-destructive" role="alert">本机更正恢复初始化失败，无法保存恢复命令；本次更正未发送：{ownerError}</p>}
+            {recoveryReadError && <p className="text-xs text-destructive" role="alert">本机恢复状态读取未确认；新更正暂不可保存。已有命令可能已发送，发送结果仍待查证：{recoveryReadError}</p>}
+            {(ownerError || recoveryReadError || requestFailure) && <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" disabled={recoveryRetrying} onClick={() => void retryRecovery()}>
+                {recoveryRetrying ? '正在重试恢复' : owner ? '重试读取本机恢复' : '刷新并重试恢复'}
+              </Button>
+              {correctedText.trim() && <Button type="button" size="sm" variant="ghost" onClick={() => void copyCorrectionText()}>复制更正文本</Button>}
+            </div>}
+            {recoveryActionMessage && <p className="text-xs text-destructive" role="alert">{recoveryActionMessage}</p>}
             {notice && <p className="text-xs text-secondary" role="status">{notice}</p>}
           </div>
           <DialogFooter>
@@ -405,11 +480,11 @@ export function BetaRecordCorrectionDialog({
                 setCorrectedText(''); setError(''); setNotice('未提交的更正编辑已取消；没有发送命令。');
               }}>取消未提交编辑</Button>
             )}
-            <Button type="button" onClick={() => void submitCorrection(!!pending || !!saveFailed)}
-              disabled={saving || !owner || !!recoveryError || !client.recordOrganization
-                || (!pending && !saveFailed && (targetIsBlocked || !correctedText.trim()))}>
+            <Button type="button" onClick={() => void submitCorrection(!!pending || !!sending || !!saveFailed)}
+              disabled={saving || !owner || !!ownerError || (!!recoveryReadError && !pending && !sending) || !client.recordOrganization
+                || (!pending && !sending && !saveFailed && (targetIsBlocked || textIssue !== null))}>
               {saving ? <LoaderCircle size={15} className="mr-2 animate-spin" /> : <PencilLine size={15} className="mr-2" />}
-              {saving ? '正在保存' : pending ? '查证并重试' : saveFailed ? '重试本机暂存' : '保存更正'}
+              {saving && sending ? '正在发送' : saving ? '正在本机暂存' : pending || sending ? '查证并重试' : saveFailed ? '重试本机暂存' : '保存更正'}
             </Button>
           </DialogFooter>
           {!client.recordOrganization && <p className="text-xs text-destructive" role="alert">当前连接尚不支持更正，请更新 Beta 服务。</p>}
@@ -420,6 +495,12 @@ export function BetaRecordCorrectionDialog({
 }
 
 function errorMessageForCorrections(error: unknown): string {
+  if (error instanceof BetaApiError && error.code === 'invalid_request') {
+    return '当前错误没有指出具体字段；更正正文不会经过 Markdown 解析或改写。可保留输入并重试。';
+  }
+  if (error instanceof BetaApiError && error.code === 'invalid_correction') {
+    return '更正内容须非空、Unicode 有效且不超过 128 KiB UTF-8 字节；原始记录保持不变。';
+  }
   if (error instanceof BetaApiError && error.code === 'correction_target_conflict') {
     return '原始记录不存在或摘要不匹配；更正未保存，请刷新记录后重试。';
   }

@@ -6,6 +6,30 @@ export const MAX_BETA_EVENT_TAG_BYTES = 128;
 /** Mirrors Core's MAX_CORRECTION_TEXT_BYTES; keep the UI and adapter bounded before persistence or RPC. */
 export const MAX_BETA_CORRECTION_TEXT_BYTES = 128 * 1024;
 
+export type BetaCorrectionTextIssue = 'empty' | 'invalid_unicode' | 'too_large';
+
+export function betaCorrectionTextByteLength(text: string): number {
+  return new TextEncoder().encode(text).byteLength;
+}
+
+/** JSON transports represent Unicode scalar values; reject lone UTF-16
+ * surrogates before persistence so Native/HTTP decoders cannot reject later. */
+export function betaCorrectionTextIssue(text: string): BetaCorrectionTextIssue | null {
+  if (!text.trim()) return 'empty';
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = text.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return 'invalid_unicode';
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return 'invalid_unicode';
+    }
+  }
+  if (betaCorrectionTextByteLength(text) > MAX_BETA_CORRECTION_TEXT_BYTES) return 'too_large';
+  return null;
+}
+
 export interface BetaRecordCorrectionCommand {
   command_id: string;
   event_id: string;
@@ -146,11 +170,15 @@ function validateCorrectionReceipt(value: unknown, command: BetaRecordCorrection
 }
 
 function validateCorrectionCommand(command: BetaRecordCorrectionCommand): void {
+  const textIssue = typeof command.corrected_text === 'string' ? betaCorrectionTextIssue(command.corrected_text) : 'empty';
   if (!command.command_id || !command.event_id || !command.profile_id || !command.target_event_id
     || command.event_id === command.target_event_id || !Number.isSafeInteger(command.occurred_at_ms) || command.occurred_at_ms < 0
-    || !/^[a-f0-9]{64}$/.test(command.target_digest) || !command.corrected_text.trim()
-    || new TextEncoder().encode(command.corrected_text).byteLength > MAX_BETA_CORRECTION_TEXT_BYTES) {
-    throw new BetaApiError('invalid_correction', '更正内容或目标标识超出当前服务的保存范围');
+    || !/^[a-f0-9]{64}$/.test(command.target_digest) || textIssue) {
+    const message = textIssue === 'empty' ? '请先写下非空更正内容'
+      : textIssue === 'invalid_unicode' ? '更正内容包含无法传输的 Unicode 字符，请重新输入该字符'
+        : textIssue === 'too_large' ? '更正内容超过 128 KiB UTF-8 字节上限，请删减后再保存'
+          : '更正目标或命令身份无效，请刷新记录后重试';
+    throw new BetaApiError('invalid_correction', message);
   }
 }
 

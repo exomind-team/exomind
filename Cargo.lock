@@ -1411,6 +1411,7 @@ dependencies = [
  "exomind-android-clipboard",
  "exomind-android-keep-awake",
  "exomind-android-keepalive",
+ "exomind-android-share-handoff",
  "exomind-android-timeblock-end-alert",
  "exomind-beta-host",
  "exomind-core",
@@ -1464,6 +1465,16 @@ dependencies = [
 
 [[package]]
 name = "exomind-android-keepalive"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "exomind-android-share-handoff"
 version = "0.1.0"
 dependencies = [
  "serde",

@@ -57,6 +57,24 @@ async function flushMicrotasks(): Promise<void> {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('BetaAudioRecordingController', () => {
+  it('returns the current pending File only by explicit profile-scoped read and keeps it out of the snapshot', async () => {
+    const { controller, recorders } = createHarness();
+    expect(controller.getPendingFile('profile-p')).toBeNull();
+    await controller.start('profile-p');
+    recorders[0].emit(9);
+    await controller.stop();
+
+    const pendingFile = controller.getPendingFile('profile-p');
+    expect(pendingFile).toBeInstanceOf(File);
+    expect(pendingFile?.size).toBe(9);
+    expect(controller.getPendingFile('profile-q')).toBeNull();
+    expect(controller.snapshot()).not.toHaveProperty('file');
+
+    expect(controller.discard('profile-p')).toBe(true);
+    expect(controller.getPendingFile('profile-p')).toBeNull();
+    controller.dispose();
+  });
+
   it('only asks for a microphone after explicit start and releases a permission result that arrives after cancellation', async () => {
     let resolvePermission!: (stream: MediaStream) => void;
     const getUserMedia = vi.fn(() => new Promise<MediaStream>(resolve => { resolvePermission = resolve; }));

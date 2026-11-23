@@ -139,6 +139,69 @@ function assertLauncherActivity(activity: string): void {
   if (/<[A-Za-z_]/.test(filterBody) || /<[A-Za-z_]/.test(activityBody)) reject('Unsupported Beta MainActivity content in the generated Android template');
 }
 
+function assertShareHandoffActivity(activity: string): void {
+  const opening = activity.slice(0, activity.indexOf('>') + 1);
+  assertKnownAttributes(opening, ['android:name', 'android:label', 'android:exported', 'android:excludeFromRecents', 'android:theme'], 'share handoff activity');
+  if (attribute(opening, 'android:name') !== 'app.tauri.exomindsharehandoff.BetaShareHandoffActivity'
+    || attribute(opening, 'android:exported') !== 'true'
+    || attribute(opening, 'android:excludeFromRecents') !== 'true'
+    || attribute(opening, 'android:label') !== '@string/app_name'
+    || attribute(opening, 'android:theme') !== '@android:style/Theme.Translucent.NoTitleBar') {
+    reject('Unsupported Beta share handoff receiver in the generated Android template');
+  }
+  const filters = [...activity.matchAll(/<intent-filter\b[^>]*>[\s\S]*?<\/intent-filter\s*>/g)];
+  if (filters.length !== 2) reject('Beta share handoff receiver must own exactly two share intent filters');
+  const expectedActions = new Set(['android.intent.action.SEND', 'android.intent.action.SEND_MULTIPLE']);
+  for (const [filter] of filters) {
+    const openingTag = filter.slice(0, filter.indexOf('>') + 1);
+    assertKnownAttributes(openingTag, [], 'share intent filter');
+    const actions = [...filter.matchAll(/<action\b[^>]*\/>/g)];
+    const categories = [...filter.matchAll(/<category\b[^>]*\/>/g)];
+    const data = [...filter.matchAll(/<data\b[^>]*\/>/g)];
+    for (const [tag] of actions) assertKnownAttributes(tag, ['android:name'], 'share action');
+    for (const [tag] of categories) assertKnownAttributes(tag, ['android:name'], 'share category');
+    for (const [tag] of data) assertKnownAttributes(tag, ['android:mimeType'], 'share MIME filter');
+    const action = actions.length === 1 ? attribute(actions[0][0], 'android:name') : undefined;
+    if (!action || !expectedActions.delete(action)
+      || categories.length !== 1 || attribute(categories[0][0], 'android:name') !== 'android.intent.category.DEFAULT'
+      || data.length !== 1 || attribute(data[0][0], 'android:mimeType') !== '*/*') {
+      reject('Unsupported Beta share intent filter in the generated Android template');
+    }
+  }
+  if (expectedActions.size) reject('Beta share receiver is missing a required Android send action');
+  const body = filters.reduce((current, [filter]) => current.replace(filter, ''), activity.slice(opening.length, activity.lastIndexOf('</activity>')));
+  if (/<[A-Za-z_]/.test(body)) reject('Unsupported share receiver content in the generated Android template');
+}
+
+function ensureShareHandoffActivity(xml: string): string {
+  const applications = [...xml.matchAll(/<application\b[^>]*>[\s\S]*?<\/application\s*>/g)];
+  if (applications.length !== 1) reject('Expected one Tauri application in the generated Beta Android template');
+  const application = applications[0][0];
+  if (/<activity\b[^>]*android:name\s*=\s*["']app\.tauri\.exomindsharehandoff\.BetaShareHandoffActivity["'][^>]*>[\s\S]*?<\/activity\s*>/.test(application)) return xml;
+  const newline = xml.includes('\r\n') ? '\r\n' : '\n';
+  const receiver = [
+    '        <activity',
+    '            android:name="app.tauri.exomindsharehandoff.BetaShareHandoffActivity"',
+    '            android:label="@string/app_name"',
+    '            android:exported="true"',
+    '            android:excludeFromRecents="true"',
+    '            android:theme="@android:style/Theme.Translucent.NoTitleBar">',
+    '            <intent-filter>',
+    '                <action android:name="android.intent.action.SEND" />',
+    '                <category android:name="android.intent.category.DEFAULT" />',
+    '                <data android:mimeType="*/*" />',
+    '            </intent-filter>',
+    '            <intent-filter>',
+    '                <action android:name="android.intent.action.SEND_MULTIPLE" />',
+    '                <category android:name="android.intent.category.DEFAULT" />',
+    '                <data android:mimeType="*/*" />',
+    '            </intent-filter>',
+    '        </activity>',
+    '',
+  ].join(newline);
+  return xml.replace(/\s*<\/application>/, `${newline}${receiver}    </application>`);
+}
+
 function assertFileProvider(provider: string): void {
   const opening = provider.slice(0, provider.indexOf('>') + 1);
   assertKnownAttributes(opening, ['android:name', 'android:authorities', 'android:exported', 'android:grantUriPermissions'], 'FileProvider');
@@ -177,20 +240,23 @@ function assertApplication(xml: string): string {
 
   const activities = [...application.matchAll(/<activity\b[^>]*>[\s\S]*?<\/activity\s*>/g)];
   const providers = [...application.matchAll(/<provider\b[^>]*>[\s\S]*?<\/provider\s*>/g)];
-  if (activities.length !== 1 || [...application.matchAll(/<activity\b/g)].length !== 1
+  if (![1, 2].includes(activities.length) || [...application.matchAll(/<activity\b/g)].length !== activities.length
     || providers.length !== 1 || [...application.matchAll(/<provider\b/g)].length !== 1) {
     reject('Unsupported application children in the generated Beta Android template');
   }
   assertLauncherActivity(activities[0][0]);
+  if (activities.length === 2) assertShareHandoffActivity(activities[1][0]);
   assertFileProvider(providers[0][0]);
   const body = application.slice(opening.length, application.lastIndexOf('</application>'))
-    .replace(activities[0][0], '').replace(providers[0][0], '');
+    .replace(activities[0][0], '').replace(activities[1]?.[0] ?? '', '').replace(providers[0][0], '');
   if (/<[A-Za-z_]/.test(body)) reject('Unsupported application content in the generated Beta Android template');
   return application;
 }
 
 function assertManifest(source: string, requireAudio = false): void {
-  const xml = withoutComments(source);
+  // XML MIME wildcards such as */* resemble block comment delimiters, so only
+  // remove XML comments here. The generic source validator is for code files.
+  const xml = source.replace(/<!--[\s\S]*?-->/g, '');
   const manifests = [...xml.matchAll(/<manifest\b[^>]*>/g)];
   const manifestClosings = [...xml.matchAll(/<\/manifest\s*>/g)];
   if (manifests.length !== 1 || manifestClosings.length !== 1 || /<!DOCTYPE|<!ENTITY/i.test(xml)) {
@@ -327,7 +393,48 @@ function prepareNativeSymbols(gradle: string): string {
   ].join(newline)+carriage);
 }
 
-export function prepareBetaAndroid(projectRoot: string, options: {ndkVersion?: string | null} = {}): BetaAndroidPreparation {
+function betaTestSuffix(version: string, requestedSuffix: string): string {
+  const match = /^0\.6\.0-beta([1-9][0-9]*)$/.exec(version);
+  if (!match) reject('An isolated Beta test package requires a canonical Beta version');
+  const expected = `beta${match[1]}testci`;
+  if (requestedSuffix !== expected) {
+    reject(`Android test suffix must be ${expected} for ${version}`);
+  }
+  return expected;
+}
+
+function ensureDebugApplicationIdSuffix(gradle: string, suffix: string): string {
+  const code = withoutComments(gradle);
+  const debugBlocks = [...code.matchAll(/^[ \t]*getByName\(["']debug["']\)[ \t]*\{/gm)];
+  if (debugBlocks.length !== 1) reject('Expected exactly one generated Android debug build type');
+  const suffixes = [...code.matchAll(/^[ \t]*applicationIdSuffix[ \t]*=[ \t]*["']([^"']+)["'][ \t]*$/gm)];
+  if (suffixes.length > 1) reject('Generated Android project has ambiguous applicationIdSuffix declarations');
+  const wanted = `.${suffix}`;
+  if (suffixes.length === 1) {
+    const suffixOffset = suffixes[0].index!;
+    const nextBuildType = code.indexOf('getByName("release")', debugBlocks[0].index! + debugBlocks[0][0].length);
+    const inDebugBlock = suffixOffset > debugBlocks[0].index!
+      && (nextBuildType < 0 || suffixOffset < nextBuildType);
+    if (!inDebugBlock || suffixes[0][1] !== wanted) reject('Generated Android project has an unexpected applicationIdSuffix');
+    return gradle;
+  }
+  const anchor = debugBlocks[0][0];
+  const position = debugBlocks[0].index! + anchor.length;
+  const indent = anchor.match(/^[ \t]*/)?.[0] ?? '';
+  const newline = gradle.includes('\r\n') ? '\r\n' : '\n';
+  return `${gradle.slice(0, position)}${newline}${indent}    applicationIdSuffix = "${wanted}"${gradle.slice(position)}`;
+}
+
+function updateAndroidString(source: string, name: string, expected: string, next: string): string {
+  const matches = [...source.matchAll(new RegExp(`(<string\\s+name=["']${name}["'][^>]*>)([\\s\\S]*?)(</string>)`, 'g'))];
+  if (matches.length !== 1) reject(`Expected exactly one Android ${name} string`);
+  const [whole, opening, current, closing] = matches[0];
+  if (current === next) return source;
+  if (current !== expected) reject(`Generated Android ${name} differs from the Beta template`);
+  return source.replace(whole, `${opening}${next}${closing}`);
+}
+
+export function prepareBetaAndroid(projectRoot: string, options: {ndkVersion?: string | null; testPackageSuffix?: string} = {}): BetaAndroidPreparation {
   if (!isAbsolute(projectRoot) || lstatSync(projectRoot).isSymbolicLink() || !lstatSync(projectRoot).isDirectory()) {
     reject('An explicit absolute Beta project root is required');
   }
@@ -340,29 +447,46 @@ export function prepareBetaAndroid(projectRoot: string, options: {ndkVersion?: s
   if (!config || typeof config !== 'object' || !('identifier' in config) || config.identifier !== BETA_PACKAGE) {
     reject('Project configuration does not identify ExoMind Beta');
   }
+  const version = 'version' in config && typeof config.version === 'string' ? config.version : '';
+  const productName = 'productName' in config && typeof config.productName === 'string' ? config.productName : '';
+  const testSuffix = options.testPackageSuffix === undefined ? undefined : betaTestSuffix(version, options.testPackageSuffix);
+  if (testSuffix && !productName) reject('Beta test package preparation requires the configured product name');
   const gradlePath = sourceFile(projectRoot, [...ANDROID_APP, 'build.gradle.kts']);
   const manifestPath = sourceFile(projectRoot, [...ANDROID_APP, 'src', 'main', 'AndroidManifest.xml']);
   const activityPath = sourceFile(projectRoot, [...ANDROID_APP, 'src', 'main', 'java', ...BETA_PACKAGE.split('.'), 'MainActivity.kt']);
   const gradle = readFileSync(gradlePath, 'utf8');
   const manifest = readFileSync(manifestPath, 'utf8');
   const activity = readFileSync(activityPath, 'utf8');
+  const stringsPath = testSuffix
+    ? sourceFile(projectRoot, [...ANDROID_APP, 'src', 'main', 'res', 'values', 'strings.xml'])
+    : undefined;
+  const strings = stringsPath ? readFileSync(stringsPath, 'utf8') : undefined;
   assertGradle(gradle); assertManifest(manifest); assertActivity(activity, false);
   // AGP no longer consults ANDROID_NDK_HOME. Pin its strip tool to the same
   // installed NDK used by Rust instead of silently packaging an unstripped SO.
   const ndkVersion = options.ndkVersion === undefined ? resolveInstalledNdkVersion() : options.ndkVersion;
-  const nextGradle = ensureConfiguredNdkVersionInGradle(prepareNativeSymbols(gradle),ndkVersion).buildGradleKts;
+  let nextGradle = ensureConfiguredNdkVersionInGradle(prepareNativeSymbols(gradle),ndkVersion).buildGradleKts;
+  if (testSuffix) nextGradle = ensureDebugApplicationIdSuffix(nextGradle, testSuffix);
   assertGradle(nextGradle);
   const audioManifest = ensureWebViewAudioCapturePermissionsInManifest(
     ensureConfigChangesInManifest(manifest).manifestXml,
   ).manifestXml;
-  const nextManifest = ensureBetaApplicationIcons(audioManifest);
+  const nextManifest = ensureShareHandoffActivity(ensureBetaApplicationIcons(audioManifest));
   const nextActivity = applyBetaImeInsets(ensureAndroidSystemBarsInMainActivity(activity, { ensureConfigurationChanged: true }).activityKotlin);
+  const testLabel = testSuffix ? `外心 Beta${version.match(/-beta([1-9][0-9]*)$/)?.[1]} 测试 CI` : undefined;
+  const nextStrings = strings && testLabel
+    ? updateAndroidString(updateAndroidString(strings, 'app_name', productName, testLabel), 'main_activity_title', productName, testLabel)
+    : strings;
   assertManifest(nextManifest, true); assertActivity(nextActivity, true);
   if (attribute(withoutComments(nextManifest).match(/<activity\b[^>]*>/)?.[0] ?? '', 'android:configChanges') !== ANDROID_CONFIG_CHANGES_VALUE) {
     reject('Beta Activity configChanges integration is missing');
   }
   const changes:FileChange[] = [{ path: gradlePath, before: gradle, after: nextGradle }, { path: manifestPath, before: manifest, after: nextManifest }, { path: activityPath, before: activity, after: nextActivity }]
     .filter(change => !sameGeneratedBytes(change.before,change.after));
+  if (stringsPath && strings !== undefined && nextStrings !== undefined
+    && !sameGeneratedBytes(strings, nextStrings)) {
+    changes.push({ path: stringsPath, before: strings, after: nextStrings });
+  }
   changes.push(...planBetaAndroidBranding(projectRoot));
   return { projectRoot, changedFiles: writeChanges(changes) };
 }
@@ -370,10 +494,11 @@ export function prepareBetaAndroid(projectRoot: string, options: {ndkVersion?: s
 if (import.meta.main) {
   try {
     const args = process.argv.slice(2);
-    if (args.length !== 2 || args[0] !== '--project-root' || !args[1]) {
-      reject('Usage: bun scripts/dev/beta-android-prepare.ts --project-root <absolute Beta staging root>');
+    if ((args.length !== 2 && args.length !== 4) || args[0] !== '--project-root' || !args[1]
+      || (args.length === 4 && (args[2] !== '--test-package-suffix' || !args[3]))) {
+      reject('Usage: bun scripts/dev/beta-android-prepare.ts --project-root <absolute Beta staging root> [--test-package-suffix beta26testci]');
     }
-    const result = prepareBetaAndroid(args[1]);
+    const result = prepareBetaAndroid(args[1], args.length === 4 ? { testPackageSuffix: args[3] } : {});
     process.stdout.write(JSON.stringify(result) + '\n');
   } catch (error) {
     process.stderr.write(`[beta-android-prepare] ${error instanceof Error ? error.message : 'preparation failed'}\n`);

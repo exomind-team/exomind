@@ -25,6 +25,7 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
   const [custom,setCustom]=useState({editing:false,text:String(state.draft.minutes)});
   const [customError,setCustomError]=useState('');
   const [feedback,setFeedback]=useState<FeedbackTarget>(null);
+  const [confirmingSkip,setConfirmingSkip]=useState(false);
   const [openedHandoff,setOpenedHandoff]=useState('');const readyHandoff=useRef('');
   const [feedbackPortal,setFeedbackPortal]=useState<HTMLDivElement|null>(null);
   const [error,setError]=useState('');const [roster,setRoster]=useState<Record<string,string>>({});const [choice,setChoice]=useState('');
@@ -112,11 +113,17 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
   else if(active&&clock)model={phase:'running',name:{text:active.name||'未命名时间块',draft:'',editing:false,saving:false,readOnly:true},clock,
     paused:active.phase!=='running',feedback:{inProgress:active.phase==='feedback_pending',dialogOpen:feedback?.id===active.block_id},linkedTasks:[]};
   const feedbackDraft=feedback?state.feedback[feedback.id]?.text??'':'';
-  function submitFeedback(skipped=false){if(!feedback||disabled)return;const target=feedback;
+  function submitFeedback(skipped=false){if(!feedback||disabled||(confirmingSkip&&!skipped))return;const target=feedback;
     void run(()=>target.kind==='append'?controller.appendFeedback(target.id):controller.submitFeedback(target.id,skipped),()=>{
       setFeedback(current=>current?.id===target.id&&current.kind===target.kind&&!controller.snapshot().feedback[target.id]?.text.trim()?null:current);
     });
   }
+  const feedbackFooter=feedback?.kind==='submit'?<div ref={setFeedbackPortal} data-beta-feedback-block-id={feedback.id} data-beta-feedback-kind={feedback.kind} className="flex flex-wrap items-center justify-end gap-2">
+    {confirmingSkip?<><span role="status" className="mr-auto text-xs text-secondary">确认后会记录为“已明确跳过反馈”。</span>
+      <Button className="h-9 rounded-[10px]" variant="ghost" disabled={disabled} onClick={()=>setConfirmingSkip(false)}>返回填写</Button>
+      <Button aria-label="确认跳过反馈" className="h-9 rounded-[10px]" variant="ghost" disabled={disabled} onClick={()=>{setConfirmingSkip(false);submitFeedback(true);}}>确认跳过反馈</Button>
+    </>:<Button aria-label="明确跳过反馈" className="h-9 rounded-[10px]" variant="ghost" disabled={disabled} onClick={()=>setConfirmingSkip(true)}>跳过</Button>}
+  </div>:undefined;
   const selected=choice||active?.block_id||Object.keys(roster)[0]||'';
   return <section aria-label="时间块" className="shrink-0 px-3 pb-2">
     <div className="flex min-h-9 flex-wrap items-center gap-1 py-1 text-xs text-secondary">
@@ -148,16 +155,18 @@ export function BetaFocusTimer({controller,client,profileId,onCommitted,handoffT
           if(event.nativeEvent.isComposing)return;if(quick(event)){event.preventDefault();event.stopPropagation();if(applyMinutes(event.currentTarget.value))start();}
           else if(event.key==='Enter'){event.preventDefault();applyMinutes(event.currentTarget.value);}else if(event.key==='Escape'){event.preventDefault();setCustomError('');setCustom({editing:false,text:String(state.draft.minutes)});}
         }},expectedTimeKeyDown:event=>{if(quick(event)){event.preventDefault();start();}},
-      }} slots={{configurationDetails:panel&&<div className="space-y-2 text-xs text-secondary"><div className="flex flex-wrap items-center gap-2">{panel.kind==='rotate'&&<span>当前时间块：{panel.name} → 新时间块</span>}<label className="flex items-center gap-2">倒计时到点<FieldSelect label="倒计时到点方式" value={state.draft.endMode} onValueChange={value=>setDraft({endMode:value as 'soft'|'hard'})} options={[{value:'soft',label:'继续超时'},{value:'hard',label:'结束行动并待反馈'}]}/></label></div>{customError&&<p role="alert" className="text-xs text-destructive">{customError}</p>}</div>,dialogs:<TimeBlockFeedbackDialog open={!!feedback} onOpenChange={open=>{if(!open)setFeedback(null);}}
+      }} slots={{configurationDetails:panel&&<div className="space-y-2 text-xs text-secondary"><div className="flex flex-wrap items-center gap-2">{panel.kind==='rotate'&&<span>当前时间块：{panel.name} → 新时间块</span>}<label className="flex items-center gap-2">倒计时到点<FieldSelect label="倒计时到点方式" value={state.draft.endMode} onValueChange={value=>setDraft({endMode:value as 'soft'|'hard'})} options={[{value:'soft',label:'继续超时'},{value:'hard',label:'结束行动并待反馈'}]}/></label></div>{customError&&<p role="alert" className="text-xs text-destructive">{customError}</p>}</div>,dialogs:<TimeBlockFeedbackDialog open={!!feedback} onOpenChange={open=>{if(!open){setConfirmingSkip(false);setFeedback(null);}}}
         title={feedback?.kind==='append'?'追加反馈':'结束反馈'} description={feedback?roster[feedback.id]??feedback.id.slice(0,8):''} compact
         feedback={feedbackDraft} onFeedbackChange={text=>{if(feedback)try{controller.setFeedbackDraft(feedback.id,text);}catch(failure){setError(message(failure));}}}
         onFeedbackKeyDown={event=>{runActionOnPrimaryModifierEnter(event,()=>submitFeedback());}} feedbackPlaceholder="记录本次专注的反馈..." feedbackTestId="new-focus-feedback-textarea"
-        onSubmit={()=>submitFeedback()} submitLabel={feedback?.kind==='append'?'追加反馈':'提交反馈'} submitDisabled={disabled||!feedbackDraft.trim()} submitTestId="new-focus-feedback-confirm" tasks={[]}
+        onSubmit={()=>submitFeedback()} submitLabel={feedback?.kind==='append'?'追加反馈':'提交反馈'} submitDisabled={disabled||!feedbackDraft.trim()||confirmingSkip} submitTestId="new-focus-feedback-confirm" tasks={[]}
         textareaClassName="min-h-[96px] resize-none dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
         submitButtonClassName="inline-flex items-center justify-center rounded-[10px] bg-brand-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 hover:bg-brand-accent/90"
         extraContent={<p className="hidden text-[11px] text-muted [@media(pointer:fine)]:block">Ctrl/Cmd+Enter 提交 · Enter 换行</p>}
-        footerContent={feedback?.kind==='submit'?<div ref={setFeedbackPortal} data-beta-feedback-block-id={feedback.id} data-beta-feedback-kind={feedback.kind}><Button aria-label="明确跳过反馈" className="h-9 rounded-[10px]" variant="ghost" disabled={disabled} onClick={()=>submitFeedback(true)}>跳过</Button></div>:undefined}/>}}/>
+        footerContent={feedbackFooter}
+        />}}/>
       {clock?.stale&&<p className="px-5 text-xs text-muted">显示等待服务刷新；界面不会自行结束时间块</p>}
+      {pendingFeedback.length>0&&<p role="status" className="px-5 pb-1 text-xs text-muted">反馈尚未提交 · 待处理，可继续填写。</p>}
       <div className="flex flex-wrap gap-2 px-5 pb-2">{pendingFeedback.map(id=><Button key={id} aria-label={`填写反馈 ${id.slice(0,8)}`} variant="ghost" size="sm" disabled={disabled} onClick={()=>setFeedback({id,kind:'submit'})}>填写反馈 {roster[id]??id.slice(0,8)}</Button>)}</div>
     </>}
   </section>;

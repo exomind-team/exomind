@@ -29,6 +29,8 @@ export interface BetaMessageReferenceInsertion {
   referenceLine: string;
   inserted: boolean;
   cursorOffsetDelta: number;
+  referencePrefixLength: number;
+  removedLeadingWhitespace: number;
 }
 
 interface TextLine {
@@ -181,15 +183,19 @@ export function insertBetaMessageReference(
   const exists = extractBetaMessageReferences(draftText)
     .some(reference => identityKey(reference) === identityKey(identity));
   if (exists) {
-    return { text: draftText, referenceLine, inserted: false, cursorOffsetDelta: 0 };
+    return { text: draftText, referenceLine, inserted: false, cursorOffsetDelta: 0, referencePrefixLength: 0, removedLeadingWhitespace: 0 };
   }
 
-  const prefix = referenceLine + '\n';
+  const normalizedDraft = draftText.replace(/^(?:[ \t]*\r?\n)+/u, '');
+  const prefix = referenceLine + '\n\n';
+  const removedLeadingWhitespace = draftText.length - normalizedDraft.length;
   return {
-    text: prefix + draftText,
+    text: prefix + normalizedDraft,
     referenceLine,
     inserted: true,
-    cursorOffsetDelta: prefix.length,
+    cursorOffsetDelta: prefix.length - removedLeadingWhitespace,
+    referencePrefixLength: prefix.length,
+    removedLeadingWhitespace,
   };
 }
 
@@ -306,8 +312,12 @@ export function removeBetaMessageReference(
 
 /** A display projection only; callers keep the captured source text unchanged. */
 export function stripBetaMessageReferencesForDisplay(value: string): string {
-  return extractBetaMessageReferences(value).reduce(
+  const displayText = extractBetaMessageReferences(value).reduce(
     (current, reference) => removeBetaMessageReference(current, reference),
     value,
   );
+  // Reference rows are rendered as their own cards. Keep their separating
+  // whitespace out of the Markdown body, while preserving every internal
+  // line break and paragraph boundary in the user's text.
+  return displayText.trim();
 }

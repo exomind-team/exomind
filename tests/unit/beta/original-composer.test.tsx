@@ -40,17 +40,102 @@ describe('Beta original composer uses the shared Alpha input',()=>{
     };
     const client={...fakeClient(),originals};
     render(<BetaApp intentJournal={memoryIntentJournal()} client={client} sourceStore={sourceStore}/>);
-    await screen.findByRole('textbox',{name:'记录当下'});
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
     expect(screen.getByTestId('new-now-input-row')).toBeInTheDocument();
     expect(screen.getByRole('button',{name:'附件'})).toBeEnabled();
     fireEvent.change(screen.getByLabelText('选择原件'),{target:{files:[new File([],'unknown.custom')]}});
     expect(await screen.findByText('unknown.custom')).toBeInTheDocument();
     await waitFor(()=>expect(screen.getByRole('button',{name:'发送'})).toBeEnabled());
-    fireEvent.click(screen.getByRole('button',{name:'发送'}));
+    editor.focus();fireEvent.click(screen.getByRole('button',{name:'发送'}));
+    expect(document.activeElement).not.toBe(editor);
     await waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
     expect(client.capture.mock.calls[0][0].text).toBe('');
     expect(client.capture.mock.calls[0][0].originals?.map(item=>item.file_name)).toEqual(['unknown.custom']);
     expect(await screen.findByText('本机已保存')).toBeInTheDocument();
+  });
+  it('closes the keyboard immediately and cancels an unsubmitted pre-send when new text arrives',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const bytes=new Uint8Array([1,2,3,4]);
+    const blobs=new Map<string,Blob>();
+    const sourceStore:FileSourceStore={put:async(key,blob)=>{blobs.set(key,blob);},get:async key=>blobs.get(key)??null,remove:async key=>{blobs.delete(key);}};
+    let stage:BetaStage|undefined;
+    const uploadStarted=deferred<void>(),uploadGate=deferred<BetaStage>();
+    const originals:BetaOriginalClient={
+      begin:async(input:BetaBeginStage)=>stage??={stage_id:input.stage_id,profile_id:input.profile_id,original:{original_id:input.original_id,sha256:input.expected_sha256,byte_length:input.byte_length,file_name:input.file_name,media_type:input.media_type},state:'uploading',next_offset:0,generation:1},
+      status:async()=>stage!,
+      write:async(_profile,id,offset,chunk)=>{uploadStarted.resolve();stage=await uploadGate.promise;return stage;},
+      verify:async()=>({...stage!,state:'verified'}),readStage:async()=>new Uint8Array(),readOriginal:async()=>new Uint8Array(),
+    };
+    const client={...fakeClient(),originals};
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} sourceStore={sourceStore}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(editor,{target:{value:'已固定的原文'}});
+    fireEvent.change(screen.getByLabelText('选择原件'),{target:{files:[new File([bytes],'queued.apk',{type:'application/vnd.android.package-archive'})]}});
+
+    try {
+      await uploadStarted.promise;
+      await waitFor(()=>expect(screen.getByRole('button',{name:'发送'})).toBeEnabled());
+      editor.focus();
+      fireEvent.keyDown(editor,{key:'Enter',ctrlKey:true});
+
+      expect(document.activeElement).not.toBe(editor);
+      expect(await screen.findByText('已固定的原文')).toBeInTheDocument();
+      expect(screen.getByRole('progressbar',{name:'附件准备进度 queued.apk'})).toBeInTheDocument();
+      expect(client.capture).not.toHaveBeenCalled();
+
+      editor.focus();
+      fireEvent.change(editor,{target:{value:'下一条新内容'}});
+      expect(editor).toHaveValue('已固定的原文\n\n下一条新内容');
+      expect(screen.getByText(/上一条预发送已取消/)).toBeInTheDocument();
+      expect(screen.queryByText('已固定的原文')).not.toBeInTheDocument();
+      expect(client.capture).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button',{name:'同步'}));
+      expect(document.querySelector('[data-beta-view="now"]')).toHaveAttribute('hidden');
+      expect(client.capture).not.toHaveBeenCalled();
+
+      uploadGate.resolve({...stage!,next_offset:bytes.length});
+      expect(client.capture).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button',{name:'当下'}));
+      await waitFor(()=>expect(screen.getByText(/附件已校验就绪 · 记录尚未提交/)).toBeInTheDocument());
+      expect(editor).toHaveValue('已固定的原文\n\n下一条新内容');
+      fireEvent.click(screen.getByRole('button',{name:'发送'}));
+      await waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
+      expect(client.capture.mock.calls[0][0].text).toBe('已固定的原文\n\n下一条新内容');
+      expect(client.capture.mock.calls[0][0].originals).toHaveLength(1);
+      expect(editor).toHaveValue('');
+    } finally {
+      if(stage) uploadGate.resolve({...stage,next_offset:bytes.length});
+    }
+  });
+  it('offers same-file retry after bounded local-copy attempts and distinguishes ready attachment from committed record',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const blobs=new Map<string,Blob>();let putAttempts=0;
+    const sourceStore:FileSourceStore={
+      put:async(key,blob)=>{putAttempts++;if(putAttempts<=4)throw{code:'source_store_unavailable',message:'synthetic transient local-copy failure'};blobs.set(key,blob.slice());},
+      get:async key=>blobs.get(key)??null,remove:async key=>{blobs.delete(key);},
+    };
+    const stages=new Map<string,BetaStage>(),stageBytes=new Map<string,Uint8Array>();
+    const originals:BetaOriginalClient={
+      begin:async input=>{const existing=stages.get(input.stage_id);if(existing)return existing;const stage:BetaStage={stage_id:input.stage_id,profile_id:input.profile_id,original:{original_id:input.original_id,sha256:input.expected_sha256,byte_length:input.byte_length,file_name:input.file_name,media_type:input.media_type},state:'uploading',next_offset:0,generation:1};stages.set(input.stage_id,stage);stageBytes.set(input.stage_id,new Uint8Array());return stage;},
+      status:async(_profile,id)=>stages.get(id)!,
+      write:async(_profile,id,offset,bytes)=>{const old=stageBytes.get(id)!;if(offset!==old.length)throw new Error('synthetic stage offset mismatch');const next=new Uint8Array(old.length+bytes.length);next.set(old);next.set(bytes,old.length);stageBytes.set(id,next);const stage={...stages.get(id)!,next_offset:next.length};stages.set(id,stage);return stage;},
+      verify:async(_profile,id)=>{const stage={...stages.get(id)!,state:'verified' as const};stages.set(id,stage);return stage;},
+      readStage:async(_profile,id,offset,length)=>stageBytes.get(id)!.slice(offset,offset+length),
+      readOriginal:async(_profile,id,offset,length)=>stageBytes.get(id)!.slice(offset,offset+length),
+    };
+    const client={...fakeClient(),originals};
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} sourceStore={sourceStore}/>);
+    await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(screen.getByLabelText('选择原件'),{target:{files:[new File(['same source bytes'],'retry-same-file.webp',{type:'image/webp'})]}});
+
+    const retry=await screen.findByRole('button',{name:'重试上传'},{timeout:5000});
+    expect(retry).toBeEnabled();expect(screen.getByRole('button',{name:'重新选择'})).toBeEnabled();
+    expect(putAttempts).toBe(4);expect(client.capture).not.toHaveBeenCalled();
+    fireEvent.click(retry);
+    expect(await screen.findByText(/附件已校验就绪 · 记录尚未提交/)).toBeInTheDocument();
+    await waitFor(()=>expect(putAttempts).toBe(5));
+    expect(client.capture).not.toHaveBeenCalled();
   });
   it('recovers only the selected failed attachment and preserves edits made during the retry',async()=>{
     Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
@@ -95,7 +180,7 @@ describe('Beta original composer uses the shared Alpha input',()=>{
     expect(firstStageId).toBe(targetBefore.stage_id);
     const targetRow=screen.getByText('first.txt').parentElement?.parentElement;
     expect(targetRow).not.toBeNull();
-    fireEvent.click(within(targetRow!).getByRole('button',{name:'恢复暂存'}));
+    fireEvent.click(within(targetRow!).getByRole('button',{name:'重试上传'}));
     await recoveryStarted.promise;
     fireEvent.change(editor,{target:{value:'文字在恢复期间继续编辑'}});
     await act(async()=>{

@@ -63,10 +63,48 @@ describe('Beta message reference protocol', () => {
     const inserted = insertBetaMessageReference(originalDraft, source);
 
     expect(inserted.inserted).toBe(true);
-    expect(inserted.text).toBe(buildBetaMessageReferenceLine(source) + '\n' + originalDraft);
+    expect(inserted.text).toBe(buildBetaMessageReferenceLine(source) + '\n\n' + originalDraft);
     expect(inserted.text).toContain('继续写的新内容');
     expect(insertBetaMessageReference(inserted.text, source)).toMatchObject({ text: inserted.text, inserted: false });
     expect(originalDraft).toBe('我先记下一句话\n继续写的新内容');
+  });
+
+  it('separates a reference block from a body that already starts with blank lines', () => {
+    const source = { profileId: PROFILE, eventId: EVENT, text: '合成引用摘要' };
+    const body = '\r\n\n  已有正文';
+    const inserted = insertBetaMessageReference(body, source);
+
+    expect(inserted.text).toBe(buildBetaMessageReferenceLine(source) + '\n\n  已有正文');
+    expect(inserted.cursorOffsetDelta).toBe(buildBetaMessageReferenceLine(source).length + 2 - 3);
+    expect(insertBetaMessageReference(inserted.text, source)).toMatchObject({
+      text: inserted.text,
+      inserted: false,
+      cursorOffsetDelta: 0,
+    });
+  });
+
+  it('keeps an empty draft as a standalone quote block with a blank cursor line', () => {
+    const source = { profileId: PROFILE, eventId: EVENT, text: '合成引用摘要' };
+    const line = buildBetaMessageReferenceLine(source);
+    expect(insertBetaMessageReference('', source)).toMatchObject({
+      text: line + '\n\n',
+      referenceLine: line,
+      inserted: true,
+      cursorOffsetDelta: line.length + 2,
+    });
+  });
+
+  it('keeps a quote preview readable and bounded beyond the 128 KiB UTF-8 source boundary', () => {
+    const sourceText = '🧪'.repeat(32_769) + '\n' + '第二行保留为可读摘要';
+    expect(new TextEncoder().encode(sourceText).byteLength).toBeGreaterThan(128 * 1024);
+
+    const line = buildBetaMessageReferenceLine({ profileId: PROFILE, eventId: EVENT, text: sourceText });
+    const [reference] = extractBetaMessageReferences(line);
+
+    expect(reference.label).toBe('🧪'.repeat(47) + '…');
+    expect(reference.excerpt).toBe('第二行保留为可读摘要');
+    expect(new TextEncoder().encode(line).byteLength).toBeLessThan(512);
+    expect(line).not.toContain(sourceText.slice(-64));
   });
 
   it('extracts quoted and pasted references without exposing their IDs as display labels', () => {
@@ -109,11 +147,21 @@ describe('Beta message reference protocol', () => {
     expect(removeBetaMessageReference(draft, { profileId: PROFILE, eventId: EVENT })).toBe('请回看这里  然后继续记录');
   });
 
-  it('strips only the display projection of a quote line while leaving source text intact', () => {
+  it('strips quote metadata from the display projection while preserving the source text', () => {
     const original = 'my note\n' + buildBetaMessageReferenceLine({ profileId: PROFILE, eventId: EVENT, text: 'quoted sentence\nsource excerpt' });
 
-    expect(stripBetaMessageReferencesForDisplay(original)).toBe('my note\n');
+    expect(stripBetaMessageReferencesForDisplay(original)).toBe('my note');
     expect(original).toContain('quoted sentence');
     expect(original).toContain('exomind-beta://event/');
+  });
+
+  it('removes leading and trailing blank space left by reference rows without collapsing body paragraphs', () => {
+    const first = buildBetaMessageReferenceLine({ profileId: PROFILE, eventId: EVENT, text: 'first source' });
+    const second = buildBetaMessageReferenceLine({ profileId: PROFILE, eventId: OTHER_EVENT, text: 'second source' });
+    const original = ` \n\n${first}\n\n${second}\n\nFirst paragraph\n\nSecond paragraph\n\n `;
+
+    expect(stripBetaMessageReferencesForDisplay(original)).toBe('First paragraph\n\nSecond paragraph');
+    expect(original).toContain(first);
+    expect(original).toContain(second);
   });
 });

@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { BetaApiError, type BetaClient, type BetaReceipt } from '@/beta/client';
 import { BetaDraftController } from '@/beta/drafts';
 import type { LocalIntentJournal } from '@/beta/local-intent-journal';
-import type { BetaRecordCorrectionCommand } from '@/beta/record-organization-client';
+import { NativeIntentJournal } from '@/beta/native-intent-journal';
+import { nativeRecordOrganizationClient, type BetaRecordCorrectionCommand } from '@/beta/record-organization-client';
 import { BetaRecordCorrectionOwner } from '@/beta/record-correction-owner';
 import { fakeClient, memoryStorage } from './fixtures';
 
@@ -212,6 +213,137 @@ describe('Beta record correction recovery owner', () => {
     owner.close();
   });
 
+  it('keeps correction text literal across Markdown, Unicode, control characters and the UTF-8 byte limit', async () => {
+    const journal = new SharedMemoryIntentJournal();
+    const owner = await openOwner(journal);
+    const correctedText = `> 引用原文\n\n第二段：中文与 emoji 🧪\n\n[来源](https://synthetic.example/reference?id=7&view=full)\n\n\`\`\`json\n{"long":"${'x'.repeat(120_000)}"}\n\`\`\`\n制表符\t与可见控制字符\u0001`;
+    expect(new TextEncoder().encode(correctedText).byteLength).toBeLessThanOrEqual(128 * 1024);
+    const { client: baseClient } = makeClient();
+    const nativeInvocation = vi.fn(async <T>(name: string, args?: Record<string, unknown>): Promise<T> => {
+      if (name !== 'beta_record_correction') throw new Error(`unexpected native invocation: ${name}`);
+      return receipt(args?.command as BetaRecordCorrectionCommand) as T;
+    });
+    const client = {
+      ...baseClient,
+      recordOrganization: nativeRecordOrganizationClient(nativeInvocation),
+    } as BetaClient;
+
+    const result = await owner.submit(client, {
+      event_id: TARGET, profile_id: PROFILE, digest: TARGET_DIGEST,
+    }, correctedText);
+
+    expect(result.status).toBe('accepted');
+    expect(nativeInvocation).toHaveBeenCalledTimes(1);
+    expect(nativeInvocation).toHaveBeenCalledWith('beta_record_correction', {
+      command: expect.objectContaining({ corrected_text: correctedText }),
+    });
+    owner.close();
+  });
+
+  it('refuses to reopen a malformed recovery entry without sending another correction', async () => {
+    const journal = new SharedMemoryIntentJournal();
+    const { client, recordCorrection } = makeClient({
+      recordCorrection: async () => { throw new Error('synthetic response not confirmed'); },
+    });
+    const owner = await openOwner(journal);
+    const pending = await owner.submit(client, {
+      event_id: TARGET, profile_id: PROFILE, digest: TARGET_DIGEST,
+    }, 'synthetic preserved wording');
+    expect(pending.status).toBe('pending');
+    owner.close();
+
+    const [key, raw] = [...journal.values.entries()][0];
+    const envelope = JSON.parse(raw) as { entries: Array<Record<string, unknown>> };
+    envelope.entries[0].status = 'unknown_status';
+    journal.values.set(key, JSON.stringify(envelope));
+
+    await expect(openOwner(journal, () => 'unused')).rejects.toMatchObject({ code: 'intent_cache_corrupt' });
+    expect(recordCorrection).toHaveBeenCalledTimes(1);
+    owner.close();
+  });
+
+  it('rejects an over-limit correction before journal mutation or request', async () => {
+    const journal = new SharedMemoryIntentJournal();
+    const owner = await openOwner(journal);
+    const { client, recordCorrection } = makeClient();
+    const rawBefore = [...journal.values.entries()];
+
+    await expect(owner.submit(client, {
+      event_id: TARGET, profile_id: PROFILE, digest: TARGET_DIGEST,
+    }, 'x'.repeat(128 * 1024 + 1))).rejects.toMatchObject({
+      code: 'invalid_correction',
+      message: '更正内容超过 128 KiB UTF-8 字节上限，请删减后再保存',
+    });
+
+    expect([...journal.values.entries()]).toEqual(rawBefore);
+    expect(recordCorrection).not.toHaveBeenCalled();
+    owner.close();
+  });
+
+  it('rejects a malformed UTF-16 surrogate before saving a command', async () => {
+    const journal = new SharedMemoryIntentJournal();
+    const owner = await openOwner(journal);
+    const { client, recordCorrection } = makeClient();
+
+    await expect(owner.submit(client, {
+      event_id: TARGET, profile_id: PROFILE, digest: TARGET_DIGEST,
+    }, '\ud800')).rejects.toMatchObject({
+      code: 'invalid_correction',
+      message: '更正内容包含无法传输的 Unicode 字符，请重新输入该字符',
+    });
+    expect(journal.writes).toBe(0);
+    expect(recordCorrection).not.toHaveBeenCalled();
+    owner.close();
+  });
+
+  it('removes a command after Native explicitly rejects an invalid request', async () => {
+    const journal = new SharedMemoryIntentJournal();
+    const recordCorrection = vi.fn(async () => { throw new BetaApiError('invalid_request', '请求内容无效'); });
+    const client = {
+      receipt: vi.fn(async () => null),
+      recordOrganization: { recordCorrection },
+    } as unknown as BetaClient;
+    const owner = await openOwner(journal);
+
+    await expect(owner.submit(client, {
+      event_id: TARGET, profile_id: PROFILE, digest: TARGET_DIGEST,
+    }, 'synthetic rejected command')).rejects.toMatchObject({ code: 'invalid_request' });
+
+    expect(recordCorrection).toHaveBeenCalledTimes(1);
+    expect(owner.snapshot().entries).toEqual([]);
+    expect([...journal.values.values()].some(raw => raw.includes(COMMAND))).toBe(false);
+    owner.close();
+  });
+
+  it('projects the sending stage while the record correction request is awaiting a receipt', async () => {
+    const journal = new SharedMemoryIntentJournal();
+    let release: ((value: BetaReceipt) => void) | undefined;
+    let entered: (() => void) | undefined;
+    const requestStarted = new Promise<void>(resolve => { entered = resolve; });
+    const { client } = makeClient({
+      recordCorrection: command => {
+        entered?.();
+        return new Promise<BetaReceipt>(resolve => { release = resolve; });
+      },
+    });
+    const owner = await openOwner(journal);
+    const submission = owner.submit(client, {
+      event_id: TARGET, profile_id: PROFILE, digest: TARGET_DIGEST,
+    }, 'request stage text');
+
+    await requestStarted;
+    try {
+      expect(owner.snapshot().entries).toMatchObject([{ status: 'sending', message: expect.stringContaining('正在发送') }]);
+    } finally {
+      release?.(receipt({
+        command_id: COMMAND, event_id: CORRECTION_EVENT, profile_id: PROFILE, occurred_at_ms: 1_700_000_000_000,
+        target_event_id: TARGET, target_digest: TARGET_DIGEST, corrected_text: 'request stage text',
+      }));
+      await submission;
+      owner.close();
+    }
+  });
+
   it('keeps a durable accepted result and offers local cleanup after cleanup fails', async () => {
     const journal = new SharedMemoryIntentJournal();
     journal.failWrites.add(3);
@@ -308,6 +440,18 @@ describe('Beta record correction recovery owner', () => {
 
     expect(journal.values.get(draftKey)).toBe('{"version":1,"drafts":{"legacy-profile":{"text":"kept"}}}');
     expect([...journal.values.keys()].some(key => key.includes('record-corrections'))).toBe(true);
+    owner.close();
+  });
+
+  it('initializes through the private Native journal namespace without sending a correction', async () => {
+    const call = vi.fn(async <T>(_name: string, _args: Record<string, unknown>) => null as T);
+    const journal = new NativeIntentJournal(call);
+    const owner = await openOwner(journal);
+
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call.mock.calls[0][0]).toBe('beta_read_local_intent');
+    expect(call.mock.calls[0][1]?.key).toMatch(/^exomind:beta:record-corrections:device-a:[a-f0-9]{64}$/);
+    expect(owner.snapshot().entries).toEqual([]);
     owner.close();
   });
 

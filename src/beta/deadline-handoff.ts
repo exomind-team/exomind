@@ -94,6 +94,17 @@ export function useBetaDeadlineHandoff(client: BetaDeadlineHandoffsClient | null
   return { ...view, retry() {
     const life = active.current;
     if (!life?.active) return;
+    if (!latest.current.ready) {
+      setView({
+        pending: life.pending,
+        busy: false,
+        failed: true,
+        message: life.pending
+          ? '本机连接或档案切换尚未就绪，提醒入口仍保留。请先完成当前恢复操作，再重试。'
+          : '本机连接或档案切换尚未就绪，暂不能确认提醒入口。请先恢复连接后重新读取。',
+      });
+      return;
+    }
     if (!life.unsubscribe) { setSubscription(value => value + 1); return; }
     ++life.revision; life.abort?.abort(); life.attempted = null; life.refresh();
   } };

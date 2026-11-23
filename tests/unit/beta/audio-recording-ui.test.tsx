@@ -30,9 +30,66 @@ class FakeRecorder {
   }
 }
 
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('BetaAudioRecorder view lifecycle', () => {
+  it('turns the main record button into Stop and offers an icon-only discard plus a local preview', async () => {
+    let now = 0;
+    const stream = new FakeStream();
+    const recorder = new FakeRecorder();
+    const controller = new BetaAudioRecordingController({
+      getUserMedia: async () => stream as unknown as MediaStream,
+      createRecorder: () => recorder as unknown as MediaRecorder,
+      isTypeSupported: () => true,
+      now: () => now,
+    });
+    const onAddFile = vi.fn(async () => {});
+    vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('probably');
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:pending-audio');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+    const view = render(<BetaAudioRecorder controller={controller} profileId="profile-p" onAddFile={onAddFile} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '开始原声录音' }));
+      await waitFor(() => expect(controller.snapshot().phase).toBe('recording'));
+    });
+
+    const stop = screen.getByRole('button', { name: '停止原声录音' });
+    const discard = screen.getByRole('button', { name: '放弃原声录音' });
+    expect(screen.queryByRole('button', { name: '开始原声录音' })).not.toBeInTheDocument();
+    expect(stop.className).toContain('[@media(pointer:coarse)]:w-11');
+    expect(discard.className).toContain('[@media(pointer:coarse)]:w-11');
+    expect(discard.textContent).toBe('');
+
+    now = 5_000;
+    recorder.emit(8);
+    await act(async () => {
+      fireEvent.click(stop);
+      await waitFor(() => expect(controller.snapshot().phase).toBe('awaiting_attachment'));
+    });
+    const preview = screen.getByRole('button', { name: /^播放 exomind-audio-/ });
+    fireEvent.click(preview);
+    const media = await screen.findByTestId('beta-media-element') as HTMLMediaElement;
+    await waitFor(() => expect(media.play).toHaveBeenCalledTimes(1));
+    Object.defineProperty(media, 'duration', { configurable: true, value: Number.NaN });
+    fireEvent.loadedMetadata(media);
+    expect(screen.getByTestId('beta-media-time').querySelectorAll('time')[1]).toHaveTextContent('--:--');
+    expect(screen.getByTestId('beta-media-recording-duration')).toHaveTextContent('录音计时 0:05；媒体总时长尚未确认');
+    expect(onAddFile).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /收起播放器 exomind-audio-/ }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith('blob:pending-audio'));
+    expect(controller.getPendingFile('profile-p')).toBeInstanceOf(File);
+
+    fireEvent.click(screen.getByRole('button', { name: '放弃原声录音' }));
+    fireEvent.click(screen.getByRole('button', { name: '明确放弃' }));
+    expect(controller.getPendingFile('profile-p')).toBeNull();
+    view.unmount();
+    controller.dispose();
+  });
+
   it('does not request the microphone on mount and does not stop or duplicate a session when the view unmounts', async () => {
     const stream = new FakeStream();
     const recorder = new FakeRecorder();
@@ -43,8 +100,10 @@ describe('BetaAudioRecorder view lifecycle', () => {
 
     const firstView = render(<BetaAudioRecorder controller={controller} profileId="profile-p" onAddFile={onAddFile} />);
     expect(getUserMedia).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '开始原声录音' }));
-    await waitFor(() => expect(controller.snapshot().phase).toBe('recording'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '开始原声录音' }));
+      await waitFor(() => expect(controller.snapshot().phase).toBe('recording'));
+    });
     recorder.emit(8);
     firstView.unmount();
 

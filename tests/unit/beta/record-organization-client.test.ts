@@ -99,6 +99,36 @@ describe('Beta record organization client', () => {
     expect(call).not.toHaveBeenCalled();
   });
 
+  it('accepts the maximum UTF-8 correction whose escaped JSON request remains within the HTTP body budget', async () => {
+    const correctedText = '\u0001'.repeat(128 * 1024);
+    const command = {
+      command_id: 'command', event_id: OTHER, profile_id: PROFILE, occurred_at_ms: 2,
+      target_event_id: TARGET, target_digest: 'a'.repeat(64), corrected_text: correctedText,
+    };
+    const receipt = { command_id: 'command', event_id: OTHER, profile_id: PROFILE, local_seq: 9,
+      event_digest: 'c'.repeat(64), durability: 'local_committed', replayed: false };
+    const io: BetaRecordOrganizationIO = { json: vi.fn(async () => receipt) };
+    const client = webRecordOrganizationClient(io);
+
+    await expect(client.recordCorrection(command)).resolves.toMatchObject({ event_id: OTHER });
+
+    const [, , method, body] = vi.mocked(io.json).mock.calls[0];
+    expect(method).toBe('POST');
+    expect(JSON.stringify(body).length).toBeLessThan(1024 * 1024);
+    expect(body).toMatchObject({ corrected_text: correctedText });
+  });
+
+  it('rejects malformed UTF-16 before crossing the Native command boundary', async () => {
+    const call = vi.fn(async <T>() => ({ command_id: 'command', event_id: OTHER, profile_id: PROFILE, local_seq: 9,
+      event_digest: 'c'.repeat(64), durability: 'local_committed', replayed: false } as T));
+    const client = nativeRecordOrganizationClient(call);
+    await expect(client.recordCorrection({
+      command_id: 'command', event_id: OTHER, profile_id: PROFILE, occurred_at_ms: 2,
+      target_event_id: TARGET, target_digest: 'a'.repeat(64), corrected_text: '\ud800',
+    })).rejects.toMatchObject({ code: 'invalid_correction' });
+    expect(call).not.toHaveBeenCalled();
+  });
+
   it('rejects tags outside the Core contract before making a request', async () => {
     const call = vi.fn(async <T>() => capturePage() as T);
     const client = nativeRecordOrganizationClient(call);

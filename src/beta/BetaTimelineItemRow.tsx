@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Bot } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ChatMessageRowView } from '@/ui/app/components/ChatMessageRowView';
@@ -12,6 +12,7 @@ import type { SummaryArtifactRecord, SummarySourceRef } from './summary-types';
 import { BetaSummaryHistoryRow } from './BetaSummaryHistoryRow';
 import { BetaExternalSummaryHistoryRow } from './BetaExternalSummaryHistoryRow';
 import { BetaTimeblockAvatar } from './BetaTimeblockAvatar';
+import { BetaCaptureMarkdown } from './BetaCaptureMarkdown';
 import { betaTimeblockLabel } from './timeblock-label';
 import { OriginalDownloads } from './OriginalDownloads';
 import { BetaMessageActions, BetaMessageReferenceLinks } from './BetaMessageActions';
@@ -32,9 +33,13 @@ interface BetaTimelineItemRowProps {
   onInspectSummary: (record: SummaryArtifactRecord) => void;
   onOpenSource?: (source: SummarySourceRef) => void;
   rangeExport?: { selections: readonly UserRangeSelection[]; onToggle: (selection: UserRangeSelection) => void };
+  exportMode?: boolean;
 }
 
 type TimelineExportChoice = BetaMessageExportChoice;
+
+const TIMELINE_ROW_CLASS = 'group [&>div.flex-col]:w-fit [&>div.min-w-0]:w-fit [&>div.min-w-0]:flex-none';
+const TIMELINE_SUMMARY_ROW_CLASS = '[&_[data-testid=new-mobile-system-message-row]>div.min-w-0]:w-fit [&_[data-testid=new-mobile-system-message-row]>div.min-w-0]:flex-none [&_[data-testid=new-mobile-agent-feedback-bubble]]:[overflow-wrap:anywhere]';
 
 function timeblockExportChoices(node: Extract<BetaTimelineItem, { kind: 'timeblock' }>['record']): TimelineExportChoice[] {
   if (node.payload.kind !== 'action') {
@@ -65,7 +70,9 @@ export function BetaTimelineItemRow({
   onInspectSummary,
   onOpenSource,
   rangeExport,
+  exportMode = false,
 }: BetaTimelineItemRowProps) {
+  const [messageActionsExpanded, setMessageActionsExpanded] = useState(false);
   const capture = item.kind === 'capture' ? item.record : null;
   const timeblock = item.kind === 'timeblock' ? item.record : null;
   const captureText = capture?.text;
@@ -73,6 +80,7 @@ export function BetaTimelineItemRow({
     () => captureText ? stripBetaMessageReferencesForDisplay(captureText) : '',
     [captureText],
   );
+  const hasCaptureReferences = !!captureText && displayCaptureText !== captureText;
   const timeblockText = timeblock ? betaTimeblockLabel(timeblock) : '';
   const actionContent = item.kind === 'capture'
     ? item.record.text
@@ -102,24 +110,22 @@ export function BetaTimelineItemRow({
     ? [{ selection: { kind: 'event', event_id: capture.event_id }, label: '此消息' }]
     : timeblock ? timeblockExportChoices(timeblock) : [];
   const messageActions = (
-    <>
-      <BetaMessageActions
-        content={actionContent}
-        profileId={item.record.profile_id}
-        eventId={item.record.event_id}
-        align={capture?.author_kind === 'human' ? 'end' : 'start'}
-        onQuote={canQuote ? onQuote : undefined}
-        onCorrect={capture && onCorrect ? () => onCorrect(capture) : undefined}
-        referenceLabel={referenceLabel}
-        referenceMetadata={referenceMetadata}
-        exportChoices={exportChoices}
-        selectedExportSelections={rangeExport?.selections}
-        onToggleExportSelection={rangeExport?.onToggle}
-      />
-      {capture ? (
-        <BetaMessageReferenceLinks value={capture.text} onOpen={onOpenReference} sourceLabel={sourceLabel} />
-      ) : null}
-    </>
+    <BetaMessageActions
+      content={actionContent}
+      profileId={item.record.profile_id}
+      eventId={item.record.event_id}
+      align={capture?.author_kind === 'human' ? 'end' : 'start'}
+      onQuote={canQuote ? onQuote : undefined}
+      onCorrect={capture && onCorrect ? () => onCorrect(capture) : undefined}
+      referenceLabel={referenceLabel}
+      referenceMetadata={referenceMetadata}
+      exportChoices={exportChoices}
+      selectedExportSelections={rangeExport?.selections}
+      onToggleExportSelection={rangeExport?.onToggle}
+      exportMode={exportMode}
+      expanded={messageActionsExpanded}
+      onExpandedChange={setMessageActionsExpanded}
+    />
   );
 
   if (item.kind === 'capture') {
@@ -129,7 +135,8 @@ export function BetaTimelineItemRow({
         eventId={event.event_id}
         timelineKind="capture"
         tone={event.author_kind === 'human' ? 'user' : 'agent-feedback'}
-        className="group"
+        className={TIMELINE_ROW_CLASS}
+        onBubbleBlankClick={() => setMessageActionsExpanded(value => !value)}
         avatar={
           <Avatar className={`${event.author_kind === 'human' ? '' : 'mt-0.5 '}h-8 w-8 shrink-0`}>
             <AvatarFallback className={event.author_kind === 'human'
@@ -148,9 +155,12 @@ export function BetaTimelineItemRow({
             </span>
           </>
         }
-        content={displayCaptureText
-          ? <p className="select-text whitespace-pre-wrap break-words">{displayCaptureText}</p>
-          : null}
+        content={displayCaptureText || hasCaptureReferences ? (
+          <div className="min-w-0 max-w-full space-y-2">
+            {displayCaptureText ? <BetaCaptureMarkdown content={displayCaptureText} /> : null}
+            <BetaMessageReferenceLinks value={event.text} onOpen={onOpenReference} sourceLabel={sourceLabel} />
+          </div>
+        ) : null}
         afterBubble={!!event.originals?.length && (
           <OriginalDownloads
             client={client}
@@ -171,6 +181,8 @@ export function BetaTimelineItemRow({
         eventId={item.record.event_id}
         timelineKind="timeblock"
         tone="system"
+        className={TIMELINE_ROW_CLASS}
+        onBubbleBlankClick={() => setMessageActionsExpanded(value => !value)}
         avatar={<BetaTimeblockAvatar node={item.record} />}
         metadata={
           <>
@@ -180,7 +192,7 @@ export function BetaTimelineItemRow({
             <EventTimestamp timestamp={item.record.occurred_at_ms} now={now} mode={dateMode} />
           </>
         }
-        content={<p className="whitespace-pre-wrap break-words">{timeblockText}</p>}
+        content={<p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{timeblockText}</p>}
         actions={messageActions}
       />
     );
@@ -188,26 +200,30 @@ export function BetaTimelineItemRow({
 
   if (item.kind === 'summary/1') {
     return (
+      <div className={`min-w-0 max-w-full ${TIMELINE_SUMMARY_ROW_CLASS}`}>
       <BetaSummaryHistoryRow
-        record={item.record}
-        api={client.summaries}
-        revision={revision}
-        now={now}
-        dateMode={dateMode}
-        onInspect={onInspectSummary}
-        onOpenSource={onOpenSource}
-        messageActions={messageActions}
-      />
+          record={item.record}
+          api={client.summaries}
+          revision={revision}
+          now={now}
+          dateMode={dateMode}
+          onInspect={onInspectSummary}
+          onOpenSource={onOpenSource}
+          messageActions={messageActions}
+        />
+      </div>
     );
   }
 
   return (
-    <BetaExternalSummaryHistoryRow
-      record={item.record}
-      now={now}
-      dateMode={dateMode}
-      onOpenSource={onOpenSource}
-      messageActions={messageActions}
-    />
+    <div className={`min-w-0 max-w-full ${TIMELINE_SUMMARY_ROW_CLASS}`}>
+      <BetaExternalSummaryHistoryRow
+        record={item.record}
+        now={now}
+        dateMode={dateMode}
+        onOpenSource={onOpenSource}
+        messageActions={messageActions}
+      />
+    </div>
   );
 }

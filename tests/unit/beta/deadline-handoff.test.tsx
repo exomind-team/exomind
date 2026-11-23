@@ -16,8 +16,8 @@ function transport(initial: BetaDeadlineHandoff | null = first) {
     subscribe: vi.fn(async (listener: () => void) => { changed = listener; return unsubscribe; }) } satisfies BetaDeadlineHandoffsClient;
   return { client, unsubscribe, tap(next: BetaDeadlineHandoff | null) { pending = next; changed(); } };
 }
-function Harness({ client, open, scope = 'device-a' }: { client: BetaDeadlineHandoffsClient; open: Open; scope?: string }) {
-  const view = useBetaDeadlineHandoff(client, scope, true, open);
+function Harness({ client, open, scope = 'device-a', ready = true }: { client: BetaDeadlineHandoffsClient; open: Open; scope?: string; ready?: boolean }) {
+  const view = useBetaDeadlineHandoff(client, scope, ready, open);
   return <><p role={view.failed ? 'alert' : 'status'}>{view.message}</p><button disabled={view.busy} onClick={view.retry}>retry</button></>;
 }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -52,6 +52,24 @@ describe('deadline notification handoff delivery and acknowledgement', () => {
     const open=vi.fn<Open>(async()=> 'location opened');render(<Harness client={f.client} open={open}/>);
     await screen.findByText(/系统尚未确认入口已处理/);expect(f.client.acknowledge).toHaveBeenCalledTimes(1);expect(open).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button',{name:'retry'}));await screen.findByText('location opened');expect(f.client.acknowledge).toHaveBeenCalledTimes(2);
+  });
+  it('explains why retry cannot start while the local profile/workspace is not ready', async () => {
+    const f = transport();
+    f.client.acknowledge.mockResolvedValue(false);
+    const open = vi.fn<Open>(async () => 'location opened');
+    const ui = render(<Harness client={f.client} open={open}/>);
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent(/系统尚未确认入口已处理/);
+    expect(f.client.acknowledge).toHaveBeenCalledTimes(1);
+
+    ui.rerender(<Harness client={f.client} open={open} ready={false}/>);
+    const readsBeforeRetry = f.client.pending.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'retry' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/本机连接或档案切换尚未就绪/);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(f.client.acknowledge).toHaveBeenCalledTimes(1);
+    expect(f.client.pending).toHaveBeenCalledTimes(readsBeforeRetry);
   });
   it('validates Native identities and exact ACK responses without parsing an Android URI', async () => {
     let response: unknown = first; const call = vi.fn(async () => response); const client = nativeBetaDeadlineHandoffsClient(call, async () => () => {});

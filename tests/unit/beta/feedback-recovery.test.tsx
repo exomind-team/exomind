@@ -24,6 +24,24 @@ describe('Beta feedback recovery and notification source readiness', () => {
       await act(async () => { await owner.refresh(); }); expect(screen.queryByTestId('new-focus-feedback-textarea')).not.toBeInTheDocument(); expect(client.timeblocks.command).not.toHaveBeenCalled();
     } finally { ui.unmount(); await owner.close(); }
   });
+  it('keeps feedback pending when the view disappears during skip confirmation', async () => {
+    const client = timeblockClient(); client.timeblocks.snapshot.mockResolvedValue(pending()); const journal = memoryIntentJournal();
+    let owner = await BetaTimeblockController.open(client, D, P, { journal }); let ui = render(<BetaFocusTimer controller={owner} client={client} profileId={P}/>);
+    try {
+      fireEvent.click(await screen.findByRole('button', { name: `填写反馈 ${B.slice(0, 8)}` }));
+      fireEvent.click(await screen.findByRole('button', { name: '明确跳过反馈' }));
+      expect(await screen.findByRole('button', { name: '确认跳过反馈' })).toBeEnabled();
+      expect(client.timeblocks.command).not.toHaveBeenCalled();
+      ui.unmount(); await owner.close();
+
+      owner = await BetaTimeblockController.open(client, D, P, { journal }); ui = render(<BetaFocusTimer controller={owner} client={client} profileId={P}/>);
+      expect(await screen.findByRole('button', { name: `填写反馈 ${B.slice(0, 8)}` })).toBeEnabled();
+      expect(screen.queryByTestId('new-focus-feedback-textarea')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '确认跳过反馈' })).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent('反馈尚未提交 · 待处理，可继续填写。');
+      expect(client.timeblocks.command).not.toHaveBeenCalled();
+    } finally { ui.unmount(); await owner.close(); }
+  });
   it('does not signal notification readiness at section mount, and waits for hydrated source identity plus the actual Alpha form portal', async () => {
     const client = timeblockClient(), gate = deferred<BetaTimeblockSnapshot>(); client.timeblocks.snapshot.mockResolvedValue(pending()).mockReturnValueOnce(gate.promise);
     const owner = await BetaTimeblockController.open(client, D, P, { journal: memoryIntentJournal() });
@@ -46,7 +64,22 @@ describe('Beta feedback recovery and notification source readiness', () => {
     try {
       await screen.findByTestId('new-focus-feedback-textarea'); await waitFor(() => expect(ready).toHaveBeenCalledTimes(1));
       expect(document.querySelector('[data-testid="new-focus-running-name-display"]')).toHaveTextContent('another active block'); expect(document.querySelector('[data-beta-feedback-block-id]')).toHaveAttribute('data-beta-feedback-block-id', B); expect(client.timeblocks.command).not.toHaveBeenCalled();
-      fireEvent.click(screen.getByRole('button', { name: '明确跳过反馈' })); await waitFor(() => expect(client.timeblocks.command).toHaveBeenCalledTimes(1)); expect(client.timeblocks.command.mock.calls[0][0].action).toEqual({ kind: 'submit_feedback', block_id: B, feedback: { kind: 'skipped' } });
+      fireEvent.click(screen.getByRole('button', { name: '明确跳过反馈' }));
+      expect(await screen.findByRole('button', { name: '确认跳过反馈' })).toBeEnabled();
+      expect(client.timeblocks.command).not.toHaveBeenCalled();
+      fireEvent.keyDown(document, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByTestId('new-focus-feedback-textarea')).not.toBeInTheDocument());
+      expect(client.timeblocks.command).not.toHaveBeenCalled();
+      expect(screen.getByRole('status')).toHaveTextContent('反馈尚未提交 · 待处理，可继续填写。');
+      const recovery = screen.getByRole('button', { name: `填写反馈 ${B.slice(0, 8)}` });
+      expect(recovery).toBeEnabled();
+      fireEvent.click(recovery);
+      expect(await screen.findByTestId('new-focus-feedback-textarea')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '明确跳过反馈' })).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: '明确跳过反馈' }));
+      fireEvent.click(await screen.findByRole('button', { name: '确认跳过反馈' }));
+      await waitFor(() => expect(client.timeblocks.command).toHaveBeenCalledTimes(1));
+      expect(client.timeblocks.command.mock.calls[0][0].action).toEqual({ kind: 'submit_feedback', block_id: B, feedback: { kind: 'skipped' } });
     } finally { ui.unmount(); await owner.close(); }
   });
   it('does not fabricate a submit dialog or Core action for a completed source', async () => {

@@ -25,6 +25,7 @@ const PROGRESS_LABEL: Record<string, string> = {
   cancelling: '等待取消结果',
   publishing: '正在确认本机文件',
 };
+const EXPORT_CONTROL_BUTTON_CLASS = 'min-h-8 [@media(pointer:coarse)]:min-h-11 touch-manipulation';
 
 function shortId(value: string): string { return value.slice(0, 8); }
 function selectionLabel(selection: UserRangeSelection): string {
@@ -50,15 +51,18 @@ function unresolved(task: UserRangeExportTask | null): boolean {
 export function BetaUserRangeExportControls({
   owner,
   state,
+  mode,
+  onModeChange,
   profileNameFor = (profileId: string) => shortId(profileId),
 }: {
   owner: UserRangeExportStateController;
   state: UserRangeExportSnapshot;
+  mode: 'browse' | 'select-export';
+  onModeChange: (mode: 'browse' | 'select-export') => void;
   profileNameFor?: (profileId: string) => string;
 }) {
   const [confirmation, setConfirmation] = useState<'new' | 'unknown' | null>(null);
   const [manageOpen, setManageOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const panelId = useId();
   if (!state.ready || !state.supported) return null;
@@ -82,29 +86,34 @@ export function BetaUserRangeExportControls({
     aria-label="选取内容导出"
     data-testid="beta-user-range-export-controls"
   >
-    <div className="flex min-w-0 items-center gap-2">
-      <Button type="button" variant="ghost" size="sm" className="shrink-0"
-        aria-expanded={expanded} aria-controls={panelId}
-        onClick={() => { setExpanded(value => !value); setConfirmation(null); setManageOpen(false); }}>
-        选取内容导出 <span className="min-w-[3ch] text-right tabular-nums">{state.selections.length}</span>
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <Button type="button" variant={mode === 'select-export' ? 'secondary' : 'outline'} size="sm"
+        className={EXPORT_CONTROL_BUTTON_CLASS + ' max-w-full shrink-0'}
+        aria-expanded={mode === 'select-export'} aria-controls={panelId}
+        onClick={() => { onModeChange(mode === 'select-export' ? 'browse' : 'select-export'); setConfirmation(null); setManageOpen(false); }}>
+        {mode === 'select-export' ? '退出选择导出' : '选择并导出'} · 已选 {state.selections.length} 项
       </Button>
       {task && <p role="status" className="min-w-0 flex-1 text-xs text-secondary">{taskLabel(task)}</p>}
     </div>
-    <div id={panelId} hidden={!expanded} className="space-y-2">
+    <div id={panelId} hidden={mode !== 'select-export'} className="space-y-2">
+    {mode === 'select-export' && <p role="status" aria-live="polite" className="text-xs text-secondary">
+      选择导出模式 · {profileNameFor(state.profile_id)} · 浏览周期变化或退出后保留已选内容。
+    </p>}
     <div className="flex min-w-0 flex-wrap items-center gap-2">
       <div className="min-w-0 flex-1">
         <p className="text-xs text-secondary">
-          已选 {state.selections.length} / {USER_RANGE_EXPORT_MAX_SELECTIONS} 项；按档案分别保存。
+          每个档案最多 {USER_RANGE_EXPORT_MAX_SELECTIONS} 项；导出内容按档案分别保存。
         </p>
-        <p className="text-xs text-muted">在消息或时间块的“更多操作”中选入清单。</p>
+        <p className="text-xs text-muted">在消息或时间块的“更多操作”中选择要导出的内容。</p>
       </div>
-      {state.selections.length > 4 && <Button type="button" size="sm" variant="ghost" onClick={() => setManageOpen(true)}>
+      {state.selections.length > 4 && <Button type="button" size="sm" variant="ghost" className={EXPORT_CONTROL_BUTTON_CLASS} onClick={() => setManageOpen(true)}>
         管理全部 {state.selections.length} 项
       </Button>}
       <Button
         type="button"
         size="sm"
         variant="ghost"
+        className={EXPORT_CONTROL_BUTTON_CLASS}
         disabled={state.selections.length === 0 || !state.storageReady}
         onClick={() => { void owner.resetSelections(); }}
       >清空</Button>
@@ -112,6 +121,7 @@ export function BetaUserRangeExportControls({
         type="button"
         size="sm"
         variant="outline"
+        className={EXPORT_CONTROL_BUTTON_CLASS}
         disabled={blocked}
         onClick={() => setConfirmation('new')}
       >导出所选内容</Button>
@@ -130,7 +140,7 @@ export function BetaUserRangeExportControls({
             type="button"
             size="icon"
             variant="ghost"
-            className="h-8 w-8 min-h-8 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:min-h-11"
+            className={'h-8 w-8 min-h-8 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 ' + EXPORT_CONTROL_BUTTON_CLASS}
             aria-label={`从导出清单移除：${label}`}
             onClick={() => { void owner.removeSelection(selection); }}
           ><X aria-hidden="true" /></Button>
@@ -148,12 +158,12 @@ export function BetaUserRangeExportControls({
       {task.cancelAccepted === true && task.phase === 'unknown' && <p role="status" className="text-xs text-secondary">已请求取消，最终结果仍待确认。</p>}
       {task.message && !Object.prototype.hasOwnProperty.call(PROGRESS_LABEL, task.phase) && <p role={task.phase === 'failed' ? 'alert' : 'status'} className={task.phase === 'failed' ? 'text-xs text-destructive' : 'text-xs text-secondary'}>{task.message.split('Native').join('本机').split('request ID').join('导出编号')}</p>}
       {task.phase === 'unknown' && <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm" variant="outline" onClick={() => { void owner.refreshStatus(); }}>重新检查结果</Button>
-        <Button type="button" size="sm" variant="outline" onClick={() => setConfirmation('unknown')}>
+        <Button type="button" size="sm" variant="outline" className={EXPORT_CONTROL_BUTTON_CLASS} onClick={() => { void owner.refreshStatus(); }}>重新检查结果</Button>
+        <Button type="button" size="sm" variant="outline" className={EXPORT_CONTROL_BUTTON_CLASS} onClick={() => setConfirmation('unknown')}>
           我已核对，另开导出
         </Button>
       </div>}
-      {canCancel && <Button type="button" size="sm" variant="outline" onClick={() => { void owner.requestCancel(); }}>取消此导出</Button>}
+      {canCancel && <Button type="button" size="sm" variant="outline" className={EXPORT_CONTROL_BUTTON_CLASS} onClick={() => { void owner.requestCancel(); }}>取消此导出</Button>}
       {result && <div className="space-y-1 text-xs text-secondary">
         {result.phase === 'saved' && result.archive_byte_length !== null && result.archive_sha256 !== null && <>
           <p>文件已在本机保存 · {bytesLabel(result.archive_byte_length)}</p>
@@ -167,7 +177,7 @@ export function BetaUserRangeExportControls({
         </> : !result.partial_output && <p>本次未生成可核对的导出包。</p>}
         {result.partial_output && <p>保存位置可能留有部分文件，请核对。</p>}
       </div>}
-      <Button type="button" size="sm" variant="ghost" aria-expanded={detailsOpen}
+      <Button type="button" size="sm" variant="ghost" className={EXPORT_CONTROL_BUTTON_CLASS} aria-expanded={detailsOpen}
         onClick={() => setDetailsOpen(value => !value)}>{detailsOpen ? '收起校验详情' : '查看校验详情'}</Button>
       {detailsOpen && <div className="space-y-1 break-all text-xs text-secondary">
         <p>导出编号：<code>{task.request_id}</code></p>
@@ -189,13 +199,13 @@ export function BetaUserRangeExportControls({
             return <li key={selection.kind === 'event' ? `event:${selection.event_id}` : `timeblock:${selection.block_id}`}
               className="flex min-w-0 items-center gap-2 border-b border-border-card py-1">
               <span className="min-w-0 flex-1 break-all text-xs text-secondary">{label}</span>
-              <Button type="button" size="sm" variant="ghost" aria-label={`从导出清单移除：${label}`}
+            <Button type="button" size="sm" variant="ghost" className={EXPORT_CONTROL_BUTTON_CLASS} aria-label={`从导出清单移除：${label}`}
                 onClick={() => { void owner.removeSelection(selection); }}>移除</Button>
             </li>;
           })}
         </ul>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setManageOpen(false)}>完成</Button>
+          <Button type="button" variant="outline" className={EXPORT_CONTROL_BUTTON_CLASS} onClick={() => setManageOpen(false)}>完成</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -215,8 +225,8 @@ export function BetaUserRangeExportControls({
           将导出当前档案选中的 {state.selections.length} 项；原记录和文件保留。
         </p>}
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setConfirmation(null)}>返回</Button>
-          <Button type="button" onClick={() => { void confirmAction(); }}>
+          <Button type="button" variant="outline" className={EXPORT_CONTROL_BUTTON_CLASS} onClick={() => setConfirmation(null)}>返回</Button>
+          <Button type="button" className={EXPORT_CONTROL_BUTTON_CLASS} onClick={() => { void confirmAction(); }}>
             {confirmation === 'unknown' ? '我已核对，另开导出' : '继续并选择保存位置'}
           </Button>
         </DialogFooter>

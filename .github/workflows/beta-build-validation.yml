@@ -30,6 +30,11 @@ on:
         required: false
         type: boolean
         default: false
+      android_test_package_suffix:
+        description: Installable test-only Android package suffix that does not replace Beta25
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -291,6 +296,7 @@ jobs:
     timeout-minutes: 120
     env:
       BUILD_SCOPE: ${{ inputs.android_only && 'android-only' || 'all' }}
+      ANDROID_TEST_PACKAGE_SUFFIX: ${{ inputs.android_test_package_suffix || '' }}
       SOURCE_SHA: ${{ needs.resolve-source.outputs.sha }}
       WORKFLOW_RECIPE_SHA: ${{ needs.resolve-source.outputs.recipe_sha }}
       BETA_VERSION: ${{ needs.resolve-source.outputs.version }}
@@ -376,7 +382,11 @@ jobs:
         run: |
           bun recipe/scripts/dev/beta-android-ci.ts verify-ndk
           bun scripts/dev/android-manifest-permission.ts
-          bun scripts/dev/beta-android-prepare.ts --project-root "$GITHUB_WORKSPACE"
+          if [[ -n "$ANDROID_TEST_PACKAGE_SUFFIX" ]]; then
+            bun scripts/dev/beta-android-prepare.ts --project-root "$GITHUB_WORKSPACE" --test-package-suffix "$ANDROID_TEST_PACKAGE_SUFFIX"
+          else
+            bun scripts/dev/beta-android-prepare.ts --project-root "$GITHUB_WORKSPACE"
+          fi
       - name: Repair generated Gradle callback and verify the selected NDK
         run: bun recipe/scripts/dev/beta-android-ci.ts patch-callback --project-root "$GITHUB_WORKSPACE"
       - name: Build Beta debug APKs (arm64 and x86_64; no device/install/release key)
@@ -393,13 +403,36 @@ jobs:
           const walk=directory=>fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?walk(path.join(directory,entry.name)):[path.join(directory,entry.name)]);
           const apks=walk(root).filter(file=>file.endsWith('.apk')&&file.includes('debug')&&!/androidTest/i.test(file));assert.equal(apks.length,2,'Exactly two ABI-specific debug APKs required');
           const ndkVersion=process.env.EXOMIND_ANDROID_NDK_VERSION;assert.equal(ndkVersion,'30.0.16248370');assert.equal(process.env.ANDROID_NDK_VERSION,ndkVersion);const ndkHome=path.join(process.env.ANDROID_HOME,'ndk',ndkVersion);assert.equal(fs.realpathSync(process.env.NDK_HOME),fs.realpathSync(ndkHome));assert.equal(fs.realpathSync(process.env.ANDROID_NDK_HOME),fs.realpathSync(ndkHome));const ndkSourceProperties=path.join(ndkHome,'source.properties'),ndkSource=fs.readFileSync(ndkSourceProperties,'utf8');assert.equal(/^[\t ]*Pkg\.Revision[\t ]*=\s*([^\s]+)\s*$/m.exec(ndkSource)?.[1],ndkVersion);const installedNdks=fs.readdirSync(path.join(process.env.ANDROID_HOME,'ndk'),{withFileTypes:true}).filter(entry=>entry.isDirectory()).map(entry=>entry.name).sort();assert.deepEqual(installedNdks,[ndkVersion]);const gradleSource=fs.readFileSync('src-tauri/gen/android/app/build.gradle.kts','utf8'),gradleNdkVersions=[...gradleSource.matchAll(/^[\t ]*ndkVersion[\t ]*=\s*"([^"]+)"\s*$/gm)].map(match=>match[1]);assert.deepEqual(gradleNdkVersions,[ndkVersion]);
-          const tools=path.join(process.env.ANDROID_HOME,'build-tools','36.0.0'),seen=new Set(),files=[];
-          for(const source of apks){const badging=execFileSync(path.join(tools,'aapt'),['dump','badging',source],{encoding:'utf8',timeout:10000});assert.equal(/^package: name='([^']+)'/m.exec(badging)?.[1],'com.exomind.app.v06.beta');assert.equal(/versionName='([^']+)'/.exec(badging)?.[1],process.env.BETA_VERSION);assert.equal(/versionCode='([^']+)'/.exec(badging)?.[1],process.env.BETA_VERSION_CODE);assert.ok(/^application-debuggable\b/m.test(badging));const abi=/^native-code: '([^']+)'\s*$/m.exec(badging)?.[1];assert.ok(['arm64-v8a','x86_64'].includes(abi)&&!seen.has(abi));seen.add(abi);execFileSync(path.join(tools,'apksigner'),['verify',source],{stdio:'inherit',timeout:10000});const target=path.join(output,`ExoMind-${process.env.BETA_VERSION}-${abi}-${process.env.SOURCE_SHA.slice(0,12)}.apk`);fs.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);files.push({file:path.basename(target),abi,bytes:fs.statSync(target).size,sha256:hash(target),package:'com.exomind.app.v06.beta',version:process.env.BETA_VERSION,version_code:Number(process.env.BETA_VERSION_CODE)});}
-          const info={validation_only:true,build_scope:process.env.BUILD_SCOPE,workflow_recipe_sha:process.env.WORKFLOW_RECIPE_SHA,source_sha:process.env.SOURCE_SHA,version:process.env.BETA_VERSION,identifier:'com.exomind.app.v06.beta',entry:'beta.html',profile:'debug APK',core_schema:Number(fs.readFileSync('crates/exomind-core/src/lib.rs','utf8').match(/CORE_SCHEMA_VERSION:\s*i64\s*=\s*(\d+)/)?.[1]),config_sha256:process.env.BETA_CONFIG_HASH,cargo_lock_sha256:process.env.CARGO_LOCK_HASH,rustc:execFileSync('rustc',['-Vv'],{encoding:'utf8'}).trim(),ndk:ndkVersion,gradle_ndk:gradleNdkVersions[0],ndk_selection:'Isolated ANDROID_HOME contained exactly the selected NDK; source.properties was verified before and after preparation.',ndk_source_properties_sha256:hash(ndkSourceProperties),sdk:36,build_tools:'36.0.0',files,runtime_tested:false,upgrade_tested:false,published:false,signing:'Runner-local debug key only; not release-signed or guaranteed upgrade-compatible with local/previous candidates.'};fs.writeFileSync(path.join(output,'build-info.json'),JSON.stringify(info,null,2));
+          const tools=path.join(process.env.ANDROID_HOME,'build-tools','36.0.0');
+          const suffix=process.env.ANDROID_TEST_PACKAGE_SUFFIX??'';
+          const betaNumber=/^0\.6\.0-beta([1-9][0-9]*)$/.exec(process.env.BETA_VERSION)?.[1];
+          assert.ok(betaNumber,'The source resolver must supply a canonical Beta version');
+          if(suffix)assert.equal(suffix,`beta${betaNumber}testci`);
+          const packageName=`com.exomind.app.v06.beta${suffix?`.${suffix}`:''}`;
+          const appLabel=suffix?`外心 Beta${betaNumber} 测试 CI`:'ExoMind Beta';
+          const seen=new Set(),files=[];
+          for(const source of apks){
+            const badging=execFileSync(path.join(tools,'aapt'),['dump','badging',source],{encoding:'utf8',timeout:10000});
+            assert.equal(/^package: name='([^']+)'/m.exec(badging)?.[1],packageName);
+            assert.equal(/versionName='([^']+)'/.exec(badging)?.[1],process.env.BETA_VERSION);
+            assert.equal(/versionCode='([^']+)'/.exec(badging)?.[1],process.env.BETA_VERSION_CODE);
+            assert.equal(/^application-label:'([^']+)'/m.exec(badging)?.[1],appLabel);
+            assert.ok(/^application-debuggable\b/m.test(badging));
+            const abi=/^native-code: '([^']+)'\s*$/m.exec(badging)?.[1];
+            assert.ok(['arm64-v8a','x86_64'].includes(abi)&&!seen.has(abi));
+            seen.add(abi);
+            execFileSync(path.join(tools,'apksigner'),['verify',source],{stdio:'inherit',timeout:10000});
+            const suffixForName=suffix?`-${suffix}`:'';
+            const target=path.join(output,`ExoMind-${process.env.BETA_VERSION}${suffixForName}-${abi}-${process.env.SOURCE_SHA.slice(0,12)}.apk`);
+            fs.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);
+            files.push({file:path.basename(target),abi,bytes:fs.statSync(target).size,sha256:hash(target),package:packageName,version:process.env.BETA_VERSION,version_code:Number(process.env.BETA_VERSION_CODE)});
+          }
+          const info={validation_only:true,build_scope:process.env.BUILD_SCOPE,workflow_recipe_sha:process.env.WORKFLOW_RECIPE_SHA,source_sha:process.env.SOURCE_SHA,version:process.env.BETA_VERSION,identifier:packageName,base_identifier:'com.exomind.app.v06.beta',android_test_package_suffix:suffix||null,entry:'beta.html',profile:'debug APK',core_schema:Number(fs.readFileSync('crates/exomind-core/src/lib.rs','utf8').match(/CORE_SCHEMA_VERSION:\s*i64\s*=\s*(\d+)/)?.[1]),config_sha256:process.env.BETA_CONFIG_HASH,cargo_lock_sha256:process.env.CARGO_LOCK_HASH,rustc:execFileSync('rustc',['-Vv'],{encoding:'utf8'}).trim(),ndk:ndkVersion,gradle_ndk:gradleNdkVersions[0],ndk_selection:'Isolated ANDROID_HOME contained exactly the selected NDK; source.properties was verified before and after preparation.',ndk_source_properties_sha256:hash(ndkSourceProperties),sdk:36,build_tools:'36.0.0',files,runtime_tested:false,upgrade_tested:false,published:false,signing:'Runner-local debug key only; test package suffix avoids replacing Beta25 or previous test packages; not release-signed.'};
+          fs.writeFileSync(path.join(output,'build-info.json'),JSON.stringify(info,null,2));
           NODE
       - uses: actions/upload-artifact@v7
         with:
-          name: beta-android-${{ needs.resolve-source.outputs.version }}-${{ needs.resolve-source.outputs.sha }}-attempt${{ github.run_attempt }}
+          name: beta-android-${{ needs.resolve-source.outputs.version }}-${{ inputs.android_test_package_suffix || 'base' }}-${{ needs.resolve-source.outputs.sha }}-attempt${{ github.run_attempt }}
           path: validation-artifacts/android/
           if-no-files-found: error
           retention-days: 7

@@ -175,21 +175,20 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
     {readable && <BetaImagePreview identity={`${deviceId}:${profileId}:${original.original_id}:${original.sha256}`} sourceScope={client} visible={visible} inline fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={() => collectOriginalDownload(client, profileId, original)} />}
     <div className="flex items-center gap-2"><Tooltip content={client.originalOpener?readable?'使用系统打开':'自动获取原件后用系统打开':'系统打开需要独立应用；仍可下载原件'}><Button size="icon" variant="ghost" className="shrink-0" aria-label={`打开 ${original.file_name}`}  disabled={!client.originalOpener||!readable&&!acquisition?.fetchAny||opening||running} onClick={()=>{void(readable?openOriginal():findOriginal(true));}}><FileText size={16} className="text-brand-accent" aria-hidden="true" /></Button></Tooltip>
       {readable&&isTextPreviewCandidate(original.file_name,original.media_type)&&<BetaTextPreview identity={JSON.stringify([deviceId,profileId,original.original_id,original.sha256,original.byte_length])} sourceScope={client} visible={visible} fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={()=>collectOriginalDownload(client,profileId,original)}/>}
-      {readable && mediaFormat?.kind === 'audio' && <div className="min-w-0 flex-[0_1_auto] space-y-1">
-        <BetaMediaPreview
-          identity={JSON.stringify([deviceId, profileId, original.original_id, original.sha256, original.byte_length, original.file_name, original.media_type])}
-          sourceScope={client}
-          visible={visible}
-          fileName={original.file_name}
-          mediaType={original.media_type}
-          byteLength={original.byte_length}
-          fallbackActionMessage={fallbackActionMessage}
-          load={() => collectOriginalDownload(client, profileId, original)}
-        />
-      </div>}
       <div className="min-w-0 flex-1"><p className="break-all text-xs font-medium">{original.file_name}</p><p className="text-[10px] text-muted">{formatBytes(original.byte_length)}</p></div>
       <Button variant="ghost" size="icon" aria-label={`下载 ${original.file_name}`} disabled={exporting||!readable||!client.originalExports&&original.byte_length>MAX_BASIC_DOWNLOAD_BYTES} onClick={onDownload}><Download size={14}/></Button>
     </div>
+    {readable && mediaFormat?.kind === 'audio' && <BetaMediaPreview
+      identity={JSON.stringify([deviceId, profileId, original.original_id, original.sha256, original.byte_length, original.file_name, original.media_type])}
+      sourceScope={client}
+      visible={visible}
+      inline
+      fileName={original.file_name}
+      mediaType={original.media_type}
+      byteLength={original.byte_length}
+      fallbackActionMessage={fallbackActionMessage}
+      load={() => collectOriginalDownload(client, profileId, original)}
+    />}
     <BetaOriginalLifecyclePanel profileId={profileId} originalId={original.original_id} fileName={original.file_name} deviceLabel={deviceNames.label} visible={visible} revision={lifecycleRevision} />
     {opening&&<p role="status" className="text-xs text-muted">正在准备系统打开…</p>}
     {acquisition&&<div className="mt-1 space-y-1 text-xs text-muted"><p role="status">{label}</p>

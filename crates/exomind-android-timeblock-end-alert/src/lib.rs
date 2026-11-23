@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, Runtime, plugin::TauriPlugin};
+use tauri::{plugin::TauriPlugin, Manager, Runtime};
 
 #[cfg(target_os = "android")]
 use tauri::plugin::PluginHandle;
@@ -41,6 +41,34 @@ pub struct PendingTimeblockEndHandoff {
 #[serde(rename_all = "camelCase")]
 pub struct NotificationPermissionStatus {
     pub state: String,
+}
+
+/// Read-only snapshot of the Android timeblock reminder notification channel.
+/// This describes OS configuration only; it does not prove audible playback.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BetaDeadlineNotificationChannelState {
+    pub notification_permission: String,
+    pub notifications_enabled: bool,
+    pub channel_supported: bool,
+    pub channel_exists: bool,
+    pub channel_importance: String,
+    pub channel_sound_enabled: Option<bool>,
+    pub settings_available: bool,
+}
+
+impl BetaDeadlineNotificationChannelState {
+    pub fn unavailable() -> Self {
+        Self {
+            notification_permission: "unavailable".into(),
+            notifications_enabled: false,
+            channel_supported: false,
+            channel_exists: false,
+            channel_importance: "unavailable".into(),
+            channel_sound_enabled: None,
+            settings_available: false,
+        }
+    }
 }
 
 /// Native-only projection of accepted local operational deadlines. This is
@@ -209,6 +237,36 @@ impl<R: Runtime> AndroidTimeblockEndAlert<R> {
             Ok(NotificationPermissionStatus {
                 state: "unavailable".to_string(),
             })
+        }
+    }
+
+    pub fn beta_deadline_notification_channel_state(
+        &self,
+    ) -> Result<BetaDeadlineNotificationChannelState> {
+        #[cfg(target_os = "android")]
+        {
+            self.mobile_plugin_handle
+                .run_mobile_plugin("notificationChannelState", ())
+                .map_err(Into::into)
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(BetaDeadlineNotificationChannelState::unavailable())
+        }
+    }
+
+    pub fn open_beta_deadline_notification_channel_settings(&self) -> Result<()> {
+        #[cfg(target_os = "android")]
+        {
+            self.mobile_plugin_handle
+                .run_mobile_plugin("openNotificationChannelSettings", ())
+                .map_err(Into::into)
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(())
         }
     }
 }

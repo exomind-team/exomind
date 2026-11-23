@@ -9,7 +9,7 @@ import {
   type LocalIntentJournal,
 } from './local-intent-journal';
 import { productionIntentStorage } from './native-intent-journal';
-import { MAX_BETA_CORRECTION_TEXT_BYTES, type BetaRecordCorrectionCommand } from './record-organization-client';
+import { betaCorrectionTextIssue, type BetaRecordCorrectionCommand } from './record-organization-client';
 
 /** Engineering budget: at most 32 retained commands and 2 MiB of serialized JSON.
  * A full journal refuses another command; it never drops an unresolved entry. */
@@ -25,7 +25,7 @@ type PersistedCorrectionEntry =
   | { status: 'pending'; command: BetaRecordCorrectionCommand }
   | { status: 'accepted'; command: BetaRecordCorrectionCommand; receipt: BetaReceipt };
 
-export type BetaCorrectionRecoveryStatus = 'saving' | 'save_failed' | 'pending' | 'accepted';
+export type BetaCorrectionRecoveryStatus = 'saving' | 'save_failed' | 'pending' | 'sending' | 'accepted';
 
 export interface BetaCorrectionRecoveryEntry {
   readonly command: Readonly<BetaRecordCorrectionCommand>;
@@ -63,7 +63,7 @@ interface CandidateCorrection {
 
 interface TransientCorrection {
   command: BetaRecordCorrectionCommand;
-  status: 'pending' | 'accepted';
+  status: 'pending' | 'sending' | 'accepted';
   receipt?: BetaReceipt;
   message?: string;
 }
@@ -96,8 +96,7 @@ function parseCommand(value: unknown): BetaRecordCorrectionCommand {
     || typeof raw.target_event_id !== 'string' || !raw.target_event_id
     || raw.event_id === raw.target_event_id
     || typeof raw.target_digest !== 'string' || !SHA256.test(raw.target_digest)
-    || typeof raw.corrected_text !== 'string' || !raw.corrected_text.trim()
-    || new TextEncoder().encode(raw.corrected_text).byteLength > MAX_BETA_CORRECTION_TEXT_BYTES) {
+    || typeof raw.corrected_text !== 'string' || betaCorrectionTextIssue(raw.corrected_text)) {
     throw new BetaApiError('intent_cache_corrupt', '本机更正恢复记录的命令无效，已停止发送');
   }
   return Object.freeze({
@@ -171,7 +170,8 @@ function isJournalConflict(error: unknown): boolean {
 
 function isDefinitiveRejection(error: unknown): boolean {
   if (!(error instanceof BetaApiError)) return false;
-  if (error.code === 'correction_target_conflict' || error.code === 'correction_requires_human') return true;
+  if (error.code === 'correction_target_conflict' || error.code === 'correction_requires_human'
+    || error.code === 'invalid_request' || error.code === 'invalid_correction') return true;
   return error.status !== undefined && error.status >= 400 && error.status < 500
     && ![408, 425, 429].includes(error.status);
 }
@@ -387,10 +387,10 @@ export class BetaRecordCorrectionOwner {
     if (!target.event_id || !target.profile_id || !SHA256.test(target.digest)) {
       throw new BetaApiError('invalid_correction', '原始记录没有可验证的摘要，不能提交更正');
     }
-    if (!correctedText.trim()) throw new BetaApiError('invalid_correction', '请先写下更正内容');
-    if (new TextEncoder().encode(correctedText).byteLength > MAX_BETA_CORRECTION_TEXT_BYTES) {
-      throw new BetaApiError('invalid_correction', '更正内容超过 128 KiB，尚未保存或发送');
-    }
+    const textIssue = betaCorrectionTextIssue(correctedText);
+    if (textIssue === 'empty') throw new BetaApiError('invalid_correction', '请先写下非空更正内容');
+    if (textIssue === 'invalid_unicode') throw new BetaApiError('invalid_correction', '更正内容包含无法传输的 Unicode 字符，请重新输入该字符');
+    if (textIssue === 'too_large') throw new BetaApiError('invalid_correction', '更正内容超过 128 KiB UTF-8 字节上限，请删减后再保存');
     const commandId = this.uuid();
     const eventId = this.uuid();
     const occurredAt = this.clock();
@@ -538,6 +538,19 @@ export class BetaRecordCorrectionOwner {
     });
   }
 
+  /** Reopen the journal after an observer error without sending a correction. */
+  async retryRecovery(): Promise<void> {
+    await this.track(async () => {
+      try {
+        await this.reopenStorage();
+      } catch (error) {
+        this.observerError = errorText(error);
+        this.emit();
+        throw error;
+      }
+    });
+  }
+
   private async persistPending(command: BetaRecordCorrectionCommand): Promise<void> {
     await this.mutateEntries(entries => {
       const byId = entries.find(entry => entry.command.command_id === command.command_id);
@@ -554,6 +567,12 @@ export class BetaRecordCorrectionOwner {
 
   private async reconcile(client: BetaClient, command: BetaRecordCorrectionCommand): Promise<BetaCorrectionRecoveryEntry> {
     let receipt: BetaReceipt | null;
+    this.transient.set(command.command_id, {
+      command,
+      status: 'pending',
+      message: '本机命令已持久保存；正在查找服务回执，尚未确认本次请求是否已发送。',
+    });
+    this.emit();
     try {
       receipt = await client.receipt(command.profile_id, command.command_id);
       if (receipt) receipt = receiptFor(command, receipt);
@@ -564,6 +583,12 @@ export class BetaRecordCorrectionOwner {
     if (!client.recordOrganization) {
       return this.keepPending(command, '更正已暂存；当前服务暂不支持重试，原命令仍保留。');
     }
+    this.transient.set(command.command_id, {
+      command,
+      status: 'sending',
+      message: '本机命令已持久保存；正在发送更正请求，尚未收到服务回执。',
+    });
+    this.emit();
     try {
       const result = receiptFor(command, await client.recordOrganization.recordCorrection({ ...command }));
       return this.accept(command, result);

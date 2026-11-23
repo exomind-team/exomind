@@ -1,15 +1,27 @@
-import { ATTACHMENT_PHASE_LABELS, type AttachmentProgress } from './attachment-progress';
+import { ATTACHMENT_PHASE_LABELS } from './attachment-progress';
+import type { BetaAttachmentProgress as BetaAttachmentProgressState } from './drafts';
 import { Progress } from '@/components/ui/progress';
 
 function bytes(value:number):string { return value<1024*1024?`${(value/1024).toFixed(1)} KiB`:`${(value/1024/1024).toFixed(1)} MiB`; }
-export function BetaAttachmentProgress({name,progress,active,now}:{name:string;progress?:AttachmentProgress;active:boolean;now:number}) {
+export function BetaAttachmentProgress({name,progress,active,now}:{name:string;progress?:BetaAttachmentProgressState;active:boolean;now:number}) {
   if(!active)return null;
   const completed=progress?.completed,total=progress?.total??0,phaseElapsed=progress?Math.max(0,(now-progress.phaseStartedAt)/1000):0;
   const remaining=typeof completed==='number'&&completed>0&&completed<total&&phaseElapsed>=1?Math.ceil((total-completed)/completed*phaseElapsed):null;
   const elapsed=progress?Math.max(0,Math.floor((now-progress.startedAt)/1000)):0;
+  const queue=progress?.queue;
+  const phaseLabel=queue?.kind==='queued'
+    ? queue.stage==='preparation'?'等待本机副本处理':'等待附件暂存'
+    : queue?.kind==='retry'?'等待自动重试'
+    : progress?ATTACHMENT_PHASE_LABELS[progress.phase]:'等待准备';
+  const queueMessage=queue?.kind==='queued'
+    ? `队列位置 ${queue.position} · 前序附件正在处理`
+    : queue?.kind==='retry'
+    ? `将在 ${queue.retryDelayMs} 毫秒后自动重试（${queue.retryIndex}/3）`
+    : null;
+  const stalled=!queue&&progress&&progress.phase!=='queued'&&now-progress.updatedAt>=10000;
   return <div className="mt-1 space-y-1 text-[11px] text-secondary" role="status">
-    <div className="flex flex-wrap gap-x-2"><span>{progress?ATTACHMENT_PHASE_LABELS[progress.phase]:'等待准备'}</span>{typeof completed==='number'&&<span>{bytes(completed)} / {bytes(total)}</span>}<span>已耗时 {elapsed}s</span></div>
+    <div className="flex flex-wrap gap-x-2"><span>{phaseLabel}</span>{typeof completed==='number'&&<span>{bytes(completed)} / {bytes(total)}</span>}<span>已耗时 {elapsed}s</span></div>
     <Progress className="block h-1 w-full" aria-label={`附件准备进度 ${name}`} max={Math.max(1,total)} {...(typeof completed==='number'?{value:completed}:{})}/>
-    <p>{remaining===null?'剩余时间待估算':`本阶段预计还需约 ${remaining}s`}{progress&&now-progress.updatedAt>=10000?' · 尚无新进度，可取消后重试':''}</p>
+    <p>{queueMessage??(remaining===null?'剩余时间待估算':`本阶段预计还需约 ${remaining}s`)}{stalled?' · 当前处理阶段 10 秒未更新；原文件仍保留，记录尚未提交。':''}</p>
   </div>;
 }

@@ -1,11 +1,14 @@
 //! Private local draft bytes. Only the main Beta window can use this adapter;
 //! source bytes are never exposed through the HTTP or overlay interfaces.
 use super::{Failure, NativeState, trusted_window, work};
+use base64::Engine as _;
 use exomind_beta_host::{
     HostError, LocalSourceBegin, LocalSourceInfo, MAX_LOCAL_SOURCE_CHUNK_BYTES,
 };
 use std::sync::Arc;
 use tauri::{State, WebviewWindow};
+
+const MAX_BASE64_SOURCE_CHUNK_BYTES: usize = (MAX_LOCAL_SOURCE_CHUNK_BYTES + 2) / 3 * 4;
 
 fn bounded_range(offset: u64, length: usize) -> Result<(), Failure> {
     if length > MAX_LOCAL_SOURCE_CHUNK_BYTES {
@@ -94,6 +97,41 @@ pub(super) async fn beta_write_local_source_binary(
     .await
 }
 
+fn decode_base64_source_chunk(encoded: &str) -> Result<Vec<u8>, Failure> {
+    if encoded.len() > MAX_BASE64_SOURCE_CHUNK_BYTES {
+        return Err(HostError::PayloadTooLarge.into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|_| Failure::from(HostError::InvalidRequest))?;
+    if bytes.is_empty() {
+        return Err(HostError::InvalidRequest.into());
+    }
+    bounded_range(0, bytes.len())?;
+    Ok(bytes)
+}
+
+/// Android Tauri IPC uses JSON requests, so it sends the same bounded chunks
+/// in base64 while the Host validates and stores the original bytes.
+#[tauri::command]
+pub(super) async fn beta_write_local_source_base64(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    key: String,
+    offset: u64,
+    bytes_base64: String,
+) -> Result<LocalSourceInfo, Failure> {
+    trusted_window(&window, state.inner())?;
+    let bytes = decode_base64_source_chunk(&bytes_base64)?;
+    bounded_range(offset, bytes.len())?;
+    work(state.inner(), move |state| {
+        state
+            .host
+            .write_local_source_chunk(&state.owner, &key, offset, &bytes)
+    })
+    .await
+}
+
 #[tauri::command]
 pub(super) async fn beta_finish_local_source(
     window: WebviewWindow,
@@ -166,5 +204,20 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn base64_source_chunk_preserves_binary_bytes_and_enforces_the_decoded_limit() {
+        let expected = vec![0, 255, 1, 128, 7];
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&expected);
+        assert_eq!(decode_base64_source_chunk(&encoded).unwrap(), expected);
+
+        let invalid = decode_base64_source_chunk("%%%not-base64%%%").unwrap_err();
+        assert_eq!(invalid.code, "invalid_request");
+
+        let too_large = vec![0x5a; MAX_LOCAL_SOURCE_CHUNK_BYTES + 1];
+        let encoded_too_large = base64::engine::general_purpose::STANDARD.encode(too_large);
+        assert!(encoded_too_large.len() <= MAX_BASE64_SOURCE_CHUNK_BYTES);
+        assert_eq!(decode_base64_source_chunk(&encoded_too_large).unwrap_err().code, "payload_too_large");
     }
 }

@@ -1,16 +1,35 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { BetaApiError } from './api-error';
 import { hashFileSource, IndexedDbFileSourceStore, type FileSource, type FileSourceStore, type RangeFileSource } from './file-source-store';
 import { ORIGINAL_CHUNK_BYTES } from './original-types';
 import type { FileSourceWork } from './attachment-progress';
-import type { NativeAttachmentFile, NativeAttachmentSources } from './native-attachment-types';
+import type { NativeAttachmentFile, NativeAttachmentSources, SharedHandoffAttachmentFile } from './native-attachment-types';
 import type { BetaBeginStage } from './original-types';
 import { validateStage } from './original-client';
 import { runNativeAttachment } from './native-attachments';
+import { betaUuid } from './initialization';
 type NativeCall = <T>(name:string,args:Record<string,unknown>)=>Promise<T>;
+type NativeListen = <T>(event:string,handler:(event:{payload:T})=>void)=>Promise<()=>void>;
+interface ShareImportProgress { request_id:string;handoff_id:string;item_id:string;phase:'verifying'|'copying'|'ready';completed:number|null;total:number }
 const MAX_NATIVE_SOURCE_BYTES=4*1024*1024*1024; // Native private-source/1 policy; Host independently enforces it.
+const MAX_BASE64_SOURCE_CHUNK_BYTES=Math.ceil(ORIGINAL_CHUNK_BYTES/3)*4;
 interface Info { key:string; byte_length:number; sha256:string; next_offset:number; generation:number; state:'copying'|'frozen'|'ready'|'hash_mismatch'|'released' }
 const invalid=()=>new BetaApiError('invalid_native_source','本机原件暂存响应不一致，尚未提交记录');
+export function encodeBase64SourceChunk(bytes:Uint8Array):string{
+  if(bytes.length<1||bytes.length>ORIGINAL_CHUNK_BYTES)throw new BetaApiError('invalid_chunk','原件分块大小无效');
+  if(typeof globalThis.btoa!=='function')throw new BetaApiError('unsupported_binary_encoding','当前 WebView 不支持安全的 Base64 原件传输');
+  const parts:string[]=[];
+  for(let offset=0;offset<bytes.length;offset+=8192){
+    const end=Math.min(bytes.length,offset+8192);
+    const characters=new Array<string>(end-offset);
+    for(let index=offset;index<end;index++)characters[index-offset]=String.fromCharCode(bytes[index]);
+    parts.push(characters.join(''));
+  }
+  const encoded=globalThis.btoa(parts.join(''));
+  if(encoded.length>MAX_BASE64_SOURCE_CHUNK_BYTES)throw new BetaApiError('payload_too_large','Base64 原件分块超出 IPC 限制');
+  return encoded;
+}
 function info(value:unknown,key:string):Info{
   if(!value||typeof value!=='object')throw invalid();const row=value as Info;
   if(row.key!==key||!Number.isSafeInteger(row.byte_length)||row.byte_length<0||row.byte_length>MAX_NATIVE_SOURCE_BYTES||!Number.isSafeInteger(row.next_offset)||row.next_offset<0||row.next_offset>row.byte_length||!Number.isSafeInteger(row.generation)||row.generation<1||!/^[a-f0-9]{64}$/.test(row.sha256)||!['copying','frozen','ready','hash_mismatch','released'].includes(row.state)||(['frozen','ready','hash_mismatch'].includes(row.state)&&row.next_offset!==row.byte_length)||(row.state==='released'&&row.next_offset!==0)||(row.state==='copying'&&row.next_offset!==row.byte_length&&row.next_offset%ORIGINAL_CHUNK_BYTES!==0))throw invalid();return Object.freeze({...row});
@@ -25,7 +44,7 @@ class NativeSource implements RangeFileSource {
  * not a whole-file Blob assembled from native ranges. */
 export class NativeFileSourceStore implements NativeAttachmentSources {
   private closed=false;
-  constructor(private readonly call:NativeCall=invoke,private readonly binaryWrite?: (key:string,offset:number,bytes:Uint8Array)=>Promise<unknown>){}
+  constructor(private readonly call:NativeCall=invoke,private readonly binaryWrite?: (key:string,offset:number,bytes:Uint8Array)=>Promise<unknown>,private readonly listenEvent:NativeListen=listen as unknown as NativeListen){}
   private active(){if(this.closed)throw new BetaApiError('inactive_session','原件暂存窗口已关闭');}
   private async rpc<T>(name:string,args:Record<string,unknown>):Promise<T>{this.active();try{const value=await this.call<T>(name,args);this.active();return value;}catch(error){if(error instanceof BetaApiError)throw error;if(error&&typeof error==='object'&&'code'in error&&'message'in error&&typeof error.code==='string'&&typeof error.message==='string')throw new BetaApiError(error.code,error.message);throw new BetaApiError('local_source_unavailable','本机原件暂存未确认；不会改用浏览器缓存，请保留源文件后重试');}}
   async put(key:string,source:Blob,work?:FileSourceWork):Promise<void>{
@@ -76,6 +95,44 @@ export class NativeFileSourceStore implements NativeAttachmentSources {
     const result=info(await runNativeAttachment('beta_import_attachment_path',{key,path:file.path,expectedSize:file.size},work,this.rpc.bind(this)),key);
     if(result.state!=='ready'||result.byte_length!==file.size)throw invalid();
   }
+  async importSharedHandoff(key:string,file:SharedHandoffAttachmentFile,work:FileSourceWork):Promise<void>{
+    this.active();if(work.cancelled())throw new BetaApiError('selection_removed','附件准备已取消');
+    if(!file.handoffId||!file.itemId||!file.profileId||!Number.isSafeInteger(file.size)||file.size<0||file.size>MAX_NATIVE_SOURCE_BYTES)throw new BetaApiError('invalid_share_handoff','系统分享附件身份或大小无效，原分享仍保留');
+    const requestId=betaUuid();let stopProgress:(()=>void)|undefined,cancellation:Promise<unknown>|undefined;
+    try{
+      stopProgress=await this.listenEvent<ShareImportProgress>('beta-share-handoff-import-progress',event=>{
+        const progress=event?.payload;
+        if(!progress||progress.request_id!==requestId||progress.handoff_id!==file.handoffId||progress.item_id!==file.itemId||work.cancelled()
+          ||!Number.isSafeInteger(progress.total)||progress.total<0||progress.total!==file.size
+          ||progress.completed!==null&&(!Number.isSafeInteger(progress.completed)||progress.completed<0||progress.completed>progress.total)
+          ||!['verifying','copying','ready'].includes(progress.phase))return;
+        const phase=progress.phase==='copying'?'copying':'verifying_source';
+        work.progress(phase,progress.completed,progress.total);
+      });
+    }catch{
+      // Progress is observational. A listener failure must not lose the
+      // original share; the bounded Native copy may still proceed.
+      work.progress('copying',null,file.size);
+    }
+    const cancel=()=>{cancellation=this.call('beta_cancel_attachment_work',{requestId}).catch(()=>false);};
+    work.signal?.addEventListener('abort',cancel,{once:true});
+    try{
+      if(work.cancelled()){
+        cancel();
+        await cancellation;
+        throw new BetaApiError('selection_removed','附件准备已取消；系统分享原件仍保留');
+      }
+      const result=info(await this.rpc('beta_import_share_handoff_item',{
+        handoff_id:file.handoffId,item_id:file.itemId,profile_id:file.profileId,source_key:key,expected_size:file.size,request_id:requestId,
+      }),key);
+      if(work.cancelled())throw new BetaApiError('selection_removed','附件准备已取消；系统分享原件仍保留');
+      if(result.state!=='ready'||result.byte_length!==file.size)throw invalid();
+    }finally{
+      work.signal?.removeEventListener('abort',cancel);
+      stopProgress?.();
+      await cancellation;
+    }
+  }
   async verifySource(key:string,work:FileSourceWork):Promise<{size:number;sha256:string}>{
     this.active();if(work.cancelled())throw new BetaApiError('selection_removed','附件准备已取消');
     work.progress('verifying_source',null,0);
@@ -108,4 +165,11 @@ export class NativeFileSourceStore implements NativeAttachmentSources {
   }
   close(){this.closed=true;}
 }
-export function productionFileSources():FileSourceStore{return isTauri()?new NativeFileSourceStore(invoke,(key,offset,bytes)=>invoke('beta_write_local_source_binary',bytes,{headers:{'x-exomind-source-key':key,'x-exomind-source-offset':String(offset)}})):new IndexedDbFileSourceStore();}
+export function productionFileSources():FileSourceStore{
+  if(!isTauri())return new IndexedDbFileSourceStore();
+  const android=typeof navigator!=='undefined'&&/android/i.test(navigator.userAgent);
+  const binaryWrite=android
+    ? (key:string,offset:number,bytes:Uint8Array)=>invoke('beta_write_local_source_base64',{key,offset,bytesBase64:encodeBase64SourceChunk(bytes)})
+    : (key:string,offset:number,bytes:Uint8Array)=>invoke('beta_write_local_source_binary',bytes,{headers:{'x-exomind-source-key':key,'x-exomind-source-offset':String(offset)}});
+  return new NativeFileSourceStore(invoke,binaryWrite);
+}

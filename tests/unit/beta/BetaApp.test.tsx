@@ -4,7 +4,9 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
+import { setBetaDesktopAdaptiveEnabled } from '@/beta/preferences';
 import type { BetaPage, BetaReceipt } from '@/beta/client';
+import type { BetaShareHandoff, BetaShareHandoffSummary, BetaShareHandoffsClient } from '@/beta/share-handoff-client';
 import { asyncDraftLocks, deferred, fakeClient, saved } from './fixtures';
 
 const originalLocks = Object.getOwnPropertyDescriptor(navigator, 'locks');
@@ -17,18 +19,95 @@ afterEach(() => {
   else Reflect.deleteProperty(navigator, 'locks');
 });
 describe('Beta React entry', () => {
+  it('adds a system-shared link to the local draft and waits for the existing Send action to create the Capture',async()=>{
+    const client=fakeClient();let consumed=false;
+    const summary:BetaShareHandoffSummary={handoff_id:'share-link-1',received_at_ms:1234,state:'ready',bound_profile_id:null,profile_match:true,error_code:null,recovery_instruction:null,text_state:'ready',text_preview:'https://example.test/article',items:[]};
+    const payload:BetaShareHandoff={...summary,text:'https://example.test/article',items:[]};
+    const shared:BetaShareHandoffsClient={
+      list:vi.fn(async()=>consumed?[]:[summary]),get:vi.fn(async()=>payload),
+      bindProfile:vi.fn(async()=>{}),
+      acknowledgeText:vi.fn(async()=>{consumed=true;}),acknowledgeItem:vi.fn(async()=>{}),
+      discard:vi.fn(async()=>{}),cancel:vi.fn(async()=>({cancel_requested:true,status:'cancelled'})),onAvailable:vi.fn(async()=>vi.fn()),
+    };
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} shareHandoffs={shared}/>);
+    const input=await screen.findByRole('textbox',{name:'记录当下'});
+    await waitFor(()=>expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy','false'));
+    expect(await screen.findByRole('heading',{name:'系统分享已接收'})).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button',{name:'添加到「我的档案」草稿'}));
+    await waitFor(()=>expect(input).toHaveValue('https://example.test/article'));
+    await waitFor(()=>expect(screen.queryByRole('heading',{name:'系统分享已接收'})).not.toBeInTheDocument());
+    expect(shared.acknowledgeText).toHaveBeenCalledWith('share-link-1','p');
+    expect(client.capture).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button',{name:'发送'}));
+    await waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
+    expect(client.capture.mock.calls[0][0].text).toBe('https://example.test/article');
+  });
+
+  it('keeps an incoming system share visible until a local profile is selected or created',async()=>{
+    const client=fakeClient();client.profiles.mockResolvedValue([]);
+    const summary:BetaShareHandoffSummary={handoff_id:'share-before-profile',received_at_ms:1234,state:'ready',bound_profile_id:null,profile_match:true,error_code:null,recovery_instruction:null,text_state:'ready',text_preview:'shared link',items:[]};
+    const shared:BetaShareHandoffsClient={
+      list:vi.fn(async()=>[summary]),get:vi.fn(async()=>({...summary,text:'https://example.test',items:[]})),
+      bindProfile:vi.fn(async()=>{}),
+      acknowledgeText:vi.fn(async()=>{}),acknowledgeItem:vi.fn(async()=>{}),
+      discard:vi.fn(async()=>{}),cancel:vi.fn(async()=>({cancel_requested:true,status:'cancelled'})),onAvailable:vi.fn(async()=>vi.fn()),
+    };
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} shareHandoffs={shared}/>);
+
+    expect(await screen.findByText('有 1 条系统分享待处理；选择档案后查看内容并继续处理。此处不会显示分享内容。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'选择或创建档案'}));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(client.capture).not.toHaveBeenCalled();
+    expect(shared.acknowledgeText).not.toHaveBeenCalled();
+  });
+
+  it('returns from another section when a new Android share intent arrives',async()=>{
+    const client=fakeClient();let received=false,notify:(id:string)=>void=()=>{};
+    const summary:BetaShareHandoffSummary={handoff_id:'share-while-settings',received_at_ms:1234,state:'ready',bound_profile_id:null,profile_match:true,error_code:null,recovery_instruction:null,text_state:'ready',text_preview:'shared text',items:[]};
+    const shared:BetaShareHandoffsClient={
+      list:vi.fn(async()=>received?[summary]:[]),get:vi.fn(async()=>({...summary,text:'shared text',items:[]})),
+      bindProfile:vi.fn(async()=>{}),
+      acknowledgeText:vi.fn(async()=>{}),acknowledgeItem:vi.fn(async()=>{}),
+      discard:vi.fn(async()=>{}),cancel:vi.fn(async()=>({cancel_requested:true,status:'cancelled'})),onAvailable:vi.fn(async handler=>{notify=handler;return vi.fn();}),
+    };
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} shareHandoffs={shared}/>);
+    await screen.findByRole('textbox',{name:'记录当下'});
+    await waitFor(()=>expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy','false'));
+    fireEvent.click(screen.getByRole('button',{name:'设置'}));
+    expect(await screen.findByRole('heading',{name:'设置'})).toBeInTheDocument();
+    await waitFor(()=>expect(shared.onAvailable).toHaveBeenCalled());
+
+    received=true;
+    await act(async()=>{notify('share-while-settings');await Promise.resolve();});
+
+    expect(await screen.findByRole('heading',{name:'系统分享已接收'})).toBeInTheDocument();
+    expect(screen.getByRole('textbox',{name:'记录当下'})).toBeVisible();
+    expect(client.capture).not.toHaveBeenCalled();
+  });
+
   it('uses the existing profile dialog for creation, retains a failed draft there and closes after a confirmed creation',async()=>{
     const client=fakeClient();client.provisionProfile.mockRejectedValueOnce(new Error('synthetic profile failure'));
     render(<BetaApp intentJournal={memoryIntentJournal()} client={client}/>);
     await screen.findByRole('textbox',{name:'记录当下'});expect(screen.queryByRole('textbox',{name:'新档案名称'})).not.toBeInTheDocument();
     expect(screen.getByRole('combobox',{name:'当前档案'})).toHaveAttribute('id','beta-profile');
-    fireEvent.click(screen.getByRole('button',{name:'管理档案'}));fireEvent.change(screen.getByRole('textbox',{name:'新档案名称'}),{target:{value:'Created in profile dialog'}});
+    const profileEntry = screen.getAllByRole('button',{name:/^打开档案：/});
+    expect(profileEntry).toHaveLength(1);
+    expect(screen.queryByRole('button',{name:'管理档案'})).not.toBeInTheDocument();
+    fireEvent.click(profileEntry[0]);fireEvent.change(screen.getByRole('textbox',{name:'新档案名称'}),{target:{value:'Created in profile dialog'}});
+    expect(screen.getByRole('button',{name:'档案备份与导入'})).toBeVisible();
     await waitFor(()=>expect(screen.getByRole('button',{name:'创建档案'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'创建档案'}));
     expect(await within(screen.getByRole('dialog')).findByText('synthetic profile failure')).toBeVisible();expect(screen.getByRole('dialog')).toBeVisible();expect(screen.getByRole('textbox',{name:'新档案名称'})).toHaveValue('Created in profile dialog');
     await waitFor(()=>expect(screen.getByRole('button',{name:'创建档案'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'创建档案'}));
     await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(client.provisionProfile).toHaveBeenCalledTimes(2);expect(client.provisionProfile.mock.calls[1][0]).toBe(client.provisionProfile.mock.calls[0][0]);
     expect(screen.getByRole('combobox',{name:'当前档案'})).toHaveValue(client.provisionProfile.mock.calls[1][0]);
+    act(()=>setBetaDesktopAdaptiveEnabled(false));
+    expect(screen.queryByRole('button',{name:'管理档案'})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'设置'}));
+    fireEvent.click(await screen.findByRole('button',{name:'管理档案'}));
+    expect(await screen.findByRole('button',{name:'档案备份与导入'})).toBeVisible();
   });
   it('keeps the sole writer, unsent draft and reading position mounted while opening settings',async()=>{
     const client=fakeClient();

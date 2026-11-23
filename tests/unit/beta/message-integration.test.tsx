@@ -108,6 +108,37 @@ afterEach(() => {
 });
 
 describe('Beta message actions in the record workspace', () => {
+  it('opens actions from bubble padding while preserving text clicks and active selection', async () => {
+    const client = profileClient();
+    const body = '可选择的合成正文';
+    client.eventsPage.mockResolvedValueOnce({ items: [eventRecord(PROFILE, EVENT, body)], next_before: null, highwater: 1 });
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client as BetaClient} />);
+
+    await screen.findByRole('textbox', { name: '记录当下' });
+    await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
+    const row = screen.getByTestId('new-mobile-user-message-row');
+    const bubble = within(row).getByTestId('beta-message-bubble');
+    const trigger = within(row).getByRole('button', { name: '显示消息操作' });
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(bubble);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(screen.getByText(body));
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(screen.getByText(body));
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    fireEvent.click(bubble);
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    selection?.removeAllRanges();
+  });
+
   it.each([
     { kind: 'timeblock' as const, body: '暂停时间块', label: '系统时间块' },
     { kind: 'summary/1' as const, body: '保存的 AI 总结正文', label: 'AI 总结' },
@@ -130,11 +161,11 @@ describe('Beta message actions in the record workspace', () => {
     await waitFor(() => expect(history).toHaveAttribute('aria-busy', 'false'));
     const historyTarget = document.querySelector(`[data-event-id="${TARGET}"][data-timeline-kind="${kind}"]`) as HTMLElement;
     expect(historyTarget).toBeInTheDocument();
-    fireEvent.click(within(historyTarget).getByRole('button', { name: '更多消息操作' }));
+    fireEvent.click(within(historyTarget).getByRole('button', { name: '显示消息操作' }));
     fireEvent.click(within(historyTarget).getByRole('button', { name: '复制消息正文' }));
     await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(1, body));
     fireEvent.click(within(historyTarget).getByRole('button', { name: '引用消息' }));
-    expect(editor).toHaveValue(buildBetaMessageReferenceLine({ profileId: PROFILE, eventId: TARGET, text: body, label }) + '\n');
+    expect(editor).toHaveValue(buildBetaMessageReferenceLine({ profileId: PROFILE, eventId: TARGET, text: body, label }) + '\n\n');
 
     const sourceRow = document.querySelector(`[data-event-id="${EVENT}"]`) as HTMLElement;
     fireEvent.click(within(sourceRow).getByRole('button', { name: /在外心档案内回看原文：定位摘要/ }));
@@ -147,7 +178,7 @@ describe('Beta message actions in the record workspace', () => {
     const peek = location.querySelector<HTMLElement>(`[data-event-id="${TARGET}"][data-timeline-kind="${kind}"]`);
     expect(peek).toBeInTheDocument();
     expect(history.contains(peek)).toBe(false);
-    fireEvent.click(within(peek!).getByRole('button', { name: '更多消息操作' }));
+    fireEvent.click(within(peek!).getByRole('button', { name: '显示消息操作' }));
     fireEvent.click(within(peek!).getByRole('button', { name: '复制消息正文' }));
     await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(2, body));
   });
@@ -165,14 +196,14 @@ describe('Beta message actions in the record workspace', () => {
     const editor = await screen.findByRole('textbox', { name: '记录当下' });
     await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
     const row = screen.getByTestId('new-mobile-user-message-row');
-    fireEvent.click(within(row).getByRole('button', { name: '更多消息操作' }));
+    fireEvent.click(within(row).getByRole('button', { name: '显示消息操作' }));
     expect(within(row).getByRole('button', { name: '复制消息正文' })).toBeDisabled();
     fireEvent.click(within(row).getByRole('button', { name: '引用消息' }));
 
     const referenceLine = buildBetaMessageReferenceLine({
       profileId: PROFILE, eventId: EVENT, text: '', label: '附件记录', metadata: '附件名：receipt.pdf',
     });
-    expect(editor).toHaveValue(referenceLine + '\n');
+    expect(editor).toHaveValue(referenceLine + '\n\n');
     expect(referenceLine).toContain('· 元数据：附件名：receipt.pdf');
     expect(referenceLine).not.toContain(' | ');
     expect(screen.getByRole('region', { name: '草稿中的外心档案内引用' })).toHaveTextContent('附件名：receipt.pdf');
@@ -190,7 +221,7 @@ describe('Beta message actions in the record workspace', () => {
     await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
     fireEvent.change(editor, { target: { value: '先写下的内容' } });
     const row = screen.getByTestId('new-mobile-user-message-row');
-    fireEvent.click(within(row).getByRole('button', { name: '更多消息操作' }));
+    fireEvent.click(within(row).getByRole('button', { name: '显示消息操作' }));
     fireEvent.click(within(row).getByRole('button', { name: '复制消息正文' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(body));
     fireEvent.click(within(row).getByRole('button', { name: '复制外心档案内定位链接' }));
@@ -198,7 +229,8 @@ describe('Beta message actions in the record workspace', () => {
     fireEvent.click(within(row).getByRole('button', { name: '引用消息' }));
 
     const referenceLine = buildBetaMessageReferenceLine({ profileId: PROFILE, eventId: EVENT, text: body });
-    expect(editor).toHaveValue(referenceLine + '\n先写下的内容');
+    expect(editor).toHaveValue(referenceLine + '\n\n先写下的内容');
+    expect(screen.getByText('引用已加入当前草稿')).toHaveAttribute('role', 'status');
     expect(screen.getByRole('region', { name: '草稿中的外心档案内引用' })).toHaveTextContent('原消息正文');
     fireEvent.click(screen.getByRole('button', { name: '档案内引用如何保存' }));
     expect(screen.getByText(/只用于外心档案内定位/)).toBeInTheDocument();
@@ -207,6 +239,38 @@ describe('Beta message actions in the record workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /从草稿移除引用/ }));
     expect(editor).toHaveValue('期间继续输入的内容');
     expect(screen.queryByRole('region', { name: '草稿中的外心档案内引用' })).not.toBeInTheDocument();
+  });
+
+  it('renders reference links inside the synthetic source message bubble', async () => {
+    const quoted = buildBetaMessageReferenceLine({ profileId: PROFILE, eventId: TARGET, text: '合成来源摘要\n合成尾文本' });
+    const client = profileClient();
+    client.eventsPage.mockResolvedValueOnce({ items: [eventRecord(PROFILE, EVENT, '正文开头\n\n' + quoted)], next_before: null, highwater: 1 });
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client as BetaClient} />);
+
+    await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
+    const row = document.querySelector(`[data-event-id="${EVENT}"]`) as HTMLElement;
+    const linkCard = within(row).getByRole('region', { name: '消息中的外心档案内引用原文' });
+    expect(linkCard.closest('.bg-user-bubble')).toBeTruthy();
+    expect(within(linkCard).getByText('合成来源摘要')).toBeInTheDocument();
+    expect(within(linkCard).getByRole('button', { name: /档案内回看/ })).toBeEnabled();
+  });
+
+  it('keeps a synthetic long JSON row content-sized and constrained on narrow layouts', async () => {
+    const body = '{"payload":"' + 'x'.repeat(12000) + '"}';
+    const client = profileClient();
+    client.eventsPage.mockResolvedValueOnce({ items: [eventRecord(PROFILE, EVENT, body)], next_before: null, highwater: 1 });
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client as BetaClient} />);
+
+    await screen.findByRole('textbox', { name: '记录当下' });
+    await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
+    const row = await screen.findByTestId('new-mobile-user-message-row');
+    const text = row.querySelector('p');
+    expect(text).toHaveTextContent(body);
+    expect(text?.className).toContain('[overflow-wrap:anywhere]');
+    expect(row.className).toContain('[&>div.flex-col]:w-fit');
+    const contentColumn = Array.from(row.querySelectorAll<HTMLElement>('*'))
+      .find(element => element.className.includes('max-w-[84%]'));
+    expect(contentColumn?.className).toContain('max-w-[84%]');
   });
 
   it('does not read a different profile for a pasted URI and keeps the current draft and selection', async () => {

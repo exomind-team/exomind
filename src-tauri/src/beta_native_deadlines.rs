@@ -1,9 +1,10 @@
 //! Native-owned platform reminders; no React lifetime or receiver Core writes.
-use super::{Failure, NativeState, trusted_window};
+use super::{trusted_window, Failure, NativeState};
+use exomind_android_timeblock_end_alert::BetaDeadlineNotificationChannelState;
 use serde::Serialize;
 use std::sync::{
-    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
 };
 use tauri::{State, WebviewWindow};
 #[path = "beta_native_handoff.rs"]
@@ -336,6 +337,52 @@ impl Bridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_settings_projection_is_device_scoped_and_does_not_claim_playback() {
+        let status = exomind_android_timeblock_end_alert::BetaDeadlineNotificationChannelState {
+            notification_permission: "denied".into(),
+            notifications_enabled: false,
+            channel_supported: true,
+            channel_exists: true,
+            channel_importance: "blocked".into(),
+            channel_sound_enabled: Some(false),
+            settings_available: true,
+        };
+        let value = serde_json::to_value(status).unwrap();
+
+        assert_eq!(value["notificationPermission"], "denied");
+        assert_eq!(value["notificationsEnabled"], false);
+        assert_eq!(value["channelSupported"], true);
+        assert_eq!(value["channelSoundEnabled"], false);
+        assert_eq!(value["settingsAvailable"], true);
+        assert!(value.get("profileId").is_none());
+        assert!(value.get("soundPlayed").is_none());
+        assert!(value.get("audible").is_none());
+    }
+
+    #[test]
+    fn pre_notification_channel_platform_serializes_global_sound_scope_as_unsupported() {
+        let value = serde_json::to_value(
+            exomind_android_timeblock_end_alert::BetaDeadlineNotificationChannelState {
+                notification_permission: "granted".into(),
+                notifications_enabled: true,
+                channel_supported: false,
+                channel_exists: false,
+                channel_importance: "unavailable".into(),
+                channel_sound_enabled: None,
+                settings_available: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(value["channelSupported"], false);
+        assert_eq!(value["channelExists"], false);
+        assert_eq!(value["channelSoundEnabled"], serde_json::Value::Null);
+        assert_eq!(value["settingsAvailable"], true);
+        assert!(value.get("profileId").is_none());
+    }
+
     #[tokio::test]
     async fn stop_does_not_treat_timed_out_platform_call_as_drained() {
         let bridge = Bridge::default();
@@ -406,6 +453,83 @@ pub(super) fn beta_deadline_alert_status(
         .lock()
         .map(|value| value.clone())
         .map_err(|_| exomind_beta_host::HostError::StatePoisoned.into())
+}
+
+/// Device-level notification-channel state is intentionally not profile-scoped.
+/// It reports Android configuration, never proof that audio was actually heard.
+#[tauri::command]
+pub(super) async fn beta_deadline_alert_channel_state(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    #[cfg_attr(not(target_os = "android"), allow(unused_variables))] app: tauri::AppHandle,
+) -> Result<BetaDeadlineNotificationChannelState, Failure> {
+    trusted_window(&window, state.inner())?;
+    if state.closing.load(Ordering::Acquire) {
+        return Err(exomind_beta_host::HostError::Stopped.into());
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        use exomind_android_timeblock_end_alert::AndroidTimeblockEndAlertExt;
+        tauri::async_runtime::spawn_blocking(move || {
+            app.android_timeblock_end_alert()
+                .beta_deadline_notification_channel_state()
+        })
+        .await
+        .map_err(|_| Failure {
+            code: "deadline_alert_channel_state_unavailable",
+            message: "Android 提醒渠道状态暂不可用，请重新读取",
+        })?
+        .map_err(|_| Failure {
+            code: "deadline_alert_channel_state_unavailable",
+            message: "Android 提醒渠道状态暂不可用，请重新读取",
+        })
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let unavailable = BetaDeadlineNotificationChannelState::unavailable();
+        Ok(unavailable)
+    }
+}
+
+/// Opens Android's notification channel page only after an explicit user action.
+#[tauri::command]
+pub(super) async fn beta_deadline_alert_open_channel_settings(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    #[cfg_attr(not(target_os = "android"), allow(unused_variables))] app: tauri::AppHandle,
+) -> Result<(), Failure> {
+    trusted_window(&window, state.inner())?;
+    if state.closing.load(Ordering::Acquire) {
+        return Err(exomind_beta_host::HostError::Stopped.into());
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        use exomind_android_timeblock_end_alert::AndroidTimeblockEndAlertExt;
+        tauri::async_runtime::spawn_blocking(move || {
+            app.android_timeblock_end_alert()
+                .open_beta_deadline_notification_channel_settings()
+        })
+        .await
+        .map_err(|_| Failure {
+            code: "deadline_alert_settings_open_failed",
+            message: "无法打开 Android 提醒渠道设置，请从系统应用通知设置中进入",
+        })?
+        .map_err(|_| Failure {
+            code: "deadline_alert_settings_open_failed",
+            message: "无法打开 Android 提醒渠道设置，请从系统应用通知设置中进入",
+        })
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        Err(Failure {
+            code: "deadline_alert_settings_unavailable",
+            message: "当前平台没有 Android 通知渠道设置",
+        })
+    }
 }
 #[tauri::command]
 pub(super) async fn beta_deadline_alert_request_permission(

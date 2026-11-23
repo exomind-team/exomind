@@ -21,6 +21,7 @@ const LAYOUT: &str = "exomind-native-local-intent/1";
 const CAPTURE_PREFIX: &str = "exomind:beta:drafts:";
 const TIMEBLOCK_PREFIX: &str = "exomind:beta:timeblocks:";
 const SUMMARY_PREFIX: &str = "exomind:beta:summaries:";
+const CORRECTION_PREFIX: &str = "exomind:beta:record-corrections:";
 const SUMMARY_CONSENT_PREFIX: &str = "exomind:beta:summary-consent:";
 const MAX_RAW_BYTES: usize = 8 * 1024 * 1024;
 const MAX_KEY_BYTES: usize = 256;
@@ -65,6 +66,22 @@ fn validate_key(key: &str, device: DeviceId, core: &Core) -> Result<(), HostErro
         return Ok(());
     }
     if key == format!("exomind:beta:workspace:{device}") {
+        return Ok(());
+    }
+    if let Some(suffix) = key.strip_prefix(CORRECTION_PREFIX) {
+        let Some((key_device, service_scope_digest)) = suffix.split_once(':') else {
+            return Err(HostError::InvalidRequest);
+        };
+        if key_device != device.to_string() {
+            return Err(HostError::Forbidden);
+        }
+        if service_scope_digest.len() != 64
+            || !service_scope_digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(HostError::InvalidRequest);
+        }
         return Ok(());
     }
     let encoded = key
@@ -175,6 +192,36 @@ mod tests {
             Some(consent_raw)
         );
         reopened.stop().unwrap();
+    }
+
+    #[test]
+    fn correction_recovery_namespace_is_device_bound_and_accepts_only_scoped_digests() {
+        let directory = tempfile::tempdir().unwrap();
+        let host = BetaHost::open(&directory.path().join("host")).unwrap();
+        let owner = host.owner_session().unwrap();
+        let device = host.device_id;
+        let key = format!("exomind:beta:record-corrections:{device}:{}", "a".repeat(64));
+
+        assert_eq!(host.read_local_intent(&owner, &key).unwrap(), None);
+        let raw = format!(r#"{{"version":1,"device_id":"{device}","service_scope":"synthetic","entries":[]}}"#);
+        host.write_local_intent(&owner, &key, &raw).unwrap();
+        assert_eq!(host.read_local_intent(&owner, &key).unwrap().as_deref(), Some(raw.as_str()));
+
+        let other_device_key = format!(
+            "exomind:beta:record-corrections:{}:{}",
+            DeviceId::new(),
+            "b".repeat(64)
+        );
+        assert!(matches!(
+            host.read_local_intent(&owner, &other_device_key),
+            Err(HostError::Forbidden)
+        ));
+        let malformed_scope = format!("exomind:beta:record-corrections:{device}:scope");
+        assert!(matches!(
+            host.read_local_intent(&owner, &malformed_scope),
+            Err(HostError::InvalidRequest)
+        ));
+        host.stop().unwrap();
     }
 
     #[test]

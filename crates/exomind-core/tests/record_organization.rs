@@ -59,6 +59,47 @@ fn exact_correction_source_is_profile_scoped_and_preserves_the_original() {
 }
 
 #[test]
+fn correction_text_is_literal_markdown_with_a_utf8_byte_budget() {
+    let root = tempfile::tempdir().unwrap();
+    let core = Core::open(root.path()).unwrap();
+    let profile = core.create_profile("synthetic correction text contract").unwrap();
+    let human = core.local_human(profile).unwrap();
+    let original = capture(profile, "synthetic original", &[]);
+    let target = core.submit(&human, &original).unwrap();
+    let markdown = "> 引用行\n\n第二段：中文与 emoji 🧪\n\n```json\n{\"answer\":1}\n```\n制表符\t与控制字符\u{0001}";
+    let corrected = core
+        .record_correction(&human, &correction(profile, original.event_id, &target.event_digest, markdown))
+        .unwrap();
+    let stored = core.correction_event(&human, profile, corrected.event_id).unwrap().unwrap();
+    assert_eq!(stored.record.corrected_text, markdown);
+
+    let byte_limit_text = "x".repeat(128 * 1024);
+    let at_limit = core
+        .record_correction(
+            &human,
+            &correction(profile, original.event_id, &target.event_digest, &byte_limit_text),
+        )
+        .unwrap();
+    assert_eq!(
+        core.correction_event(&human, profile, at_limit.event_id)
+            .unwrap()
+            .unwrap()
+            .record
+            .corrected_text,
+        byte_limit_text
+    );
+
+    let over_limit_text = "x".repeat(128 * 1024 + 1);
+    assert!(matches!(
+        core.record_correction(
+            &human,
+            &correction(profile, original.event_id, &target.event_digest, &over_limit_text),
+        ),
+        Err(CoreError::InvalidCorrection(_))
+    ));
+}
+
+#[test]
 fn exact_correction_source_reports_an_unresolved_target_then_a_digest_conflict() {
     let root = tempfile::tempdir().unwrap();
     let core = Core::open(root.path()).unwrap();

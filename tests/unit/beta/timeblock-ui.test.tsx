@@ -172,6 +172,7 @@ describe('shared Alpha focus presentation with real Beta commands',()=>{
       const firstId=oldId.kind==='start'?oldId.block_id:B;
       await waitFor(()=>expect(screen.getByRole('button',{name:`填写反馈 ${firstId.slice(0,8)}`})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:`填写反馈 ${firstId.slice(0,8)}`}));
       fireEvent.click(await screen.findByRole('button',{name:'明确跳过反馈',exact:true}));
+      fireEvent.click(await screen.findByRole('button',{name:'确认跳过反馈',exact:true}));
       await waitFor(()=>expect(screen.queryByTestId('new-focus-feedback-textarea')).not.toBeInTheDocument());
       await waitFor(()=>expect(screen.getByRole('button',{name:'追加反馈'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'追加反馈'}));
       const appended=await screen.findByTestId('new-focus-feedback-textarea');fireEvent.change(appended,{target:{value:'later note'}});

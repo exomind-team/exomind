@@ -59,6 +59,7 @@ exomind-android-keepalive = { path = "../crates/exomind-android-keepalive" }
 exomind-android-clipboard = { path = "../crates/exomind-android-clipboard" }
 exomind-android-keep-awake = { path = "../crates/exomind-android-keep-awake" }
 exomind-android-timeblock-end-alert = { path = "../crates/exomind-android-timeblock-end-alert" }
+exomind-android-share-handoff = { path = "../crates/exomind-android-share-handoff" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tauri-plugin-global-shortcut = "2"
 enigo = { version = "0.3", features = ["serde"] }

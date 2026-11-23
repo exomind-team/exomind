@@ -25,6 +25,10 @@ function previewButton(kind: 'audio' | 'video', fileName: string) {
   return screen.getByRole('button', { name: `预览${kind === 'audio' ? '音频' : '视频'} ${fileName}` });
 }
 
+function inlinePlayButton(fileName: string) {
+  return screen.getByRole('button', { name: `播放 ${fileName}` });
+}
+
 function previewProps(overrides: Partial<ComponentProps<typeof BetaMediaPreview>> = {}) {
   return {
     identity: 'device:profile:original:sha256',
@@ -101,6 +105,65 @@ describe('explicit verified media preview', () => {
     expect(media.paused).toBe(true);
     expect(dialog).toHaveTextContent('正在读取媒体信息');
     expect(screen.getByRole('button', { name: '播放' })).toBeInTheDocument();
+  });
+
+  it('plays verified synthetic audio from one contextual tap and never autoplays on mount', async () => {
+    const bytes = syntheticWav();
+    const load = vi.fn(async () => new Blob([bytes], { type: 'audio/wav' }));
+    render(<BetaMediaPreview {...previewProps({ inline: true, byteLength: bytes.byteLength, load })} />);
+
+    expect(load).not.toHaveBeenCalled();
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(inlinePlayButton('voice.wav'));
+
+    const media = await screen.findByTestId('beta-media-element') as HTMLMediaElement;
+    await waitFor(() => expect(media.play).toHaveBeenCalledTimes(1));
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(media.autoplay).toBe(false);
+    expect(media).not.toHaveAttribute('controls');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    const previewBlob = vi.mocked(URL.createObjectURL).mock.calls[0]?.[0] as Blob;
+    expect(new Uint8Array(await previewBlob.arrayBuffer())).toEqual(bytes);
+
+    fireEvent.playing(media);
+    expect(screen.getByTestId('beta-media-playback-status')).toHaveTextContent('正在播放');
+    fireEvent.click(screen.getByRole('button', { name: '暂停 voice.wav' }));
+    expect(media.pause).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses recorder elapsed time only as a labeled hint and keeps unknown media duration unseekable', async () => {
+    render(<BetaMediaPreview {...previewProps({ inline: true, durationHintMs: 5_000 })} />);
+    fireEvent.click(inlinePlayButton('voice.wav'));
+    const media = await screen.findByTestId('beta-media-element') as HTMLMediaElement;
+    setMediaReadings(media, Number.NaN);
+    fireEvent.loadedMetadata(media);
+
+    expectMediaTimes('0:00', '--:--');
+    expect(screen.getByTestId('beta-media-recording-duration')).toHaveTextContent('录音计时 0:05；媒体总时长尚未确认');
+    expect(screen.getByRole('slider', { name: '播放位置（秒）' })).toBeDisabled();
+
+    setMediaReadings(media, 12);
+    fireEvent.loadedMetadata(media);
+    expectMediaTimes('0:00', '0:12');
+    expect(screen.queryByTestId('beta-media-recording-duration')).not.toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: '播放位置（秒）' })).toBeEnabled();
+  });
+
+  it('revokes the inline playback URL on close and unmount', async () => {
+    const load = vi.fn(async () => new Blob([syntheticWav()], { type: 'audio/wav' }));
+    const view = render(<BetaMediaPreview {...previewProps({ inline: true, byteLength: syntheticWav().byteLength, load })} />);
+    fireEvent.click(inlinePlayButton('voice.wav'));
+    const media = await screen.findByTestId('beta-media-element');
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '收起播放器 voice.wav' }));
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:media-1'));
+    expect(media.pause).toHaveBeenCalled();
+
+    fireEvent.click(inlinePlayButton('voice.wav'));
+    await screen.findByTestId('beta-media-element');
+    view.unmount();
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:media-2'));
   });
 
   it('defers video without reading bytes or creating a playback object', () => {
@@ -376,14 +439,16 @@ describe('explicit verified media preview', () => {
 
     render(<OriginalDownloads client={client} profileId="profile-current" deviceId="device-current" originals={[original]} />);
     expect(readOriginal).not.toHaveBeenCalled();
-    fireEvent.click(previewButton('audio', 'voice.wav'));
-    await screen.findByTestId('beta-media-element');
+    fireEvent.click(inlinePlayButton('voice.wav'));
+    const media = await screen.findByTestId('beta-media-element');
+    await waitFor(() => expect(media.play).toHaveBeenCalledTimes(1));
 
     expect(readOriginal).toHaveBeenCalledWith('profile-current', 'voice-original', 0, bytes.byteLength);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(open).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
     expect(client.capture).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: '收起播放器 voice.wav' }));
     expect(screen.getByRole('button', { name: '打开 voice.wav' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '下载 voice.wav' })).toBeEnabled();
   });

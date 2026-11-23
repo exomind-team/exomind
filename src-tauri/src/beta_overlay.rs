@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::{HashSet, VecDeque},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tauri::Emitter;
@@ -767,9 +767,12 @@ pub(super) async fn beta_workspace_bind(
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         state.human(profile_id).map_err(Failure::from)?;
+        let status = state.host.status().map_err(Failure::from)?;
+        if !status.running {
+            return Err(unavailable());
+        }
         let mut broker = state.overlay.lock().map_err(|_| unavailable())?;
         set_presentation(&mut broker, theme, input_send_mode)?;
-        let status = state.host.status().map_err(Failure::from)?;
         let scope = broker.register(Binding {
             device_id: status
                 .device_id
@@ -795,6 +798,26 @@ pub(super) enum WindowOperation {
     Resize { width: u32, height: u32 },
     RememberPosition,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowCaller {
+    Main,
+    Overlay,
+}
+fn window_operation_caller(operation: &WindowOperation, label: &str) -> Option<WindowCaller> {
+    match operation {
+        WindowOperation::Show if label == "main" => Some(WindowCaller::Main),
+        WindowOperation::Hide if label == "main" => Some(WindowCaller::Main),
+        WindowOperation::Hide if label == LABEL => Some(WindowCaller::Overlay),
+        WindowOperation::ReturnMain
+        | WindowOperation::Resize { .. }
+        | WindowOperation::RememberPosition
+            if label == LABEL =>
+        {
+            Some(WindowCaller::Overlay)
+        }
+        _ => None,
+    }
+}
 #[tauri::command]
 pub(super) async fn beta_overlay_window(
     app: AppHandle,
@@ -802,10 +825,10 @@ pub(super) async fn beta_overlay_window(
     state: State<'_, Arc<NativeState>>,
     operation: WindowOperation,
 ) -> Result<(), Failure> {
-    if matches!(operation, WindowOperation::Show) {
-        trusted_window(&window, state.inner())?;
-    } else {
-        trusted_overlay(&window, state.inner())?;
+    match window_operation_caller(&operation, window.label()) {
+        Some(WindowCaller::Main) => trusted_window(&window, state.inner())?,
+        Some(WindowCaller::Overlay) => trusted_overlay(&window, state.inner())?,
+        None => return Err(denied()),
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -819,18 +842,53 @@ pub(super) async fn beta_overlay_window(
     {
         match operation {
             WindowOperation::Show => {
-                ensure_window(&app)?;
+                ensure_window(&app, state.inner())?;
                 let overlay = app.get_webview_window(LABEL).ok_or_else(unavailable)?;
                 let saved = state.overlay.lock().map_err(|_| unavailable())?.position;
                 position_window(&app, &overlay, saved)?;
-                overlay.show().map_err(|_| unavailable())?;
+                overlay.show().map_err(|error| {
+                    log::error!("Beta overlay window show failed: {error}");
+                    Failure {
+                        code: "overlay_window_show_failed",
+                        message: "浮窗窗口已创建，但系统未能显示；请重试，仍失败时可回主界面继续使用工作台",
+                    }
+                })?;
+                overlay.set_focus().map_err(|error| {
+                    log::error!("Beta overlay window focus failed: {error}");
+                    Failure {
+                        code: "overlay_window_focus_failed",
+                        message: "浮窗已显示，但系统未能将其置于前台；请重试，也可回主界面继续使用工作台",
+                    }
+                })?;
             }
-            WindowOperation::Hide => window.hide().map_err(|_| unavailable())?,
+            WindowOperation::Hide => {
+                if let Some(overlay) = app.get_webview_window(LABEL) {
+                    overlay.hide().map_err(|error| {
+                        log::error!("Beta overlay window hide failed: {error}");
+                        Failure {
+                            code: "overlay_window_hide_failed",
+                            message: "系统未能隐藏浮窗；请重试，设置开关仍保持上次确认值",
+                        }
+                    })?;
+                }
+            }
             WindowOperation::ReturnMain => {
                 let main = app.get_webview_window("main").ok_or_else(unavailable)?;
-                main.show().map_err(|_| unavailable())?;
+                main.show().map_err(|error| {
+                    log::error!("Beta main window show failed: {error}");
+                    Failure {
+                        code: "overlay_main_window_show_failed",
+                        message: "主窗口未能显示；请重试浮窗中的返回按钮",
+                    }
+                })?;
                 let _ = main.unminimize();
-                main.set_focus().map_err(|_| unavailable())?;
+                main.set_focus().map_err(|error| {
+                    log::error!("Beta main window focus failed: {error}");
+                    Failure {
+                        code: "overlay_main_window_focus_failed",
+                        message: "主窗口已显示，但系统未能将其置于前台；请在任务栏选择主窗口",
+                    }
+                })?;
             }
             WindowOperation::Resize { width, height } => {
                 // Alpha's measured mini/idle pills can be shorter than their
@@ -855,10 +913,11 @@ pub(super) async fn beta_overlay_window(
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn ensure_window(app: &AppHandle) -> Result<(), Failure> {
-    if app.get_webview_window(LABEL).is_some() {
-        return Ok(());
-    }
+fn ensure_window(app: &AppHandle, state: &NativeState) -> Result<(), Failure> {
+    ensure_window_once(
+        &state.overlay_window_creation,
+        || app.get_webview_window(LABEL).is_some(),
+        || {
     let directory = crate::dev_instance_paths::resolve_overlay_webview_data_dir(LABEL)
         .map_err(|_| unavailable())?
         .unwrap_or(
@@ -884,11 +943,38 @@ fn ensure_window(app: &AppHandle) -> Result<(), Failure> {
     .data_directory(directory);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
-    let window = builder.build().map_err(|_| unavailable())?;
+            let window = builder.build().map_err(window_creation_failed)?;
     if let Err(error) = super::window_icon::install(&window) {
         log::warn!("Beta overlay logo was not applied: {error}");
     }
     position_window(app, &window, None)
+        },
+    )
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn ensure_window_once(
+    creation_lock: &Mutex<()>,
+    window_exists: impl FnOnce() -> bool,
+    create_window: impl FnOnce() -> Result<(), Failure>,
+) -> Result<(), Failure> {
+    // This mutex only serializes the check/create pair; recovering a poisoned
+    // guard is safe because it contains no window state of its own.
+    let _guard = creation_lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if window_exists() {
+        return Ok(());
+    }
+    create_window()
+}
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn window_creation_failed(error: impl std::fmt::Display) -> Failure {
+    log::error!("Beta overlay window creation failed: {error}");
+    Failure {
+        code: "overlay_window_creation_failed",
+        message: "系统未能创建浮窗窗口；请重试，仍失败时重启应用后再试，或继续在主界面使用工作台",
+    }
 }
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn position_window(
@@ -1060,6 +1146,164 @@ mod tests {
         }
         assert_eq!(b.entries.len(), MAX_REQUESTS);
         assert_eq!(b.submit(first).unwrap_err().code, "overlay_request_expired");
+    }
+    #[test]
+    fn overlay_window_creation_skips_an_existing_window() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let creation_lock = Mutex::new(());
+        let created = AtomicBool::new(false);
+        ensure_window_once(
+            &creation_lock,
+            || true,
+            || {
+                created.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(!created.load(Ordering::SeqCst));
+    }
+    #[test]
+    fn concurrent_show_requests_create_the_window_once() {
+        use std::sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            Arc, Mutex,
+        };
+
+        let exists = Arc::new(AtomicBool::new(false));
+        let creations = Arc::new(AtomicUsize::new(0));
+        let creation_lock = Arc::new(Mutex::new(()));
+        let requests = (0..2)
+            .map(|_| {
+                let exists = Arc::clone(&exists);
+                let creations = Arc::clone(&creations);
+                let creation_lock = Arc::clone(&creation_lock);
+                std::thread::spawn(move || {
+                    ensure_window_once(
+                        &creation_lock,
+                        || exists.load(Ordering::SeqCst),
+                        || {
+                            creations.fetch_add(1, Ordering::SeqCst);
+                            exists.store(true, Ordering::SeqCst);
+                            Ok(())
+                        },
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for request in requests {
+            request.join().unwrap().unwrap();
+        }
+        assert_eq!(creations.load(Ordering::SeqCst), 1);
+    }
+    #[test]
+    fn failed_window_creation_can_be_retried() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let creation_lock = Mutex::new(());
+        let attempts = AtomicUsize::new(0);
+        let first = ensure_window_once(
+            &creation_lock,
+            || false,
+            || {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Err(window_creation_failed(std::io::Error::other("synthetic")))
+            },
+        );
+        assert_eq!(first.unwrap_err().code, "overlay_window_creation_failed");
+
+        ensure_window_once(
+            &creation_lock,
+            || false,
+            || {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+    #[test]
+    fn independent_app_locks_do_not_block_each_others_window_creation() {
+        use std::sync::{Arc, Barrier, Mutex};
+
+        let both_creating = Arc::new(Barrier::new(2));
+        let requests = (0..2)
+            .map(|_| {
+                let both_creating = Arc::clone(&both_creating);
+                std::thread::spawn(move || {
+                    let creation_lock = Mutex::new(());
+                    ensure_window_once(
+                        &creation_lock,
+                        || false,
+                        || {
+                            both_creating.wait();
+                            Ok(())
+                        },
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for request in requests {
+            request.join().unwrap().unwrap();
+        }
+    }
+    #[test]
+    fn poisoned_window_creation_lock_allows_a_later_retry() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Mutex,
+        };
+
+        let creation_lock = Arc::new(Mutex::new(()));
+        let poisoned_lock = Arc::clone(&creation_lock);
+        let panic = std::thread::spawn(move || {
+            let _ = ensure_window_once(
+                &poisoned_lock,
+                || false,
+                || -> Result<(), Failure> {
+                    panic!("synthetic panic during window creation");
+                },
+            );
+        })
+        .join();
+        assert!(panic.is_err());
+
+        let created = AtomicBool::new(false);
+        ensure_window_once(
+            &creation_lock,
+            || false,
+            || {
+                created.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(created.load(Ordering::SeqCst));
+    }
+    #[test]
+    fn window_creation_failure_identifies_the_failed_stage() {
+        let failure = window_creation_failed(std::io::Error::other("synthetic"));
+
+        assert_eq!(failure.code, "overlay_window_creation_failed");
+        assert!(failure.message.contains("创建浮窗窗口"));
+    }
+    #[test]
+    fn main_settings_and_overlay_can_both_hide_the_overlay_window() {
+        assert_eq!(
+            window_operation_caller(&WindowOperation::Hide, "main"),
+            Some(WindowCaller::Main)
+        );
+        assert_eq!(
+            window_operation_caller(&WindowOperation::Hide, LABEL),
+            Some(WindowCaller::Overlay)
+        );
+        assert_eq!(window_operation_caller(&WindowOperation::Show, LABEL), None);
     }
     #[test]
     fn correct_url_does_not_authorize_another_window_label() {

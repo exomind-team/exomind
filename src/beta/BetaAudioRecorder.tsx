@@ -10,6 +10,7 @@ import {
   BetaAudioRecordingController,
   type BetaAudioAttachmentSink,
 } from './beta-audio-recording';
+import { BetaMediaPreview } from './BetaMediaPreview';
 
 export interface BetaAudioRecorderProps {
   /** Supplied by the stable device workspace owner, never created by this view. */
@@ -59,6 +60,9 @@ export function BetaAudioRecorder({ controller, profileId, profileName, profileN
     && snapshot.durationMs >= controller.limits.maxDurationMs * controller.limits.warningRatio;
   const nearByteLimit = phase === 'recording'
     && snapshot.byteLength >= controller.limits.maxBytes * controller.limits.warningRatio;
+  const pendingFile = phase === 'awaiting_attachment' && !scopeMismatch
+    ? controller.getPendingFile(profileId)
+    : null;
 
   const confirmDiscard = () => {
     if (snapshot.profileId) controller.discard(snapshot.profileId);
@@ -67,15 +71,18 @@ export function BetaAudioRecorder({ controller, profileId, profileName, profileN
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="beta-audio-recorder">
-      {phase === 'idle' && (
-        <ActionTooltip label="开始原声录音">
+      {(phase === 'idle' || phase === 'recording') && (
+        <ActionTooltip label={phase === 'recording' ? '停止并保留原声' : '开始原声录音'}>
           <Button
             type="button" size="icon" variant="ghost"
-            className="h-9 w-9 shrink-0 rounded-full text-muted hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-            aria-label="开始原声录音"
-            onClick={() => { void controller.start(profileId).catch(() => {}); }}
+            className={`h-9 w-9 shrink-0 rounded-full [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 ${phase === 'recording' ? 'text-destructive hover:text-destructive' : 'text-muted hover:text-foreground'}`}
+            aria-label={phase === 'recording' ? '停止原声录音' : '开始原声录音'}
+            onClick={() => {
+              if (phase === 'recording') void controller.stop();
+              else void controller.start(profileId).catch(() => {});
+            }}
           >
-            <Mic size={16} />
+            {phase === 'recording' ? <Square size={16} className="fill-current" /> : <Mic size={16} />}
           </Button>
         </ActionTooltip>
       )}
@@ -106,11 +113,6 @@ export function BetaAudioRecorder({ controller, profileId, profileName, profileN
               接近 {nearByteLimit ? formatLimit('bytes', controller.limits.maxBytes) : formatLimit('duration', controller.limits.maxDurationMs)} 上限
             </span>
           )}
-          <ActionTooltip label="停止并保留原声">
-            <Button type="button" size="sm" variant="outline" onClick={() => { void controller.stop(); }} aria-label="停止原声录音" >
-              <Square size={13} className="mr-1.5 fill-current" />停止
-            </Button>
-          </ActionTooltip>
           <DiscardDialog
             open={discardOpen}
             onOpenChange={setDiscardOpen}
@@ -169,6 +171,25 @@ export function BetaAudioRecorder({ controller, profileId, profileName, profileN
             )}
             {snapshot.error && <p className="text-[11px] text-destructive" role="alert">{snapshot.error}</p>}
           </div>
+          {pendingFile && snapshot.sourceId && (
+            <div className="basis-full min-w-0">
+              <BetaMediaPreview
+                identity={JSON.stringify([profileId, snapshot.sourceId, pendingFile.name, pendingFile.size, pendingFile.type])}
+                sourceScope={controller}
+                inline
+                durationHintMs={snapshot.durationMs}
+                fileName={pendingFile.name}
+                mediaType={pendingFile.type || snapshot.mimeType || 'application/octet-stream'}
+                byteLength={pendingFile.size}
+                fallbackActionMessage="关闭试听后可继续保存这段原声"
+                load={async () => {
+                  const current = controller.getPendingFile(profileId);
+                  if (!current || current !== pendingFile) throw new Error('原声已变化；关闭试听后重新打开即可查看当前录音');
+                  return current;
+                }}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -221,9 +242,14 @@ function DiscardDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <ActionTooltip label="明确放弃这段原声">
-          <Button type="button" size="sm" variant="ghost" aria-label="放弃原声录音" onClick={() => onOpenChange(true)}>
-            <Trash2 size={14} className="mr-1.5" />放弃
+      <ActionTooltip label="放弃原声录音">
+          <Button
+            type="button" size="icon" variant="ghost"
+            className="h-9 w-9 shrink-0 rounded-full text-muted hover:text-destructive [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+            aria-label="放弃原声录音"
+            onClick={() => onOpenChange(true)}
+          >
+            <Trash2 size={15} />
           </Button>
       </ActionTooltip>
       <DialogContent className="border-border-card bg-card text-card-foreground">

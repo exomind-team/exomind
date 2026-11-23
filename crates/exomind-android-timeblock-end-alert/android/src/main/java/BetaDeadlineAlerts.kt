@@ -6,9 +6,13 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -22,7 +26,9 @@ import java.util.UUID
  */
 object BetaDeadlineAlerts {
   const val ACTION_FIRE = "com.exomind.app.action.BETA_DEADLINE_ALERT_FIRE"
-  private const val CHANNEL = "exomind_beta_deadline_alert"
+  const val CHANNEL_ID = "exomind_beta_deadline_alert"
+  private const val CHANNEL_NAME = "时间块到点"
+  private const val CHANNEL_DESCRIPTION = "时间块倒计时到点时的系统提醒。"
   private const val MAX_RECEIPTS = 4096
   private val gate=BetaDeadlineGate()
   private var handoffFailure=false
@@ -36,9 +42,91 @@ object BetaDeadlineAlerts {
   private fun prefs(context: Context) = context.getSharedPreferences("exomind.beta.deadline.alerts", Context.MODE_PRIVATE)
   private fun manager(context: Context) = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
   private fun exact(context: Context): Boolean = runCatching { manager(context)?.let { Build.VERSION.SDK_INT < Build.VERSION_CODES.S || it.canScheduleExactAlarms() } ?: false }.getOrDefault(false)
+  private fun notificationChannel(context: Context): NotificationChannel? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null
+    return context.getSystemService(NotificationManager::class.java)?.getNotificationChannel(CHANNEL_ID)
+  }
+
+  private fun ensureNotificationChannel(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
+    val notifications = context.getSystemService(NotificationManager::class.java) ?: return false
+    val existing = notifications.getNotificationChannel(CHANNEL_ID)
+    val defaultSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+    val policy = deadlineNotificationSoundPolicy(
+      channelSupported = true,
+      channelAlreadyExists = existing != null,
+      defaultSoundAvailable = defaultSound != null,
+    )
+    if (!policy.createChannel) return true
+
+    return runCatching {
+      val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH).apply {
+        description = CHANNEL_DESCRIPTION
+        setShowBadge(false)
+        if (policy.applyDefaultSystemSoundToNewChannel) {
+          setSound(
+            defaultSound,
+            AudioAttributes.Builder()
+              .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+              .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+              .build(),
+          )
+        }
+      }
+      notifications.createNotificationChannel(channel)
+      true
+    }.onFailure { error ->
+      Log.w("ExoMindBetaDeadline", "notification channel requires system settings review", error)
+    }.getOrDefault(false)
+  }
+
+  private fun channelImportanceLabel(channel: NotificationChannel?): String = when (channel?.importance) {
+    null -> "unavailable"
+    NotificationManager.IMPORTANCE_NONE -> "blocked"
+    NotificationManager.IMPORTANCE_MIN -> "min"
+    NotificationManager.IMPORTANCE_LOW -> "low"
+    NotificationManager.IMPORTANCE_DEFAULT -> "default"
+    NotificationManager.IMPORTANCE_HIGH -> "high"
+    NotificationManager.IMPORTANCE_MAX -> "max"
+    else -> "unknown"
+  }
+
+  fun notificationChannelState(context: Context, permission: String): JSObject {
+    val channelSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+    val channel = notificationChannel(context)
+    val soundEnabled = channel?.let {
+      deadlineChannelSoundEnabled(
+        channelExists = true,
+        channelBlocked = it.importance == NotificationManager.IMPORTANCE_NONE,
+        soundUriPresent = it.sound != null,
+      )
+    }
+    return JSObject()
+      .put("notificationPermission", permission)
+      .put("notificationsEnabled", NotificationManagerCompat.from(context).areNotificationsEnabled())
+      .put("channelSupported", channelSupported)
+      .put("channelExists", channel != null)
+      .put("channelImportance", channelImportanceLabel(channel))
+      .put("channelSoundEnabled", soundEnabled ?: JSONObject.NULL)
+      .put("settingsAvailable", true)
+  }
+
+  fun openNotificationChannelSettings(activity: android.app.Activity) {
+    check(ensureNotificationChannel(activity.applicationContext)) { "notification channel unavailable" }
+    val channelSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+    val intent = if (channelSupported) {
+      Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+        .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+        .putExtra(Settings.EXTRA_CHANNEL_ID, CHANNEL_ID)
+    } else {
+      Intent(Settings.ACTION_SOUND_SETTINGS)
+    }
+    activity.startActivity(intent)
+  }
+
   private fun notificationAllowed(context: Context): Boolean {
     val notifications=NotificationManagerCompat.from(context)
-    return notifications.areNotificationsEnabled() && (Build.VERSION.SDK_INT<Build.VERSION_CODES.O || notifications.getNotificationChannel(CHANNEL)?.importance!=NotificationManager.IMPORTANCE_NONE)
+    return notifications.areNotificationsEnabled() && (Build.VERSION.SDK_INT<Build.VERSION_CODES.O || notifications.getNotificationChannel(CHANNEL_ID)?.importance!=NotificationManager.IMPORTANCE_NONE)
   }
   private fun load(context: Context): JSONObject = JSONObject(prefs(context).getString("alerts", "{}") ?: "{}")
   private fun receipts(context: Context): MutableSet<String> = (prefs(context).getStringSet("delivered", emptySet()) ?: emptySet()).toMutableSet()
@@ -61,6 +149,7 @@ object BetaDeadlineAlerts {
 
   @Synchronized
   fun activate(context: Context, token: String) {
+    ensureNotificationChannel(context)
     val old=load(context)
     // Preserve source attribution for already posted notifications across a
     // new Native runtime, including migration from the earlier UUID-only set.
@@ -159,18 +248,29 @@ object BetaDeadlineAlerts {
     if(delivered.contains(id) || delivered.size>=MAX_RECEIPTS)return
     val now=SystemClock.elapsedRealtime()
     if(!entry.optBoolean("completed") && entry.getLong("trigger")>now) { schedule(context,id,entry.getLong("trigger"));return }
+    if (!ensureNotificationChannel(context)) return
     val notifications=NotificationManagerCompat.from(context)
     if(!notificationAllowed(context))return
-    if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O) notifications.createNotificationChannel(NotificationChannel(CHANNEL,"时间块到点",NotificationManager.IMPORTANCE_HIGH))
     val launch=Intent(context,BetaDeadlineHandoffActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     // Scope extras are hints for presentation, never Core commands or authority.
     launch.putExtra("betaProfileId",entry.getString("profile")).putExtra("betaBlockId",entry.getString("block"))
     launch.data=Uri.parse("exomind-beta://open-deadline/$id")
     val open=PendingIntent.getActivity(context,0,launch,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-    val notification=NotificationCompat.Builder(context,CHANNEL).setSmallIcon(context.applicationInfo.icon)
+    val channelSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+    val defaultSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+    val soundPolicy = deadlineNotificationSoundPolicy(
+      channelSupported = channelSupported,
+      channelAlreadyExists = notificationChannel(context) != null,
+      defaultSoundAvailable = defaultSound != null,
+    )
+    val builder = NotificationCompat.Builder(context,CHANNEL_ID).setSmallIcon(context.applicationInfo.icon)
       .setContentTitle("时间块到点").setContentText("打开外心查看状态与填写反馈")
       .setCategory(NotificationCompat.CATEGORY_REMINDER).setPriority(NotificationCompat.PRIORITY_HIGH)
-      .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setContentIntent(open).setAutoCancel(true).build()
+      .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setContentIntent(open).setAutoCancel(true)
+    if (soundPolicy.applyDefaultSystemSoundToLegacyNotification) {
+      defaultSound?.let { builder.setSound(it, AudioManager.STREAM_NOTIFICATION) }
+    }
+    val notification=builder.build()
     try {
       notifications.notify("beta-deadline-$id",0,notification)
       delivered.add(id)

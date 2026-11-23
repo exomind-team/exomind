@@ -186,6 +186,75 @@ test('real container keeps controls reachable and fits narrow or short layouts',
   await page.screenshot({ path: info.outputPath('short-layout.png'), fullPage: true });
 });
 
+test('mobile composer keeps the editor visible above tools and bottom navigation while the keyboard reduces the viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 760 });
+  const input = page.getByRole('textbox', { name: '记录当下' });
+  const editorWidth = await input.evaluate(element => element.getBoundingClientRect().width);
+  expect(editorWidth).toBeGreaterThan(260);
+
+  await activate(page, page.getByRole('button', { name: /编辑记录标签/ }));
+  const tagInput = page.getByRole('textbox', { name: '添加记录标签' });
+  await tagInput.fill('合成竖屏标签');
+  await activate(page, page.getByRole('button', { name: '添加', exact: true }));
+
+  await input.fill('合成内容：输入区在软键盘展开后仍然可见、可编辑。');
+  await page.setViewportSize({ width: 360, height: 340 });
+  await expect(input).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole('button', { name: '发送', exact: true })).toBeInViewport({ ratio: 1 });
+  const tools = page.getByTestId('new-now-input-tools');
+  const toolLayout = await tools.evaluate(element => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    overflowY: getComputedStyle(element).overflowY,
+  }));
+  expect(toolLayout.scrollHeight).toBeGreaterThan(toolLayout.clientHeight);
+  expect(toolLayout.overflowY).toBe('auto');
+  const separated = await tools.evaluate(element => {
+    const inputBox = document.querySelector('[data-testid="new-now-input-textarea"]')!.getBoundingClientRect();
+    const toolsBox = element.getBoundingClientRect();
+    return toolsBox.bottom <= inputBox.top + 1;
+  });
+  expect(separated).toBe(true);
+
+  const inputTopBeforeToolsScroll = (await input.boundingBox())!.y;
+  await tools.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  expect((await input.boundingBox())!.y).toBe(inputTopBeforeToolsScroll);
+  await input.press('End');
+  await input.press('Shift+ArrowLeft');
+  await expect(input).toHaveValue('合成内容：输入区在软键盘展开后仍然可见、可编辑。');
+  await expect(page.getByRole('button', { name: '附件', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '附件', exact: true })).toBeInViewport({ ratio: 1 });
+
+  await page.setViewportSize({ width: 360, height: 760 });
+  await input.evaluate(element => element.blur());
+  const nav = page.getByTestId('mobile-bottom-tab');
+  await expect(nav).toBeVisible();
+  const composerNavigationLayout = await page.getByTestId('new-now-input-row').evaluate(element => {
+    const navigation = document.querySelector('[data-testid="mobile-bottom-tab"]')!.getBoundingClientRect();
+    return {
+      navigationTop: navigation.top,
+      controls: ['new-now-input-textarea', 'new-now-attachment-button', 'new-now-send-button']
+        .map(testId => {
+        const control = element.querySelector(`[data-testid="${testId}"]`);
+        if (!control) return { testId, missing: true };
+        const box = control.getBoundingClientRect();
+        return { testId, top: box.top, bottom: box.bottom };
+      }),
+    };
+  });
+  expect(composerNavigationLayout.controls.every(control => !('missing' in control) && control.top >= 0 && control.bottom <= composerNavigationLayout.navigationTop + 1), JSON.stringify(composerNavigationLayout)).toBe(true);
+  expect(await page.getByTestId('new-now-input-row').getAttribute('class')).toContain('focus-within:pb-[env(safe-area-inset-bottom,0px)]');
+
+  await page.evaluate(() => {
+    const chooser = document.querySelector<HTMLInputElement>('input[aria-label="选择原件"]')!;
+    (window as unknown as { __betaAttachmentPickerRequested?: boolean }).__betaAttachmentPickerRequested = false;
+    chooser.click = () => { (window as unknown as { __betaAttachmentPickerRequested?: boolean }).__betaAttachmentPickerRequested = true; };
+  });
+  await activate(page, page.getByRole('button', { name: '附件', exact: true }));
+  expect(await page.evaluate(() => (window as unknown as { __betaAttachmentPickerRequested?: boolean }).__betaAttachmentPickerRequested)).toBe(true);
+  expect(await page.locator('input[aria-label="选择原件"]').evaluate(element => (element as HTMLInputElement).multiple)).toBe(true);
+});
+
 test('keyboard operates the same pane controls and keeps the editor selection across navigation', async ({ page }) => {
   const hide = page.getByRole('button', { name: '隐藏记录', exact: true });
   await hide.focus(); await hide.press('Space');

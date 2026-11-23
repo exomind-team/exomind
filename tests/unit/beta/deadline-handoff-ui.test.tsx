@@ -34,6 +34,30 @@ describe('notification tap uses the real Beta profile/draft and mounted timebloc
     await act(async () => { taps.tap(target); }); await screen.findByText(/通知对应档案不在本机/);
     expect(screen.getByRole('combobox', { name: '当前档案' })).toHaveValue(Q); expect(screen.getByRole('button', { name: '重试打开提醒' })).toBeEnabled(); expect(taps.client.acknowledge).not.toHaveBeenCalled(); expect(client.provisionProfile).not.toHaveBeenCalled(); expect(client.timeblocks.command).not.toHaveBeenCalled();
   });
+  it('retries an unconfirmed handoff from the visible Beta UI and reports the second result', async () => {
+    const client = timeblockClient();
+    client.profiles.mockResolvedValue([{ profile_id: P, display_name: 'P' }, { profile_id: Q, display_name: 'Q' }]);
+    client.timeblocks.snapshot.mockImplementation(async profile => profile === P ? activeSnapshot() : { ...snapshot(), profile_id: Q });
+    const taps = handoffs();
+    let acknowledgementAttempts = 0;
+    taps.client.acknowledge.mockImplementation(async () => {
+      acknowledgementAttempts += 1;
+      return acknowledgementAttempts > 1;
+    });
+
+    render(<BetaApp client={client} handoffs={taps.client} intentJournal={memoryIntentJournal()}/>);
+    await screen.findByRole('textbox', { name: '记录当下' });
+    await act(async () => { taps.tap(target); });
+    await screen.findByText(/系统尚未确认入口已处理/);
+    expect(taps.client.acknowledge).toHaveBeenCalledTimes(1);
+    expect(client.timeblocks.command).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '重试打开提醒' }));
+
+    await waitFor(() => expect(taps.client.acknowledge).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('beta-deadline-handoff')).toHaveTextContent(/当前仍在运行/));
+    expect(client.timeblocks.command).not.toHaveBeenCalled();
+  });
   it('dispatches ACK for a pending source only after its real feedback form is mounted, while Q draft remains intact',async()=>{
     const client=timeblockClient();client.profiles.mockResolvedValue([{profile_id:P,display_name:'P'},{profile_id:Q,display_name:'Q'}]);
     client.timeblocks.snapshot.mockImplementation(async profile=>profile===P?{...activeSnapshot(),active:{...activeSnapshot().active!,phase:'feedback_pending',deadline:null,deadline_reached:true},pending_feedback:[B]}:{...snapshot(),profile_id:Q});

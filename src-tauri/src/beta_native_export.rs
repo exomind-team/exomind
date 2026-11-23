@@ -1,8 +1,8 @@
 //! Main-window, one-original export. The save picker owns destination choice;
 //! frontend arguments contain only source IDs and a cancellation request ID.
-use super::{Failure, NativeState, trusted_window};
+use super::{trusted_window, Failure, NativeState};
 use exomind_beta_host::HostError;
-use exomind_core::{MAX_ORIGINAL_CHUNK_BYTES, OriginalId, OriginalRef, ProfileId};
+use exomind_core::{OriginalId, OriginalRef, ProfileId, MAX_ORIGINAL_CHUNK_BYTES};
 #[path = "beta_export_journal.rs"]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod journal;
@@ -15,7 +15,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    sync::{Arc, atomic::Ordering},
+    sync::{atomic::Ordering, Arc},
 };
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, FilePath};
@@ -23,8 +23,8 @@ use uuid::Uuid;
 
 #[path = "beta_native_export_manager.rs"]
 mod manager;
-pub(super) use manager::ExportManager;
 use manager::ExportLease;
+pub(super) use manager::ExportManager;
 #[path = "beta_native_original_source.rs"]
 mod source;
 use source::Source;
@@ -193,6 +193,60 @@ fn io_failure() -> Failure {
         "export_io",
         "无法写入所选位置，原文件未被覆盖，请检查空间与权限",
     )
+}
+fn open_copy_io_failure() -> Failure {
+    failure(
+        "open_copy_failed",
+        "系统打开副本准备失败；本机原件未修改，请重试或下载后打开",
+    )
+}
+fn open_copy_integrity_failure() -> Failure {
+    failure(
+        "open_copy_incomplete",
+        "系统打开副本校验未完成；本机原件未修改，请重试",
+    )
+}
+fn map_open_copy_failure(error: Failure) -> Failure {
+    match error.code {
+        "export_io" => open_copy_io_failure(),
+        "export_incomplete" => open_copy_integrity_failure(),
+        _ => error,
+    }
+}
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn rename_no_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+    let source = CString::new(source.as_os_str().as_bytes())
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let destination = CString::new(destination.as_os_str().as_bytes())
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    // Use the syscall number instead of the libc wrapper: Bionic only exposes
+    // the wrapper at newer API levels, while this app still supports API 24.
+    // RENAME_NOREPLACE is the publication boundary; an old cache entry is
+    // never replaced by a partially prepared copy.
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_renameat2,
+            libc::AT_FDCWD,
+            source.as_ptr(),
+            libc::AT_FDCWD,
+            destination.as_ptr(),
+            libc::RENAME_NOREPLACE as libc::c_uint,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+fn rename_no_replace(_source: &Path, _destination: &Path) -> std::io::Result<()> {
+    // Platforms without an atomic no-replace rename keep the hard-link path.
+    // If that is unavailable too, fail closed rather than use an overwriting
+    // rename or publish an incomplete final path.
+    Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
 }
 
 #[derive(Serialize)]
@@ -921,34 +975,91 @@ pub(super) async fn beta_open_original(
 fn prepare_open_copy(
     cache: &Path,
     original: &OriginalRef,
-    mut read: impl FnMut(u64, usize) -> Result<Vec<u8>, Failure>,
+    read: impl FnMut(u64, usize) -> Result<Vec<u8>, Failure>,
     lease: &ExportLease,
 ) -> Result<PathBuf, Failure> {
-    std::fs::create_dir_all(cache).map_err(|_| io_failure())?;
-    let cache = cache.canonicalize().map_err(|_| io_failure())?;
+    prepare_open_copy_with_publishers(
+        cache,
+        original,
+        read,
+        lease,
+        |source: &Path, destination: &Path| std::fs::hard_link(source, destination),
+        |source: &Path, destination: &Path| rename_no_replace(source, destination),
+    )
+}
+
+fn prepare_open_copy_with_publishers(
+    cache: &Path,
+    original: &OriginalRef,
+    mut read: impl FnMut(u64, usize) -> Result<Vec<u8>, Failure>,
+    lease: &ExportLease,
+    hard_link: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    no_replace_rename: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> Result<PathBuf, Failure> {
+    std::fs::create_dir_all(cache).map_err(|_| open_copy_io_failure())?;
+    let cache = cache.canonicalize().map_err(|_| open_copy_io_failure())?;
     let path = cache.join(suggested_name(&original.file_name));
     if path.exists() {
         if !std::fs::symlink_metadata(&path)
-            .map_err(|_| io_failure())?
+            .map_err(|_| open_copy_io_failure())?
             .file_type()
             .is_file()
         {
-            return Err(io_failure());
+            return Err(open_copy_io_failure());
         }
-        verify_reader(
-            &mut File::open(&path).map_err(|_| io_failure())?,
-            original,
-            lease,
-        )?;
+        verify_open_copy(&path, original, lease)?;
         return Ok(path);
     }
-    let mut temporary = Temporary::create(&cache)?;
-    stream_original(original, &mut read, temporary.file()?, lease)?;
-    temporary.sync()?;
+    let mut temporary = Temporary::create(&cache).map_err(map_open_copy_failure)?;
+    let temporary_file = temporary.file().map_err(map_open_copy_failure)?;
+    stream_original(original, &mut read, temporary_file, lease).map_err(map_open_copy_failure)?;
+    temporary.sync().map_err(map_open_copy_failure)?;
     lease.check()?;
-    // create_new semantics: another application's file is never overwritten.
-    std::fs::hard_link(&temporary.path, &path).map_err(|_| io_failure())?;
+    match hard_link(&temporary.path, &path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            // A concurrent open may have published the same complete copy.
+            // Reuse it only after verifying the full original identity.
+            verify_open_copy(&path, original, lease)?;
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Unsupported
+            ) =>
+        {
+            match no_replace_rename(&temporary.path, &path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // Another open won the create_new race. Never replace it.
+                    verify_open_copy(&path, original, lease)?;
+                }
+                Err(_) => return Err(open_copy_io_failure()),
+            }
+        }
+        Err(_) => return Err(open_copy_io_failure()),
+    }
     Ok(path)
+}
+
+fn verify_open_copy(
+    path: &Path,
+    original: &OriginalRef,
+    lease: &ExportLease,
+) -> Result<(), Failure> {
+    if !std::fs::symlink_metadata(path)
+        .map_err(|_| open_copy_io_failure())?
+        .file_type()
+        .is_file()
+    {
+        return Err(open_copy_io_failure());
+    }
+    verify_reader(
+        &mut File::open(path).map_err(|_| open_copy_io_failure())?,
+        original,
+        lease,
+    )
+    .map_err(map_open_copy_failure)
 }
 
 #[tauri::command]
@@ -1028,6 +1139,10 @@ mod tests {
     fn test_lease(manager: &Arc<ExportManager>, request: Uuid) -> Result<ExportLease, Failure> {
         manager.begin(request, ProfileId::new(), OriginalId::new())
     }
+    fn test_rename_no_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
+        std::fs::hard_link(source, destination)?;
+        std::fs::remove_file(source)
+    }
     #[test]
     fn system_open_copy_requires_a_complete_digest_and_never_overwrites_a_changed_cache() {
         let cache = tempfile::tempdir().unwrap();
@@ -1051,31 +1166,193 @@ mod tests {
         );
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         std::fs::write(&path, b"changed by external application").unwrap();
-        assert!(
-            prepare_open_copy(
-                cache.path(),
-                &descriptor,
-                |_, _| panic!("must validate the existing cache first"),
-                &lease
-            )
-            .is_err()
-        );
+        assert!(prepare_open_copy(
+            cache.path(),
+            &descriptor,
+            |_, _| panic!("must validate the existing cache first"),
+            &lease
+        )
+        .is_err());
         assert_eq!(
             std::fs::read(&path).unwrap(),
             b"changed by external application"
         );
         let bad = tempfile::tempdir().unwrap();
-        assert!(
-            prepare_open_copy(
-                bad.path(),
-                &descriptor,
-                |_, length| Ok(vec![0; length]),
-                &lease
-            )
-            .is_err()
-        );
+        assert!(prepare_open_copy(
+            bad.path(),
+            &descriptor,
+            |_, length| Ok(vec![0; length]),
+            &lease
+        )
+        .is_err());
         assert_eq!(std::fs::read_dir(bad.path()).unwrap().count(), 0);
     }
+
+    #[test]
+    fn system_open_copy_uses_no_replace_rename_when_hard_links_are_denied() {
+        let cache = tempfile::tempdir().unwrap();
+        let bytes = b"synthetic SAF HTML attachment";
+        let mut descriptor = original(bytes.len() as u64, format!("{:x}", Sha256::digest(bytes)));
+        descriptor.file_name = "share-test.html".into();
+        let manager = Arc::new(ExportManager::default());
+        let lease = test_lease(&manager, Uuid::new_v4()).unwrap();
+
+        let path = prepare_open_copy_with_publishers(
+            cache.path(),
+            &descriptor,
+            |offset, length| {
+                Ok(bytes[offset as usize..((offset as usize) + length).min(bytes.len())].to_vec())
+            },
+            &lease,
+            |_source, _destination| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            test_rename_no_replace,
+        )
+        .unwrap();
+
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("share-test.html")
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn system_open_copy_does_not_replace_a_destination_created_during_publish() {
+        let cache = tempfile::tempdir().unwrap();
+        let bytes = b"synthetic SAF HTML attachment";
+        let mut descriptor = original(bytes.len() as u64, format!("{:x}", Sha256::digest(bytes)));
+        descriptor.file_name = "share-test.html".into();
+        let path = cache.path().join("share-test.html");
+        let manager = Arc::new(ExportManager::default());
+        let lease = test_lease(&manager, Uuid::new_v4()).unwrap();
+
+        let result = prepare_open_copy_with_publishers(
+            cache.path(),
+            &descriptor,
+            |offset, length| {
+                Ok(bytes[offset as usize..((offset as usize) + length).min(bytes.len())].to_vec())
+            },
+            &lease,
+            |_source, destination| {
+                std::fs::write(destination, b"pre-existing cache entry")?;
+                Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
+            },
+            |_source, _destination| panic!("link already published the competing target"),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"pre-existing cache entry");
+        assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn system_open_copy_publish_failure_leaves_final_path_absent_and_retry_recovers() {
+        let cache = tempfile::tempdir().unwrap();
+        let bytes = b"synthetic SAF HTML attachment";
+        let mut descriptor = original(bytes.len() as u64, format!("{:x}", Sha256::digest(bytes)));
+        descriptor.file_name = "share-test.html".into();
+        let path = cache.path().join("share-test.html");
+        let manager = Arc::new(ExportManager::default());
+        let lease = test_lease(&manager, Uuid::new_v4()).unwrap();
+
+        let failed = prepare_open_copy_with_publishers(
+            cache.path(),
+            &descriptor,
+            |offset, length| {
+                Ok(bytes[offset as usize..((offset as usize) + length).min(bytes.len())].to_vec())
+            },
+            &lease,
+            |_source, _destination| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            |_source, _destination| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+        );
+        assert_eq!(failed.unwrap_err().code, "open_copy_failed");
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 0);
+
+        // A crash while writing the private spool can leave an owned-name
+        // partial behind. It is not the final name and must not block retry.
+        let stale_spool = cache.path().join(".exomind-export-crash.partial");
+        std::fs::write(&stale_spool, b"truncated private spool").unwrap();
+
+        let recovered = prepare_open_copy_with_publishers(
+            cache.path(),
+            &descriptor,
+            |offset, length| {
+                Ok(bytes[offset as usize..((offset as usize) + length).min(bytes.len())].to_vec())
+            },
+            &lease,
+            |_source, _destination| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            test_rename_no_replace,
+        )
+        .unwrap();
+        assert_eq!(recovered.canonicalize().unwrap(), path.canonicalize().unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(
+            std::fs::read(&stale_spool).unwrap(),
+            b"truncated private spool"
+        );
+        assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn system_open_copy_no_replace_rename_preserves_a_competing_destination() {
+        let cache = tempfile::tempdir().unwrap();
+        let bytes = b"synthetic SAF HTML attachment";
+        let mut descriptor = original(bytes.len() as u64, format!("{:x}", Sha256::digest(bytes)));
+        descriptor.file_name = "share-test.html".into();
+        let path = cache.path().join("share-test.html");
+        let manager = Arc::new(ExportManager::default());
+        let lease = test_lease(&manager, Uuid::new_v4()).unwrap();
+
+        let result = prepare_open_copy_with_publishers(
+            cache.path(),
+            &descriptor,
+            |offset, length| {
+                Ok(bytes[offset as usize..((offset as usize) + length).min(bytes.len())].to_vec())
+            },
+            &lease,
+            |_source, _destination| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            |_source, destination| {
+                std::fs::write(destination, b"pre-existing target")?;
+                Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
+            },
+        );
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"pre-existing target");
+        assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn system_open_copy_io_errors_name_the_open_copy_instead_of_a_save_location() {
+        let root = tempfile::tempdir().unwrap();
+        let not_a_directory = root.path().join("not-a-directory");
+        std::fs::write(&not_a_directory, b"synthetic sentinel").unwrap();
+        let bytes = b"synthetic SAF HTML attachment";
+        let descriptor = original(bytes.len() as u64, format!("{:x}", Sha256::digest(bytes)));
+        let manager = Arc::new(ExportManager::default());
+        let lease = test_lease(&manager, Uuid::new_v4()).unwrap();
+
+        let error = prepare_open_copy(
+            &not_a_directory,
+            &descriptor,
+            |offset, length| {
+                Ok(bytes[offset as usize..((offset as usize) + length).min(bytes.len())].to_vec())
+            },
+            &lease,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code, "open_copy_failed");
+        assert!(error.message.contains("系统打开副本准备失败"));
+        assert!(!error.message.contains("所选位置"));
+        assert_eq!(
+            std::fs::read(&not_a_directory).unwrap(),
+            b"synthetic sentinel"
+        );
+    }
+
     fn original(length: u64, sha256: String) -> OriginalRef {
         OriginalRef {
             original_id: Uuid::new_v4().to_string().parse().unwrap(),

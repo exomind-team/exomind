@@ -199,6 +199,14 @@ export class BetaAudioRecordingController {
 
   get limits(): Readonly<BetaAudioRecordingLimits> { return this.limitsValue; }
 
+  /** Return the stopped recording only when an explicit preview asks for it.
+   * The File stays out of the high-frequency snapshot and remains controller-owned. */
+  getPendingFile(profileId: string): File | null {
+    const pending = this.pending;
+    if (this.disposed || !pending || pending.profileId !== profileId) return null;
+    return pending.file;
+  }
+
   /** Device workspace supplies the current profile owner; the controller keeps the sink across hidden views. */
   setAttachmentSink(sink: BetaAudioAttachmentSink | null): void {
     this.attachmentSink = sink;
