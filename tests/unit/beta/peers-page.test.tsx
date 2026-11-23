@@ -487,7 +487,11 @@ describe('Nearby network scan',()=>{
     fireEvent.click(scanButton);
     expect(client.scanNearby).toHaveBeenCalledWith(expect.objectContaining({scopeIds:expect.any(Array)}));
     expect(await screen.findByText(/扫描结束/)).toBeInTheDocument();
-    expect(screen.getByLabelText('未验证地址候选')).toHaveTextContent('TCP 开放，未识别 Beta 传输协议');
+    const unverifiedDisclosure=screen.getByRole('button',{name:'查看未验证开放端口（2）'});
+    expect(unverifiedDisclosure).toHaveAttribute('aria-expanded','false');
+    expect(screen.queryByRole('list',{name:'未验证开放端口地址'})).not.toBeInTheDocument();
+    fireEvent.click(unverifiedDisclosure);
+    expect(screen.getByRole('list',{name:'未验证开放端口地址'})).toHaveTextContent('TCP 开放，未识别 Beta Peer Transport');
   });
   it('shows Beta transport fingerprints before unverified open ports without calling them joined devices',async()=>{
     const client=peers();
@@ -503,7 +507,11 @@ describe('Nearby network scan',()=>{
     await waitFor(()=>expect(scanButton).toBeEnabled());
     fireEvent.click(scanButton);
     expect(await screen.findByLabelText('Beta 对等传输候选')).toHaveTextContent('TLS 指纹 aaaaaaaaaaaa…');
-    expect(screen.getByLabelText('未验证地址候选')).toHaveTextContent('192.168.1.8:43344 · TCP 开放，未识别 Beta 传输协议');
+    const unverifiedDisclosure=screen.getByRole('button',{name:'查看未验证开放端口（1）'});
+    expect(unverifiedDisclosure).toHaveAttribute('aria-expanded','false');
+    expect(screen.queryByRole('list',{name:'未验证开放端口地址'})).not.toBeInTheDocument();
+    fireEvent.click(unverifiedDisclosure);
+    expect(screen.getByRole('list',{name:'未验证开放端口地址'})).toHaveTextContent('192.168.1.8:43344 · TCP 开放，未识别 Beta Peer Transport');
     expect(screen.getByText(/尚未核对邀请，也未加入档案/)).toBeInTheDocument();
     expect(client.joinInvitation).not.toHaveBeenCalled();
   });
@@ -630,7 +638,7 @@ describe('Nearby network scan',()=>{
       expect(screen.getByText(/设备同步状态读取失败；以下保留上次确认值：已开启/)).toBeInTheDocument();
     }finally{view.unmount();vi.useRealTimers();}
   });
-  it('reports omitted open-port candidates when the list hits the display cap',async()=>{
+  it('reports omitted unverified open-port addresses when the sample hits the display cap',async()=>{
     const client=peers();
     client.status.mockResolvedValue({...status(Q),network_enabled:true});
     const addresses=Array.from({length:64},(_,index)=>`192.168.1.${index+1}:43344`);
@@ -639,7 +647,8 @@ describe('Nearby network scan',()=>{
     const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
     await waitFor(()=>expect(scanButton).toBeEnabled());
     fireEvent.click(scanButton);
-    expect(await screen.findByText(/另有 6 个开放端口候选未展示/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'查看未验证开放端口（70）'}));
+    expect(await screen.findByText(/另有 6 个未验证开放端口地址未展示/)).toBeInTheDocument();
   });
   it('auto-retries a transient scan status failure and recovers',async()=>{
     const client=peers();

@@ -143,9 +143,9 @@ function buildScanDiagnostic(scan: BetaNetworkScan | null, scopes: readonly Beta
     ...(scan ? [
       `扫描标识：${scan.scan_id.slice(0, 8)}…`,
       `阶段：${scan.stage}`,
-      `尝试：${scan.attempted} · 开放端口候选：${scan.discovered} · Beta Peer Transport 握手：${scan.peer_transport_count} · 跳过：${scan.skipped}`,
+      `尝试：${scan.attempted} · TCP 端口开放：${scan.discovered} · Beta Peer Transport 握手：${scan.peer_transport_count} · 跳过：${scan.skipped}`,
       `已取消：${scan.cancelled ? '是' : '否'}`,
-      `候选样本：${scan.discovered_addresses.length} 个（地址已从诊断中省略）`,
+      `开放 TCP 地址样本：${scan.discovered_addresses.length} 个（地址已从诊断中省略）`,
     ] : ['扫描尚未完成']),
     `可选范围：${scopes.filter(scope => scope.eligible).length} 个（物理局域网 ${kindCount('physical_lan')}、EasyTier ${kindCount('easytier')}、覆盖网 ${kindCount('overlay')}、手动 ${kindCount('manual')}、其他 ${kindCount('other')}）`,
     `不可用范围原因：${reasons}`,
@@ -210,6 +210,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
   const [scanError, setScanError] = useState('');
   const [scanBusy, setScanBusy] = useState(false);
   const [scanPollPaused, setScanPollPaused] = useState(false);
+  const [showUnverifiedAddresses, setShowUnverifiedAddresses] = useState(false);
   const observing = useBetaViewActive(visible);
   const now = useBetaNow(observing); const dateMode = useBetaDateDisplayMode();
   const isCurrent = (life: Life) => life.active && lifecycle.current === life && currentScope.current === scope;
@@ -545,6 +546,10 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
     && shownEndpoints.some(report => report.disposition === 'unreachable');
   const peerTransportAddressSet = new Set((scan?.peer_transport_candidates ?? []).map(candidate => candidate.address));
   const openUnverifiedAddresses = (scan?.discovered_addresses ?? []).filter(address => !peerTransportAddressSet.has(address));
+  const unverifiedOpenPortCount = scan
+    ? Math.max(0, scan.discovered - scan.peer_transport_count)
+    : 0;
+  const unverifiedOpenPortCountNotShown = Math.max(0, unverifiedOpenPortCount - openUnverifiedAddresses.length);
   if (!peers) return <PageShell title="设备同步" contentClassName="overflow-y-auto"><div className="mx-auto max-w-3xl px-5 py-8"><SettingsSection title="当前连接"><p className="px-4 py-4 text-sm text-secondary">此连接尚未提供设备同步管理。独立应用会使用本机服务连接设备。</p></SettingsSection></div></PageShell>;
   if (!runtimeId || !deviceId) return <PageShell title="设备同步"><p role="status" className="px-5 py-8 text-sm text-secondary">本机服务尚未就绪，请在当下页面完成连接后继续。</p></PageShell>;
   return <PageShell title="设备同步" contentClassName="overflow-y-auto" headerAction={profileId && <Button variant="ghost" size="icon" aria-label="刷新同步状态" disabled={!!operation} onClick={() => void perform('refresh', refresh)}><RefreshCw size={16}/></Button>}>
@@ -648,7 +653,7 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
           {scan && scan.finished_at_ms > 0 && (
             <div className="space-y-2">
               <p role="status" className="text-xs text-secondary">
-                扫描结束 · 已尝试 {scan.attempted} · 开放端口候选 {scan.discovered} · Beta 传输握手 {scan.peer_transport_count} · 已跳过 {scan.skipped}{scan.cancelled ? ' · 已取消' : ''}
+                扫描结束 · 已尝试 {scan.attempted} · TCP 端口开放 {scan.discovered} · Beta 传输握手 {scan.peer_transport_count} · 已跳过 {scan.skipped}{scan.cancelled ? ' · 已取消' : ''}
               </p>
               {scan.peer_transport_candidates.length > 0 && (
                 <div className="space-y-1">
@@ -669,23 +674,43 @@ export function BetaPeersPage({ peers, profileId, profileName, runtimeId, device
                   )}
                 </div>
               )}
-              {openUnverifiedAddresses.length > 0 && (
+              {unverifiedOpenPortCount > 0 && (
                 <div className="space-y-1">
-                  <ul aria-label="未验证地址候选" className="space-y-1">
-                    {openUnverifiedAddresses.map(address => (
-                      <li key={address} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                        <span className="min-w-0 break-all font-mono text-secondary">{address} · TCP 开放，未识别 Beta 传输协议</span>
-                        <Button variant="outline" size="sm" disabled={!!operation}
-                          onClick={() => { setDialAddress(address); setShowDialAddress(true); setNotice('该地址仅是开放端口候选；检查邀请时仍会严格核对 TLS 指纹。'); }}>
-                          使用地址
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="min-h-11"
+                    aria-expanded={showUnverifiedAddresses}
+                    aria-controls="beta-unverified-open-ports"
+                    onClick={() => setShowUnverifiedAddresses(value => !value)}
+                  >
+                    {showUnverifiedAddresses ? '收起' : '查看'}未验证开放端口（{unverifiedOpenPortCount}）
+                  </Button>
+                  <p className="text-xs leading-relaxed text-secondary">
+                    TCP 端口可连接不代表这是 ExoMind 设备；本轮未完成 Beta Peer Transport 握手的地址默认收起。展开后可把地址填入邀请拨号栏，加入仍会严格核对 TLS 指纹。
+                  </p>
+                  <div id="beta-unverified-open-ports" hidden={!showUnverifiedAddresses} className="space-y-1">
+                    {openUnverifiedAddresses.length > 0 ? (
+                      <ul aria-label="未验证开放端口地址" className="space-y-1">
+                        {openUnverifiedAddresses.map(address => (
+                          <li key={address} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <span className="min-w-0 break-all font-mono text-secondary">{address} · TCP 开放，未识别 Beta Peer Transport</span>
+                            <Button variant="outline" size="sm" disabled={!!operation}
+                              aria-label={`填入 ${address} 为邀请拨号地址`}
+                              onClick={() => { setDialAddress(address); setShowDialAddress(true); setNotice('该地址仅确认 TCP 端口开放；检查邀请时仍会严格核对 TLS 指纹。'); }}>
+                              填入邀请拨号地址
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p role="status" className="text-xs text-secondary">本轮未返回可展示的未验证地址样本。</p>
+                    )}
+                    {unverifiedOpenPortCountNotShown > 0 && (
+                      <p className="text-xs text-secondary">另有 {unverifiedOpenPortCountNotShown} 个未验证开放端口地址未展示（最多显示 64 个样本）。</p>
+                    )}
+                  </div>
                 </div>
-              )}
-              {scan.discovered > scan.discovered_addresses.length && (
-                <p className="text-xs text-secondary">另有 {scan.discovered - scan.discovered_addresses.length} 个开放端口候选未展示；已按 Beta 传输握手结果优先排序。</p>
               )}
               {scan.discovered === 0 && (
                 <p className="text-xs leading-relaxed text-secondary">
