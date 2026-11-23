@@ -35,6 +35,14 @@ on:
         required: false
         type: string
         default: ''
+      android_build_profile:
+        description: Android profile for same-source size comparison
+        required: false
+        type: choice
+        options:
+          - debug
+          - release
+        default: debug
 
 permissions:
   contents: read
@@ -178,7 +186,7 @@ jobs:
           NODE
       - name: Build embedded Beta debug executable (no installer/signing/publishing)
         shell: bash
-        run: node node_modules/@tauri-apps/cli/tauri.js build --ci --debug --no-bundle --target "${{ matrix.target }}" --config src-tauri/tauri.beta.conf.json -- --locked
+        run: node node_modules/@tauri-apps/cli/tauri.js build --ci --debug --no-bundle --target "${{ matrix.target }}" --config src-tauri/tauri.beta.conf.json -- --locked --no-default-features --features custom-protocol,beta-native-only
       - name: Check Windows export source regressions for Beta20 and later
         if: runner.os == 'Windows'
         shell: bash
@@ -280,12 +288,12 @@ jobs:
           if(process.platform!=='win32') {artifact=binary+'.tar.gz';execFileSync('tar',['-czf',artifact,'-C',output,path.basename(binary)],{stdio:'inherit'});fs.unlinkSync(binary);}
           const config=JSON.parse(fs.readFileSync('src-tauri/tauri.beta.conf.json','utf8'));
           const native=process.platform==='win32'?JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP,'beta-pe-identity.json'),'utf8')):null;
-          const info={validation_only:true,workflow_recipe_sha:process.env.WORKFLOW_RECIPE_SHA,source_sha:process.env.SOURCE_SHA,version:config.version,version_source:'tauri.beta.conf.json; VITE_APP_VERSION uses the same value',identifier:config.identifier,product_name:config.productName,entry:'beta.html',platform:label,target:process.env.BUILD_TARGET,profile:'debug embedded assets; no dev server',core_schema:Number(fs.readFileSync('crates/exomind-core/src/lib.rs','utf8').match(/CORE_SCHEMA_VERSION:\s*i64\s*=\s*(\d+)/)?.[1]),source_cargo_package_version:fs.readFileSync('src-tauri/Cargo.toml','utf8').match(/^version\s*=\s*"([^"]+)"/m)?.[1],native_resource_metadata:native,native_resource_version_matches_app:native?native.product_version===config.version&&native.file_version===config.version:null,config_sha256:process.env.BETA_CONFIG_HASH,cargo_lock_sha256:process.env.CARGO_LOCK_HASH,rustc:execFileSync('rustc',['-Vv'],{encoding:'utf8'}).trim(),cargo:execFileSync('cargo',['-V'],{encoding:'utf8'}).trim(),file:path.basename(artifact),bytes:fs.statSync(artifact).size,sha256:hash(artifact),runtime_tested:false,installer_tested:false,published:false,limitations:'Raw macOS/Linux binaries are build validation artifacts, not tested app/install packages. Device behavior and upgrade compatibility require separate same-candidate validation.'};
+          const info={validation_only:true,workflow_recipe_sha:process.env.WORKFLOW_RECIPE_SHA,source_sha:process.env.SOURCE_SHA,version:config.version,version_source:'tauri.beta.conf.json; VITE_APP_VERSION uses the same value',identifier:config.identifier,product_name:config.productName,entry:'beta.html',platform:label,target:process.env.BUILD_TARGET,profile:'debug embedded assets; no dev server',cargo_features:['custom-protocol','beta-native-only'],cargo_default_features:false,core_schema:Number(fs.readFileSync('crates/exomind-core/src/lib.rs','utf8').match(/CORE_SCHEMA_VERSION:\s*i64\s*=\s*(\d+)/)?.[1]),source_cargo_package_version:fs.readFileSync('src-tauri/Cargo.toml','utf8').match(/^version\s*=\s*"([^"]+)"/m)?.[1],native_resource_metadata:native,native_resource_version_matches_app:native?native.product_version===config.version&&native.file_version===config.version:null,config_sha256:process.env.BETA_CONFIG_HASH,cargo_lock_sha256:process.env.CARGO_LOCK_HASH,rustc:execFileSync('rustc',['-Vv'],{encoding:'utf8'}).trim(),cargo:execFileSync('cargo',['-V'],{encoding:'utf8'}).trim(),file:path.basename(artifact),bytes:fs.statSync(artifact).size,sha256:hash(artifact),runtime_tested:false,installer_tested:false,published:false,limitations:'Raw macOS/Linux binaries are build validation artifacts, not tested app/install packages. Device behavior and upgrade compatibility require separate same-candidate validation.'};
           fs.writeFileSync(path.join(output,'build-info.json'),JSON.stringify(info,null,2));
           NODE
       - uses: actions/upload-artifact@v7
         with:
-          name: beta-${{ matrix.label }}-${{ needs.resolve-source.outputs.version }}-${{ needs.resolve-source.outputs.sha }}-attempt${{ github.run_attempt }}
+          name: beta-${{ matrix.label }}-${{ needs.resolve-source.outputs.version }}-beta-native-only-${{ needs.resolve-source.outputs.sha }}-attempt${{ github.run_attempt }}
           path: validation-artifacts/${{ matrix.label }}/
           if-no-files-found: error
           retention-days: 7
@@ -297,6 +305,7 @@ jobs:
     env:
       BUILD_SCOPE: ${{ inputs.android_only && 'android-only' || 'all' }}
       ANDROID_TEST_PACKAGE_SUFFIX: ${{ inputs.android_test_package_suffix || '' }}
+      ANDROID_BUILD_PROFILE: ${{ inputs.android_build_profile || 'debug' }}
       SOURCE_SHA: ${{ needs.resolve-source.outputs.sha }}
       WORKFLOW_RECIPE_SHA: ${{ needs.resolve-source.outputs.recipe_sha }}
       BETA_VERSION: ${{ needs.resolve-source.outputs.version }}
@@ -389,8 +398,48 @@ jobs:
           fi
       - name: Repair generated Gradle callback and verify the selected NDK
         run: bun recipe/scripts/dev/beta-android-ci.ts patch-callback --project-root "$GITHUB_WORKSPACE"
-      - name: Build Beta debug APKs (arm64 and x86_64; no device/install/release key)
-        run: node node_modules/@tauri-apps/cli/tauri.js android build --ci --debug --apk --split-per-abi -t aarch64 x86_64 --config src-tauri/tauri.beta.conf.json -- --locked
+      - name: Build Beta ${{ inputs.android_build_profile || 'debug' }} APKs (arm64 and x86_64; Beta-only Rust features)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$ANDROID_BUILD_PROFILE" == "debug" ]]; then
+            node node_modules/@tauri-apps/cli/tauri.js android build --ci --debug --apk --split-per-abi -t aarch64 x86_64 --config src-tauri/tauri.beta.conf.json -- --locked --no-default-features --features custom-protocol,beta-native-only
+          elif [[ "$ANDROID_BUILD_PROFILE" == "release" ]]; then
+            node node_modules/@tauri-apps/cli/tauri.js android build --ci --apk --split-per-abi -t aarch64 x86_64 --config src-tauri/tauri.beta.conf.json -- --locked --no-default-features --features custom-protocol,beta-native-only
+          else
+            echo "Unsupported Android build profile: $ANDROID_BUILD_PROFILE" >&2
+            exit 1
+          fi
+      - name: Sign release-profile APKs with an ephemeral comparison key
+        if: ${{ inputs.android_build_profile == 'release' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_tools="$ANDROID_HOME/build-tools/36.0.0"
+          key="$RUNNER_TEMP/beta-size-probe.jks"
+          probe_pass="$(openssl rand -hex 16)"
+          keytool -genkeypair -noprompt -storetype JKS -keystore "$key" \
+            -storepass "$probe_pass" -keypass "$probe_pass" -alias beta-size-probe \
+            -dname "CN=ExoMind Beta Release Size Probe" -keyalg RSA -keysize 2048 -validity 3650
+          apk_root="src-tauri/gen/android/app/build/outputs/apk"
+          found=0
+          while IFS= read -r -d '' apk; do
+            found=1
+            aligned="${apk%.apk}.aligned.apk"
+            signed="${apk%.apk}.signed.apk"
+            "$build_tools/zipalign" -p -f 4 "$apk" "$aligned"
+            "$build_tools/apksigner" sign --ks "$key" --ks-pass "pass:$probe_pass" \
+              --key-pass "pass:$probe_pass" --ks-key-alias beta-size-probe \
+              --out "$signed" "$aligned"
+            "$build_tools/apksigner" verify --verbose "$signed"
+            mv "$signed" "$apk"
+            rm -f "$aligned"
+          done < <(find "$apk_root" -type f -name '*release*.apk' ! -name '*androidTest*' -print0)
+          if [[ "$found" -ne 1 ]]; then
+            echo 'Expected release-profile APKs to sign.' >&2
+            exit 1
+          fi
+          echo 'Release-profile artifacts use a runner-generated comparison key, not the release signing key.'
       - name: Verify Android callback and NDK provenance after build
         run: bun recipe/scripts/dev/beta-android-ci.ts verify-prepared --project-root "$GITHUB_WORKSPACE"
       - name: Verify actual APK identities and write provenance
@@ -401,7 +450,8 @@ jobs:
           const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');assert.equal(execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),process.env.SOURCE_SHA);assert.equal(hash('Cargo.lock'),process.env.CARGO_LOCK_HASH);assert.equal(hash('src-tauri/tauri.beta.conf.json'),process.env.BETA_CONFIG_HASH);assert.ok(fs.existsSync('dist/beta.html'));
           const root='src-tauri/gen/android/app/build/outputs/apk',output='validation-artifacts/android';fs.mkdirSync(output,{recursive:true});
           const walk=directory=>fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?walk(path.join(directory,entry.name)):[path.join(directory,entry.name)]);
-          const apks=walk(root).filter(file=>file.endsWith('.apk')&&file.includes('debug')&&!/androidTest/i.test(file));assert.equal(apks.length,2,'Exactly two ABI-specific debug APKs required');
+          const profile=process.env.ANDROID_BUILD_PROFILE;assert.ok(['debug','release'].includes(profile));
+          const apks=walk(root).filter(file=>file.endsWith('.apk')&&file.includes(profile)&&!/androidTest/i.test(file));assert.equal(apks.length,2,`Exactly two ABI-specific ${profile} APKs required`);
           const ndkVersion=process.env.EXOMIND_ANDROID_NDK_VERSION;assert.equal(ndkVersion,'30.0.16248370');assert.equal(process.env.ANDROID_NDK_VERSION,ndkVersion);const ndkHome=path.join(process.env.ANDROID_HOME,'ndk',ndkVersion);assert.equal(fs.realpathSync(process.env.NDK_HOME),fs.realpathSync(ndkHome));assert.equal(fs.realpathSync(process.env.ANDROID_NDK_HOME),fs.realpathSync(ndkHome));const ndkSourceProperties=path.join(ndkHome,'source.properties'),ndkSource=fs.readFileSync(ndkSourceProperties,'utf8');assert.equal(/^[\t ]*Pkg\.Revision[\t ]*=\s*([^\s]+)\s*$/m.exec(ndkSource)?.[1],ndkVersion);const installedNdks=fs.readdirSync(path.join(process.env.ANDROID_HOME,'ndk'),{withFileTypes:true}).filter(entry=>entry.isDirectory()).map(entry=>entry.name).sort();assert.deepEqual(installedNdks,[ndkVersion]);const gradleSource=fs.readFileSync('src-tauri/gen/android/app/build.gradle.kts','utf8'),gradleNdkVersions=[...gradleSource.matchAll(/^[\t ]*ndkVersion[\t ]*=\s*"([^"]+)"\s*$/gm)].map(match=>match[1]);assert.deepEqual(gradleNdkVersions,[ndkVersion]);
           const tools=path.join(process.env.ANDROID_HOME,'build-tools','36.0.0');
           const suffix=process.env.ANDROID_TEST_PACKAGE_SUFFIX??'';
@@ -417,22 +467,24 @@ jobs:
             assert.equal(/versionName='([^']+)'/.exec(badging)?.[1],process.env.BETA_VERSION);
             assert.equal(/versionCode='([^']+)'/.exec(badging)?.[1],process.env.BETA_VERSION_CODE);
             assert.equal(/^application-label:'([^']+)'/m.exec(badging)?.[1],appLabel);
-            assert.ok(/^application-debuggable\b/m.test(badging));
+            assert.equal(/^application-debuggable\b/m.test(badging),profile==='debug');
             const abi=/^native-code: '([^']+)'\s*$/m.exec(badging)?.[1];
             assert.ok(['arm64-v8a','x86_64'].includes(abi)&&!seen.has(abi));
             seen.add(abi);
-            execFileSync(path.join(tools,'apksigner'),['verify',source],{stdio:'inherit',timeout:10000});
+            const signerOutput=execFileSync(path.join(tools,'apksigner'),['verify','--print-certs',source],{encoding:'utf8',timeout:10000});
+            const signerSha256=/Signer #1 certificate SHA-256 digest: ([0-9a-f]+)/i.exec(signerOutput)?.[1]?.toLowerCase();
+            assert.ok(signerSha256,'APK signer certificate SHA-256 missing');
             const suffixForName=suffix?`-${suffix}`:'';
-            const target=path.join(output,`ExoMind-${process.env.BETA_VERSION}${suffixForName}-${abi}-${process.env.SOURCE_SHA.slice(0,12)}.apk`);
+            const target=path.join(output,`ExoMind-${process.env.BETA_VERSION}${suffixForName}-${profile}-${abi}-${process.env.SOURCE_SHA.slice(0,12)}.apk`);
             fs.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);
-            files.push({file:path.basename(target),abi,bytes:fs.statSync(target).size,sha256:hash(target),package:packageName,version:process.env.BETA_VERSION,version_code:Number(process.env.BETA_VERSION_CODE)});
+            files.push({file:path.basename(target),abi,bytes:fs.statSync(target).size,sha256:hash(target),package:packageName,version:process.env.BETA_VERSION,version_code:Number(process.env.BETA_VERSION_CODE),signer_sha256:signerSha256});
           }
-          const info={validation_only:true,build_scope:process.env.BUILD_SCOPE,workflow_recipe_sha:process.env.WORKFLOW_RECIPE_SHA,source_sha:process.env.SOURCE_SHA,version:process.env.BETA_VERSION,identifier:packageName,base_identifier:'com.exomind.app.v06.beta',android_test_package_suffix:suffix||null,entry:'beta.html',profile:'debug APK',core_schema:Number(fs.readFileSync('crates/exomind-core/src/lib.rs','utf8').match(/CORE_SCHEMA_VERSION:\s*i64\s*=\s*(\d+)/)?.[1]),config_sha256:process.env.BETA_CONFIG_HASH,cargo_lock_sha256:process.env.CARGO_LOCK_HASH,rustc:execFileSync('rustc',['-Vv'],{encoding:'utf8'}).trim(),ndk:ndkVersion,gradle_ndk:gradleNdkVersions[0],ndk_selection:'Isolated ANDROID_HOME contained exactly the selected NDK; source.properties was verified before and after preparation.',ndk_source_properties_sha256:hash(ndkSourceProperties),sdk:36,build_tools:'36.0.0',files,runtime_tested:false,upgrade_tested:false,published:false,signing:'Runner-local debug key only; test package suffix avoids replacing Beta25 or previous test packages; not release-signed.'};
+          const info={validation_only:true,build_scope:process.env.BUILD_SCOPE,workflow_recipe_sha:process.env.WORKFLOW_RECIPE_SHA,source_sha:process.env.SOURCE_SHA,version:process.env.BETA_VERSION,identifier:packageName,base_identifier:'com.exomind.app.v06.beta',android_test_package_suffix:suffix||null,entry:'beta.html',profile:`${profile} APK`,cargo_features:['custom-protocol','beta-native-only'],cargo_default_features:false,core_schema:Number(fs.readFileSync('crates/exomind-core/src/lib.rs','utf8').match(/CORE_SCHEMA_VERSION:\s*i64\s*=\s*(\d+)/)?.[1]),config_sha256:process.env.BETA_CONFIG_HASH,cargo_lock_sha256:process.env.CARGO_LOCK_HASH,rustc:execFileSync('rustc',['-Vv'],{encoding:'utf8'}).trim(),ndk:ndkVersion,gradle_ndk:gradleNdkVersions[0],ndk_selection:'Isolated ANDROID_HOME contained exactly the selected NDK; source.properties was verified before and after preparation.',ndk_source_properties_sha256:hash(ndkSourceProperties),sdk:36,build_tools:'36.0.0',files,runtime_tested:false,upgrade_tested:false,published:false,signing:profile==='debug'?'Runner-local debug key only; test package suffix avoids replacing Beta25 or previous test packages; not release-signed.':'Runner-generated ephemeral size-probe key; not release-signed.'};
           fs.writeFileSync(path.join(output,'build-info.json'),JSON.stringify(info,null,2));
           NODE
       - uses: actions/upload-artifact@v7
         with:
-          name: beta-android-${{ needs.resolve-source.outputs.version }}-${{ inputs.android_test_package_suffix || 'base' }}-${{ needs.resolve-source.outputs.sha }}-attempt${{ github.run_attempt }}
+          name: beta-android-${{ needs.resolve-source.outputs.version }}-${{ inputs.android_build_profile || 'debug' }}-${{ inputs.android_test_package_suffix || 'base' }}-beta-native-only-${{ needs.resolve-source.outputs.sha }}-attempt${{ github.run_attempt }}
           path: validation-artifacts/android/
           if-no-files-found: error
           retention-days: 7

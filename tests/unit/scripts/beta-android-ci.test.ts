@@ -169,4 +169,15 @@ describe('Beta Android workflow contract', () => {
     expect(manifestPreparation).toBeGreaterThan(freshInit);
     expect(betaPreparation).toBeGreaterThan(manifestPreparation);
   });
+
+  it('builds Beta-only Rust features and supports debug/release size comparisons', async () => {
+    const { readFileSync } = await import('node:fs');
+    const workflow = readFileSync('.github/workflows/beta-build-validation.yml', 'utf8');
+    expect(workflow).toContain('android_build_profile:');
+    expect(workflow).toContain('          - debug\n          - release');
+    expect(workflow).toContain('--locked --no-default-features --features custom-protocol,beta-native-only');
+    expect(workflow).toContain('Sign release-profile APKs with an ephemeral comparison key');
+    expect(workflow).toContain("assert.equal(/^application-debuggable\\b/m.test(badging),profile==='debug')");
+    expect(workflow).toContain("cargo_features:['custom-protocol','beta-native-only'],cargo_default_features:false");
+  });
 });

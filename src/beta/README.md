@@ -16,10 +16,12 @@
 自定义构建漏传 `VITE_APP_VERSION` 会显示默认 package 值。不要为统一文字而更改数据身份。
 
 Native 有两个互斥的编译模式。默认 `alpha-legacy-runtime` 保留 Alpha Runtime、旧命令和
-身份播种路径；当前默认构建仍可按 Beta identifier 选择 Native Host。需要排除旧 Runtime
-时显式使用 `--no-default-features --features custom-protocol,beta-native-only`，并传入
-Beta Tauri 配置。Beta-only 在创建业务状态前拒绝非 Beta identifier；同时启用两个模式或
-两个都不启用会编译失败。移动全屏、Beta 托盘退出及隔离 WebView 路径仍是共享平台接缝。
+身份播种路径；通用默认构建仍服务 Alpha，而 Beta 候选工作流显式使用
+`--no-default-features --features custom-protocol,beta-native-only` 和 Beta Tauri 配置。
+Beta-only 在创建业务状态前拒绝非 Beta identifier；同时启用两个模式或两个都不启用会
+编译失败。Beta-only 只将旧 Runtime 从 Beta 产物中排除，不代表可以从仓库删除：
+既有 0.5.1 程序和 0.6 Alpha 入口仍依赖该路径。移动全屏、Beta 托盘退出及隔离 WebView
+路径仍是共享平台接缝。
 
 例如在已有前端资产的环境下验证 Beta-only：
 
@@ -29,8 +31,10 @@ cargo test -p exomind --no-default-features --features custom-protocol,beta-nati
 
 此命令还需按本机链路提供 `TAURI_CONFIG`；它不是完整包构建入口。默认模式与 Beta-only
 路由测试、默认路径/播种兼容回归，以及两种错误 feature 组合均已验证。依赖图中 Beta-only
-不再包含 `exomind-runtime`；Web 资产未随之裁剪。最终包体差异需同源 A/B link-map 探针，
-不能由 feature 名或依赖图推断尺寸、功耗或最终候选身份。冻结 Beta18 构建入口保持原样。
+不再包含 `exomind-runtime`，但 Tauri 仍使用共享的完整 `dist`，会把 Alpha 与 Beta 多入口
+资源一起打包。Beta 验证工作流可在同一源码上选择 Debug 或 Release profile；体积判断应对照
+同一源码、同一特性集的产物，不能只根据 feature 名或依赖图推断大小、功耗或设备行为。
+冻结 Beta18 构建入口保持原样。
 
 ## 当前控制关系
 
