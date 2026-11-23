@@ -918,14 +918,17 @@ fn ensure_window(app: &AppHandle, state: &NativeState) -> Result<(), Failure> {
         &state.overlay_window_creation,
         || app.get_webview_window(LABEL).is_some(),
         || {
-    let directory = crate::dev_instance_paths::resolve_overlay_webview_data_dir(LABEL)
+    let directory = match crate::dev_instance_paths::resolve_overlay_webview_data_dir(LABEL)
         .map_err(|_| unavailable())?
-        .unwrap_or(
-            app.path()
-                .app_data_dir()
-                .map_err(|_| unavailable())?
-                .join("beta-overlay-webview"),
-        );
+    {
+        Some(directory) => directory,
+        None => {
+            let fallback = app.path().app_data_dir().map_err(|_| unavailable())?;
+            let app_data_dir =
+                crate::dev_instance_paths::resolve_instance_app_data_dir_with_fallback(&fallback);
+            app_data_dir.join("beta-overlay-webview")
+        }
+    };
     std::fs::create_dir_all(&directory).map_err(|_| unavailable())?;
     let builder = tauri::WebviewWindowBuilder::new(
         app,

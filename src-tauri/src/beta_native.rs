@@ -993,6 +993,22 @@ async fn beta_desktop_status(
     })?
 }
 
+fn instance_app_data_dir(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let fallback = app.path().app_data_dir()?;
+    let directory =
+        crate::dev_instance_paths::resolve_instance_app_data_dir_with_fallback(&fallback);
+    std::fs::create_dir_all(&directory)?;
+    Ok(directory)
+}
+
+fn beta_host_root(app_data_dir: &std::path::Path) -> PathBuf {
+    app_data_dir.join("beta-host")
+}
+
+fn beta_handoff_root(app_data_dir: &std::path::Path) -> PathBuf {
+    app_data_dir.join(share_handoff::DIRECTORY_NAME)
+}
+
 fn data_root(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Some(root) = std::env::var_os("EXOMIND_BETA_DATA_DIR") {
         let root = PathBuf::from(root);
@@ -1004,10 +1020,8 @@ fn data_root(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Resolve the platform-owned app directory before the independent host's
     // strict path checks. Android may expose this directory through OS aliases;
     // explicit user overrides above still retain their strict validation.
-    let base = app.path().app_data_dir()?;
-    std::fs::create_dir_all(&base)?;
-    let base = base.canonicalize()?;
-    let root = base.join("beta-host");
+    let base = instance_app_data_dir(app)?.canonicalize()?;
+    let root = beta_host_root(&base);
     #[cfg(debug_assertions)]
     log::info!(
         "Beta platform storage: absolute={}, root={}",
@@ -1033,7 +1047,8 @@ fn report_startup_failure(app: &AppHandle, error: &HostError) {
             }
             _ => "本机资料未能打开，请保留启动日志供进一步核对。",
         };
-        let log_dir = app.path().app_log_dir().ok();
+        let log_dir = crate::dev_instance_paths::resolve_instance_log_dir_from_env()
+            .or_else(|| app.path().app_log_dir().ok());
         let message = format!(
             "{reason}\n\n现有资料已保留，请勿清空或重建档案。\n启动日志目录：{}",
             log_dir
@@ -1130,10 +1145,8 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                 Err(_) => return Err("EXOMIND_BETA_PORT must be valid Unicode".into()),
             };
             let native_root = data_root(app.handle())?;
-            let handoff_root = app
-                .path()
-                .app_data_dir()?
-                .join(share_handoff::DIRECTORY_NAME);
+            let app_data_dir = instance_app_data_dir(app.handle())?;
+            let handoff_root = beta_handoff_root(&app_data_dir);
             let handoffs = share_handoff::Store::new(handoff_root);
             if let Err(error) =
                 handoffs.recover(|id| app.android_share_handoff().is_receiving(id).unwrap_or(true))
@@ -1444,6 +1457,21 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn beta_native_and_handoff_roots_follow_the_instance_app_data_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let instance_app_data = root.path().join("beta26-qa-app-data");
+
+        assert_eq!(
+            beta_host_root(&instance_app_data),
+            instance_app_data.join("beta-host")
+        );
+        assert_eq!(
+            beta_handoff_root(&instance_app_data),
+            instance_app_data.join(share_handoff::DIRECTORY_NAME)
+        );
+    }
 
     #[test]
     fn native_window_authority_rejects_remote_and_legacy_pages() {

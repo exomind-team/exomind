@@ -135,10 +135,14 @@ fn persist_failure(
 
 #[cfg(target_os = "android")]
 fn export_journal_root(app: &AppHandle, host_root: &Path) -> Result<PathBuf, JournalError> {
-    let base = app
+    let fallback = app
         .path()
         .app_data_dir()
-        .map_err(|_| JournalError::Unavailable)?
+        .map_err(|_| JournalError::Unavailable)?;
+    let app_data_dir =
+        crate::dev_instance_paths::resolve_instance_app_data_dir_with_fallback(&fallback);
+    std::fs::create_dir_all(&app_data_dir).map_err(|_| JournalError::Unavailable)?;
+    let base = app_data_dir
         .canonicalize()
         .map_err(|_| JournalError::Unavailable)?;
     let host_root = host_root
