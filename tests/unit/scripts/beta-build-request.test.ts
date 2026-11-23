@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  BETA_BUILD_REQUEST_PATH,
   BetaBuildRequestError,
   resolveBetaBuildRequest,
   validateBetaCandidateIdentity,
@@ -104,6 +105,15 @@ describe('Beta build request validation', () => {
     expectCode(()=>resolveBetaBuildRequest(pushInput({
       requestText:JSON.stringify({...candidateRequest,expected_version:'0.6.0-beta26',android_test_package_suffix:'beta25testci'}),
     })),'invalid_test_package_suffix');
+  });
+
+  it('keeps the checked-in candidate SHA exact and the Android test package isolated', () => {
+    const candidate=JSON.parse(readFileSync(resolve(BETA_BUILD_REQUEST_PATH),'utf8')) as Record<string, unknown>;
+    expect(candidate.source_ref).toMatch(/^[0-9a-f]{40}$/);
+    expect(candidate.expected_sha).toBe(candidate.source_ref);
+    const request=resolveBetaBuildRequest(pushInput({requestText:JSON.stringify(candidate)}));
+    expect(request.expectedVersion).toBe(candidate.expected_version);
+    expect(request.androidTestPackageSuffix).toBe(candidate.android_test_package_suffix);
   });
 
   it('rejects unknown request keys with a schema-specific error', () => {
