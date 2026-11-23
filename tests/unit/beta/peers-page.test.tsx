@@ -647,7 +647,7 @@ describe('Nearby network scan',()=>{
     const scanButton=screen.getByRole('button',{name:'扫描当前内网'});
     await waitFor(()=>expect(scanButton).toBeEnabled());
     fireEvent.click(scanButton);
-    fireEvent.click(screen.getByRole('button',{name:'查看未验证开放端口（70）'}));
+    fireEvent.click(await screen.findByRole('button',{name:'查看未验证开放端口（70）'}));
     expect(await screen.findByText(/另有 6 个未验证开放端口地址未展示/)).toBeInTheDocument();
   });
   it('auto-retries a transient scan status failure and recovers',async()=>{
