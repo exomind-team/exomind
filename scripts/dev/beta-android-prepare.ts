@@ -20,6 +20,7 @@ import {
 } from './android-manifest-permission-lib';
 
 const BETA_PACKAGE = 'com.exomind.app.v06.beta';
+const BETA_ANDROID_APPLICATION_ID = 'com.exomind.app';
 const ANDROID_APP = ['src-tauri', 'gen', 'android', 'app'];
 const NATIVE_SYMBOLS_PROPERTY = 'exomind.keepNativeSymbols';
 const TAURI_ANDROID_INIT_CONFIG_CHANGES_VALUE = 'orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode';
@@ -73,12 +74,28 @@ function withoutComments(source: string): string {
 
 function assertGradle(source: string): void {
   const code = withoutComments(source);
-  for (const field of ['namespace', 'applicationId']) {
-    const declarations = [...code.matchAll(new RegExp(`^\\s*${field}\\s*=\\s*(["'])([^"']+)\\1`, 'gm'))];
-    if (declarations.length !== 1 || declarations[0][2] !== BETA_PACKAGE) {
-      reject(`Generated Android ${field} must explicitly equal the Beta package`);
-    }
+  const namespaces = [...code.matchAll(/^\s*namespace\s*=\s*(["'])([^"']+)\1/gm)];
+  if (namespaces.length !== 1 || namespaces[0][2] !== BETA_PACKAGE) {
+    reject(`Generated Android namespace must explicitly equal ${BETA_PACKAGE}`);
   }
+  const applicationIds = [...code.matchAll(/^\s*applicationId\s*=\s*(["'])([^"']+)\1/gm)];
+  if (applicationIds.length !== 1
+    || ![BETA_PACKAGE, BETA_ANDROID_APPLICATION_ID].includes(applicationIds[0][2])) {
+    reject(`Generated Android applicationId must be ${BETA_PACKAGE} before preparation or ${BETA_ANDROID_APPLICATION_ID} after preparation`);
+  }
+}
+
+function ensureStableApplicationId(gradle: string): string {
+  const code = withoutComments(gradle);
+  const declarations = [...code.matchAll(/^\s*applicationId\s*=\s*(["'])([^"']+)\1/gm)];
+  if (declarations.length !== 1) reject('Expected exactly one generated Android applicationId');
+  const current = declarations[0][2];
+  if (current === BETA_ANDROID_APPLICATION_ID) return gradle;
+  if (current !== BETA_PACKAGE) reject(`Unexpected generated Android applicationId: ${current}`);
+  return gradle.replace(
+    /^([ \t]*applicationId[ \t]*=[ \t]*)(["'])com\.exomind\.app\.v06\.beta\2([ \t]*)$/m,
+    `$1$2${BETA_ANDROID_APPLICATION_ID}$2$3`,
+  );
 }
 
 function attribute(tag: string, name: string): string | undefined {
@@ -445,27 +462,25 @@ export function prepareBetaAndroid(projectRoot: string, options: {ndkVersion?: s
   const configPath = sourceFile(projectRoot, ['src-tauri', 'tauri.beta.conf.json']);
   const config: unknown = JSON.parse(readFileSync(configPath, 'utf8'));
   if (!config || typeof config !== 'object' || !('identifier' in config) || config.identifier !== BETA_PACKAGE) {
-    reject('Project configuration does not identify ExoMind Beta');
+    reject('Project configuration does not identify the Exomind 0.6 beta candidate');
   }
   const version = 'version' in config && typeof config.version === 'string' ? config.version : '';
   const productName = 'productName' in config && typeof config.productName === 'string' ? config.productName : '';
   const testSuffix = options.testPackageSuffix === undefined ? undefined : betaTestSuffix(version, options.testPackageSuffix);
-  if (testSuffix && !productName) reject('Beta test package preparation requires the configured product name');
+  if (!productName) reject('Beta Android preparation requires the configured product name');
   const gradlePath = sourceFile(projectRoot, [...ANDROID_APP, 'build.gradle.kts']);
   const manifestPath = sourceFile(projectRoot, [...ANDROID_APP, 'src', 'main', 'AndroidManifest.xml']);
   const activityPath = sourceFile(projectRoot, [...ANDROID_APP, 'src', 'main', 'java', ...BETA_PACKAGE.split('.'), 'MainActivity.kt']);
   const gradle = readFileSync(gradlePath, 'utf8');
   const manifest = readFileSync(manifestPath, 'utf8');
   const activity = readFileSync(activityPath, 'utf8');
-  const stringsPath = testSuffix
-    ? sourceFile(projectRoot, [...ANDROID_APP, 'src', 'main', 'res', 'values', 'strings.xml'])
-    : undefined;
-  const strings = stringsPath ? readFileSync(stringsPath, 'utf8') : undefined;
+  const stringsPath = sourceFile(projectRoot, [...ANDROID_APP, 'src', 'main', 'res', 'values', 'strings.xml']);
+  const strings = readFileSync(stringsPath, 'utf8');
   assertGradle(gradle); assertManifest(manifest); assertActivity(activity, false);
   // AGP no longer consults ANDROID_NDK_HOME. Pin its strip tool to the same
   // installed NDK used by Rust instead of silently packaging an unstripped SO.
   const ndkVersion = options.ndkVersion === undefined ? resolveInstalledNdkVersion() : options.ndkVersion;
-  let nextGradle = ensureConfiguredNdkVersionInGradle(prepareNativeSymbols(gradle),ndkVersion).buildGradleKts;
+  let nextGradle = ensureStableApplicationId(ensureConfiguredNdkVersionInGradle(prepareNativeSymbols(gradle),ndkVersion).buildGradleKts);
   if (testSuffix) nextGradle = ensureDebugApplicationIdSuffix(nextGradle, testSuffix);
   assertGradle(nextGradle);
   const audioManifest = ensureWebViewAudioCapturePermissionsInManifest(
@@ -477,17 +492,19 @@ export function prepareBetaAndroid(projectRoot: string, options: {ndkVersion?: s
   const testLabel = testSuffix
     ? `外心 Beta${version.match(/-beta([1-9][0-9]*)$/)?.[1]} 测试 CI${testRevision ? ` ${testRevision}` : ''}`
     : undefined;
-  const nextStrings = strings && testLabel
-    ? updateAndroidString(updateAndroidString(strings, 'app_name', productName, testLabel), 'main_activity_title', productName, testLabel)
-    : strings;
+  const nextStrings = updateAndroidString(
+    updateAndroidString(strings, 'app_name', productName, testLabel ?? productName),
+    'main_activity_title',
+    productName,
+    testLabel ?? productName,
+  );
   assertManifest(nextManifest, true); assertActivity(nextActivity, true);
   if (attribute(withoutComments(nextManifest).match(/<activity\b[^>]*>/)?.[0] ?? '', 'android:configChanges') !== ANDROID_CONFIG_CHANGES_VALUE) {
     reject('Beta Activity configChanges integration is missing');
   }
   const changes:FileChange[] = [{ path: gradlePath, before: gradle, after: nextGradle }, { path: manifestPath, before: manifest, after: nextManifest }, { path: activityPath, before: activity, after: nextActivity }]
     .filter(change => !sameGeneratedBytes(change.before,change.after));
-  if (stringsPath && strings !== undefined && nextStrings !== undefined
-    && !sameGeneratedBytes(strings, nextStrings)) {
+  if (!sameGeneratedBytes(strings, nextStrings)) {
     changes.push({ path: stringsPath, before: strings, after: nextStrings });
   }
   changes.push(...planBetaAndroidBranding(projectRoot));

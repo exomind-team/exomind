@@ -67,7 +67,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Source checkout must be clean before the probe' }
 
           $config = Get-Content -LiteralPath 'src-tauri/tauri.beta.conf.json' -Raw | ConvertFrom-Json
-          if ($config.identifier -ne 'com.exomind.app.v06.beta' -or $config.productName -ne 'ExoMind Beta') { throw 'Current source Beta Native identity mismatch' }
+          if ($config.identifier -ne 'com.exomind.app.v06.beta' -or $config.productName -ne 'Exomind 0.6 beta') { throw 'Current source Beta Native identity mismatch' }
           if ($config.version -notmatch '^0\.6\.0-beta[1-9][0-9]*$') { throw 'Current source Beta Native version is missing or invalid' }
           if ($config.build.beforeBuildCommand -ne 'bun run build:web') { throw 'Beta beforeBuildCommand must remain bun run build:web' }
           $main = @($config.app.windows | Where-Object { $_.label -eq 'main' })
@@ -168,7 +168,7 @@ jobs:
             if (-not (Test-Path -LiteralPath $mapPath -PathType Leaf)) { throw 'Windows linker did not produce this variant root executable map' }
 
             $identity = (Get-Item -LiteralPath $env:PROBE_BINARY_PATH).VersionInfo
-            if ($identity.ProductName -ne 'ExoMind Beta') { throw 'Built PE is not the current source Beta Native identity' }
+            if ($identity.ProductName -ne 'Exomind 0.6 beta') { throw 'Built PE is not the current source Beta Native identity' }
             if ($identity.ProductVersion -ne $env:PROBE_VERSION -or $identity.FileVersion -ne $env:PROBE_VERSION) { throw 'Built PE version resource differs from the current Beta Native config' }
             $env:PROBE_PE_PRODUCT_NAME = $identity.ProductName
             $env:PROBE_PE_PRODUCT_VERSION = $identity.ProductVersion

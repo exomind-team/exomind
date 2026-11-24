@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ExoMind Beta",
+  "productName": "Exomind 0.6 beta",
   "version": "0.6.0-beta26",
   "identifier": "com.exomind.app.v06.beta",
   "build": {

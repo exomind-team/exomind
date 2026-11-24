@@ -90,7 +90,7 @@ function comparisonInput(variant) {
     mode: legacy ? "alpha-legacy-runtime" : "beta-native-only",
     source_sha: "a".repeat(40),
     workflow_recipe: { source_commit_sha: "a".repeat(40), recipe_sha256: "recipe-sha" },
-    source_native_config: { sha256: "config-sha", identifier: "com.exomind.app.v06.beta", product_name: "ExoMind Beta", version: "0.6.0-beta19" },
+    source_native_config: { sha256: "config-sha", identifier: "com.exomind.app.v06.beta", product_name: "Exomind 0.6 beta", version: "0.6.0-beta19" },
     cargo: {
       package: "exomind",
       source_manifest_version: "0.6.0-beta19",

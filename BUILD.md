@@ -234,6 +234,10 @@ git push origin release/v0.2.0-preview
 
 > Android APK 默认输出 `aarch64 (arm64-v8a)` 与 `x86 (i686)` 两个 ABI，可直接侧载安装。
 
+Beta26 稳定 Android 候选恢复 0.5 的 applicationId `com.exomind.app`，显示名为
+`Exomind 0.6 beta`，并使用仓库 Android 签名密钥保持同名候选的 signer 稳定。
+`beta26testciN` 后缀只用于明确要求并行的测试安装，默认候选不加后缀。
+
 #### 下载构建产物
 
 1. 打开 https://github.com/exomind-team/exomind/actions

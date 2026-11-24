@@ -58,7 +58,7 @@ function expectCode(action: () => unknown, code: BetaBuildRequestError['code']):
 function beta16Config() {
   return {
     identifier: 'com.exomind.app.v06.beta',
-    productName: 'ExoMind Beta',
+    productName: 'Exomind 0.6 beta',
     version: '0.6.0-beta16',
     build: { beforeBuildCommand: 'bun run build:web' },
     app: {
@@ -107,13 +107,14 @@ describe('Beta build request validation', () => {
     })),'invalid_test_package_suffix');
   });
 
-  it('keeps the checked-in candidate SHA exact and the Android test package isolated', () => {
+  it('keeps the checked-in Beta26 candidate on the stable Android package', () => {
     const candidate=JSON.parse(readFileSync(resolve(BETA_BUILD_REQUEST_PATH),'utf8')) as Record<string, unknown>;
     expect(candidate.source_ref).toMatch(/^[0-9a-f]{40}$/);
     expect(candidate.expected_sha).toBe(candidate.source_ref);
     const request=resolveBetaBuildRequest(pushInput({requestText:JSON.stringify(candidate)}));
     expect(request.expectedVersion).toBe(candidate.expected_version);
-    expect(request.androidTestPackageSuffix).toBe(candidate.android_test_package_suffix);
+    expect('android_test_package_suffix' in candidate).toBe(false);
+    expect(request.androidTestPackageSuffix).toBe('');
   });
 
   it('rejects unknown request keys with a schema-specific error', () => {

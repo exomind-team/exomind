@@ -172,6 +172,17 @@ CLI 内置的路径边界检查独立计数，不冒充第四个业务场景。
 阻止一切 push/发布。轻量证明检查先于安装 CLI，触发路径包含依赖的 Core 和共享
 展示组件；不根据一次源码绿宣称完整跨平台通过。现阶段不设全仓覆盖率或机械性能阈值。
 
+## Beta26 Android 稳定身份
+
+- 源码与 Tauri 内部标识继续使用 `com.exomind.app.v06.beta`，保持 Beta Native
+  路由和本机数据边界独立。
+- Android 对外稳定 `applicationId` 恢复为 0.5 的 `com.exomind.app`，源码
+  namespace 仍使用 `com.exomind.app.v06.beta`。
+- 稳定候选显示名为 `Exomind 0.6 beta`。
+- `beta26testciN` 只用于用户显式要求的并行测试安装；默认构建不得添加后缀。
+- 稳定 debug APK 使用仓库 Android 签名密钥，保证同名候选具有一致 signer；
+  release-profile 体积对照仍可使用当次临时探针签名，不冒充可升级候选。
+
 ## G 盘空间与构建保留（用户 2026-11-19 确认）
 
 - 最多保留最新和上一版，共两个版本槽。同版不累计多个无用 staging。

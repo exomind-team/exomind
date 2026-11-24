@@ -521,7 +521,7 @@ async function main() {
   const passedConfig = JSON.parse(need("TAURI_CONFIG"));
   assert(JSON.stringify(passedConfig) === JSON.stringify(config), "TAURI_CONFIG differs from the checked-in Beta Native config");
   assert(config.identifier === "com.exomind.app.v06.beta", "Unexpected current Beta Native identifier");
-  assert(config.productName === "ExoMind Beta", "Unexpected current Beta Native product name");
+  assert(config.productName === "Exomind 0.6 beta", "Unexpected current Beta Native product name");
   assert(/^0\.6\.0-beta[1-9][0-9]*$/.test(config.version), "Current Beta Native config version is invalid");
   assert(config.version === need("PROBE_VERSION"), "Probe version differs from source config");
   assert(config.build?.beforeBuildCommand === "bun run build:web", "Current Beta beforeBuildCommand changed");

@@ -31,7 +31,7 @@ on:
         type: boolean
         default: false
       android_test_package_suffix:
-        description: Version-matched test package suffix; use a numbered variant such as beta26testci2 to keep parallel installs separate
+        description: Optional version-matched suffix for an explicitly parallel test install; leave blank for the stable Beta26 package
         required: false
         type: string
         default: ''
@@ -263,7 +263,7 @@ jobs:
         run: |
           $binary = Join-Path $env:CARGO_TARGET_DIR "$env:BUILD_TARGET/debug/exomind.exe"
           $identity = (Get-Item -LiteralPath $binary).VersionInfo
-          if ($identity.ProductName -ne 'ExoMind Beta') { throw 'Built PE is not Beta' }
+          if ($identity.ProductName -ne 'Exomind 0.6 beta') { throw 'Built PE is not the locked Beta26 app' }
           if ($identity.ProductVersion -ne $env:BETA_VERSION -or $identity.FileVersion -ne $env:BETA_VERSION) { throw 'Built PE version does not match the exact Beta candidate' }
           # The Beta-only resource seam must override shared Alpha Cargo
           # metadata. Record and verify the actual PE, not only the config.
@@ -412,6 +412,74 @@ jobs:
             echo "Unsupported Android build profile: $ANDROID_BUILD_PROFILE" >&2
             exit 1
           fi
+      - name: Prepare repository Android signing keystore for stable debug APK
+        if: ${{ inputs.android_build_profile != 'release' }}
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" ]]; then
+            echo 'Missing repository Android keystore secret.' >&2
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/exomind-beta-stable.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          {
+            echo "ANDROID_KEYSTORE_PATH=$keystore"
+            echo 'ANDROID_SIGNING_MODE=repository-key'
+          } >> "$GITHUB_ENV"
+      - name: Sign stable debug APKs with repository Android key
+        if: ${{ inputs.android_build_profile != 'release' }}
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for required in ANDROID_KEYSTORE_PATH ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!required:-}" ]]; then
+              echo "Missing required Android signing input: $required" >&2
+              exit 1
+            fi
+          done
+          build_tools="$ANDROID_HOME/build-tools/36.0.0"
+          apk_root="src-tauri/gen/android/app/build/outputs/apk"
+          found=0
+          signer=""
+          while IFS= read -r -d '' apk; do
+            found=$((found + 1))
+            aligned="${apk%.apk}.aligned.apk"
+            signed="${apk%.apk}.signed.apk"
+            "$build_tools/zipalign" -p -f 4 "$apk" "$aligned"
+            "$build_tools/apksigner" sign \
+              --ks "$ANDROID_KEYSTORE_PATH" \
+              --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+              --ks-key-alias "$ANDROID_KEY_ALIAS" \
+              --key-pass env:ANDROID_KEY_PASSWORD \
+              --out "$signed" "$aligned"
+            verification="$("$build_tools/apksigner" verify --verbose --print-certs "$signed")"
+            grep -q '^Number of signers: 1$' <<<"$verification"
+            current_signer="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$verification" | head -n1)"
+            if [[ -z "$current_signer" ]]; then
+              echo "APK signer fingerprint missing: $apk" >&2
+              exit 1
+            fi
+            if [[ -n "$signer" && "$current_signer" != "$signer" ]]; then
+              echo 'ABI APKs were signed by different certificates.' >&2
+              exit 1
+            fi
+            signer="$current_signer"
+            mv "$signed" "$apk"
+            rm -f "$aligned"
+          done < <(find "$apk_root" -type f -name '*debug*.apk' ! -name '*androidTest*' -print0)
+          if [[ "$found" -ne 2 ]]; then
+            echo "Expected two debug APKs to sign; found $found." >&2
+            exit 1
+          fi
+          echo "Stable debug APK signer SHA-256: $signer"
       - name: Sign release-profile APKs with an ephemeral comparison key
         if: ${{ inputs.android_build_profile == 'release' }}
         shell: bash
@@ -422,7 +490,7 @@ jobs:
           probe_pass="$(openssl rand -hex 16)"
           keytool -genkeypair -noprompt -storetype JKS -keystore "$key" \
             -storepass "$probe_pass" -keypass "$probe_pass" -alias beta-size-probe \
-            -dname "CN=ExoMind Beta Release Size Probe" -keyalg RSA -keysize 2048 -validity 3650
+            -dname "CN=Exomind 0.6 beta Release Size Probe" -keyalg RSA -keysize 2048 -validity 3650
           apk_root="src-tauri/gen/android/app/build/outputs/apk"
           found=0
           while IFS= read -r -d '' apk; do
@@ -456,14 +524,15 @@ jobs:
           const apks=walk(root).filter(file=>file.endsWith('.apk')&&file.includes(profile)&&!/androidTest/i.test(file));assert.equal(apks.length,2,`Exactly two ABI-specific ${profile} APKs required`);
           const ndkVersion=process.env.EXOMIND_ANDROID_NDK_VERSION;assert.equal(ndkVersion,'30.0.16248370');assert.equal(process.env.ANDROID_NDK_VERSION,ndkVersion);const ndkHome=path.join(process.env.ANDROID_HOME,'ndk',ndkVersion);assert.equal(fs.realpathSync(process.env.NDK_HOME),fs.realpathSync(ndkHome));assert.equal(fs.realpathSync(process.env.ANDROID_NDK_HOME),fs.realpathSync(ndkHome));const ndkSourceProperties=path.join(ndkHome,'source.properties'),ndkSource=fs.readFileSync(ndkSourceProperties,'utf8');assert.equal(/^[\t ]*Pkg\.Revision[\t ]*=\s*([^\s]+)\s*$/m.exec(ndkSource)?.[1],ndkVersion);const installedNdks=fs.readdirSync(path.join(process.env.ANDROID_HOME,'ndk'),{withFileTypes:true}).filter(entry=>entry.isDirectory()).map(entry=>entry.name).sort();assert.deepEqual(installedNdks,[ndkVersion]);const gradleSource=fs.readFileSync('src-tauri/gen/android/app/build.gradle.kts','utf8'),gradleNdkVersions=[...gradleSource.matchAll(/^[\t ]*ndkVersion[\t ]*=\s*"([^"]+)"\s*$/gm)].map(match=>match[1]);assert.deepEqual(gradleNdkVersions,[ndkVersion]);
           const tools=path.join(process.env.ANDROID_HOME,'build-tools','36.0.0');
+          const config=JSON.parse(fs.readFileSync('src-tauri/tauri.beta.conf.json','utf8'));
           const suffix=process.env.ANDROID_TEST_PACKAGE_SUFFIX??'';
           const betaNumber=/^0\.6\.0-beta([1-9][0-9]*)$/.exec(process.env.BETA_VERSION)?.[1];
           assert.ok(betaNumber,'The source resolver must supply a canonical Beta version');
           const testSuffixPattern=new RegExp(`^beta${betaNumber}testci(?:[1-9][0-9]{0,2})?$`);
           if(suffix)assert.ok(testSuffixPattern.test(suffix),'Android test suffix must be isolated and match the Beta version');
-          const packageName=`com.exomind.app.v06.beta${suffix?`.${suffix}`:''}`;
+          const packageName=`com.exomind.app${suffix?`.${suffix}`:''}`;
           const testRevision=new RegExp(`^beta${betaNumber}testci([1-9][0-9]{0,2})$`).exec(suffix)?.[1];
-          const appLabel=suffix?`外心 Beta${betaNumber} 测试 CI${testRevision?` ${testRevision}`:''}`:'ExoMind Beta';
+          const appLabel=suffix?`外心 Beta${betaNumber} 测试 CI${testRevision?` ${testRevision}`:''}`:config.productName;
           const seen=new Set(),files=[];
           for(const source of apks){
             const badging=execFileSync(path.join(tools,'aapt'),['dump','badging',source],{encoding:'utf8',timeout:10000});
@@ -483,7 +552,7 @@ jobs:
             fs.copyFileSync(source,target,fs.constants.COPYFILE_EXCL);
             files.push({file:path.basename(target),abi,bytes:fs.statSync(target).size,sha256:hash(target),package:packageName,version:process.env.BETA_VERSION,version_code:Number(process.env.BETA_VERSION_CODE),signer_sha256:signerSha256});
           }
-          const info={validation_only:true,build_scope:process.env.BUILD_SCOPE,workflow_recipe_sha:process.env.WORKFLOW_RECIPE_SHA,source_sha:process.env.SOURCE_SHA,version:process.env.BETA_VERSION,identifier:packageName,base_identifier:'com.exomind.app.v06.beta',android_test_package_suffix:suffix||null,entry:'beta.html',profile:`${profile} APK`,cargo_features:['custom-protocol','beta-native-only'],cargo_default_features:false,core_schema:Number(fs.readFileSync('crates/exomind-core/src/lib.rs','utf8').match(/CORE_SCHEMA_VERSION:\s*i64\s*=\s*(\d+)/)?.[1]),config_sha256:process.env.BETA_CONFIG_HASH,cargo_lock_sha256:process.env.CARGO_LOCK_HASH,rustc:execFileSync('rustc',['-Vv'],{encoding:'utf8'}).trim(),ndk:ndkVersion,gradle_ndk:gradleNdkVersions[0],ndk_selection:'Isolated ANDROID_HOME contained exactly the selected NDK; source.properties was verified before and after preparation.',ndk_source_properties_sha256:hash(ndkSourceProperties),sdk:36,build_tools:'36.0.0',files,runtime_tested:false,upgrade_tested:false,published:false,signing:profile==='debug'?'Runner-local debug key only; test package suffix avoids replacing Beta25 or previous test packages; not release-signed.':'Runner-generated ephemeral size-probe key; not release-signed.'};
+          const info={validation_only:true,build_scope:process.env.BUILD_SCOPE,workflow_recipe_sha:process.env.WORKFLOW_RECIPE_SHA,source_sha:process.env.SOURCE_SHA,version:process.env.BETA_VERSION,identifier:packageName,base_identifier:'com.exomind.app',android_test_package_suffix:suffix||null,entry:'beta.html',profile:`${profile} APK`,cargo_features:['custom-protocol','beta-native-only'],cargo_default_features:false,core_schema:Number(fs.readFileSync('crates/exomind-core/src/lib.rs','utf8').match(/CORE_SCHEMA_VERSION:\s*i64\s*=\s*(\d+)/)?.[1]),config_sha256:process.env.BETA_CONFIG_HASH,cargo_lock_sha256:process.env.CARGO_LOCK_HASH,rustc:execFileSync('rustc',['-Vv'],{encoding:'utf8'}).trim(),ndk:ndkVersion,gradle_ndk:gradleNdkVersions[0],ndk_selection:'Isolated ANDROID_HOME contained exactly the selected NDK; source.properties was verified before and after preparation.',ndk_source_properties_sha256:hash(ndkSourceProperties),sdk:36,build_tools:'36.0.0',files,runtime_tested:false,upgrade_tested:false,published:false,signing:profile==='debug'?'Repository Android signing key with stable package identity; not release-signed.':'Runner-generated ephemeral size-probe key; not release-signed.'};
           fs.writeFileSync(path.join(output,'build-info.json'),JSON.stringify(info,null,2));
           NODE
       - uses: actions/upload-artifact@v7

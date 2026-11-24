@@ -64,17 +64,31 @@ function fixture(namespace = beta) {
     strings: join(root, 'src-tauri/gen/android/app/src/main/res/values/strings.xml'),
   };
   const put = (path: string, value: string) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, value); };
-  put(files.config, JSON.stringify({ productName: 'ExoMind Beta', version: '0.6.0-beta26', identifier: beta, app: { windows: [{ label: 'main', url: 'beta.html' }] } }));
+  put(files.config, JSON.stringify({ productName: 'Exomind 0.6 beta', version: '0.6.0-beta26', identifier: beta, app: { windows: [{ label: 'main', url: 'beta.html' }] } }));
   put(files.gradle, `android {\n    namespace = "${namespace}"\n    defaultConfig {\n        applicationId = "${beta}"\n    }\n}\n`);
   put(files.manifest, freshManifest);
   put(files.activity, freshActivity);
-  put(files.strings, '<resources>\n    <string name="app_name">ExoMind Beta</string>\n    <string name="main_activity_title">ExoMind Beta</string>\n</resources>\n');
+  put(files.strings, '<resources>\n    <string name="app_name">Exomind 0.6 beta</string>\n    <string name="main_activity_title">Exomind 0.6 beta</string>\n</resources>\n');
   cpSync(join(process.cwd(),'src-tauri/icons/android'),join(root,'src-tauri/icons/android'),{recursive:true});
   return { root, files, snapshot: () => Object.fromEntries(Object.entries(files).map(([key,path]) => [key,readFileSync(path,'utf8')])) };
 }
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe('isolated Beta Android preparation', () => {
+  it('uses the stable 0.5 application identity and the locked Beta26 display name by default', async () => {
+    const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
+    const work = fixture();
+
+    prepareBetaAndroid(work.root, { ndkVersion: null });
+    const after = work.snapshot();
+
+    expect(after.gradle).toContain(`namespace = "${beta}"`);
+    expect(after.gradle).toContain('applicationId = "com.exomind.app"');
+    expect(after.gradle).not.toContain('applicationIdSuffix');
+    expect(after.strings).toContain('<string name="app_name">Exomind 0.6 beta</string>');
+    expect(after.strings).toContain('<string name="main_activity_title">Exomind 0.6 beta</string>');
+    expect(prepareBetaAndroid(work.root, { ndkVersion: null }).changedFiles).toEqual([]);
+  });
   it('B14-U05: replaces template launcher resources from the maintained brand pack, including round/adaptive icons',async()=>{
     const {prepareBetaAndroid}=await import('../../../scripts/dev/beta-android-prepare');const work=fixture();
     const target=join(work.root,'src-tauri/gen/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png');mkdirSync(dirname(target),{recursive:true});writeFileSync(target,'synthetic Tauri template icon');
@@ -93,7 +107,7 @@ describe('isolated Beta Android preparation', () => {
     const after=work.snapshot();
 
     expect(after.gradle).toContain(`namespace = "${beta}"`);
-    expect(after.gradle).toContain(`applicationId = "${beta}"`);
+    expect(after.gradle).toContain('applicationId = "com.exomind.app"');
     expect(after.gradle).toContain('applicationIdSuffix = ".beta26testci"');
     expect(after.strings).toContain('<string name="app_name">外心 Beta26 测试 CI</string>');
     expect(after.strings).toContain('<string name="main_activity_title">外心 Beta26 测试 CI</string>');
@@ -136,12 +150,12 @@ describe('isolated Beta Android preparation', () => {
     expect(prepared).toContain('exomind.keepNativeSymbols');expect(prepared).toContain('if (keepNativeSymbols)');
     expect(prepareBetaAndroid(work.root,{ndkVersion:null}).changedFiles).toEqual([]);expect(work.snapshot().gradle).toBe(prepared);
   });
-  it('patches the fresh Tauri Android template with only audio permissions and is idempotent', async () => {
+  it('patches the fresh Tauri Android template identity and audio permissions idempotently', async () => {
     const { prepareBetaAndroid } = await import('../../../scripts/dev/beta-android-prepare');
     const work = fixture(); const before = work.snapshot();
     const result = prepareBetaAndroid(work.root,{ndkVersion:null});
-    expect(result.changedFiles).toContain(work.files.manifest);expect(result.changedFiles).toContain(work.files.activity);expect(result.changedFiles).not.toContain(work.files.gradle);
-    const after = work.snapshot(); expect(after.gradle).toBe(before.gradle); expect(after.config).toBe(before.config);
+    expect(result.changedFiles).toContain(work.files.manifest);expect(result.changedFiles).toContain(work.files.activity);expect(result.changedFiles).toContain(work.files.gradle);
+    const after = work.snapshot(); expect(after.gradle).not.toBe(before.gradle); expect(after.gradle).toContain('applicationId = "com.exomind.app"'); expect(after.config).toBe(before.config);
     expect(after.activity).toContain('fun setExomindFullscreen(enabled: Boolean)');
     expect(after.activity).toContain('override fun onConfigurationChanged(newConfig: android.content.res.Configuration)');
     expect(after.activity).toMatch(/super\.onResume\(\)\s+applyExomindSystemBars\(\)/);

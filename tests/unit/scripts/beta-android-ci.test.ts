@@ -176,6 +176,8 @@ describe('Beta Android workflow contract', () => {
     expect(workflow).toContain('android_build_profile:');
     expect(workflow).toContain('          - debug\n          - release');
     expect(workflow).toContain('--locked --no-default-features --features custom-protocol,beta-native-only');
+    expect(workflow).toContain('Sign stable debug APKs with repository Android key');
+    expect(workflow).toContain("base_identifier:'com.exomind.app'");
     expect(workflow).toContain('Sign release-profile APKs with an ephemeral comparison key');
     expect(workflow).toContain("assert.equal(/^application-debuggable\\b/m.test(badging),profile==='debug')");
     expect(workflow).toContain("cargo_features:['custom-protocol','beta-native-only'],cargo_default_features:false");

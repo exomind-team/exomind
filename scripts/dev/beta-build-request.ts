@@ -201,7 +201,7 @@ export function validateBetaCandidateIdentity(
 
   if (
     config?.identifier !== 'com.exomind.app.v06.beta'
-    || config.productName !== 'ExoMind Beta'
+    || config.productName !== 'Exomind 0.6 beta'
     || config.version !== request.expectedVersion
     || build?.beforeBuildCommand !== 'bun run build:web'
     || asRecord(mainWindow)?.url !== 'beta.html'
@@ -210,7 +210,7 @@ export function validateBetaCandidateIdentity(
     || capabilities[0] !== 'beta'
     || capabilities[1] !== 'beta-overlay'
   ) {
-    fail('beta_identity_mismatch', 'Candidate does not match the expected ExoMind Beta identity and entry contract.');
+    fail('beta_identity_mismatch', 'Candidate does not match the expected Exomind 0.6 beta identity and entry contract.');
   }
 
   const versionCode = android?.versionCode;

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { assertAndroidApkIdentity, parseAndroidApkIdentity } from '../../../scripts/dev/beta-apk-identity.mjs';
-const identity=iteration=>({identifier:'com.exomind.app.v06.beta',versionCode:6000+iteration,versionName:`0.6.0-beta${iteration}`});
-const badging=value=>`package: name='${value.identifier}' versionCode='${value.versionCode}' versionName='${value.versionName}' platformBuildVersionName='16'\napplication-label:'ExoMind Beta'\n`;
+const identity=iteration=>({identifier:'com.exomind.app',versionCode:6000+iteration,versionName:`0.6.0-beta${iteration}`});
+const badging=value=>`package: name='${value.identifier}' versionCode='${value.versionCode}' versionName='${value.versionName}' platformBuildVersionName='16'\napplication-label:'Exomind 0.6 beta'\n`;
 for(const iteration of [18,19,20])test(`checks Beta${iteration} as values without a copied version regular expression`,()=>{
   const expected=identity(iteration);
   assert.deepEqual(assertAndroidApkIdentity(badging(expected),expected),expected);
