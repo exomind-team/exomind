@@ -50,7 +50,10 @@ const root = ReactDOM.createRoot(document.getElementById('root')!);
 try {
   if (!mockMode) {
     initializeBetaUuid();
-    void initQuickExitShortcutRuntime();
+    void initQuickExitShortcutRuntime({
+      exitCommand: 'beta_request_exit',
+      bindingSource: 'persisted-settings',
+    });
   }
   root.render(<React.StrictMode><BetaEntry /></React.StrictMode>);
 } catch (failure) {

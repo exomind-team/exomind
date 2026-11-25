@@ -128,9 +128,41 @@ impl MainWindowShortcutState {
 ///
 /// Defaults to unassigned: quick exit never owns a destructive global chord
 /// until the user explicitly captures one in settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum QuickExitShortcutScope {
+    AppOnly,
+    SystemGlobal,
+}
+
+impl Default for QuickExitShortcutScope {
+    fn default() -> Self {
+        // Calls from pre-scope frontends used to mean system-global. New
+        // frontends always send an explicit scope; keeping this fallback
+        // preserves the existing command contract during a mixed upgrade.
+        Self::SystemGlobal
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickExitShortcutBinding {
+    pub shortcut: Option<String>,
+    pub scope: QuickExitShortcutScope,
+}
+
+impl Default for QuickExitShortcutBinding {
+    fn default() -> Self {
+        Self {
+            shortcut: None,
+            scope: QuickExitShortcutScope::default(),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct QuickExitShortcutState {
-    shortcut: Mutex<Option<String>>,
+    binding: Mutex<QuickExitShortcutBinding>,
     request_exit: Option<QuickExitRequest>,
 }
 
@@ -139,28 +171,48 @@ type QuickExitRequest = fn(&AppHandle, i32);
 impl QuickExitShortcutState {
     pub fn new() -> Self {
         Self {
-            shortcut: Mutex::new(None),
+            binding: Mutex::new(QuickExitShortcutBinding::default()),
             request_exit: None,
         }
     }
 
     pub fn with_exit_handler(request_exit: QuickExitRequest) -> Self {
         Self {
-            shortcut: Mutex::new(None),
+            binding: Mutex::new(QuickExitShortcutBinding::default()),
             request_exit: Some(request_exit),
         }
     }
 
     fn get(&self) -> Option<String> {
-        self.shortcut
+        self.binding
             .lock()
-            .map(|value| value.clone())
+            .map(|binding| binding.shortcut.clone())
             .unwrap_or(None)
     }
 
+    fn scope(&self) -> QuickExitShortcutScope {
+        self.binding
+            .lock()
+            .map(|binding| binding.scope)
+            .unwrap_or_default()
+    }
+
+    fn binding(&self) -> QuickExitShortcutBinding {
+        self.binding
+            .lock()
+            .map(|binding| binding.clone())
+            .unwrap_or_default()
+    }
+
     fn set(&self, shortcut: Option<String>) {
-        if let Ok(mut value) = self.shortcut.lock() {
-            *value = shortcut;
+        if let Ok(mut binding) = self.binding.lock() {
+            binding.shortcut = shortcut;
+        }
+    }
+
+    fn set_binding(&self, next: QuickExitShortcutBinding) {
+        if let Ok(mut binding) = self.binding.lock() {
+            *binding = next;
         }
     }
 
@@ -660,11 +712,14 @@ fn canonical_quick_exit_key(token: &str) -> String {
 /// Register the configured quick-exit shortcut at startup（启动时注册快速退出快捷键）.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn register_quick_exit_shortcut(app: &AppHandle, state: &QuickExitShortcutState) {
-    if let Some(shortcut) = state.get() {
-        if let Err(error) =
-            register_quick_exit_shortcut_listener(app, &shortcut, state.exit_handler())
-        {
-            log::warn!("failed to register quick exit shortcut {shortcut}: {error}");
+    let binding = state.binding();
+    if binding.scope == QuickExitShortcutScope::SystemGlobal {
+        if let Some(shortcut) = binding.shortcut {
+            if let Err(error) =
+                register_quick_exit_shortcut_listener(app, &shortcut, state.exit_handler())
+            {
+                log::warn!("failed to register quick exit shortcut {shortcut}: {error}");
+            }
         }
     }
 }
@@ -679,13 +734,13 @@ pub fn apply_quick_exit_shortcut(
     state: &QuickExitShortcutState,
     voice_state: &VoiceShortcutState,
     main_window_state: &MainWindowShortcutState,
-    raw_shortcut: Option<&str>,
-) -> Result<Option<String>, String> {
+    requested: QuickExitShortcutBinding,
+) -> Result<QuickExitShortcutBinding, String> {
     apply_quick_exit_shortcut_with_registry(
         state,
         &voice_state.get(),
         main_window_state.get().as_deref(),
-        raw_shortcut,
+        requested,
         &TauriQuickExitShortcutRegistry {
             app,
             exit_handler: state.exit_handler(),
@@ -731,26 +786,35 @@ fn apply_quick_exit_shortcut_with_registry(
     state: &QuickExitShortcutState,
     voice_shortcut: &str,
     main_window_shortcut: Option<&str>,
-    raw_shortcut: Option<&str>,
+    requested: QuickExitShortcutBinding,
     registry: &impl QuickExitShortcutRegistry,
-) -> Result<Option<String>, String> {
-    let next_shortcut = raw_shortcut
+) -> Result<QuickExitShortcutBinding, String> {
+    let next_shortcut = requested.shortcut
+        .as_deref()
         .map(normalize_quick_exit_accelerator)
         .transpose()?;
+    let next_binding = QuickExitShortcutBinding {
+        shortcut: next_shortcut,
+        scope: requested.scope,
+    };
     let mut current = state
-        .shortcut
+        .binding
         .lock()
         .map_err(|_| "failed to lock quick exit shortcut state".to_string())?;
-    let was_registered = current
-        .as_deref()
-        .is_some_and(|shortcut| registry.is_registered(shortcut));
+    let current_shortcut = current.shortcut.as_deref();
+    let was_registered = current.scope == QuickExitShortcutScope::SystemGlobal
+        && current_shortcut.is_some_and(|shortcut| registry.is_registered(shortcut));
+    let next_is_global = next_binding.scope == QuickExitShortcutScope::SystemGlobal;
 
-    if *current == next_shortcut && (next_shortcut.is_none() || was_registered) {
+    if *current == next_binding
+        && (!next_is_global || was_registered || next_binding.shortcut.is_none())
+    {
         return Ok(current.clone());
     }
 
-    if let Some(next_shortcut_value) = next_shortcut.as_ref() {
-        if current.as_deref() != Some(next_shortcut_value)
+    if let Some(next_shortcut_value) = next_binding.shortcut.as_deref() {
+        if next_is_global
+            && (!was_registered || current_shortcut != Some(next_shortcut_value))
             && registry.is_registered(next_shortcut_value)
         {
             return Err(format!(
@@ -771,27 +835,30 @@ fn apply_quick_exit_shortcut_with_registry(
         }
     }
 
-    if let Some(current_value) = current.as_deref().filter(|_| was_registered) {
+    if let Some(current_value) = current_shortcut.filter(|_| was_registered) {
         registry.unregister(current_value)?;
     }
 
-    if let Some(next_shortcut_value) = next_shortcut.as_ref() {
-        if let Err(error) = registry.register(next_shortcut_value) {
-            let message =
-                format!("failed to register quick exit shortcut {next_shortcut_value}: {error}");
-            if let Some(current_value) = current.as_deref().filter(|_| was_registered) {
-                if let Err(restore_error) = registry.register(current_value) {
-                    return Err(format!(
-                        "{message}; failed to restore previous shortcut {current_value}: {restore_error}"
-                    ));
+    if next_is_global {
+        if let Some(next_shortcut_value) = next_binding.shortcut.as_deref() {
+            if let Err(error) = registry.register(next_shortcut_value) {
+                let message = format!(
+                    "failed to register quick exit shortcut {next_shortcut_value}: {error}"
+                );
+                if let Some(current_value) = current_shortcut.filter(|_| was_registered) {
+                    if let Err(restore_error) = registry.register(current_value) {
+                        return Err(format!(
+                            "{message}; failed to restore previous shortcut {current_value}: {restore_error}"
+                        ));
+                    }
                 }
+                return Err(message);
             }
-            return Err(message);
         }
     }
 
-    *current = next_shortcut.clone();
-    Ok(next_shortcut)
+    *current = next_binding.clone();
+    Ok(next_binding)
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -800,13 +867,19 @@ pub fn apply_quick_exit_shortcut(
     state: &QuickExitShortcutState,
     _voice_state: &VoiceShortcutState,
     _main_window_state: &MainWindowShortcutState,
-    raw_shortcut: Option<&str>,
-) -> Result<Option<String>, String> {
-    let next_shortcut = raw_shortcut
+    requested: QuickExitShortcutBinding,
+) -> Result<QuickExitShortcutBinding, String> {
+    let shortcut = requested
+        .shortcut
+        .as_deref()
         .map(normalize_quick_exit_accelerator)
         .transpose()?;
-    state.set(next_shortcut.clone());
-    Ok(next_shortcut)
+    let next_binding = QuickExitShortcutBinding {
+        shortcut,
+        scope: requested.scope,
+    };
+    state.set_binding(next_binding.clone());
+    Ok(next_binding)
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1490,22 +1563,40 @@ pub async fn quick_exit_shortcut_set(
     voice_state: State<'_, VoiceShortcutState>,
     main_window_state: State<'_, MainWindowShortcutState>,
     shortcut: Option<String>,
-) -> Result<Option<String>, String> {
-    apply_quick_exit_shortcut(
+    scope: Option<QuickExitShortcutScope>,
+) -> Result<QuickExitShortcutBinding, String> {
+    let binding = apply_quick_exit_shortcut(
         &app,
         &state,
         &voice_state,
         &main_window_state,
-        shortcut.as_deref(),
-    )
+        QuickExitShortcutBinding {
+            shortcut,
+            // Old clients only sent the shortcut field, which always meant a
+            // system-wide binding. New clients send an explicit scope.
+            scope: scope.unwrap_or_else(|| state.scope()),
+        },
+    )?;
+    notify_quick_exit_shortcut_binding(&app, &binding);
+    Ok(binding)
 }
 
 /// Read current quick-exit shortcut（读取当前快速退出快捷键）.
 #[tauri::command]
 pub async fn quick_exit_shortcut_get(
     state: State<'_, QuickExitShortcutState>,
-) -> Result<Option<String>, String> {
-    Ok(state.get())
+) -> Result<QuickExitShortcutBinding, String> {
+    Ok(state.binding())
+}
+
+fn notify_quick_exit_shortcut_binding(
+    app: &AppHandle,
+    binding: &QuickExitShortcutBinding,
+) {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    app.emit("quick-exit-shortcut-binding-changed", binding).ok();
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let _ = (app, binding);
 }
 
 /// Sync recording lifecycle（同步录音生命周期）to arm/disarm global Esc cancel.
@@ -1579,7 +1670,10 @@ pub async fn foreground_window_focus(_window_handle: String) -> Result<bool, Str
 mod tests {
     use super::normalize_quick_exit_accelerator;
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    use super::{apply_quick_exit_shortcut_with_registry, quick_exit_edge, QuickExitEdge};
+    use super::{
+        apply_quick_exit_shortcut_with_registry, quick_exit_edge, QuickExitEdge,
+        QuickExitShortcutBinding, QuickExitShortcutScope,
+    };
     use super::{
         MonitorGeometry, SyntheticPasteModifier, SyntheticShortcutStep, calculate_overlay_position,
         choose_voice_overlay_anchor, cursor_in_monitor, paste_shortcut_character,
@@ -1642,6 +1736,17 @@ mod tests {
             }
             self.registered.borrow_mut().insert(shortcut.to_string());
             Ok(())
+        }
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    fn quick_exit_binding(
+        shortcut: Option<&str>,
+        scope: QuickExitShortcutScope,
+    ) -> QuickExitShortcutBinding {
+        QuickExitShortcutBinding {
+            shortcut: shortcut.map(str::to_string),
+            scope,
         }
     }
 
@@ -1749,15 +1854,21 @@ mod tests {
             &state,
             "Alt+Q",
             Some("Ctrl+E"),
-            Some("Ctrl+Alt+X"),
+            quick_exit_binding(Some("Ctrl+Alt+X"), QuickExitShortcutScope::SystemGlobal),
             &registry,
         )
         .unwrap();
         assert!(registry.registered.borrow().contains("Ctrl+Alt+X"));
         assert_eq!(state.get().as_deref(), Some("Ctrl+Alt+X"));
 
-        apply_quick_exit_shortcut_with_registry(&state, "Alt+Q", Some("Ctrl+E"), None, &registry)
-            .unwrap();
+        apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            quick_exit_binding(None, QuickExitShortcutScope::SystemGlobal),
+            &registry,
+        )
+        .unwrap();
         assert!(registry.registered.borrow().is_empty());
         assert_eq!(state.get(), None);
     }
@@ -1772,7 +1883,7 @@ mod tests {
             &state,
             "Alt+Q",
             Some("Ctrl+E"),
-            Some("Alt+Q"),
+            quick_exit_binding(Some("Alt+Q"), QuickExitShortcutScope::SystemGlobal),
             &registry,
         )
         .unwrap_err();
@@ -1792,7 +1903,7 @@ mod tests {
             &state,
             "Alt+Q",
             Some("Ctrl+E"),
-            Some("Ctrl+E"),
+            quick_exit_binding(Some("Ctrl+E"), QuickExitShortcutScope::SystemGlobal),
             &registry,
         )
         .unwrap_err();
@@ -1820,7 +1931,7 @@ mod tests {
             &state,
             "Alt+Q",
             Some("Ctrl+E"),
-            Some(replacement),
+            quick_exit_binding(Some(replacement), QuickExitShortcutScope::SystemGlobal),
             &registry,
         )
         .unwrap_err();
@@ -1851,7 +1962,10 @@ mod tests {
             &state,
             "Alt+Q",
             Some("Ctrl+E"),
-            Some("Ctrl+Shift+Space"),
+            quick_exit_binding(
+                Some("Ctrl+Shift+Space"),
+                QuickExitShortcutScope::SystemGlobal,
+            ),
             &registry,
         )
         .unwrap_err();
@@ -1874,13 +1988,97 @@ mod tests {
             &state,
             "Alt+Q",
             Some("Ctrl+E"),
-            Some("Ctrl+Alt+X"),
+            quick_exit_binding(Some("Ctrl+Alt+X"), QuickExitShortcutScope::SystemGlobal),
             &registry,
         )
         .unwrap();
 
         assert!(registry.attempts.borrow().is_empty());
         assert!(registry.registered.borrow().contains("Ctrl+Alt+X"));
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn app_only_scope_ignores_os_global_ownership_and_never_registers_system_wide() {
+        let state = super::QuickExitShortcutState::new();
+        let registry = ControlledQuickExitShortcutRegistry::default();
+        registry
+            .registered
+            .borrow_mut()
+            .insert("Ctrl+Shift+Q".into());
+
+        let binding = apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            quick_exit_binding(Some("Ctrl+Shift+Q"), QuickExitShortcutScope::AppOnly),
+            &registry,
+        )
+        .unwrap();
+
+        assert_eq!(binding.shortcut.as_deref(), Some("Ctrl+Shift+Q"));
+        assert_eq!(binding.scope, QuickExitShortcutScope::AppOnly);
+        assert_eq!(state.binding(), binding);
+        assert!(registry.attempts.borrow().is_empty());
+        assert!(registry.registered.borrow().contains("Ctrl+Shift+Q"));
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn switching_global_quick_exit_to_app_only_releases_the_os_binding() {
+        let state = super::QuickExitShortcutState::new();
+        let registry = ControlledQuickExitShortcutRegistry::default();
+        apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            quick_exit_binding(Some("Ctrl+Shift+Q"), QuickExitShortcutScope::SystemGlobal),
+            &registry,
+        )
+        .unwrap();
+
+        let binding = apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            quick_exit_binding(Some("Ctrl+Shift+Q"), QuickExitShortcutScope::AppOnly),
+            &registry,
+        )
+        .unwrap();
+
+        assert_eq!(binding.scope, QuickExitShortcutScope::AppOnly);
+        assert_eq!(binding.shortcut.as_deref(), Some("Ctrl+Shift+Q"));
+        assert!(registry.registered.borrow().is_empty());
+        assert_eq!(registry.attempts.borrow().len(), 1);
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn switching_app_only_quick_exit_to_global_registers_the_os_binding() {
+        let state = super::QuickExitShortcutState::new();
+        let registry = ControlledQuickExitShortcutRegistry::default();
+        apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            quick_exit_binding(Some("Ctrl+Shift+Q"), QuickExitShortcutScope::AppOnly),
+            &registry,
+        )
+        .unwrap();
+
+        let binding = apply_quick_exit_shortcut_with_registry(
+            &state,
+            "Alt+Q",
+            Some("Ctrl+E"),
+            quick_exit_binding(Some("Ctrl+Shift+Q"), QuickExitShortcutScope::SystemGlobal),
+            &registry,
+        )
+        .unwrap();
+
+        assert_eq!(binding.scope, QuickExitShortcutScope::SystemGlobal);
+        assert_eq!(registry.registered.borrow().len(), 1);
+        assert!(registry.registered.borrow().contains("Ctrl+Shift+Q"));
+        assert_eq!(registry.attempts.borrow().as_slice(), ["Ctrl+Shift+Q"]);
     }
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

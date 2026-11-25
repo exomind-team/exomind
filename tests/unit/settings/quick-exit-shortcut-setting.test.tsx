@@ -4,6 +4,7 @@ import { QuickExitShortcutSetting } from '@/ui/app/components/settings/quick-exi
 import {
   getQuickExitShortcut,
   setQuickExitShortcut,
+  setQuickExitShortcutScope,
 } from '@/config/quick-exit-shortcut';
 import { __resetRuntimeConfigCacheForTests } from '@/config/runtime-config-cache';
 
@@ -132,5 +133,34 @@ describe('quick exit shortcut setting UI（快速退出快捷键设置界面）'
     expect(screen.queryByText(/已设置/)).not.toBeInTheDocument();
     expect(getQuickExitShortcut()).toBe('Ctrl+Alt+X');
     expect(screen.getByText('Ctrl+Alt+X')).toBeInTheDocument();
+  });
+
+  it('switches the saved binding scope only after the runtime confirms it', async () => {
+    setQuickExitShortcut('Ctrl+Alt+X');
+    setQuickExitShortcutScope('app-only');
+    syncMock.mockImplementationOnce(async ({ scope }: { scope?: string }) => {
+      if (scope) setQuickExitShortcutScope(scope as 'app-only' | 'system-global');
+      return { kind: 'valid', hotkey: 'Ctrl+Alt+X' };
+    });
+    render(<QuickExitShortcutSetting ctx={{ isDesktop: true }} />);
+
+    fireEvent.click(screen.getByRole('combobox', { name: '快速退出快捷键作用范围' }));
+    fireEvent.click(await screen.findByRole('option', { name: '系统全局' }));
+
+    expect(syncMock).toHaveBeenCalledWith({ scope: 'system-global' });
+    expect(await screen.findByText('其他应用位于前台时也会请求退出外心。')).toBeInTheDocument();
+  });
+
+  it('keeps the previous scope and reports an error when scope switching fails', async () => {
+    setQuickExitShortcut('Ctrl+Alt+X');
+    setQuickExitShortcutScope('app-only');
+    syncMock.mockRejectedValueOnce(new Error('当前运行时不支持快捷键作用域。'));
+    render(<QuickExitShortcutSetting ctx={{ isDesktop: true }} />);
+
+    fireEvent.click(screen.getByRole('combobox', { name: '快速退出快捷键作用范围' }));
+    fireEvent.click(await screen.findByRole('option', { name: '系统全局' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('当前运行时不支持快捷键作用域。');
+    expect(screen.getByRole('combobox', { name: '快速退出快捷键作用范围' })).toHaveTextContent('仅外心窗口');
   });
 });

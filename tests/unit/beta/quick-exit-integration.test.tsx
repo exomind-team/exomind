@@ -58,6 +58,17 @@ describe('Beta quick-exit integration', () => {
     const entry = readFileSync('src/beta-main.tsx', 'utf8');
 
     expect(entry.match(/initQuickExitShortcutRuntime/g)).toHaveLength(2);
+    expect(entry).toContain("exitCommand: 'beta_request_exit'");
+    expect(entry).toContain("bindingSource: 'persisted-settings'");
+  });
+
+  it('hydrates quick-exit state in the Beta overlay and legacy app entry', () => {
+    const overlayEntry = readFileSync('src/beta-focus-overlay-main.tsx', 'utf8');
+    const legacyEntry = readFileSync('src/App.tsx', 'utf8');
+
+    expect(overlayEntry).toContain("exitCommand:'beta_request_exit',bindingSource:'native-runtime'");
+    expect(legacyEntry).toContain("exitCommand: 'app_request_exit'");
+    expect(legacyEntry).toContain("bindingSource: 'persisted-settings'");
   });
 
   it('wires Beta Native to the shared commands and Beta-owned shutdown path', () => {

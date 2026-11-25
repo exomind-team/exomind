@@ -14,6 +14,15 @@ import {
 
 const QUICK_EXIT_SHORTCUT_STORAGE_KEY = 'exomind:quickExitShortcut';
 const QUICK_EXIT_SHORTCUT_CHANGED_EVENT = 'exomind:quick-exit-shortcut-changed';
+const QUICK_EXIT_SHORTCUT_SCOPE_STORAGE_KEY = 'exomind:quickExitShortcutScope';
+const QUICK_EXIT_SHORTCUT_SCOPE_CHANGED_EVENT = 'exomind:quick-exit-shortcut-scope-changed';
+
+export const QUICK_EXIT_SHORTCUT_SCOPE_VALUES = ['app-only', 'system-global'] as const;
+export type QuickExitShortcutScope = (typeof QUICK_EXIT_SHORTCUT_SCOPE_VALUES)[number];
+export interface QuickExitShortcutBinding {
+  shortcut: string | null;
+  scope: QuickExitShortcutScope;
+}
 
 export const QUICK_EXIT_SHORTCUT_POLICY: ShortcutCapturePolicy = {
   allowedModifiers: ['Cmd', 'Ctrl', 'Alt', 'Shift'],
@@ -45,6 +54,26 @@ export function getQuickExitShortcut(): string | null {
   );
 }
 
+export function parseQuickExitShortcutScope(
+  rawValue: string | null | undefined,
+): QuickExitShortcutScope | null {
+  return QUICK_EXIT_SHORTCUT_SCOPE_VALUES.includes(rawValue as QuickExitShortcutScope)
+    ? rawValue as QuickExitShortcutScope
+    : null;
+}
+
+/**
+ * A saved legacy binding was global. New or unassigned bindings default to
+ * app-only so adding a shortcut cannot silently affect another application.
+ */
+export function getQuickExitShortcutScope(): QuickExitShortcutScope {
+  const stored = parseQuickExitShortcutScope(
+    getRuntimeConfigValueSync(QUICK_EXIT_SHORTCUT_SCOPE_STORAGE_KEY),
+  );
+  if (stored) return stored;
+  return getQuickExitShortcut() ? 'system-global' : 'app-only';
+}
+
 export function setQuickExitShortcut(
   hotkey: string | null,
   options: { emitEvent?: boolean } = {},
@@ -68,6 +97,27 @@ export function setQuickExitShortcut(
     ));
   }
 
+  return normalized;
+}
+
+export function setQuickExitShortcutScope(
+  scope: QuickExitShortcutScope,
+  options: { emitEvent?: boolean } = {},
+): QuickExitShortcutScope {
+  const normalized = parseQuickExitShortcutScope(scope);
+  if (!normalized) throw new Error('快速退出快捷键作用范围无效。');
+  if (typeof window === 'undefined') return normalized;
+
+  setRuntimeConfigValue(QUICK_EXIT_SHORTCUT_SCOPE_STORAGE_KEY, normalized, {
+    source: QUICK_EXIT_SHORTCUT_SCOPE_CHANGED_EVENT,
+    sourceOrigin: window.location?.origin,
+  });
+  if (options.emitEvent !== false) {
+    window.dispatchEvent(new CustomEvent<QuickExitShortcutScope>(
+      QUICK_EXIT_SHORTCUT_SCOPE_CHANGED_EVENT,
+      { detail: normalized },
+    ));
+  }
   return normalized;
 }
 
@@ -118,5 +168,29 @@ export function subscribeQuickExitShortcutChanges(
   return () => {
     window.removeEventListener('storage', handleStorage);
     window.removeEventListener(QUICK_EXIT_SHORTCUT_CHANGED_EVENT, handleCustomEvent);
+  };
+}
+
+export function subscribeQuickExitShortcutScopeChanges(
+  listener: (scope: QuickExitShortcutScope) => void,
+): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  const publish = (rawValue: string | null | undefined) => {
+    listener(parseQuickExitShortcutScope(rawValue) ?? getQuickExitShortcutScope());
+  };
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === QUICK_EXIT_SHORTCUT_SCOPE_STORAGE_KEY) publish(event.newValue);
+  };
+  const handleCustomEvent = (event: Event) => {
+    const customEvent = event as CustomEvent<QuickExitShortcutScope>;
+    publish(customEvent.detail);
+  };
+
+  window.addEventListener('storage', handleStorage);
+  window.addEventListener(QUICK_EXIT_SHORTCUT_SCOPE_CHANGED_EVENT, handleCustomEvent);
+  return () => {
+    window.removeEventListener('storage', handleStorage);
+    window.removeEventListener(QUICK_EXIT_SHORTCUT_SCOPE_CHANGED_EVENT, handleCustomEvent);
   };
 }

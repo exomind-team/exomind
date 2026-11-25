@@ -32,7 +32,10 @@ function App() {
     initUpdateChecker();
     initVoiceShortcutService();
     initMainWindowShortcutService();
-    void initQuickExitShortcutRuntime();
+    void initQuickExitShortcutRuntime({
+      exitCommand: 'app_request_exit',
+      bindingSource: 'persisted-settings',
+    });
     void getNowWorkbenchOverlayService().init();
     return () => {
       destroyUpdateChecker();
