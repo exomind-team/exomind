@@ -1,6 +1,6 @@
 # ExoMind β27 / β28 / 长期路线：Agent 检索索引
 
-> **当前迭代入口**　按用户本轮裁决接手时读[批注后迭代计划](2026-11-25-beta-iteration-after-user-review.md)。本索引用于追查早期现场、优先级和授权记录。[32 条原始意见与选段](2026-11-25-beta-review-user-annotations.md)保留用户的完整措辞。软件级原则另有[待审批草案](2026-11-25-arc137-software-rules-proposal.md)。
+> **当前迭代入口**　按用户本轮裁决接手时读[批注后迭代计划](2026-11-25-beta-iteration-after-user-review.md)。本索引用于追查早期现场、优先级和授权记录。32 条原始批注已在整理时消化进上方批注后迭代计划，A01–A32 的映射见该页。软件级原则待用户审批，草案在本机审阅，未入库。
 >
 > **更新**：2026-11-25。只读 Beta API 快照 `through=289`，`full_history_complete=true`：170 captures、82 timeblock nodes、0 corrections、timeline 255 项。`through=289` 是读取水位；本档案当前最新本地记录为用户 `local_seq=287`，不是 seq 288/289。覆盖仅限所列 Beta typed feeds。
 >

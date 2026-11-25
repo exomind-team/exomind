@@ -1,6 +1,6 @@
 # β27／β28 用户批注后的迭代计划
 
-2026-11-25。这里维护下一轮的工作顺序、责任和验收。原始措辞及助手当时所选的叙事逐对保存在[32 条批注原件](2026-11-25-beta-review-user-annotations.md)。前瞻报告和路线索引保留现场记录、版本证据和历史备选；遇到方向差异，以本轮用户批注为准。[架构研究](2026-11-25-beta28-architecture-decisions.md) · [路线来源](2026-11-25-beta27-beta28-roadmap-feedback-synthesis.md)
+2026-11-25。这里维护下一轮的工作顺序、责任和验收。32 条原始批注来自[📌外心：β27前瞻](t3-thread://v2/39db5963-d5de-4afe-8832-523d6ce52c9f/2a66d0fd-8deb-4eb0-a241-26f3df74e4b1) item 2442；原件已在整理时消化进本页，A01–A32 的主题与映射见文末「原件定位表」，不再单独入库。前瞻报告和路线索引保留现场记录、版本证据和历史备选；遇到方向差异，以本轮用户批注为准。[架构研究](2026-11-25-beta28-architecture-decisions.md) · [路线来源](2026-11-25-beta27-beta28-roadmap-feedback-synthesis.md)
 
 ## 当前基线与排队方式
 
@@ -95,25 +95,25 @@ RT 对界面出具业务状态与回执。每种档案模式指定一处正式�
 
 **里程碑。** β27 各包先记录原始失败或不可用能力，再过所有者单测、来源明确的构建候选和目标宿主的真实用户动作。β28 先固定 RT 身份和档案写入边界，再走接力、恢复及存储介质实验，最后把证据投影放回 UI。Windows、物理 Android、Termux Linux 实际 RT、UI 断开恢复、三个 RT 离线各持独有记录全部有各自的检查点。CI、浏览器 mock、可重复的源级演练、真实设备、人审分别记账。有既有回归／往返合同即复用。**A31、A32**。[工业化验收阶梯](2026-11-19-v0.6-industrial-iteration-roadmap.md#分期任务与成功判据)
 
-**仍需较量的取舍。** 文件夹正式发布及作者证据、并发更正与少数无法自动合并时的裁决、罕用敏感清除与旧证据链、同 ID 避让与停用的具体交互、每类介质的原子能力、存储/计费/提醒的推荐默认值、跨 P 高级导入入口、分享扩围以及后台预发送，均先按对应条目的对照用例验证。无可恢复分支、受控软件无权执行或用户意图确实冲突时，再提交最小问题让用户裁定。多 Agent 授权共有的信任模型单独作为架构研究。软件级规则草案由用户审批。**A14**。[规则草案与用户出处](2026-11-25-arc137-software-rules-proposal.md)
+**仍需较量的取舍。** 文件夹正式发布及作者证据、并发更正与少数无法自动合并时的裁决、罕用敏感清除与旧证据链、同 ID 避让与停用的具体交互、每类介质的原子能力、存储/计费/提醒的推荐默认值、跨 P 高级导入入口、分享扩围以及后台预发送，均先按对应条目的对照用例验证。无可恢复分支、受控软件无权执行或用户意图确实冲突时，再提交最小问题让用户裁定。多 Agent 授权共有的信任模型单独作为架构研究。软件级规则草案由用户审批（本机审阅中，未入库；审批后并入 ARC137 标准）。**A14**。
 
 **原件定位表。** 每条批注在此只有一个主归宿；一条涉及两处时通过正文互引。原提问 01–28 的未答选择保留于各主归宿的边界，不把重叠引文建成双份任务。
 
 | 原批注 | 原题 | 主归宿 | 原批注 | 原题 | 主归宿 |
 |---|---|---|---|---|---|
-| [A01](2026-11-25-beta-review-user-annotations.md#a01) | 01 | 文件夹外改与接纳时点 | [A17](2026-11-25-beta-review-user-annotations.md#a17) | 15 | 拒绝与低打扰 |
-| [A02](2026-11-25-beta-review-user-annotations.md#a02) | 02 | CRDT 适用范围 | [A18](2026-11-25-beta-review-user-annotations.md#a18) | 15 | 值守 Skill 重试所有者 |
-| [A03](2026-11-25-beta-review-user-annotations.md#a03) | 03 | 时间块自动汇合 | [A19](2026-11-25-beta-review-user-annotations.md#a19) | 16 | 多 Agent／多机隔离 |
-| [A04](2026-11-25-beta-review-user-annotations.md#a04) | 04 | 默认本机移除与释放 | [A20](2026-11-25-beta-review-user-annotations.md#a20) | 17 | 双端明确的写入结果 |
-| [A05](2026-11-25-beta-review-user-annotations.md#a05) | 04 | API key／PII 罕用清除 | [A21](2026-11-25-beta-review-user-annotations.md#a21) | 18 | 移动端向外分享 |
-| [A06](2026-11-25-beta-review-user-annotations.md#a06) | 05 | 已提交档案边界与历史 Pin | [A22](2026-11-25-beta-review-user-annotations.md#a22) | 19 | 改稿取消预发送 |
-| [A07](2026-11-25-beta-review-user-annotations.md#a07) | 06 | 各介质的持久化能力 | [A23](2026-11-25-beta-review-user-annotations.md#a23) | 20 | 单客户端一次提醒、多通道 |
-| [A08](2026-11-25-beta-review-user-annotations.md#a08) | 07 | 档案身份及实例名片 | [A24](2026-11-25-beta-review-user-annotations.md#a24) | 22 | 主界面、六模式与命令入口 |
-| [A09](2026-11-25-beta-review-user-annotations.md#a09) | 08 | RT 权威和 Termux 离线 | [A25](2026-11-25-beta-review-user-annotations.md#a25) | 23 | β28 内容基准与文件／语音入口 |
-| [A10](2026-11-25-beta-review-user-annotations.md#a10) | 09 | 以档案为用户操作对象 | [A26](2026-11-25-beta-review-user-annotations.md#a26) | 24 | β28 对端独立读回实验 |
-| [A11](2026-11-25-beta-review-user-annotations.md#a11) | 10 | T3 Link 使用方式与路线 | [A27](2026-11-25-beta-review-user-annotations.md#a27) | 25 | 通用存储接口、Agent/Git |
-| [A12](2026-11-25-beta-review-user-annotations.md#a12) | 11 | β28 双向邀请 | [A28](2026-11-25-beta-review-user-annotations.md#a28) | 21 | β27 作用域、β28 `when` |
-| [A13](2026-11-25-beta-review-user-annotations.md#a13) | 12 | 至少一份外部可接力副本 | [A29](2026-11-25-beta-review-user-annotations.md#a29) | 26 | 唯一活动 RT 身份 |
-| [A14](2026-11-25-beta-review-user-annotations.md#a14) | 13 | 可配置与默认值规则草案 | [A30](2026-11-25-beta-review-user-annotations.md#a30) | 27 | Magpie 溯源及磁盘线暂停 |
-| [A15](2026-11-25-beta-review-user-annotations.md#a15) | 14 | 默认本地 pin 的授权与未来流转 | [A31](2026-11-25-beta-review-user-annotations.md#a31) | 28 | 按本轮意见分轨 |
-| [A16](2026-11-25-beta-review-user-annotations.md#a16) | 15 | 有界重试、保留续页 | [A32](2026-11-25-beta-review-user-annotations.md#a32) | 28 | 精确候选及三端恢复闸门 |
+| A01 | 01 | 文件夹外改与接纳时点 | A17 | 15 | 拒绝与低打扰 |
+| A02 | 02 | CRDT 适用范围 | A18 | 15 | 值守 Skill 重试所有者 |
+| A03 | 03 | 时间块自动汇合 | A19 | 16 | 多 Agent／多机隔离 |
+| A04 | 04 | 默认本机移除与释放 | A20 | 17 | 双端明确的写入结果 |
+| A05 | 04 | API key／PII 罕用清除 | A21 | 18 | 移动端向外分享 |
+| A06 | 05 | 已提交档案边界与历史 Pin | A22 | 19 | 改稿取消预发送 |
+| A07 | 06 | 各介质的持久化能力 | A23 | 20 | 单客户端一次提醒、多通道 |
+| A08 | 07 | 档案身份及实例名片 | A24 | 22 | 主界面、六模式与命令入口 |
+| A09 | 08 | RT 权威和 Termux 离线 | A25 | 23 | β28 内容基准与文件／语音入口 |
+| A10 | 09 | 以档案为用户操作对象 | A26 | 24 | β28 对端独立读回实验 |
+| A11 | 10 | T3 Link 使用方式与路线 | A27 | 25 | 通用存储接口、Agent/Git |
+| A12 | 11 | β28 双向邀请 | A28 | 21 | β27 作用域、β28 `when` |
+| A13 | 12 | 至少一份外部可接力副本 | A29 | 26 | 唯一活动 RT 身份 |
+| A14 | 13 | 可配置与默认值规则草案 | A30 | 27 | Magpie 溯源及磁盘线暂停 |
+| A15 | 14 | 默认本地 pin 的授权与未来流转 | A31 | 28 | 按本轮意见分轨 |
+| A16 | 15 | 有界重试、保留续页 | A32 | 28 | 精确候选及三端恢复闸门 |

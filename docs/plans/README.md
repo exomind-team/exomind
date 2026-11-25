@@ -7,9 +7,9 @@
 | 用途 | 阅读材料 |
 |---|---|
 | β27 日用迭代 | [交付顺序、责任与设备验收](2026-11-25-beta-iteration-after-user-review.md) · [问题调查和原始验收条件](2026-11-24-beta27-feedback-investigation.md) |
-| 核对需求出处 | [32 条用户批注与选段](2026-11-25-beta-review-user-annotations.md) · [反馈索引与覆盖范围](2026-11-25-beta27-beta28-roadmap-feedback-synthesis.md) |
+| 核对需求出处 | [A01–A32 的主题与映射](2026-11-25-beta-iteration-after-user-review.md) · [反馈索引与覆盖范围](2026-11-25-beta27-beta28-roadmap-feedback-synthesis.md) |
 | β28 架构提案 | [同步、档案、界面与 Agent 接入的研究底稿](2026-11-25-beta28-architecture-decisions.md) · [代码简化审阅计划](2026-11-25-beta28-maintainer-simplification.md) |
-| 用户待审的跨项目规则 | [ARC137 软件设计规则草案](2026-11-25-arc137-software-rules-proposal.md) |
+| 用户待审的跨项目规则 | ARC137 软件设计规则草案（本机审阅中，未入库；审批后并入 ARC137 标准） |
 | 跨阶段验收方法 | [工业化迭代路线图](2026-11-19-v0.6-industrial-iteration-roadmap.md) · [根因回归门禁](../development/beta-iteration-guards.md) |
 
 ## 按历史问题回查
