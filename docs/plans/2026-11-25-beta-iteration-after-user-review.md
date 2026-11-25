@@ -8,6 +8,7 @@
 
 - **可继续使用的基线。** `through=179` 是前瞻的第一份现场快照。后续索引的 typed feeds 读到 `through=289`，当时最新本地用户记录为 `seq 287`。本轮批注来自 T3，不占外心事件序号。已有巡检继续使用稳定 `event_id` 去重、`reviewed/reported` 分账。
 - **已交付工作。** 焦点首项 `f0ab0fbf`、构建请求 `7cfa90f8` 及 Windows 已核验 EXE 归原交付。随后键盘自适应 fallback 已在 `5e704ec8` 落地，`ac682eab` 请求构建，`4a241ceb` 对齐旧测试。开发线程 item 46833 报告同应用源码的 Build Validation #29 和源码 CI #102 成功。焦点与键盘只补实体键盘、Android 软键盘／IME、切控件后的实际手感和回归。旧制品 hash 仅属于原制品。[焦点交付 #28](https://github.com/exomind-team/exomind/actions/runs/45537104031) · [构建 #29](https://github.com/exomind-team/exomind/actions/runs/45548377937) · [CI #102](https://github.com/exomind-team/exomind/actions/runs/45553925101)
+  2026-11-25 又提交了第二批源码：消息就地定位/标签/引用 Markdown、时间块名称+备注与提醒重试、运行范围持久化、外置监控 Skill；源码合同 CI `45624555297` 在 `a47974cf` 通过，构建验证 `45624168457` 在 `2d4e166f` 四平台成功。设备验收仍未进行。
 - **β27 按急用、常用、缺少缓解办法及改动杠杆排序。** Android 事件附件分享居首，预发送优先，Windows 到期声为刚需，快捷键作用域可以先做。Magpie 异常调用单列溯源。以下是交给实施者的范围与通过条件，本轮完成的是意见、调查与计划文档。候选出包和人审沿用项目门禁。[用户优先意见](2026-11-25-beta27-beta28-roadmap-feedback-synthesis.md#用户意见与-agent-建议的归属)
 - **β28 围绕档案跨 RT 接力及恢复。** 首轮以三个实际 RT 的独有记录汇合、断开起点后继续传播、新机从材料恢复为终点。Agent 授权可以并行做独立实验，等待预算和提醒频率由值守 Skill 维护。两轨有独立通过条件与依赖。原先“逐设备选择关心对象”“手机前端在 RT 死后仍以自身身份正式写入”的示例已经收束，现行合同见下文。
 

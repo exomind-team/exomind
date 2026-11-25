@@ -5,6 +5,8 @@
 > **更新**：2026-11-25。只读 Beta API 快照 `through=289`，`full_history_complete=true`：170 captures、82 timeblock nodes、0 corrections、timeline 255 项。`through=289` 是读取水位；本档案当前最新本地记录为用户 `local_seq=287`，不是 seq 288/289。覆盖仅限所列 Beta typed feeds。
 >
 > **首项交付记录**：β27 焦点首项已完成提交/推送和云构建交付。开发线程 2026-11-25 item 46835 随后批准前瞻交付后全面重启 β27，实施人员从上方当前迭代入口接手。源提交 `f0ab0fbf8b11805806154a7146320b0830cffd55`，候选请求提交 `7cfa90f8823d453850dc21eebc2fcf86126262c0`；GitHub Actions run `45537104031` 四平台成功。Windows EXE 已按 build-info/source SHA 与文件 hash 核验并在资源管理器呈现（SHA-256 `78262a57513e9f3bb87a63e2b5baee5a2769f8c405a6af13790ed136c7352b8f`）。这仅完成当前获授权单项，不自动扩展其它 β27 反馈；实体键盘/手机软键盘等设备场景尚未因此通过。
+>
+> **第二批交付记录（2026-11-25）**：消息就地定位/标签/引用 Markdown、时间块名称+备注与提醒重试、运行范围持久化、外置监控 Skill 已提交并推送。源码合同 CI `45624555297` 在 `a47974cf` 通过；构建验证 `45624168457` 在 `2d4e166f` 四平台成功。设备验收仍未进行。
 
 ## 三阶段方向
 
