@@ -9,17 +9,30 @@ function controller(client = fakeClient(), storage = memoryStorage(), device = '
 }
 afterEach(()=>vi.unstubAllGlobals());
 describe('Beta reliable drafts', () => {
-  it('awaits a durable command journal before any capture RPC and quota failure keeps the original ID for retry', async () => {
+  it('awaits a durable command journal before any capture RPC and editing cancels the provisional command', async () => {
     const client=fakeClient();const storage=memoryStorage();const gate=deferred<void>();
     const durable=Object.assign(storage,{durable:true as const,commit:vi.fn(()=>gate.promise),snapshot:()=>({state:'pending' as const,error:null}),subscribe:()=>()=>{}});
     const draft=controller(client,durable);draft.setDraft('p','fixed original');const sending=draft.submit('p');
+    await vi.waitFor(()=>expect(draft.snapshot().pending[0]?.command).toBeDefined());
     const original=draft.snapshot().pending[0].command;expect(client.capture).not.toHaveBeenCalled();
     expect(draft.snapshot().drafts.p).toMatchObject({ text: '', tags: [], files: [] });
     draft.setDraft('p','newer draft');gate.reject(new Error('synthetic quota'));
     await expect(sending).rejects.toBeDefined();expect(client.capture).not.toHaveBeenCalled();
-    expect(draft.snapshot().pending[0].command).toEqual(original);expect(draft.snapshot().drafts.p.text).toBe('newer draft');
+    expect(draft.snapshot().pending).toHaveLength(0);
+    expect(draft.snapshot().drafts.p.text).toBe('fixed original\n\nnewer draft');
+    await expect(draft.retry(original.command_id)).rejects.toThrow('找不到待确认提交');
+  });
+  it('a durable write failure without later editing keeps the original command for retry', async () => {
+    const client=fakeClient();const storage=memoryStorage();const gate=deferred<void>();
+    const durable=Object.assign(storage,{durable:true as const,commit:vi.fn(()=>gate.promise),snapshot:()=>({state:'pending' as const,error:null}),subscribe:()=>()=>{}});
+    const draft=controller(client,durable);draft.setDraft('p','fixed original');const sending=draft.submit('p');
+    await vi.waitFor(()=>expect(draft.snapshot().pending[0]?.command).toBeDefined());
+    const original=draft.snapshot().pending[0].command;
+    gate.reject(new Error('synthetic quota'));
+    await expect(sending).rejects.toBeDefined();expect(client.capture).not.toHaveBeenCalled();
+    expect(draft.snapshot().pending[0].command).toEqual(original);
     durable.commit.mockResolvedValue(undefined);await draft.retry(original.command_id);
-    expect(client.capture).toHaveBeenCalledWith(original);expect(draft.snapshot().drafts.p.text).toBe('newer draft');
+    expect(client.capture).toHaveBeenCalledWith(original);
   });
   it('does not send a late required commit after the controller owner closes', async () => {
     const client=fakeClient();const storage=memoryStorage();const gate=deferred<void>();
@@ -82,9 +95,11 @@ describe('Beta reliable drafts', () => {
 
     draft.setDraft('p', 'older submission');
     const olderSubmission = draft.submit('p');
+    await vi.waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
     const olderCommand = client.capture.mock.calls[0][0];
     draft.setDraft('p', 'current submission');
     const currentSubmission = draft.submit('p');
+    await vi.waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(2));
     const currentCommand = client.capture.mock.calls[1][0];
 
     current.reject(new Error('lost current receipt'));
@@ -106,6 +121,7 @@ describe('Beta reliable drafts', () => {
   it('a late receipt clears neither the newer same-profile draft nor another profile', async () => {
     const client = fakeClient(); const flight = deferred<BetaReceipt>(); client.capture.mockReturnValueOnce(flight.promise);
     const draft = controller(client); draft.setDraft('p', 'old'); const result = draft.submit('p');
+    await vi.waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
     draft.setDraft('p', 'new'); draft.setDraft('q', 'other');
     flight.resolve(saved(client.capture.mock.calls[0][0])); await result;
     expect(draft.snapshot().drafts.p.text).toBe('new'); expect(draft.snapshot().drafts.q.text).toBe('other');
@@ -123,13 +139,15 @@ describe('Beta reliable drafts', () => {
   it('never resends when receipt lookup itself fails; concurrent clicks share one flight', async () => {
     const client = fakeClient(); const flight = deferred<BetaReceipt>(); client.capture.mockReturnValueOnce(flight.promise);
     const draft = controller(client); draft.setDraft('p', 'one'); const a = draft.submit('p'); const b = draft.submit('p');
+    await vi.waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
     expect(client.capture).toHaveBeenCalledTimes(1); flight.reject('lost'); await Promise.all([a,b]);
     client.receipt.mockRejectedValueOnce(new Error('offline')); await draft.submit('p');
     expect(client.capture).toHaveBeenCalledTimes(1);
   });
   it('isolates device/profile caches and a disposed owner cannot erase a reopened newer draft', async () => {
     const client = fakeClient(); const storage = memoryStorage(); const flight = deferred<BetaReceipt>(); client.capture.mockReturnValueOnce(flight.promise);
-    const old = controller(client, storage); old.setDraft('p', 'old'); const result = old.submit('p'); old.dispose();
+    const old = controller(client, storage); old.setDraft('p', 'old'); const result = old.submit('p');
+    await vi.waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1)); old.dispose();
     const reopened = controller(client, storage); reopened.setDraft('p', 'new');
     const other = controller(client, storage, 'device-b'); expect(other.snapshot().pending).toHaveLength(0);
     expect(other.snapshot().drafts).toEqual({}); flight.resolve(saved(client.capture.mock.calls[0][0])); await result;

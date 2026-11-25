@@ -29,7 +29,7 @@ describe('Beta reopens the last successfully opened local profile', () => {
     await selectField(select, '123456789-b');
     await waitFor(() => expect(select).toHaveTextContent('123456789-b · 同名档案'));
 
-    fireEvent.click(screen.getByRole('button', { name: '管理档案' }));
+    fireEvent.click(screen.getByRole('button', { name: /^打开档案：/ }));
     expect(screen.getByRole('button', { name: '123456789-a · 同名档案' })).toBeVisible();
     expect(screen.getByRole('button', { name: '123456789-b · 同名档案' })).toBeVisible();
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
@@ -80,7 +80,7 @@ describe('Beta reopens the last successfully opened local profile', () => {
   });
   it('remembers a confirmed creation and ignores a saved profile absent from the next authoritative list', async () => {
     const client = fakeClient(); client.profiles.mockResolvedValue(profiles); render(<BetaApp client={client} intentJournal={memoryIntentJournal()}/>);
-    await screen.findByRole('textbox', { name: '记录当下' }); fireEvent.click(screen.getByRole('button', { name: '管理档案' }));
+    await screen.findByRole('textbox', { name: '记录当下' }); fireEvent.click(screen.getByRole('button', { name: /^打开档案：/ }));
     fireEvent.change(screen.getByRole('textbox', { name: '新档案名称' }), { target: { value: 'Created locally' } }); await waitFor(() => expect(screen.getByRole('button', { name: '创建档案' })).toBeEnabled()); fireEvent.click(screen.getByRole('button', { name: '创建档案' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument()); const id = client.provisionProfile.mock.calls[0][0];
     expect(restoreLastBetaProfile('device-a', [...profiles, { profile_id: id }])).toBe(id); expect(restoreLastBetaProfile('device-a', profiles)).toBe('p');

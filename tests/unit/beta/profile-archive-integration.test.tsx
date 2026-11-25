@@ -50,7 +50,7 @@ describe('profile archive workspace integration', () => {
     client.profiles.mockResolvedValueOnce(originalList).mockReturnValueOnce(refresh.promise);
     render(<BetaApp client={client} intentJournal={memoryIntentJournal()} />);
     await screen.findByRole('textbox', { name: '记录当下' });
-    fireEvent.click(screen.getByRole('button', { name: '管理档案' }));
+    fireEvent.click(screen.getByRole('button', { name: /^打开档案：/ }));
     fireEvent.click(await screen.findByRole('button', { name: '档案备份与导入' }));
     fireEvent.click(await screen.findByRole('button', { name: '确认导入' }));
     await screen.findByText('导入完成');
@@ -62,7 +62,7 @@ describe('profile archive workspace integration', () => {
     fireEvent.click(create);
     await waitFor(() => expect(client.provisionProfile).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    fireEvent.click(screen.getByRole('button', { name: '管理档案' }));
+    fireEvent.click(screen.getByRole('button', { name: /^打开档案：/ }));
     await screen.findByRole('button', { name: /^并行新建/ });
     await act(async () => refresh.resolve([...originalList, { profile_id: PROFILE, display_name: '导入的旅行' }]));
     const dialog = screen.getByRole('dialog');
@@ -76,7 +76,7 @@ describe('profile archive workspace integration', () => {
     client.profiles.mockResolvedValueOnce([]).mockResolvedValue([{ profile_id: PROFILE, display_name: '导入的旅行' }]);
     render(<BetaApp client={client} intentJournal={memoryIntentJournal()} />);
     await waitFor(() => expect(screen.queryByText('正在连接…')).toBeNull());
-    fireEvent.click(screen.getByRole('button', { name: '管理档案' }));
+    fireEvent.click(screen.getByRole('button', { name: /^打开档案：/ }));
     fireEvent.click(await screen.findByRole('button', { name: '档案备份与导入' }));
     fireEvent.click(await screen.findByRole('button', { name: '确认导入' }));
     await screen.findByText('导入完成');
@@ -101,7 +101,7 @@ describe('profile archive workspace integration', () => {
     render(<BetaApp client={client} intentJournal={memoryIntentJournal()} />);
     const input = await screen.findByRole('textbox', { name: '记录当下' });
     fireEvent.change(input, { target: { value: '导入期间保留的草稿' } });
-    fireEvent.click(screen.getByRole('button', { name: '管理档案' }));
+    fireEvent.click(screen.getByRole('button', { name: /^打开档案：/ }));
     fireEvent.click(await screen.findByRole('button', { name: '档案备份与导入' }));
     fireEvent.click(await screen.findByRole('button', { name: '确认导入' }));
     await screen.findByText('导入完成');

@@ -46,7 +46,7 @@ describe('late profile operations stay in their original client/device generatio
     const f=context();const provision=deferred<{profile_id:string;display_name:string}>();f.old.provisionProfile.mockReturnValueOnce(provision.promise);
     const ui=render(<BetaApp client={f.old} intentJournal={f.journal}/>);
     try{
-      const input=await screen.findByRole('textbox',{name:'记录当下'});fireEvent.click(screen.getByRole('button',{name:'管理档案'}));fireEvent.change(screen.getByRole('textbox',{name:'新档案名称'}),{target:{value:'Late old profile'}});
+      const input=await screen.findByRole('textbox',{name:'记录当下'});fireEvent.click(screen.getByRole('button',{name:/^打开档案：/}));fireEvent.change(screen.getByRole('textbox',{name:'新档案名称'}),{target:{value:'Late old profile'}});
       await waitFor(()=>expect(screen.getByRole('button',{name:'创建档案'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'创建档案'}));
       await waitFor(()=>expect(f.old.provisionProfile).toHaveBeenCalledTimes(1));
       fireEvent.change(input,{target:{value:'P input while provisioning'}});

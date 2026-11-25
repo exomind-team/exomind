@@ -77,7 +77,7 @@ describe('Beta daily workspace continuity', () => {
     fireEvent.click(screen.getByRole('button', { name: '隐藏记录' }));
     fireEvent.change(input, { target: { value: '不能被隐藏的失败记录' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
-    await waitFor(() => expect(screen.getAllByText('合成存储失败，原提交保留').some(element => element.closest('[role="alert"]') !== null)).toBe(true));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('合成存储失败，原提交保留'));
     expect(screen.getByRole('alert')).toBeVisible();
     expect(screen.getByRole('textbox', { name: '记录当下' })).toHaveValue('不能被隐藏的失败记录');
   });
