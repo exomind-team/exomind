@@ -27,24 +27,49 @@ describe('Beta capture Markdown rendering', () => {
     expect(container.querySelector('br')).not.toBeNull();
   });
 
+  it('uses only double tildes for deletion and supports bold text inside highlights', () => {
+    const { container } = render(
+      <BetaCaptureMarkdown
+        content={'~单波浪线原文~ 与 ~~双波浪线删除~~\n\n==**粗体高亮**== 与 **==高亮粗体==** 与 ==第一== / ==第二=='}
+      />,
+    );
+
+    expect(container.querySelectorAll('del')).toHaveLength(1);
+    expect(container.querySelector('del')).toHaveTextContent('双波浪线删除');
+    expect(container).toHaveTextContent('~单波浪线原文~');
+    const mark = container.querySelector('mark');
+    expect(mark).toHaveTextContent('粗体高亮');
+    expect(mark?.querySelector('strong')).toHaveTextContent('粗体高亮');
+    expect(container.querySelectorAll('mark')).toHaveLength(4);
+    expect(container.querySelector('strong > mark')).toHaveTextContent('高亮粗体');
+  });
+
   it('renders fenced code as source text in a narrow, horizontally scrollable block', () => {
     const htmlSource = '<script>window.__betaMarkdownProbe = true</script>';
-    const code = ['```html', htmlSource, 'const marker = "**still code**";', '```'].join('\n');
+    const code = ['```html', htmlSource, 'const marker = "==not-mark== ~not-delete~ ~~not-delete~~ $not-math$";', '```'].join('\n');
     const { container } = render(
       <BetaCaptureMarkdown content={code} />,
     );
 
     const pre = container.querySelector('pre');
     expect(pre).toHaveTextContent(htmlSource);
-    expect(pre).toHaveTextContent('**still code**');
+    expect(pre).toHaveTextContent('==not-mark== ~not-delete~ ~~not-delete~~ $not-math$');
+    expect(pre?.querySelector('mark, del, .katex')).toBeNull();
     expect(pre).toHaveClass('overflow-x-auto', 'max-w-full', 'min-w-0');
     expect(container.querySelector('script')).toBeNull();
   });
 
-  it('renders inline and block math through KaTeX', () => {
-    const { container } = render(<BetaCaptureMarkdown content={'Inline $a^2+b^2=c^2$.\n\n$$\n\\int_0^1 x\,dx\n$$'} />);
+  it('renders numeric and symbolic inline math plus scrollable block math through KaTeX', () => {
+    const { container } = render(
+      <BetaCaptureMarkdown
+        content={'Inline $1$、$a^2+b^2=c^2$；未闭合 $x\n\n$$\n\\int_0^1 x\,dx + \\frac{1}{2}\n$$'}
+      />,
+    );
 
-    expect(container.querySelectorAll('.katex').length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelectorAll('.katex')).toHaveLength(3);
+    expect(container.querySelector('.katex-display')).not.toBeNull();
+    expect(container.firstElementChild).toHaveClass('[&_.katex-display]:overflow-x-auto');
+    expect(container).toHaveTextContent('未闭合 $x');
   });
 
   it('keeps leading frontmatter as collapsed plain metadata without parsing body YAML', () => {
@@ -59,11 +84,19 @@ describe('Beta capture Markdown rendering', () => {
     expect(container.querySelector('pre')).toHaveTextContent('secret: <script>blocked()</script>');
   });
 
-  it('renders Obsidian blockquote callouts as labeled asides', () => {
-    const { container } = render(<BetaCaptureMarkdown content={'> [!WARNING] 注意\n> 保留提示内容'} />);
+  it('renders nested Obsidian blockquote callouts and their inline formatting', () => {
+    const { container } = render(
+      <BetaCaptureMarkdown
+        content={'> [!WARNING] 注意\n> **加粗** 与 ==高亮==\n> > [!NOTE] 嵌套\n> > 内层提示'}
+      />,
+    );
 
     expect(container.querySelector('aside[data-callout="warning"]')).toHaveAttribute('aria-label', '警告提示');
-    expect(container.querySelector('aside[data-callout="warning"]')).toHaveTextContent(/注意\s*保留提示内容/);
+    expect(container.querySelector('aside[data-callout="note"]')).toHaveAttribute('aria-label', '说明提示');
+    expect(container.querySelector('aside[data-callout="warning"]')).toHaveTextContent(/注意\s*加粗\s*与\s*高亮/);
+    expect(container.querySelector('aside[data-callout="warning"]')).toHaveTextContent('加粗');
+    expect(container.querySelector('aside[data-callout="warning"]')).toHaveTextContent('高亮');
+    expect(container.querySelector('aside[data-callout="note"]')).toHaveTextContent('内层提示');
   });
 
   it('keeps wikilinks readable and does not invent a destination', () => {
@@ -86,12 +119,14 @@ describe('Beta capture Markdown rendering', () => {
 
   it('never renders raw HTML as active DOM', () => {
     const { container } = render(
-      <BetaCaptureMarkdown content={'<img src=x onerror="window.__betaMarkdownProbe = true">\n<script>window.__betaMarkdownProbe = true</script>\n\n正常正文\n\n[不安全链接](javascript:alert(1))'} />,
+      <BetaCaptureMarkdown content={'<img src=x onerror="window.__betaMarkdownProbe = true">\n<script>window.__betaMarkdownProbe = true</script>\n\n<a href="https://example.test">纯 HTML 链接</a>\n\n正常正文\n\n[不安全链接](javascript:alert(1))'} />,
     );
 
     expect(container.querySelector('img, script')).toBeNull();
     expect(container.innerHTML).not.toContain('onerror=');
     expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
+    expect(screen.queryByRole('link', { name: '纯 HTML 链接' })).toBeNull();
+    expect(container).toHaveTextContent('纯 HTML 链接');
     expect(container).toHaveTextContent('正常正文');
   });
 });

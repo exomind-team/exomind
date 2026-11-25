@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -99,14 +99,18 @@ describe('Beta message actions', () => {
     const toggle = screen.getByRole('button', { name: '显示消息操作' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle).not.toHaveAttribute('title');
-    expect(toggle.className).toContain('[@media(pointer:coarse)]:min-h-11');
-    expect(toggle.className).toContain('[@media(pointer:coarse)]:opacity-100');
-    expect(toggle.className).toContain('h-6 min-h-6');
+    expect(toggle.className).not.toContain('[@media(pointer:coarse)]:min-h-11');
+    expect(toggle.className).not.toContain('[@media(pointer:coarse)]:opacity-100');
+    expect(toggle.className).not.toContain('absolute');
+    expect(toggle.className).not.toContain('group-hover');
+    expect(toggle.className).toContain('focus-visible:opacity-100');
+    expect(toggle.className).toContain('h-0 min-h-0');
     expect(toggle).toHaveTextContent('操作');
     const user = userEvent.setup();
     toggle.focus();
     await user.keyboard('{Enter}');
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle.className).toContain('[@media(pointer:coarse)]:min-h-11');
     const quote = screen.getByRole('button', { name: '引用消息' });
     expect(quote.tagName).toBe('BUTTON');
     expect(quote.classList.contains('h-7')).toBe(true);
@@ -247,6 +251,22 @@ describe('Beta message actions', () => {
 
     expect(screen.getByText('来自 设备 A')).toBeInTheDocument();
     expect(screen.getByText('预览来自引用时保存的正文摘要；原文已载入当前时间线')).toBeInTheDocument();
+  });
+
+  it('renders the saved reference excerpt as safe Markdown instead of showing its source punctuation', () => {
+    const line = buildBetaMessageReferenceLine({
+      profileId: PROFILE,
+      eventId: EVENT,
+      text: '**可读标题**\n**粗体内容**与`代码`',
+    });
+    render(<BetaMessageReferenceLinks value={line} onOpen={vi.fn()} />);
+
+    const card = screen.getByTestId('beta-message-reference-link');
+    expect(within(card).getByText('可读标题').tagName).toBe('STRONG');
+    expect(within(card).getByText('粗体内容').tagName).toBe('STRONG');
+    expect(within(card).getByText('代码').tagName).toBe('CODE');
+    expect(within(card).queryByText(/\*\*可读标题\*\*/)).not.toBeInTheDocument();
+    expect(within(card).queryByText(/\*\*粗体内容\*\*/)).not.toBeInTheDocument();
   });
 
   it('keeps an explicit return seam for the original reading position and the latest record', () => {

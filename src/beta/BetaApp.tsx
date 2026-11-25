@@ -553,6 +553,17 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
     readingTop.current=element.scrollTop;
     pendingMessageLocationRestore.current=null;
   },[messageLocationRestoreRevision]);
+  useLayoutEffect(()=>{
+    const item=messageLocation?.state.kind==='found'?messageLocation.item:undefined;
+    if(!item||!historyContent.current)return;
+    const kind=item.kind;
+    const target=Array.from(historyContent.current.querySelectorAll<HTMLElement>('[data-event-id][data-timeline-kind]'))
+      .find(row=>row.dataset.eventId===item.record.event_id&&row.dataset.timelineKind===kind);
+    if(!target)return;
+    followTail.current=false;
+    target.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'});
+    readingTop.current=scroll.current?.scrollTop??readingTop.current;
+  },[messageLocation]);
   useEffect(() => {
     if (visible && deadlineLocation?.profileId === profileId) changeLayout({ focus: 'expanded', minimal: false });
   }, [visible, profileId, deadlineLocation?.handoffId, deadlineLocation?.attempt]);
@@ -981,18 +992,23 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
       catch(failure){if(alive.current)setError(errorMessage(failure));}
     }else if(fileInput.current){fileInput.current.multiple=target===null;fileInput.current.click();}
   }
-  function renderTimelineItem(item: BetaTimelineItem, revision: number) {
+  function renderTimelineItem(item: BetaTimelineItem, revision: number, located=false) {
     return <BetaTimelineItemRow key={item.record.event_id} item={item} client={client}
       deviceId={deviceId} revision={revision} now={now} dateMode={mode} recordsActive={recordsActive}
       deviceLabel={deviceNames.label} onQuote={quoteMessage} onOpenReference={openMessageReference} rangeExport={rangeExportActions}
       exportMode={timelineMode === 'select-export'}
+      located={located}
       onCorrect={client.recordOrganization?record=>setCorrectionTarget(record):undefined}
       sourceLabel={messageReferenceSourceLabel} onInspectSummary={record=>{setReviewTarget(record);setReviewsOpen(true);}}
       onOpenSource={sourceReader||correctionSourceReader?source=>setSummarySource({profileId,source}):undefined} />;
   }
-  const locatedMessageContent=messageLocation?.item
-    ? renderTimelineItem(messageLocation.item, messageLocation.state.kind==='found' ? messageLocation.state.highwater??page?.highwater??0 : page?.highwater??0)
-    : undefined;
+  const locatedTimelineItem=messageLocation?.state.kind==='found'?messageLocation.item:null;
+  const timelineItems=page?[...page.items]:[];
+  if(locatedTimelineItem&&!timelineItems.some(item=>item.record.event_id===locatedTimelineItem.record.event_id&&item.kind===locatedTimelineItem.kind)){
+    timelineItems.push(locatedTimelineItem);
+  }
+  timelineItems.sort((left,right)=>right.record.local_seq-left.record.local_seq);
+  const timelineRevision=page?.highwater??(messageLocation?.state.kind==='found'?messageLocation.state.highwater??0:0);
   const messageLocationBoundary=messageLocation?<BetaMessageLocationBoundary
     state={messageLocation.state}
     onCancel={messageLocation.state.kind==='loading'?cancelMessageLocation:undefined}
@@ -1001,7 +1017,6 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
       ?()=>{void loadOlderAndRetryMessageReference(messageLocation.reference);}:undefined}
     onReturnToReadingPosition={()=>closeMessageLocation('reading')}
     onReturnToLatest={()=>closeMessageLocation('latest')}
-    children={locatedMessageContent}
   />:null;
   return <div ref={dropRoot} data-beta-workspace className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
     onDragOver={event=>{if(workspaceActive&&Array.from(event.dataTransfer.types).includes('Files')){event.preventDefault();event.dataTransfer.dropEffect=client.originals?'copy':'none';}}}
@@ -1077,7 +1092,9 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
       {loading && !page && <p role="status" className="text-center text-sm text-muted">正在读取…</p>}
       {page?.items.length === 0 && <p className="py-8 text-center text-sm text-muted">{periodViewActive?(query||tagFilter?'此时间范围没有匹配记录':'此时间范围没有记录'):(query||tagFilter?'没有匹配记录':'还没有记录')}</p>}
       {periodViewActive&&!!tagFilter&&<p className="pb-3 text-center text-[11px] text-muted">标签仅筛选记录；时间块与回顾仍按时间范围显示</p>}
-      <div ref={historyContent} className="space-y-4">{page && [...page.items].reverse().map(item=>renderTimelineItem(item,page.highwater))}</div>
+      <div ref={historyContent} className="space-y-4">{timelineItems.reverse().map(item=>
+        renderTimelineItem(item,timelineRevision,locatedTimelineItem?.record.event_id===item.record.event_id&&locatedTimelineItem.kind===item.kind)
+      )}</div>
     </div>
     </BetaWorkspacePane>
     {!layout.minimal&&layout.records!=='expanded'&&<div className="flex min-h-0 flex-1 items-center justify-center px-5 py-6">{layout.records==='hidden'&&(!focus||layout.focus==='hidden')&&<p className="text-center text-sm text-muted">工作区已收起，仍可记录想法。上方可恢复视图。</p>}</div>}

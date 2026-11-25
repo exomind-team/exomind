@@ -17,6 +17,7 @@ const BLOCK = '66666666-6666-4666-8666-666666666666';
 const DIGEST = 'a'.repeat(64);
 const originalLocks = Object.getOwnPropertyDescriptor(navigator, 'locks');
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
 
 function eventRecord(profileId: string, eventId: string, text: string, localSeq = 1): BetaEvent {
   return {
@@ -103,8 +104,11 @@ afterEach(() => {
   else Reflect.deleteProperty(navigator, 'locks');
   if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
   else Reflect.deleteProperty(navigator, 'clipboard');
+  if (originalScrollIntoView) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScrollIntoView);
+  else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
   localStorage.clear();
   sessionStorage.clear();
+  vi.restoreAllMocks();
 });
 
 describe('Beta message actions in the record workspace', () => {
@@ -121,6 +125,8 @@ describe('Beta message actions in the record workspace', () => {
     const trigger = within(row).getByRole('button', { name: '显示消息操作' });
 
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger.className).not.toContain('absolute');
+    expect(trigger.className).not.toContain('group-hover');
     fireEvent.click(bubble);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
 
@@ -161,7 +167,9 @@ describe('Beta message actions in the record workspace', () => {
     await waitFor(() => expect(history).toHaveAttribute('aria-busy', 'false'));
     const historyTarget = document.querySelector(`[data-event-id="${TARGET}"][data-timeline-kind="${kind}"]`) as HTMLElement;
     expect(historyTarget).toBeInTheDocument();
-    fireEvent.click(within(historyTarget).getByRole('button', { name: '显示消息操作' }));
+    const historyToggle = within(historyTarget).getByRole('button', { name: '显示消息操作' });
+    fireEvent.click(within(historyTarget).getByTestId('beta-message-bubble'));
+    expect(historyToggle).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(within(historyTarget).getByRole('button', { name: '复制消息正文' }));
     await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(1, body));
     fireEvent.click(within(historyTarget).getByRole('button', { name: '引用消息' }));
@@ -172,15 +180,36 @@ describe('Beta message actions in the record workspace', () => {
     const location = await screen.findByRole('region', { name: '外心档案内引用定位结果' });
     expect(location).toHaveTextContent('已在当前外心档案内找到引用原文');
     const sameFactRows = document.querySelectorAll(`[data-event-id="${TARGET}"][data-timeline-kind="${kind}"]`);
-    expect(sameFactRows).toHaveLength(2);
-    // The history and the location peek intentionally share the same fact ID.
-    // Resolve the peek by its owning region, independent of document order.
-    const peek = location.querySelector<HTMLElement>(`[data-event-id="${TARGET}"][data-timeline-kind="${kind}"]`);
-    expect(peek).toBeInTheDocument();
-    expect(history.contains(peek)).toBe(false);
-    fireEvent.click(within(peek!).getByRole('button', { name: '显示消息操作' }));
-    fireEvent.click(within(peek!).getByRole('button', { name: '复制消息正文' }));
+    expect(sameFactRows).toHaveLength(1);
+    const locatedRow = sameFactRows[0] as HTMLElement;
+    expect(history.contains(locatedRow)).toBe(true);
+    expect(location).not.toContainElement(locatedRow);
+    expect(locatedRow).toHaveAttribute('data-message-located', 'true');
+    fireEvent.click(within(locatedRow).getByRole('button', { name: '显示消息操作' }));
+    fireEvent.click(within(locatedRow).getByRole('button', { name: '复制消息正文' }));
     await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(2, body));
+  });
+
+  it('renders saved message tags as accessible hollow pills below the bubble', async () => {
+    const client = profileClient();
+    client.eventsPage.mockResolvedValueOnce({
+      items: [{ ...eventRecord(PROFILE, EVENT, '带标签的合成正文'), tags: ['focus', '跨端 同步'] }],
+      next_before: null,
+      highwater: 1,
+    });
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client as BetaClient} />);
+
+    await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
+    const row = document.querySelector(`[data-event-id="${EVENT}"]`) as HTMLElement;
+    const tagList = within(row).getByRole('list', { name: '消息标签' });
+    const pills = within(tagList).getAllByTestId('beta-message-tag');
+    expect(pills.map(pill => pill.textContent)).toEqual(['focus', '跨端 同步']);
+    for (const pill of pills) {
+      expect(pill.className).toContain('rounded-full');
+      expect(pill.className).toContain('border');
+      expect(pill.className).toContain('bg-transparent');
+    }
+    expect(tagList.compareDocumentPosition(within(row).getByTestId('beta-message-bubble')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
 
   it('quotes an attachment-only capture by name while keeping empty body copy disabled', async () => {
@@ -196,7 +225,10 @@ describe('Beta message actions in the record workspace', () => {
     const editor = await screen.findByRole('textbox', { name: '记录当下' });
     await waitFor(() => expect(screen.getByLabelText('记录历史')).toHaveAttribute('aria-busy', 'false'));
     const row = screen.getByTestId('new-mobile-user-message-row');
-    fireEvent.click(within(row).getByRole('button', { name: '显示消息操作' }));
+    const toggle = within(row).getByRole('button', { name: '显示消息操作' });
+    expect(toggle.className).toContain('opacity-100');
+    expect(toggle.className.split(/\s+/)).not.toContain('pointer-events-none');
+    fireEvent.click(toggle);
     expect(within(row).getByRole('button', { name: '复制消息正文' })).toBeDisabled();
     fireEvent.click(within(row).getByRole('button', { name: '引用消息' }));
 
@@ -338,13 +370,19 @@ describe('Beta message actions in the record workspace', () => {
     Object.defineProperties(history, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
     history.scrollTop = 260;
     fireEvent.scroll(history);
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
     fireEvent.click(screen.getByRole('button', { name: /在外心档案内回看原文：可定位摘要/ }));
 
     const location = await screen.findByRole('region', { name: '外心档案内引用定位结果' });
     expect(location).toHaveTextContent('已在当前外心档案内找到引用原文');
     expect(screen.getByRole('button', { name: '查看查找范围' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByText('定位到的原文')).toBeInTheDocument();
-    expect(history.scrollTop).toBe(260);
+    const locatedRow = history.querySelector<HTMLElement>(`[data-event-id="${TARGET}"]`);
+    expect(locatedRow).toHaveAttribute('data-message-located', 'true');
+    expect(location).not.toContainElement(locatedRow);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', inline: 'nearest', behavior: 'auto' });
+    expect(scrollIntoView.mock.instances.at(-1)).toBe(locatedRow);
     fireEvent.click(screen.getByRole('button', { name: '回到原阅读位置' }));
     await waitFor(() => expect(screen.queryByTestId('beta-message-location-boundary')).not.toBeInTheDocument());
     expect(history.scrollTop).toBe(260);

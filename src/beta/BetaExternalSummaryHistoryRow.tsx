@@ -10,9 +10,9 @@ import type { SummarySourceRef } from './summary-types';
 import type { ExternalSummaryRecord } from './external-summary';
 import { BetaSummaryBody } from './BetaSummaryBody';
 
-export function BetaExternalSummaryHistoryRow({record,now,dateMode,onOpenSource,messageActions}:{record:ExternalSummaryRecord;now:number;dateMode:EventDateDisplayMode;onOpenSource?:(source:SummarySourceRef)=>void;messageActions?:ReactNode}){
+export function BetaExternalSummaryHistoryRow({record,now,dateMode,onOpenSource,messageActions,onBubbleBlankClick,located}:{record:ExternalSummaryRecord;now:number;dateMode:EventDateDisplayMode;onOpenSource?:(source:SummarySourceRef)=>void;messageActions?:ReactNode;onBubbleBlankClick?:()=>void;located?:boolean}){
   const [shown,setShown]=useState(25);const sources=new Map(record.snapshot.sources.map(source=>[source.event_id,source]));
-  return<ChatMessageRowView eventId={record.event_id} timelineKind="agent_summary/1" tone="agent-feedback"
+  return<ChatMessageRowView eventId={record.event_id} timelineKind="agent_summary/1" tone="agent-feedback" onBubbleBlankClick={onBubbleBlankClick} located={located}
     avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className="bg-violet-600 text-white"><Sparkles size={16}/></AvatarFallback></Avatar>}
     metadata={<><span className="text-xs font-semibold text-strong">外部 Agent 回顾</span><EventTimestamp timestamp={record.occurred_at_ms} now={now} mode={dateMode}/></>}
     content={<div className="space-y-3"><BetaSummaryBody narrative={record.narrative}/><p className="text-xs text-muted">由 Agent {record.producer_agent_id.slice(0,8)} 在设备 {record.device_id.slice(0,8)} 提交。</p>

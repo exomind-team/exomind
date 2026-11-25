@@ -19,36 +19,73 @@ type AstNode = {
 };
 
 const highlightObsidianSyntax: Plugin<[], Root> = () => (root) => {
+  const appendText = (nodes: AstNode[], value: string) => {
+    if (!value) return;
+    const previous = nodes[nodes.length - 1];
+    if (previous?.type === 'text' && typeof previous.value === 'string') {
+      previous.value += value;
+      return;
+    }
+    nodes.push({ type: 'text', value });
+  };
+
   const visit = (node: AstNode) => {
     if (!node.children) return;
 
-    node.children = node.children.flatMap((child) => {
-      if (child.type === 'text' && typeof child.value === 'string') {
-        const parts: AstNode[] = [];
-        const pattern = /==([^=\r\n]+)==/g;
-        let offset = 0;
-        let match: RegExpExecArray | null;
-        while ((match = pattern.exec(child.value)) !== null) {
-          if (match.index > offset) {
-            parts.push({ type: 'text', value: child.value.slice(offset, match.index) });
-          }
-          parts.push({
-            type: 'emphasis',
-            data: { hName: 'mark' },
-            children: [{ type: 'text', value: match[1] }],
-          });
-          offset = match.index + match[0].length;
+    const transformed: AstNode[] = [];
+    let open: AstNode | null = null;
+    let pending: AstNode[] = [];
+    for (const child of node.children) {
+      if (child.type !== 'text' || typeof child.value !== 'string') {
+        if (open) {
+          open.children!.push(child);
+          pending.push(child);
+        } else {
+          transformed.push(child);
         }
-        if (offset === 0) return [child];
-        if (offset < child.value.length) {
-          parts.push({ type: 'text', value: child.value.slice(offset) });
-        }
-        return parts;
+        continue;
       }
 
-      visit(child);
-      return [child];
-    });
+      let offset = 0;
+      while (offset < child.value.length) {
+        const marker = child.value.indexOf('==', offset);
+        if (marker < 0) {
+          const tail = child.value.slice(offset);
+          if (open) {
+            appendText(open.children!, tail);
+            appendText(pending, tail);
+          } else {
+            appendText(transformed, tail);
+          }
+          offset = child.value.length;
+          break;
+        }
+
+        const before = child.value.slice(offset, marker);
+        if (open) {
+          appendText(open.children!, before);
+          appendText(pending, before);
+          if (open.children!.length > 0) {
+            transformed.push(open);
+            open = null;
+            pending = [];
+          } else {
+            appendText(transformed, '====');
+            open = null;
+            pending = [];
+          }
+        } else {
+          appendText(transformed, before);
+          open = { type: 'emphasis', data: { hName: 'mark' }, children: [] };
+          pending = [{ type: 'text', value: '==' }];
+        }
+        offset = marker + 2;
+      }
+    }
+    if (open) transformed.push(...pending);
+
+    node.children = transformed;
+    for (const child of node.children) visit(child);
   };
 
   visit(root as unknown as AstNode);
@@ -157,7 +194,7 @@ export function BetaCaptureMarkdown({ content }: { content: string }) {
   const { frontmatter, body } = splitLeadingFrontmatter(content);
 
   return (
-    <div className="beta-capture-markdown exomind-selectable min-w-0 max-w-full break-words text-[13px] leading-relaxed [overflow-wrap:anywhere]">
+    <div className="beta-capture-markdown exomind-selectable min-w-0 max-w-full break-words text-[13px] leading-relaxed [overflow-wrap:anywhere] [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden">
       {frontmatter !== null && (
         <details className="mb-2 text-xs text-muted">
           <summary className="cursor-pointer select-none">文档属性</summary>
@@ -169,7 +206,13 @@ export function BetaCaptureMarkdown({ content }: { content: string }) {
       {body ? (
         <ReactMarkdown
           skipHtml
-          remarkPlugins={[remarkGfm, remarkBreaks, remarkMath, highlightObsidianSyntax, obsidianCallouts]}
+          remarkPlugins={[
+            [remarkGfm, { singleTilde: false }],
+            remarkBreaks,
+            remarkMath,
+            highlightObsidianSyntax,
+            obsidianCallouts,
+          ]}
           rehypePlugins={[rehypeKatex]}
           components={markdownComponents}
         >

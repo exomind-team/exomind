@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ChevronDown, Copy, Link2, PencilLine, Quote, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BetaCaptureMarkdown } from './BetaCaptureMarkdown';
 import type { UserRangeSelection } from './user-range-export-client';
 import { writeBetaMessageClipboard } from './beta-message-clipboard';
 import { MAX_BETA_MESSAGE_LOCATE_PAGES } from './beta-message-locator';
@@ -23,8 +24,8 @@ type ClipboardFeedback =
 const CLIPBOARD_FEEDBACK_MS = 2000;
 const ACTION_BUTTON_CLASS = 'min-h-9 shrink-0 [@media(pointer:coarse)]:min-h-11 touch-manipulation px-3';
 const MESSAGE_ACTION_BUTTON_CLASS = 'h-7 min-h-7 shrink-0 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-h-11 touch-manipulation px-2 py-1 text-xs [&_svg]:size-3.5';
-const ACTION_TRIGGER_CLASS = 'min-h-6 rounded-md px-1.5 py-1 text-[10px] text-muted opacity-0 pointer-events-none hover:bg-secondary focus-visible:opacity-100 focus-visible:pointer-events-auto group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:opacity-100';
-const EXPORT_MODE_ACTION_TRIGGER_CLASS = 'min-h-6 rounded-md px-1.5 py-1 text-[10px] text-muted opacity-100 pointer-events-auto hover:bg-secondary focus-visible:ring-1 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11';
+const QUIET_ACTION_TRIGGER_CLASS = 'h-0 min-h-0 w-0 overflow-hidden rounded-md border-0 p-0 text-[10px] text-muted opacity-0 pointer-events-none focus-visible:h-7 focus-visible:min-h-7 focus-visible:w-auto focus-visible:overflow-visible focus-visible:px-2 focus-visible:py-1 focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:ring-1';
+const OPEN_ACTION_TRIGGER_CLASS = 'min-h-7 rounded-md px-2 py-1 text-[10px] text-muted opacity-100 pointer-events-auto hover:bg-secondary focus-visible:ring-1 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11';
 
 function OnDemandExplanation({ label, children }: { label: string; children: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
@@ -68,6 +69,7 @@ export interface BetaMessageActionsProps {
   exportMode?: boolean;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
+  alwaysVisible?: boolean;
 }
 
 function feedbackText(feedback: ClipboardFeedback): string {
@@ -111,10 +113,19 @@ function MessageReferenceSummary({
   return (
     <div className="min-w-0 flex-1">
       <div className="text-[10px] font-semibold text-brand-accent">引用</div>
-      <div className="break-words text-xs font-medium text-strong [overflow-wrap:anywhere]">{label}</div>
+      <div
+        className="min-w-0 max-w-full text-xs font-medium text-strong [&_.beta-capture-markdown]:text-xs [&_.beta-capture-markdown_p]:my-0"
+        data-testid="beta-message-reference-label"
+      >
+        <BetaCaptureMarkdown content={label} />
+      </div>
       {humanSource ? <div className="truncate text-[10px] text-muted">来自 {humanSource}</div> : null}
       {reference.metadata ? <div className="break-words text-[10px] text-secondary [overflow-wrap:anywhere]">引用元数据：{reference.metadata}</div> : null}
-      {reference.excerpt ? <div className="whitespace-normal break-words text-[10px] text-secondary [overflow-wrap:anywhere]">{reference.excerpt}</div> : null}
+      {reference.excerpt ? (
+        <div className="min-w-0 max-w-full [&_.beta-capture-markdown]:text-[10px]" data-testid="beta-message-reference-excerpt">
+          <BetaCaptureMarkdown content={reference.excerpt} />
+        </div>
+      ) : null}
       <div className="text-[10px] text-muted">{previewState}</div>
     </div>
   );
@@ -136,6 +147,7 @@ export function BetaMessageActions({
   exportMode = false,
   expanded: controlledExpanded,
   onExpandedChange,
+  alwaysVisible = false,
 }: BetaMessageActionsProps) {
   const [feedback, setFeedback] = useState<ClipboardFeedback>(null);
   const [internalExpanded, setInternalExpanded] = useState(false);
@@ -201,9 +213,10 @@ export function BetaMessageActions({
     ? feedback
     : null;
   const feedbackMessage = feedbackText(visibleFeedback);
+  const showTrigger = expanded || exportMode || alwaysVisible;
   return (
     <div
-      className={'relative flex min-w-0 max-w-full flex-wrap items-center gap-1 ' + alignmentClass}
+      className={'flex min-w-0 max-w-full flex-wrap items-center ' + (showTrigger ? 'gap-1 ' : 'gap-0 focus-within:gap-1 ') + alignmentClass}
       data-testid="beta-message-actions"
       onKeyDown={event => {
         if (event.key === 'Escape' && expanded) {
@@ -217,7 +230,7 @@ export function BetaMessageActions({
         type="button"
         variant="ghost"
         size="sm"
-        className={'absolute -top-2 right-0 z-10 h-6 min-h-6 px-1.5 py-1 text-[10px] ' + (exportMode ? EXPORT_MODE_ACTION_TRIGGER_CLASS : ACTION_TRIGGER_CLASS)}
+        className={'shrink-0 ' + (showTrigger ? OPEN_ACTION_TRIGGER_CLASS : QUIET_ACTION_TRIGGER_CLASS)}
         aria-label="显示消息操作"
         aria-expanded={expanded}
         aria-controls={actionsId}

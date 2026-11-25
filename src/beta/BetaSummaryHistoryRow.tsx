@@ -11,7 +11,7 @@ import { sameSummaryArtifact,summaryFailure } from './summary-ui';
 import type { SummaryArtifactRecord,SummaryArtifactView,SummaryClient,SummarySourceRef,SummaryTaskView } from './summary-types';
 import { BetaSummaryBody } from './BetaSummaryBody';
 
-export function BetaSummaryHistoryRow({record,api,revision,now,dateMode,onInspect,onOpenSource,messageActions}:{record:SummaryArtifactRecord;api?:SummaryClient;revision:number;now:number;dateMode:EventDateDisplayMode;onInspect:(record:SummaryArtifactRecord)=>void;onOpenSource?:(source:SummarySourceRef)=>void;messageActions?:ReactNode}){
+export function BetaSummaryHistoryRow({record,api,revision,now,dateMode,onInspect,onOpenSource,messageActions,onBubbleBlankClick,located}:{record:SummaryArtifactRecord;api?:SummaryClient;revision:number;now:number;dateMode:EventDateDisplayMode;onInspect:(record:SummaryArtifactRecord)=>void;onOpenSource?:(source:SummarySourceRef)=>void;messageActions?:ReactNode;onBubbleBlankClick?:()=>void;located?:boolean}){
   const host=useRef<HTMLDivElement>(null);const [visible,setVisible]=useState(()=>typeof IntersectionObserver==='undefined');
   const [reload,setReload]=useState(0);const [qualification,setQualification]=useState<{api:SummaryClient;revision:number;task:SummaryTaskView;artifact:SummaryArtifactView}|null>(null);
   const [loading,setLoading]=useState(false);const [error,setError]=useState('');
@@ -30,7 +30,7 @@ export function BetaSummaryHistoryRow({record,api,revision,now,dateMode,onInspec
   },[api,visible,record.profile_id,record.task_id,record.event_id,record.digest,record.local_seq,revision,reload]);
   const qualified=qualification&&qualification.api===api&&qualification.revision===revision&&qualification.task.profile_id===record.profile_id&&qualification.task.task_id===record.task_id&&sameSummaryArtifact(record,qualification.artifact)?qualification:null;
   const valid=!loading&&!!qualified;const sources=new Map(record.snapshot.sources.map(source=>[source.event_id,source]));
-  return<div ref={host}><ChatMessageRowView eventId={record.event_id} timelineKind="summary/1" tone="agent-feedback"
+  return<div ref={host}><ChatMessageRowView eventId={record.event_id} timelineKind="summary/1" tone="agent-feedback" onBubbleBlankClick={onBubbleBlankClick} located={located}
     avatar={<Avatar className="mt-0.5 h-8 w-8 shrink-0"><AvatarFallback className="bg-violet-600 text-white"><Sparkles size={16}/></AvatarFallback></Avatar>}
     metadata={<><span className="text-xs font-semibold text-strong">{summaryArtifactLabel(record.artifact_kind)}</span><EventTimestamp timestamp={record.occurred_at_ms} now={now} mode={dateMode}/>{valid&&qualified&&<span>{qualified.artifact.current?'当前版本':'历史版本'}</span>}</>}
     content={<div className="space-y-3"><BetaSummaryBody narrative={record.output.narrative}/>

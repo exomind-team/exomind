@@ -34,12 +34,31 @@ interface BetaTimelineItemRowProps {
   onOpenSource?: (source: SummarySourceRef) => void;
   rangeExport?: { selections: readonly UserRangeSelection[]; onToggle: (selection: UserRangeSelection) => void };
   exportMode?: boolean;
+  located?: boolean;
 }
 
 type TimelineExportChoice = BetaMessageExportChoice;
 
 const TIMELINE_ROW_CLASS = 'group [&>div.flex-col]:w-fit [&>div.min-w-0]:w-fit [&>div.min-w-0]:flex-none';
 const TIMELINE_SUMMARY_ROW_CLASS = '[&_[data-testid=new-mobile-system-message-row]>div.min-w-0]:w-fit [&_[data-testid=new-mobile-system-message-row]>div.min-w-0]:flex-none [&_[data-testid=new-mobile-agent-feedback-bubble]]:[overflow-wrap:anywhere]';
+const MESSAGE_TAG_CLASS = 'inline-flex max-w-full rounded-full border border-border-subtle bg-transparent px-2 py-0.5 text-[10px] leading-relaxed text-secondary [overflow-wrap:anywhere]';
+
+function MessageTags({ tags, align }: { tags: readonly string[]; align: 'start' | 'end' }) {
+  if (!tags.length) return null;
+  return (
+    <ul
+      className={`flex max-w-full flex-wrap gap-1 ${align === 'end' ? 'justify-end' : 'justify-start'}`}
+      aria-label="消息标签"
+      data-testid="beta-message-tags"
+    >
+      {tags.map(tag => (
+        <li key={tag} className="max-w-full">
+          <span className={MESSAGE_TAG_CLASS} title={tag} data-testid="beta-message-tag">{tag}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function timeblockExportChoices(node: Extract<BetaTimelineItem, { kind: 'timeblock' }>['record']): TimelineExportChoice[] {
   if (node.payload.kind !== 'action') {
@@ -71,6 +90,7 @@ export function BetaTimelineItemRow({
   onOpenSource,
   rangeExport,
   exportMode = false,
+  located = false,
 }: BetaTimelineItemRowProps) {
   const [messageActionsExpanded, setMessageActionsExpanded] = useState(false);
   const capture = item.kind === 'capture' ? item.record : null;
@@ -125,8 +145,24 @@ export function BetaTimelineItemRow({
       exportMode={exportMode}
       expanded={messageActionsExpanded}
       onExpandedChange={setMessageActionsExpanded}
+      alwaysVisible={!!capture && !displayCaptureText && !hasCaptureReferences}
     />
   );
+  const toggleMessageActions = () => setMessageActionsExpanded(value => !value);
+  const captureAfterBubble = capture && (!!capture.tags?.length || !!capture.originals?.length)
+    ? <div className={`mt-1 flex max-w-full flex-col gap-1 ${capture.author_kind === 'human' ? 'items-end' : 'items-start'}`}>
+      <MessageTags tags={capture.tags ?? []} align={capture.author_kind === 'human' ? 'end' : 'start'} />
+      {!!capture.originals?.length && (
+        <OriginalDownloads
+          client={client}
+          deviceId={deviceId}
+          profileId={capture.profile_id}
+          originals={capture.originals}
+          visible={recordsActive}
+        />
+      )}
+    </div>
+    : undefined;
 
   if (item.kind === 'capture') {
     const event = item.record;
@@ -136,7 +172,8 @@ export function BetaTimelineItemRow({
         timelineKind="capture"
         tone={event.author_kind === 'human' ? 'user' : 'agent-feedback'}
         className={TIMELINE_ROW_CLASS}
-        onBubbleBlankClick={() => setMessageActionsExpanded(value => !value)}
+        onBubbleBlankClick={toggleMessageActions}
+        located={located}
         avatar={
           <Avatar className={`${event.author_kind === 'human' ? '' : 'mt-0.5 '}h-8 w-8 shrink-0`}>
             <AvatarFallback className={event.author_kind === 'human'
@@ -161,15 +198,7 @@ export function BetaTimelineItemRow({
             <BetaMessageReferenceLinks value={event.text} onOpen={onOpenReference} sourceLabel={sourceLabel} />
           </div>
         ) : null}
-        afterBubble={!!event.originals?.length && (
-          <OriginalDownloads
-            client={client}
-            deviceId={deviceId}
-            profileId={event.profile_id}
-            originals={event.originals}
-            visible={recordsActive}
-          />
-        )}
+        afterBubble={captureAfterBubble}
         actions={messageActions}
       />
     );
@@ -182,7 +211,8 @@ export function BetaTimelineItemRow({
         timelineKind="timeblock"
         tone="system"
         className={TIMELINE_ROW_CLASS}
-        onBubbleBlankClick={() => setMessageActionsExpanded(value => !value)}
+        onBubbleBlankClick={toggleMessageActions}
+        located={located}
         avatar={<BetaTimeblockAvatar node={item.record} />}
         metadata={
           <>
@@ -210,6 +240,8 @@ export function BetaTimelineItemRow({
           onInspect={onInspectSummary}
           onOpenSource={onOpenSource}
           messageActions={messageActions}
+          onBubbleBlankClick={toggleMessageActions}
+          located={located}
         />
       </div>
     );
@@ -223,6 +255,8 @@ export function BetaTimelineItemRow({
         dateMode={dateMode}
         onOpenSource={onOpenSource}
         messageActions={messageActions}
+        onBubbleBlankClick={toggleMessageActions}
+        located={located}
       />
     </div>
   );
