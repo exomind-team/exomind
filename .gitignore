@@ -41,8 +41,8 @@ src-tauri/gen/android/local.properties
 src-tauri/gen/android/*.iml
 src-tauri/gen/android/.idea/
 src-tauri/gen/android/gradle-app.setting*
-crates/exomind-android-keepalive/android/.tauri/
-crates/exomind-android-timeblock-end-alert/android/.tauri/
+crates/exomind-android-*/android/.tauri/
+crates/exomind-android-*/android/build/
 *.jks
 *.keystore
 
@@ -97,6 +97,7 @@ website/.astro/
 # === Agent output (local cache) ===
 agent-output/
 skills/*-workspace/
+.archify/
 
 # === Build artifacts (local cache) ===
 artifacts/
