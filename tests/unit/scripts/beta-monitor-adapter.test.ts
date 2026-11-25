@@ -3,15 +3,18 @@ import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const adapterPath = join(repository, 'skills/exomind-rt-agent-access/scripts/beta-monitor-adapter.mjs');
+const defaultAdapterPath = join(homedir(), '.claude/skills/exomind-monitor/scripts/beta-monitor-adapter.mjs');
+const adapterPath = process.env.EXOMIND_BETA_MONITOR_SDK_PATH ?? defaultAdapterPath;
+if (!statSync(adapterPath, { throwIfNoEntry: false })?.isFile()) {
+  throw new Error(`Beta monitor adapter not found at ${adapterPath}; set EXOMIND_BETA_MONITOR_SDK_PATH to the installed skill's adapter.`);
+}
 const adapterUrl = pathToFileURL(adapterPath);
 const PROFILE_ID = '11111111-1111-4111-8111-111111111111';
 const OTHER_PROFILE_ID = '11111111-1111-4111-8111-111111111112';

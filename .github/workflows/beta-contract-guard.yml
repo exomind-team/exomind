@@ -24,7 +24,6 @@ on:
       - 'tests/unit/scripts/beta-core8-fixture.test.ts'
       - 'tests/unit/scripts/beta-core10-fixture*.test.ts'
       - 'tests/unit/scripts/beta-monitor-adapter.test.ts'
-      - 'skills/exomind-rt-agent-access/**'
       - 'scripts/dev/beta-core8-fixture.ts'
       - 'scripts/dev/beta-core-fixture-source.ts'
       - 'scripts/dev/beta-core10-fixture.ts'
@@ -69,6 +68,7 @@ jobs:
       CARGO_PROFILE_DEV_CODEGEN_UNITS: '16'
       # Env values are passed as argv, never interpolated into a shell program.
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      MONITOR_SKILL_REF: v0.6.0
     steps:
       - uses: actions/checkout@v6
         with:
@@ -77,6 +77,18 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
+      - name: Check out pinned monitor skill
+        shell: bash
+        run: |
+          monitor_dir="$RUNNER_TEMP/exomind-monitor-skill"
+          if [[ -e "$monitor_dir" ]]; then
+            echo "Monitor skill directory already exists: $monitor_dir" >&2
+            exit 1
+          fi
+          git clone --depth 1 --branch "$MONITOR_SKILL_REF" \
+            https://github.com/exomind-team/exomind-monitor-skill.git "$monitor_dir"
+          echo "EXOMIND_BETA_MONITOR_SDK_PATH=$monitor_dir/scripts/beta-monitor-adapter.mjs" >> "$GITHUB_ENV"
+          node "$monitor_dir/scripts/verify.mjs"
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.3.8'

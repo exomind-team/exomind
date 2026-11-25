@@ -4,7 +4,7 @@ Beta 的接入单位是 Native 签发给一个档案的 grant。先按任务选�
 
 ## 在新机器上选择入口
 
-2026-11-25 核对公开仓库时，远端只有 `main`（`113ba8c2`），包含 0.5 的 `monitor.js`、`send.js` 等脚本。远端标签列表为空。本机的 `v0.6.0` 标签对应提交 `932737ae`。全新环境可使用项目 `dfb2b73c` 留存的 Beta adapter 和用法，或运行合成档案的 Host HTTP 测试。[固定版 adapter 使用说明](https://github.com/exomind-team/exomind/blob/dfb2b73ce15a56142edd725368af89723865dd72/skills/exomind-rt-agent-access/references/beta-monitor.md) · [开发快速上手](quickstart.md) · [Host 隔离测试](../../crates/exomind-beta-host/tests/host.rs) · [公开版本列表](https://github.com/exomind-team/exomind-monitor-skill/tags) · [0.5 固定源码](https://github.com/exomind-team/exomind-monitor-skill/tree/113ba8c2d44fa7b79de51f427bf2f4b1998294c1)
+2026-11-25 已把 `v0.6.0`（提交 `932737ae`）推送到公开仓库；公开 `main` 与该标签一致，0.5 脚本保留在 `legacy-0.5` 标签。全新环境可直接按该标签取得 Beta adapter 和用法，或运行合成档案的 Host HTTP 测试。[固定版 adapter 使用说明](https://github.com/exomind-team/exomind/blob/dfb2b73ce15a56142edd725368af89723865dd72/skills/exomind-rt-agent-access/references/beta-monitor.md) · [开发快速上手](quickstart.md) · [Host 隔离测试](../../crates/exomind-beta-host/tests/host.rs) · [公开版本列表](https://github.com/exomind-team/exomind-monitor-skill/tags) · [0.5 固定源码](https://github.com/exomind-team/exomind-monitor-skill/tree/113ba8c2d44fa7b79de51f427bf2f4b1998294c1)
 
 已有可信的 0.6 checkout 时，先运行自检。以下为 POSIX shell 示例。`MONITOR_HANDOFF` 由调用者指定为已获授权的私有文件路径，`HISTORY_OUT` 指向本机私有输出文件。凭据仅由 CLI 从 handoff 读取，历史输出包含记录正文。
 
@@ -21,9 +21,9 @@ node "$monitor/cli.mjs" --handoff "$MONITOR_HANDOFF" read-all --fresh --out "$HI
 
 ## 本仓库如何取得测试 adapter
 
-当前工作树将 `EXOMIND_BETA_MONITOR_SDK_PATH` 作为 adapter 文件的绝对路径，缺省读取已安装 Skill 下的 `scripts/beta-monitor-adapter.mjs`。前端契约和 Host 的外部夹具共用这项约定。[前端契约](../../tests/unit/scripts/beta-monitor-adapter.test.ts) · [Host 测试夹具](../../crates/exomind-beta-host/tests/fixtures/monitor-summary-reader.mjs)
+本仓库不再保留内置 Skill。测试优先读取 `EXOMIND_BETA_MONITOR_SDK_PATH` 指向的 adapter 绝对路径；未设置时读取已安装 Skill 下的 `scripts/beta-monitor-adapter.mjs`。前端契约和 Host 的外部夹具共用这项约定。[前端契约](../../tests/unit/scripts/beta-monitor-adapter.test.ts) · [Host 测试夹具](../../crates/exomind-beta-host/tests/fixtures/monitor-summary-reader.mjs)
 
-工作树的 `Beta Source Contracts` 工作流指定 `MONITOR_SKILL_REF=v0.6.0`。全新 runner 依赖这个 ref 在公开仓库可取，以及 `verify.mjs` 自检通过。`dfb2b73c` 的源码 CI #104 通过时用的是该提交内的 adapter。外置版本的 CI 应以包含新工作流的 run 核对。[工作树的工作流](../../.github/workflows/beta-contract-guard.yml) · [#104 的固定工作流](https://github.com/exomind-team/exomind/blob/dfb2b73ce15a56142edd725368af89723865dd72/.github/workflows/beta-contract-guard.yml)
+`Beta Source Contracts` 工作流固定 `MONITOR_SKILL_REF=v0.6.0`，从公开仓库取得 adapter 并先运行 `verify.mjs`。`v0.6.0` 的 adapter 与 `dfb2b73c` 内置版本字节一致；外置版本的首个 CI 结果以包含该工作流的 run 为准。[工作流](../../.github/workflows/beta-contract-guard.yml) · [#104 的固定工作流](https://github.com/exomind-team/exomind/blob/dfb2b73ce15a56142edd725368af89723865dd72/.github/workflows/beta-contract-guard.yml)
 
 ## 已登记机器上的日用巡检
 

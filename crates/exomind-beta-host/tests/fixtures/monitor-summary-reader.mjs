@@ -1,11 +1,12 @@
 // Receives only this test's synthetic, scoped handoff over stdin. No tokens in argv/logs.
 import assert from 'node:assert/strict';
-import { isAbsolute } from 'node:path';
+import { homedir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const override = process.env.EXOMIND_BETA_MONITOR_SDK_PATH;
 if (override !== undefined) assert.ok(isAbsolute(override), 'explicit installed SDK path must be absolute');
-const adapterUrl = override ? pathToFileURL(override) : new URL('../../../../skills/exomind-rt-agent-access/scripts/beta-monitor-adapter.mjs', import.meta.url);
-const { createBetaMonitorAdapter } = await import(adapterUrl.href);
+const adapterPath = override ?? join(homedir(), '.claude', 'skills', 'exomind-monitor', 'scripts', 'beta-monitor-adapter.mjs');
+const { createBetaMonitorAdapter } = await import(pathToFileURL(adapterPath).href);
 
 const chunks = [];
 let size = 0;
