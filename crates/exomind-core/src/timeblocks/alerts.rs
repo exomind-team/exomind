@@ -70,6 +70,8 @@ impl Core {
                 deadline_id: id,
                 profile_id: row.profile,
                 block_id: row.block,
+                block_name: block.spec.name.clone(),
+                block_note: block.spec.note.clone(),
                 due_at_ms: stamp
                     .wall_ms
                     .saturating_add(remaining.min(i64::MAX as u64) as i64),

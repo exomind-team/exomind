@@ -24,6 +24,7 @@ import { BetaDiagnosticsEntry } from './BetaDiagnosticsPanel';
 import { createBetaDiagnosticsClient, type BetaDiagnosticsClient } from './diagnostics-client';
 import { BetaAgentGrantsEntry } from './BetaAgentGrantsPanel';
 import { createAgentGrantsClient } from './agent-grants-client';
+import { BetaTimeblockEndSoundSetting } from './BetaTimeblockEndSoundSetting';
 
 export function BetaSettingsPage({ profileName, profileId='', deviceId='', summaryModel, onDisconnect, onManageProfile, endpoint, deadlineAlerts, visible=true, diagnosticsClient }: { profileName: string; profileId?:string; deviceId?:string; summaryModel?:SummaryModelConfigurationService|null; onDisconnect?: () => void; onManageProfile?: () => void; endpoint?: string; deadlineAlerts?: BetaDeadlineAlertsClient | null; visible?:boolean; diagnosticsClient?:BetaDiagnosticsClient|null }) {
   const wide = useIsDesktop();
@@ -101,6 +102,7 @@ export function BetaSettingsPage({ profileName, profileId='', deviceId='', summa
       }}>
         {desktopLayout ? <DesktopSettingsLayout items={items} ctx={ctx}/> : <MobileSettingsLayout items={items} ctx={ctx}/>}
       </BetaSettingsPanels.Provider>
+      <BetaTimeblockEndSoundSetting visible={nativeDesktop}/>
       {createPortal(<SummaryModelSettings service={summaryModel??null} deviceId={deviceId} profileId={profileId} profileName={profileName}/>, modelHost, 'beta-settings-model')}
       {createPortal(<BetaDiagnosticsEntry client={diagnostics} visible={visible&&diagnosticsMounted}/>, diagnosticsHost, 'beta-settings-diagnostics')}
       {createPortal(<BetaAgentGrantsEntry client={nativeAgentGrants} profileId={profileId || null} profileName={profileName || null} visible={visible&&agentGrantsMounted}/>, agentGrantsHost, 'beta-settings-agent-grants')}

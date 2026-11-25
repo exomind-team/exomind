@@ -172,6 +172,12 @@ impl Bridge {
                                 deadline_id: row.deadline_id.to_string(),
                                 profile_id: row.profile_id.to_string(),
                                 block_id: row.block_id.to_string(),
+                                block_name: exomind_android_timeblock_end_alert::project_deadline_notification_title(
+                                    &row.block_name,
+                                ),
+                                block_note: exomind_android_timeblock_end_alert::project_deadline_notification_note(
+                                    &row.block_note,
+                                ),
                                 due_at: row.due_at_ms,
                                 remaining_ms: row.remaining_ms,
                                 completed: row.completed,
@@ -381,6 +387,29 @@ mod tests {
         assert_eq!(value["channelSoundEnabled"], serde_json::Value::Null);
         assert_eq!(value["settingsAvailable"], true);
         assert!(value.get("profileId").is_none());
+    }
+
+    #[test]
+    fn android_deadline_projection_serializes_core_block_name_and_note_with_its_scope() {
+        let value = serde_json::to_value(
+            exomind_android_timeblock_end_alert::BetaDeadlineAlert {
+                deadline_id: "deadline-id".into(),
+                profile_id: "profile-id".into(),
+                block_id: "block-id".into(),
+                block_name: "课程复习".into(),
+                block_note: "复习公式和例题".into(),
+                due_at: 1,
+                remaining_ms: 0,
+                completed: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(value["deadlineId"], "deadline-id");
+        assert_eq!(value["profileId"], "profile-id");
+        assert_eq!(value["blockId"], "block-id");
+        assert_eq!(value["blockName"], "课程复习");
+        assert_eq!(value["blockNote"], "复习公式和例题");
     }
 
     #[tokio::test]

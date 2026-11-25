@@ -17,20 +17,53 @@ fn apply(core: &Core, p: ProfileId, at: i64, action: TimeblockAction) {
     core.apply_timeblock(&human, &command, &now).unwrap();
 }
 fn start(core: &Core, p: ProfileId, block: TimeblockId) {
+    start_with_details(
+        core,
+        p,
+        block,
+        "timer fixture",
+        "",
+    );
+}
+fn start_with_details(core: &Core, p: ProfileId, block: TimeblockId, name: &str, note: &str) {
     apply(
         core,
         p,
         1000,
         TimeblockAction::Start {
             block_id: block,
-            name: "private task must not go to notification".into(),
-            note: String::new(),
+            name: name.into(),
+            note: note.into(),
             timer: TimerSpec::CountDown {
                 duration_ms: 10000,
                 end_mode: CountdownEndMode::Hard,
             },
         },
     );
+}
+
+#[test]
+fn local_deadline_alerts_project_name_and_note_from_each_owner_scoped_block() {
+    let root = tempfile::tempdir().unwrap();
+    let core = Core::open(root.path()).unwrap();
+    let p = core.create_profile("P").unwrap();
+    let q = core.create_profile("Q").unwrap();
+    let p_block = TimeblockId::new();
+    let q_block = TimeblockId::new();
+    start_with_details(&core, p, p_block, "课程复习", "复习公式和例题");
+    start_with_details(&core, q, q_block, "写作", "只属于 Q 的备注");
+
+    let alerts = core
+        .local_deadline_alerts(&core.local_scheduler(), &stamp(&core, 2000, 2000))
+        .unwrap();
+    let p_alert = alerts.iter().find(|alert| alert.profile_id == p).unwrap();
+    assert_eq!(p_alert.block_id, p_block);
+    assert_eq!(p_alert.block_name, "课程复习");
+    assert_eq!(p_alert.block_note, "复习公式和例题");
+    let q_alert = alerts.iter().find(|alert| alert.profile_id == q).unwrap();
+    assert_eq!(q_alert.block_id, q_block);
+    assert_eq!(q_alert.block_name, "写作");
+    assert_eq!(q_alert.block_note, "只属于 Q 的备注");
 }
 
 #[test]

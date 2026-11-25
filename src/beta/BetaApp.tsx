@@ -45,7 +45,9 @@ import { BetaImagePreview } from './BetaImagePreview';
 import { BetaRuntimeLocation } from './BetaRuntimeLocation';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from '@/components/ui/toast-hook';
 import { betaDesktopPreferences } from './desktop-preferences';
+import { observeBetaTimeblockEnd, playBetaTimeblockEndSound } from './timeblock-end-sound';
 import { inputSendShortcutLabel, shouldSubmitOnEnter, useBetaInputSendMode } from './input-preferences';
 import { BetaCaptureStatus } from './BetaCaptureStatus';
 import { BetaOriginalExportCenter } from './BetaOriginalExportCenter';
@@ -401,6 +403,13 @@ function DeviceWorkspace({ workspace, client, deviceId, profileId, profiles, sta
             if(cancelled)return;
             if(profileId&&client.timeblocks)focus=await BetaTimeblockController.open(client,deviceId,profileId,{journal:intentJournal,predecessor:intentPredecessor,allowLegacyImport});
             if(cancelled)return;
+            if(focus&&isTauri()&&!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)){
+              unsubscribers.push(observeBetaTimeblockEnd(focus, cue=>{
+                void playBetaTimeblockEndSound().catch(()=>{
+                  if(!cancelled)toast({title:'时间块结束提示音未能播放',description:`“${cue.name}”已结束；检查本机声音输出或应用提示音设置。`,variant:'destructive'});
+                });
+              }));
+            }
             const switchGuard=async()=>{
               summaryOwner.current?.fenceDispatch();
               for(let attempt=0;attempt<8;attempt++){

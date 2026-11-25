@@ -20,6 +20,19 @@ import app.tauri.plugin.JSObject
 import org.json.JSONObject
 import java.util.UUID
 
+internal data class BetaDeadlineStoredNotificationText(
+  val blockName: String,
+  val blockNote: String,
+)
+
+/** Delivered IDs retain their receipt/scope metadata, not user-authored text. */
+internal fun betaDeadlineStoredNotificationText(
+  blockName: String,
+  blockNote: String,
+  delivered: Boolean,
+): BetaDeadlineStoredNotificationText? =
+  if (delivered) null else BetaDeadlineStoredNotificationText(blockName, blockNote)
+
 /** Beta-only namespace: Alpha's single-timer storage and intents stay intact.
  * Inputs are sealed Native projections, not JS-selected scheduler authority.
  * Receiver effects are presentation only; Core owns every deadline fact.
@@ -191,6 +204,7 @@ object BetaDeadlineAlerts {
       require(UUID.fromString(it.deadlineId).toString()==it.deadlineId && seen.add(it.deadlineId))
       require(UUID.fromString(it.profileId).toString()==it.profileId && UUID.fromString(it.blockId).toString()==it.blockId)
       require(it.dueAt>0 && it.remainingMs>=0)
+      require(BetaDeadlineNotificationText.isValidProjection(it.blockName,it.blockNote)) { "invalid deadline notification text" }
     }
     val delivered=receipts(context)
     gate.receiptCapacity(delivered.size,seen.count { !delivered.contains(it) })
@@ -201,7 +215,9 @@ object BetaDeadlineAlerts {
       // Repeated snapshots must not postpone a timer or recreate delivered IDs.
       val oldTrigger=previous?.optLong("trigger", -1) ?: -1
       val same=previous!=null && previous.optString("profile")==a.profileId && previous.optString("block")==a.blockId && !a.completed && kotlin.math.abs(oldTrigger-trigger)<500
+      val storedText=betaDeadlineStoredNotificationText(a.blockName,a.blockNote,delivered.contains(a.deadlineId))
       val entry=JSONObject().put("profile",a.profileId).put("block",a.blockId).put("due",a.dueAt).put("completed",a.completed).put("trigger",if(same)oldTrigger else trigger)
+      storedText?.let { entry.put("blockName",it.blockName).put("blockNote",it.blockNote) }
       next.put(a.deadlineId,entry)
     }
     gate.check(token,expiresAt,SystemClock.elapsedRealtime())
@@ -243,7 +259,8 @@ object BetaDeadlineAlerts {
   }
   @Synchronized
   fun fire(context: Context,id:String) {
-    val entry=load(context).optJSONObject(id) ?: return
+    val alerts=load(context)
+    val entry=alerts.optJSONObject(id) ?: return
     val delivered=receipts(context)
     if(delivered.contains(id) || delivered.size>=MAX_RECEIPTS)return
     val now=SystemClock.elapsedRealtime()
@@ -263,8 +280,12 @@ object BetaDeadlineAlerts {
       channelAlreadyExists = notificationChannel(context) != null,
       defaultSoundAvailable = defaultSound != null,
     )
+    val notificationText=BetaDeadlineNotificationText.content(
+      entry.optString("blockName", ""),
+      entry.optString("blockNote", ""),
+    )
     val builder = NotificationCompat.Builder(context,CHANNEL_ID).setSmallIcon(context.applicationInfo.icon)
-      .setContentTitle("时间块到点").setContentText("打开外心查看状态与填写反馈")
+      .setContentTitle(notificationText.title).setContentText(notificationText.body)
       .setCategory(NotificationCompat.CATEGORY_REMINDER).setPriority(NotificationCompat.PRIORITY_HIGH)
       .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setContentIntent(open).setAutoCancel(true)
     if (soundPolicy.applyDefaultSystemSoundToLegacyNotification) {
@@ -277,7 +298,19 @@ object BetaDeadlineAlerts {
       val known=scopes(context)
       known.put(id,JSONObject().put("profile",entry.getString("profile")).put("block",entry.getString("block")))
       require(known.length()<=MAX_RECEIPTS) { "deadline source capacity" }
-      check(prefs(context).edit().putStringSet("delivered",delivered).putString("delivered_scopes",known.toString()).commit()) { "deadline receipt persistence failed" }
+      if (betaDeadlineStoredNotificationText(
+        entry.optString("blockName", ""),
+        entry.optString("blockNote", ""),
+        delivered = true,
+      ) == null) {
+        entry.remove("blockName")
+        entry.remove("blockNote")
+      }
+      check(prefs(context).edit()
+        .putString("alerts",alerts.toString())
+        .putStringSet("delivered",delivered)
+        .putString("delivered_scopes",known.toString())
+        .commit()) { "deadline receipt persistence failed" }
     } catch (_: SecurityException) { return }
     manager(context)?.cancel(alarm(context,id))
   }

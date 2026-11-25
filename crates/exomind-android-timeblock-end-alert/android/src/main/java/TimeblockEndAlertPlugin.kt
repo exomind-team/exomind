@@ -28,6 +28,8 @@ class BetaDeadlineAlertArgs {
   lateinit var deadlineId: String
   lateinit var profileId: String
   lateinit var blockId: String
+  var blockName: String = ""
+  var blockNote: String = ""
   var dueAt: Long = 0
   var remainingMs: Long = 0
   var completed: Boolean = false

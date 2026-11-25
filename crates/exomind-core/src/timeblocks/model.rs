@@ -201,6 +201,8 @@ pub struct LocalDeadlineAlert {
     pub deadline_id: Uuid,
     pub profile_id: ProfileId,
     pub block_id: TimeblockId,
+    pub block_name: String,
+    pub block_note: String,
     pub due_at_ms: i64,
     pub remaining_ms: u64,
     pub completed: bool,
