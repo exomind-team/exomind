@@ -124,7 +124,8 @@ type MessageLocationFlight={sequence:number;profileId:string;eventId:string;clie
 type BetaTimelineMode = 'all' | BetaTimelinePeriod;
 type BetaTimelinePageOwner = {client:BetaClient;profileId:string;query:string;tag:string;mode:BetaTimelineMode;from_ms:number|null;to_ms:number|null};
 type TagReturnView={client:BetaClient;profileId:string;query:string;search:string;tagSearch:string;tag:string;mode:BetaTimelineMode;from_ms:number|null;to_ms:number|null;page:BetaTimelinePage|null;top:number;followTail:boolean};
-type PreparingPreSend={profileId:string;revision:number};
+type PreparingPreSend={profileId:string;revision:number;clipboardAttempt?:object};
+type QueuedClipboardPreSend={flight:object;profileId:string;revision:number};
 function ConnectedBeta({ client, peers, handoffs, shareHandoffs, onDisconnect, sourceStore, intentJournal, intentPredecessor, endpoint }: { client: BetaClient; peers:BetaPeersClient|null; handoffs:BetaDeadlineHandoffsClient|null; shareHandoffs:BetaShareHandoffsClient|null; onDisconnect?: () => void; sourceStore?: FileSourceStore; intentJournal?: LocalIntentJournal; intentPredecessor?:IntentPredecessor; endpoint?: string }) {
   const [status, setStatus] = useState<BetaStatus | null>(null);
   const [profiles, setProfiles] = useState<BetaProfile[]>([]);
@@ -516,6 +517,7 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
   const [messageLocationRestoreRevision,setMessageLocationRestoreRevision]=useState(0);
   const [messageDraftNotice,setMessageDraftNotice]=useState('');
   const [preparingPreSend,setPreparingPreSend]=useState<PreparingPreSend|null>(null);
+  const completingPreSend=useRef<PreparingPreSend|null>(null);
   const [correctionTarget,setCorrectionTarget]=useState<BetaEvent|null>(null);
   const messageScope=useRef({client,profileId});messageScope.current={client,profileId};
   const [reviewsOpen,setReviewsOpen]=useState(false),[reviewTarget,setReviewTarget]=useState<SummaryArtifactRecord|null>(null),[summarySource,setSummarySource]=useState<{profileId:string;source:SummarySourceRef}|null>(null);
@@ -668,14 +670,20 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
       readingTop.current = restore.top; followTail.current = restore.followTail;
     }
   }
-  async function submit(commandId?: string) {
-    if (!commandId && clipboardFlight.current) return;
+  async function submit(commandId?: string, fromQueuedPreSend=false) {
+    if (!commandId && preparingPreSendCurrent && !fromQueuedPreSend) return;
     setError(''); setMessageDraftNotice('');
+    const clipboardAttempt=!commandId?clipboardFlight.current:null;
+    if(clipboardAttempt){
+      const current=controller.snapshot().drafts[profileId];
+      clipboardPreSendFlight.current={flight:clipboardAttempt,profileId,revision:current?.revision??0};
+      setPreparingPreSend({profileId,revision:current?.revision??0,clipboardAttempt});
+      return;
+    }
     if (!commandId && preparing) {
       const current = controller.snapshot().drafts[profileId];
       if (!current) return;
       setPreparingPreSend({ profileId, revision: current.revision });
-      setMessageDraftNotice('预发送已排队；等待附件本机校验完成后自动提交。继续输入会取消这次预发送。');
       return;
     }
     try {
@@ -819,6 +827,7 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
   const reselectTarget = useRef<string | null>(null);
   const [clipboardBusy, setClipboardBusy] = useState(false);
   const clipboardFlight = useRef<object | null>(null);
+  const clipboardPreSendFlight = useRef<QueuedClipboardPreSend|null>(null);
   const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
   const pasteTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => { clipboardFlight.current = null; clearTimeout(pasteTimer.current); }, []);
@@ -853,9 +862,31 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
       if (result.files.length && !client.originals) throw new Error('当前服务尚不支持附件原件');
       insertComposerText(result.text);
       if (result.files.length) await controller.addFiles(profileId, result.files);
-      if (alive.current && clipboardFlight.current === flight) reportPaste('success');
+      if (alive.current && clipboardFlight.current === flight) {
+        reportPaste('success');
+        const queued=clipboardPreSendFlight.current;
+        if(queued?.flight===flight){
+          clipboardPreSendFlight.current=null;
+          const expectedRevision=queued.revision+(result.text?1:0)+(result.files.length?1:0);
+          const latest=controller.snapshot().drafts[queued.profileId];
+          if(queued.profileId!==profileId||latest?.revision!==expectedRevision){
+            setPreparingPreSend(current=>current?.profileId===queued.profileId&&current.clipboardAttempt===flight?null:current);
+            setMessageDraftNotice('预发送已取消：草稿在剪贴板读取期间变化，本次内容尚未提交。');
+          }else{
+            setPreparingPreSend(current=>current?.profileId===profileId&&current.clipboardAttempt===flight
+              ?{profileId,revision:expectedRevision}:current);
+          }
+        }
+      }
     } catch (failure) {
-      if (alive.current && clipboardFlight.current === flight) { setError(errorMessage(failure)); reportPaste('error'); }
+      if (alive.current && clipboardFlight.current === flight) {
+        setError(errorMessage(failure)); reportPaste('error');
+        if(clipboardPreSendFlight.current?.flight===flight){
+          clipboardPreSendFlight.current=null;
+          setPreparingPreSend(current=>current?.clipboardAttempt===flight?null:current);
+          setMessageDraftNotice('预发送已取消：剪贴板读取未完成，本次内容尚未提交；当前草稿保留。');
+        }
+      }
     } finally {
       if (clipboardFlight.current === flight) { clipboardFlight.current = null; if (alive.current) setClipboardBusy(false); }
     }
@@ -868,22 +899,35 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
   const preparingPreSendCurrent = preparingPreSend?.profileId === profileId ? preparingPreSend : null;
   const attachmentReadiness = draft?.files?.map(file => `${file.id}:${Boolean(file.original)}:${file.state}`).join('|') ?? '';
   useEffect(() => {
-    if (!preparingPreSendCurrent) return;
-    if (!draft || draft.revision !== preparingPreSendCurrent.revision) {
+    if (!preparingPreSendCurrent) { completingPreSend.current=null; return; }
+    if(completingPreSend.current===preparingPreSendCurrent)return;
+    if(preparingPreSendCurrent.clipboardAttempt)return;
+    const currentDraft=controller.snapshot().drafts[profileId];
+    if (!currentDraft || currentDraft.revision !== preparingPreSendCurrent.revision) {
+      if(clipboardPreSendFlight.current?.flight===preparingPreSendCurrent.clipboardAttempt)clipboardPreSendFlight.current=null;
       setPreparingPreSend(null);
       setMessageDraftNotice('预发送已取消：当前草稿内容或附件已变化，当前输入未发送。');
       return;
     }
-    const files = draft.files ?? [];
+    const files = currentDraft.files ?? [];
     if (files.some(file => file.state === 'failed' || file.state === 'source_missing')) {
+      if(clipboardPreSendFlight.current?.flight===preparingPreSendCurrent.clipboardAttempt)clipboardPreSendFlight.current=null;
       setPreparingPreSend(null);
       setMessageDraftNotice('预发送已取消：附件尚未就绪，当前输入未发送；请重试或移除附件后再发送。');
       return;
     }
     if (files.some(file => !file.original || file.state === 'preparing')) return;
+    if(clipboardPreSendFlight.current?.flight===preparingPreSendCurrent.clipboardAttempt)clipboardPreSendFlight.current=null;
+    completingPreSend.current=preparingPreSendCurrent;
     setPreparingPreSend(null);
-    void submit();
-  }, [preparingPreSendCurrent, draft?.revision, attachmentReadiness]);
+    void submit(undefined,true);
+  }, [controller, profileId, preparingPreSendCurrent, draft?.revision, attachmentReadiness]);
+  useEffect(()=>{
+    if(!preparingPreSend||preparingPreSend.profileId===profileId)return;
+    if(clipboardPreSendFlight.current?.flight===preparingPreSend.clipboardAttempt)clipboardPreSendFlight.current=null;
+    setPreparingPreSend(null);
+    setMessageDraftNotice('预发送已取消：已切换档案，本次内容尚未提交。');
+  },[profileId,preparingPreSend]);
   const attachmentsBusy=workspaceActive&&(
     !!draft?.files?.some(file=>file.state==='preparing'||file.state==='uploading')
     ||pending.some(item=>item.files?.some(file=>file.state==='preparing'||file.state==='uploading'))
@@ -915,6 +959,7 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
   }
   const currentCommitted = draft?.text === '' && drafts.confirmed.some(item => item.receipt.profile_id === profileId && item.draft_revision + 1 === draft.revision);
   const hasDraftContent = !!draft?.text.trim() || !!draft?.files?.length || !!draft?.tags?.length;
+  const canQueueClipboardPreSend=!!clipboardFlight.current&&!busy&&!preparingPreSendCurrent&&!drafts.persistenceError;
   const captureStatus = drafts.persistenceState === 'failed' ? 'error' : clipboardBusy || drafts.persistenceState === 'pending' || pending.length || preparingPreSendCurrent ? 'pending' : currentCommitted ? 'committed' : hasDraftContent ? 'draft' : 'idle';
   const dropRoot=useRef<HTMLDivElement>(null);
   const mountDroppedFiles=useCallback(async(files:AttachmentSelection[])=>{if(!client.originals)throw new Error('当前服务尚不支持附件原件');await controller.addFiles(profileId,files);},[client,controller,profileId]);
@@ -1040,11 +1085,17 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
       inputRef={textareaRef}
       textareaLabel="记录当下"
       voiceControl={client.originals ? <BetaAudioRecorder controller={audioRecorder} profileId={profileId} profileName={profileName} profileNameFor={profileNameFor} onAddFile={addRecordedFile} onReturnToProfile={onReturnToProfile}/> : false}
-      sendLabel="发送"
+      sendLabel={preparingPreSendCurrent?'预发送已排队':clipboardBusy?'预发送':'发送'}
       onValueChange={(next, element) => { try {
+        const cancelledPreparingPreSend=preparingPreSendCurrent;
+        if(cancelledPreparingPreSend){
+          if(completingPreSend.current===cancelledPreparingPreSend)completingPreSend.current=null;
+          if(clipboardPreSendFlight.current?.flight===cancelledPreparingPreSend.clipboardAttempt)clipboardPreSendFlight.current=null;
+          setPreparingPreSend(null);
+        }
         const cancelledPreSend = controller.setDraft(profileId, next);
         const notice = '上一条预发送已取消；原文与附件已恢复到当前草稿，尚未提交。';
-        setMessageDraftNotice(previous => cancelledPreSend ? notice : previous === notice ? previous : '');
+        setMessageDraftNotice(cancelledPreSend?notice:cancelledPreparingPreSend?'预发送已取消：当前输入未发送；可以继续编辑当前草稿。':'');
         resizeNowInputTextarea(element);
       } catch (failure) { setError(errorMessage(failure)); } }}
       onKeyDown={event => {
@@ -1067,7 +1118,7 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
       pasteFailureLabel="未粘贴"
       onSend={submitAndRestoreComposerFocus}
       onAttachmentClick={client.originals ? () => {void chooseFiles();} : undefined}
-      sendDisabled={(!draft?.text.trim() && !draft?.files?.length) || busy || clipboardBusy || !!preparingPreSendCurrent || !!drafts.persistenceError}
+      sendDisabled={((!draft?.text.trim() && !draft?.files?.length) && !canQueueClipboardPreSend) || busy || (clipboardBusy&&!canQueueClipboardPreSend) || !!preparingPreSendCurrent || !!drafts.persistenceError}
       beforeControls={<>
        {shareHandoffs&&(shareQueue.handoffs.length>0||shareQueue.loading||shareQueue.error)&&<BetaShareHandoffInbox
          client={shareHandoffs} queue={{...shareQueue,refresh:refreshShareHandoffs}} controller={controller} profileId={profileId} profileName={profileName} profileNameFor={profileNameFor} onSwitchProfile={onReturnToProfile}/>
@@ -1082,8 +1133,8 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
       }} />
       <BetaMessageReferenceDraft value={draft?.text??''} onOpen={reference=>{void openMessageReference(reference);}} onRemove={removeDraftReference} sourceLabel={messageReferenceSourceLabel}/>
       {preparingPreSendCurrent&&<div role="status" className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-border-card px-3 py-2 text-xs text-secondary">
-        <span className="min-w-0 flex-1">预发送已排队；等待附件本机校验完成。继续输入会取消这次预发送，当前内容尚未进入发送。</span>
-        <Button type="button" size="sm" variant="outline" onClick={() => {setPreparingPreSend(null);setMessageDraftNotice('预发送已取消；当前输入和附件保留，尚未发送。');}}>取消预发送</Button>
+        <span className="min-w-0 flex-1">预发送已排队；等待{preparingPreSendCurrent.clipboardAttempt?'剪贴板读取和附件校验':'附件本机校验'}完成。继续输入会取消这次预发送，当前内容尚未进入发送。</span>
+        <Button type="button" size="sm" variant="outline" onClick={() => {if(completingPreSend.current===preparingPreSendCurrent)completingPreSend.current=null;if(clipboardPreSendFlight.current?.flight===preparingPreSendCurrent.clipboardAttempt)clipboardPreSendFlight.current=null;setPreparingPreSend(null);setMessageDraftNotice('预发送已取消；当前输入和附件保留，尚未发送。');}}>取消预发送</Button>
       </div>}
       {messageDraftNotice&&<p role="status" className="mb-2 text-xs text-secondary">{messageDraftNotice}</p>}
       {!!draft?.files?.length && <div className="mb-2 flex max-h-none flex-col gap-2 overflow-visible sm:max-h-[28dvh] sm:overflow-y-auto sm:overscroll-contain" aria-label="原件队列">
@@ -1121,7 +1172,7 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
         {item.state !== 'pending' && <Button variant="outline" size="sm" onClick={() => void submit(item.command.command_id)}>查证并重试</Button>}
       </div>)}
       </>}
-      inputStatus={<BetaCaptureStatus state={captureStatus} message={clipboardBusy?'正在粘贴…':drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':preparingPreSendCurrent?'预发送排队中；附件校验完成后提交，继续输入会取消':pending.some(item=>item.state==='pending'&&item.capture_attempted===false)?'上一条尚未提交；继续输入会取消预发送并恢复原文与附件':pending.some(item=>item.state==='pending')?'上一条已进入发送和回执确认；当前输入属于下一条记录':pending.length?'上一条提交仍待查证；当前输入不会改写原命令':currentCommitted ? '本机已保存' : hasDraftContent?'记录草稿已暂存 · 尚未提交':`${inputSendShortcutLabel(inputSendMode)} · 支持粘贴图片`}/> }
+      inputStatus={<BetaCaptureStatus state={captureStatus} message={preparingPreSendCurrent?.clipboardAttempt?'预发送排队 · 剪贴板读取中':clipboardBusy?'剪贴板读取中 · 可预发送':drafts.persistenceState==='pending'?'正在暂存记录草稿…':drafts.persistenceState==='failed'?'暂存失败，请保留窗口并重试':preparingPreSendCurrent?'预发送排队中；附件校验完成后提交，继续输入会取消':pending.some(item=>item.state==='pending'&&item.capture_attempted===false)?'上一条尚未提交；继续输入会取消预发送并恢复原文与附件':pending.some(item=>item.state==='pending')?'上一条已进入发送和回执确认；当前输入属于下一条记录':pending.length?'上一条提交仍待查证；当前输入不会改写原命令':currentCommitted ? '本机已保存' : hasDraftContent?'记录草稿已暂存 · 尚未提交':`${inputSendShortcutLabel(inputSendMode)} · 支持粘贴图片`}/> }
     />
   </div>;
 }

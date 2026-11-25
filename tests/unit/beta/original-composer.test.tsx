@@ -1,4 +1,5 @@
 import { memoryIntentJournal } from './timeblock-ui-fixtures';
+import { selectField } from './select-field';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
@@ -9,12 +10,33 @@ import { setBetaInputSendMode } from '@/beta/input-preferences';
 import { asyncDraftLocks, deferred, fakeClient } from './fixtures';
 
 const locks=Object.getOwnPropertyDescriptor(navigator,'locks');
+const clipboard=Object.getOwnPropertyDescriptor(navigator,'clipboard');
 const setHardwareKeyboard=(hasHardwareKeyboard:boolean)=>applyKeyboardStateFromSignal({
   hasHardwareKeyboard,
   keyboardType:hasHardwareKeyboard?'qwerty':'none',
 });
 beforeEach(()=>setHardwareKeyboard(false));
-afterEach(()=>{if(locks)Object.defineProperty(navigator,'locks',locks);else Reflect.deleteProperty(navigator,'locks');localStorage.clear();setHardwareKeyboard(false);});
+afterEach(()=>{if(locks)Object.defineProperty(navigator,'locks',locks);else Reflect.deleteProperty(navigator,'locks');if(clipboard)Object.defineProperty(navigator,'clipboard',clipboard);else Reflect.deleteProperty(navigator,'clipboard');localStorage.clear();setHardwareKeyboard(false);});
+
+function clipboardAttachmentFixture(){
+  const blobs=new Map<string,Blob>();
+  const sourceStore:FileSourceStore={put:async(key,blob)=>{blobs.set(key,blob.slice());},get:async key=>blobs.get(key)??null,remove:async key=>{blobs.delete(key);}};
+  const stages=new Map<string,BetaStage>();
+  const originals:BetaOriginalClient={
+    begin:async input=>{const existing=stages.get(input.stage_id);if(existing)return existing;const stage:BetaStage={stage_id:input.stage_id,profile_id:input.profile_id,original:{original_id:input.original_id,sha256:input.expected_sha256,byte_length:input.byte_length,file_name:input.file_name,media_type:input.media_type},state:'uploading',next_offset:0,generation:1};stages.set(input.stage_id,stage);return stage;},
+    status:async(_profile,id)=>stages.get(id)!,
+    write:async(_profile,id,offset,bytes)=>{const stage={...stages.get(id)!,next_offset:offset+bytes.length};stages.set(id,stage);return stage;},
+    verify:async(_profile,id)=>{const stage={...stages.get(id)!,state:'verified' as const};stages.set(id,stage);return stage;},
+    readStage:async()=>new Uint8Array(),readOriginal:async()=>new Uint8Array(),
+  };
+  return{sourceStore,client:{...fakeClient(),originals}};
+}
+
+function clipboardImageItem():ClipboardItem{
+  const binary=atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jq5sAAAAASUVORK5CYII=');
+  const bytes=Uint8Array.from(binary,value=>value.charCodeAt(0));
+  return{types:['image/png'],getType:async()=>new Blob([bytes],{type:'image/png'})} as ClipboardItem;
+}
 
 describe('Beta original composer uses the shared Alpha input',()=>{
   it('restores focus to the same composer after a successful send',async()=>{
@@ -162,6 +184,90 @@ describe('Beta original composer uses the shared Alpha input',()=>{
     await waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
     expect(client.capture.mock.calls[0][0].text).toBe('等待附件但先预发送');
     expect(client.capture.mock.calls[0][0].originals?.map(item=>item.file_name)).toEqual(['waiting.txt']);
+  });
+  it('queues a pre-send against the active clipboard read and submits its pasted image once it is ready',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const clipboardRead=deferred<ClipboardItems>();
+    Object.defineProperty(navigator,'clipboard',{configurable:true,value:{read:()=>clipboardRead.promise}});
+    const {client,sourceStore}=clipboardAttachmentFixture();
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} sourceStore={sourceStore}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(editor,{target:{value:'剪贴板图片和说明一起发送'}});
+    fireEvent.click(screen.getByRole('button',{name:'剪贴板'}));
+    expect(await screen.findByText(/剪贴板读取中/)).toBeInTheDocument();
+
+    const send=screen.getByRole('button',{name:'预发送'});
+    expect(send).toBeEnabled();
+    fireEvent.click(send);
+    expect(await screen.findByText(/预发送已排队；等待剪贴板读取和附件校验完成/)).toBeInTheDocument();
+    expect(client.capture).not.toHaveBeenCalled();
+
+    clipboardRead.resolve([clipboardImageItem()]);
+    await waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
+    expect(client.capture.mock.calls[0][0].text).toBe('剪贴板图片和说明一起发送');
+    expect(client.capture.mock.calls[0][0].originals).toHaveLength(1);
+    expect(client.capture.mock.calls[0][0].originals?.[0].media_type).toBe('image/png');
+    expect(screen.queryByText(/预发送已取消/)).not.toBeInTheDocument();
+  });
+  it('cancels a clipboard-bound pre-send when the user changes the text before clipboard read completes',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const clipboardRead=deferred<ClipboardItems>();
+    Object.defineProperty(navigator,'clipboard',{configurable:true,value:{read:()=>clipboardRead.promise}});
+    const {client,sourceStore}=clipboardAttachmentFixture();
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} sourceStore={sourceStore}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(editor,{target:{value:'旧意图'}});
+    fireEvent.click(screen.getByRole('button',{name:'剪贴板'}));
+    await screen.findByText(/剪贴板读取中/);
+    fireEvent.click(screen.getByRole('button',{name:'预发送'}));
+    expect(await screen.findByText(/预发送已排队；等待剪贴板读取和附件校验完成/)).toBeInTheDocument();
+
+    fireEvent.change(editor,{target:{value:'旧意图\n\n新的当前意图'}});
+    expect(await screen.findByText(/预发送已取消/)).toBeInTheDocument();
+    clipboardRead.resolve([clipboardImageItem()]);
+    await waitFor(()=>expect(screen.getByText(/附件已校验就绪 · 记录尚未提交/)).toBeInTheDocument());
+    expect(editor).toHaveValue('旧意图\n\n新的当前意图');
+    expect(client.capture).not.toHaveBeenCalled();
+  });
+  it('cancels a clipboard-bound pre-send on clipboard failure and keeps the draft unsent',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const clipboardRead=deferred<ClipboardItems>();
+    Object.defineProperty(navigator,'clipboard',{configurable:true,value:{read:()=>clipboardRead.promise}});
+    const {client,sourceStore}=clipboardAttachmentFixture();
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} sourceStore={sourceStore}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(editor,{target:{value:'失败后必须保留的文字'}});
+    fireEvent.click(screen.getByRole('button',{name:'剪贴板'}));
+    await screen.findByText(/剪贴板读取中/);
+    fireEvent.click(screen.getByRole('button',{name:'预发送'}));
+    expect(await screen.findByText(/预发送已排队；等待剪贴板读取和附件校验完成/)).toBeInTheDocument();
+
+    clipboardRead.reject(new Error('clipboard denied'));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/剪贴板未能读取/);
+    expect(await screen.findByText(/预发送已取消：剪贴板读取未完成/)).toBeInTheDocument();
+    expect(editor).toHaveValue('失败后必须保留的文字');
+    expect(client.capture).not.toHaveBeenCalled();
+  });
+  it('does not send a clipboard-bound pre-send after switching profiles',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const clipboardRead=deferred<ClipboardItems>();
+    Object.defineProperty(navigator,'clipboard',{configurable:true,value:{read:()=>clipboardRead.promise}});
+    const client=fakeClient();client.profiles.mockResolvedValue([{profile_id:'p',display_name:'profile p'},{profile_id:'q',display_name:'profile q'}]);
+    const {sourceStore}=clipboardAttachmentFixture();
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} sourceStore={sourceStore}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(editor,{target:{value:'原档案的当前内容'}});
+    fireEvent.click(screen.getByRole('button',{name:'剪贴板'}));
+    await screen.findByText(/剪贴板读取中/);
+    fireEvent.click(screen.getByRole('button',{name:'预发送'}));
+    expect(await screen.findByRole('button',{name:'取消预发送'})).toBeInTheDocument();
+
+    const profileSelector=screen.getByRole('combobox',{name:'当前档案'});
+    await selectField(profileSelector,'q');
+    await waitFor(()=>expect(profileSelector).toHaveValue('q'));
+    clipboardRead.resolve([clipboardImageItem()]);
+    expect(await screen.findByRole('textbox',{name:'记录当下'})).toHaveValue('');
+    expect(client.capture).not.toHaveBeenCalled();
   });
   it('cancels a preparing pre-send without sending old text when the draft changes',async()=>{
     Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
