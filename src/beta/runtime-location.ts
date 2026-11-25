@@ -1,12 +1,16 @@
 import { invoke } from '@tauri-apps/api/core';
 import { BetaApiError } from './api-error';
 
+export type BetaRuntimeAccessScope = 'local' | 'lan';
+
 export interface BetaRuntimeLocationInfo {
   http_address: string | null;
   listener_state: 'starting' | 'listening' | 'unavailable' | 'stopped';
   data_directory: string;
   device_id: string;
   runtime_id: string;
+  active_access_scope: BetaRuntimeAccessScope;
+  configured_access_scope: BetaRuntimeAccessScope;
 }
 
 /** Only credential-free HTTP origins are displayable as service addresses. */
@@ -20,17 +24,27 @@ export function betaDisplayEndpoint(value: string | undefined): string | null {
   } catch { return null; }
 }
 
-export async function readBetaRuntimeLocation(): Promise<BetaRuntimeLocationInfo> {
-  const value = await invoke<unknown>('beta_runtime_location');
+export function parseBetaRuntimeLocation(value: unknown): BetaRuntimeLocationInfo {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalidLocation();
   const item = value as Record<string, unknown>;
   if (!['starting', 'listening', 'unavailable', 'stopped'].includes(String(item.listener_state))
     || typeof item.data_directory !== 'string' || !item.data_directory
     || typeof item.device_id !== 'string' || !item.device_id
     || typeof item.runtime_id !== 'string' || !item.runtime_id
+    || !['local', 'lan'].includes(String(item.active_access_scope))
+    || !['local', 'lan'].includes(String(item.configured_access_scope))
     || (item.http_address !== null && (typeof item.http_address !== 'string' || betaDisplayEndpoint(item.http_address) !== item.http_address))
     || (item.listener_state === 'listening') !== (item.http_address !== null)) throw invalidLocation();
   return item as unknown as BetaRuntimeLocationInfo;
+}
+
+export async function readBetaRuntimeLocation(): Promise<BetaRuntimeLocationInfo> {
+  return parseBetaRuntimeLocation(await invoke<unknown>('beta_runtime_location'));
+}
+
+export async function setBetaRuntimeAccessScope(accessScope: BetaRuntimeAccessScope): Promise<BetaRuntimeLocationInfo> {
+  if (!['local', 'lan'].includes(accessScope)) throw invalidLocation();
+  return parseBetaRuntimeLocation(await invoke<unknown>('beta_runtime_set_access_scope', { accessScope }));
 }
 
 function invalidLocation(): BetaApiError {

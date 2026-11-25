@@ -60,7 +60,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Mutex,
     },
 };
@@ -70,6 +70,52 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 struct Failure {
     code: &'static str,
     message: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RuntimeAccessScope {
+    Local,
+    Lan,
+}
+
+impl RuntimeAccessScope {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "local" => Some(Self::Local),
+            "lan" => Some(Self::Lan),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Lan => "lan",
+        }
+    }
+
+    fn bind_address(self, port: u16) -> SocketAddr {
+        match self {
+            Self::Local => SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+            Self::Lan => SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)),
+        }
+    }
+
+    fn from_u8(value: u8) -> Self {
+        if value == 1 {
+            Self::Lan
+        } else {
+            Self::Local
+        }
+    }
+
+    fn as_u8(self) -> u8 {
+        match self {
+            Self::Local => 0,
+            Self::Lan => 1,
+        }
+    }
 }
 
 impl From<HostError> for Failure {
@@ -300,6 +346,7 @@ struct NativeState {
     diagnostics: diagnostics::DiagnosticsState,
     dev_origin: Option<url::Origin>,
     server: tokio::sync::Mutex<Option<RunningServer>>,
+    active_access_scope: AtomicU8,
     listener_failed: AtomicBool,
     closing: AtomicBool,
     exit_ready: AtomicBool,
@@ -333,6 +380,7 @@ impl NativeState {
             diagnostics: diagnostics::DiagnosticsState::new(),
             dev_origin,
             server: tokio::sync::Mutex::new(None),
+            active_access_scope: AtomicU8::new(RuntimeAccessScope::Local.as_u8()),
             listener_failed: AtomicBool::new(false),
             closing: AtomicBool::new(false),
             exit_ready: AtomicBool::new(false),
@@ -347,10 +395,14 @@ impl NativeState {
         self.workspace.human_session(profile)
     }
 
-    async fn start_listener(&self, port: u16) -> Result<(), HostError> {
+    async fn start_listener(
+        &self,
+        port: u16,
+        access_scope: RuntimeAccessScope,
+    ) -> Result<(), HostError> {
         let server = match exomind_beta_host::serve(
             self.host.clone(),
-            SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+            access_scope.bind_address(port),
         )
         .await
         {
@@ -366,6 +418,8 @@ impl NativeState {
             return server.stop().await;
         }
         *owned = Some(server);
+        self.active_access_scope
+            .store(access_scope.as_u8(), Ordering::Release);
         Ok(())
     }
 
@@ -494,15 +548,26 @@ struct RuntimeLocation {
     data_directory: String,
     device_id: String,
     runtime_id: String,
+    active_access_scope: &'static str,
+    configured_access_scope: &'static str,
 }
 
-#[tauri::command]
-async fn beta_runtime_location(
-    window: WebviewWindow,
-    state: State<'_, Arc<NativeState>>,
+async fn read_runtime_location(
+    app: &AppHandle,
+    state: &Arc<NativeState>,
 ) -> Result<RuntimeLocation, Failure> {
-    trusted_window(&window, state.inner())?;
-    let status = work(state.inner(), |state| state.host.status()).await?;
+    let status = work(state, |state| state.host.status()).await?;
+    let app_data = instance_app_data_dir(app).map_err(|_| Failure {
+        code: "runtime_location_unavailable",
+        message: "应用配置目录无法读取，访问范围尚未确认",
+    })?;
+    let configured_access_scope = load_runtime_access_scope(&app_data).map_err(|_| Failure {
+        code: "runtime_location_unavailable",
+        message: "已保存的访问范围无法读取；当前监听范围保持不变",
+    })?;
+    let configured_access_scope = configured_access_scope.as_str();
+    let active_access_scope =
+        RuntimeAccessScope::from_u8(state.active_access_scope.load(Ordering::Acquire)).as_str();
     let server = state.server.lock().await;
     let stopped = !status.running || state.closing.load(Ordering::Acquire);
     let http_address = if stopped {
@@ -510,7 +575,9 @@ async fn beta_runtime_location(
     } else {
         server
             .as_ref()
-            .map(|server| format!("http://{}", server.addr()))
+            // A LAN listener binds 0.0.0.0, which is not a destination address
+            // for the local window. Keep the copyable local origin loopback-only.
+            .map(|server| format!("http://127.0.0.1:{}", server.addr().port()))
     };
     let listener_state = if stopped {
         "stopped"
@@ -527,7 +594,42 @@ async fn beta_runtime_location(
         data_directory: state.data_directory.to_string_lossy().into_owned(),
         device_id: status.device_id.to_string(),
         runtime_id: status.runtime_id.to_string(),
+        active_access_scope,
+        configured_access_scope,
     })
+}
+
+#[tauri::command]
+async fn beta_runtime_location(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+) -> Result<RuntimeLocation, Failure> {
+    trusted_window(&window, state.inner())?;
+    read_runtime_location(&app, state.inner()).await
+}
+
+#[tauri::command]
+async fn beta_runtime_set_access_scope(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    access_scope: String,
+) -> Result<RuntimeLocation, Failure> {
+    trusted_window(&window, state.inner())?;
+    let access_scope = RuntimeAccessScope::parse(&access_scope).ok_or(Failure {
+        code: "invalid_runtime_access_scope",
+        message: "访问范围只能是仅本机或局域网",
+    })?;
+    let app_data = instance_app_data_dir(&app).map_err(|_| Failure {
+        code: "runtime_location_unavailable",
+        message: "应用配置目录无法读取，访问范围未保存",
+    })?;
+    save_runtime_access_scope(&app_data, access_scope).map_err(|_| Failure {
+        code: "runtime_location_unavailable",
+        message: "访问范围未保存，当前监听范围保持不变",
+    })?;
+    read_runtime_location(&app, state.inner()).await
 }
 
 #[tauri::command]
@@ -1009,6 +1111,52 @@ fn beta_handoff_root(app_data_dir: &std::path::Path) -> PathBuf {
     app_data_dir.join(share_handoff::DIRECTORY_NAME)
 }
 
+const RUNTIME_ACCESS_SCOPE_FILE: &str = "beta-runtime-access-scope.json";
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedRuntimeAccessScope {
+    access_scope: RuntimeAccessScope,
+}
+
+fn runtime_access_scope_path(app_data_dir: &std::path::Path) -> PathBuf {
+    app_data_dir.join(RUNTIME_ACCESS_SCOPE_FILE)
+}
+
+fn load_runtime_access_scope(app_data_dir: &std::path::Path) -> Result<RuntimeAccessScope, String> {
+    let path = runtime_access_scope_path(app_data_dir);
+    let value = match std::fs::read_to_string(&path) {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(RuntimeAccessScope::Local);
+        }
+        Err(error) => return Err(format!("failed to read Beta access scope: {error}")),
+    };
+    let persisted: PersistedRuntimeAccessScope = serde_json::from_str(&value)
+        .map_err(|error| format!("failed to parse Beta access scope: {error}"))?;
+    Ok(persisted.access_scope)
+}
+
+fn save_runtime_access_scope(
+    app_data_dir: &std::path::Path,
+    access_scope: RuntimeAccessScope,
+) -> Result<(), String> {
+    std::fs::create_dir_all(app_data_dir)
+        .map_err(|error| format!("failed to create Beta settings directory: {error}"))?;
+    let path = runtime_access_scope_path(app_data_dir);
+    let temporary = app_data_dir.join(format!("{RUNTIME_ACCESS_SCOPE_FILE}.tmp"));
+    let value = serde_json::to_vec_pretty(&PersistedRuntimeAccessScope { access_scope })
+        .map_err(|error| format!("failed to serialize Beta access scope: {error}"))?;
+    std::fs::write(&temporary, value)
+        .map_err(|error| format!("failed to write Beta access scope: {error}"))?;
+    if path.exists() {
+        std::fs::remove_file(&path)
+            .map_err(|error| format!("failed to replace Beta access scope: {error}"))?;
+    }
+    std::fs::rename(&temporary, &path)
+        .map_err(|error| format!("failed to publish Beta access scope: {error}"))
+}
+
 fn data_root(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Some(root) = std::env::var_os("EXOMIND_BETA_DATA_DIR") {
         let root = PathBuf::from(root);
@@ -1146,6 +1294,15 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             };
             let native_root = data_root(app.handle())?;
             let app_data_dir = instance_app_data_dir(app.handle())?;
+            let access_scope = match load_runtime_access_scope(&app_data_dir) {
+                Ok(scope) => scope,
+                Err(error) => {
+                    log::warn!(
+                        "Beta runtime access scope was unreadable; falling back to local-only: {error}"
+                    );
+                    RuntimeAccessScope::Local
+                }
+            };
             let handoff_root = beta_handoff_root(&app_data_dir);
             let handoffs = share_handoff::Store::new(handoff_root);
             if let Err(error) =
@@ -1241,7 +1398,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
                 }
             });
             tauri::async_runtime::spawn(async move {
-                if let Err(error) = state.start_listener(port).await {
+                if let Err(error) = state.start_listener(port, access_scope).await {
                     if state.closing.load(Ordering::Acquire) {
                         return;
                     }
@@ -1312,6 +1469,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             overlay::beta_workspace_profiles,
             beta_status,
             beta_runtime_location,
+            beta_runtime_set_access_scope,
             diagnostics::beta_diagnostics_sample,
             diagnostics::beta_diagnostics_storage,
             diagnostics::beta_diagnostics_storage_cancel,
@@ -1459,6 +1617,28 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_access_scope_defaults_local_persists_lan_and_maps_only_lan_to_all_interfaces() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            load_runtime_access_scope(root.path()).unwrap(),
+            RuntimeAccessScope::Local
+        );
+        save_runtime_access_scope(root.path(), RuntimeAccessScope::Lan).unwrap();
+        assert_eq!(
+            load_runtime_access_scope(root.path()).unwrap(),
+            RuntimeAccessScope::Lan
+        );
+        assert_eq!(
+            RuntimeAccessScope::Local.bind_address(43344),
+            SocketAddr::from((Ipv4Addr::LOCALHOST, 43344))
+        );
+        assert_eq!(
+            RuntimeAccessScope::Lan.bind_address(43344),
+            SocketAddr::from((Ipv4Addr::UNSPECIFIED, 43344))
+        );
+    }
 
     #[test]
     fn beta_native_and_handoff_roots_follow_the_instance_app_data_directory() {
@@ -1643,7 +1823,7 @@ mod tests {
             Err(HostError::Stopped)
         ));
         assert!(matches!(
-            state.start_listener(0).await,
+            state.start_listener(0, RuntimeAccessScope::Local).await,
             Err(HostError::Stopped)
         ));
         assert!(state.server.lock().await.is_none());
