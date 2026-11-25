@@ -11,6 +11,13 @@
 | 0.6 Alpha05 | 默认 `index.html` → `src/main.tsx`；默认 Tauri config / `.v06` | Alpha 的旧 Runtime/UI 验收不能代替 Beta 新协议 |
 | 0.6 Beta | `beta.html` → `src/beta-main.tsx` → `BetaApp`；Beta overlay config / `.v06.beta` | overlay 版本、Core schema、Host API、peer 协议是不同维度 |
 
+### 纯前端内存测试档案
+
+开发态可用 `bun run dev -- --host 127.0.0.1 --port 4300 --strictPort` 启动 Vite，打开
+`/beta.html?mock=1` 使用合成档案。该入口动态加载内存 `BetaClient`，不连接 Beta Host、真实档案、Tauri IPC 或 peer 服务；事件、附件、时间块与草稿保留在当前页面实例内，刷新或点“重置测试档案”会重新生成。生产构建会忽略此查询参数。
+
+这个档案用于验证前端行为和状态呈现，不构成 Core、Host、Native、同步、身份验证、系统通知或设备验收证据。`createBetaMockProfile` 可接收 `clientOverrides` 以及 peers、deadline handoff、share handoff 客户端 fixture，供各自 UI 场景隔离测试；基础样本不会伪造网络身份或系统通知。
+
 默认 `package.json` 仍是 Alpha05，这是隔离构建的有意选择。Beta 构建沿用
 [精确候选工作流](../../.github/workflows/beta-build-validation.yml)的版本环境与配置；
 自定义构建漏传 `VITE_APP_VERSION` 会显示默认 package 值。不要为统一文字而更改数据身份。

@@ -1,15 +1,89 @@
 import { memoryIntentJournal } from './timeblock-ui-fixtures';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
 import type { FileSourceStore } from '@/beta/file-source-store';
 import type { BetaBeginStage, BetaOriginalClient, BetaStage } from '@/beta/original-types';
+import { applyKeyboardStateFromSignal } from '@/config/hardware-keyboard';
+import { setBetaInputSendMode } from '@/beta/input-preferences';
 import { asyncDraftLocks, deferred, fakeClient } from './fixtures';
 
 const locks=Object.getOwnPropertyDescriptor(navigator,'locks');
-afterEach(()=>{if(locks)Object.defineProperty(navigator,'locks',locks);else Reflect.deleteProperty(navigator,'locks');localStorage.clear();});
+const setHardwareKeyboard=(hasHardwareKeyboard:boolean)=>applyKeyboardStateFromSignal({
+  hasHardwareKeyboard,
+  keyboardType:hasHardwareKeyboard?'qwerty':'none',
+});
+beforeEach(()=>setHardwareKeyboard(false));
+afterEach(()=>{if(locks)Object.defineProperty(navigator,'locks',locks);else Reflect.deleteProperty(navigator,'locks');localStorage.clear();setHardwareKeyboard(false);});
 
 describe('Beta original composer uses the shared Alpha input',()=>{
+  it('restores focus to the same composer after a successful send',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const client=fakeClient();
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    editor.focus();
+    fireEvent.change(editor,{target:{value:'发送后继续输入'}});
+    await waitFor(()=>expect(screen.getByRole('button',{name:'发送'})).toBeEnabled());
+
+    fireEvent.click(screen.getByRole('button',{name:'发送'}));
+
+    await waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
+    await waitFor(()=>expect(document.activeElement).toBe(editor));
+    expect(editor).toHaveValue('');
+  });
+
+  it('inserts an explicit newline for Ctrl+Enter when Enter-send is selected',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    localStorage.setItem('exomind:beta:input-send-mode','enter-send');
+    const client=fakeClient();
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(editor,{target:{value:'第一行'}});
+    editor.setSelectionRange(3,3);
+
+    fireEvent.keyDown(editor,{key:'Enter',ctrlKey:true});
+
+    expect(editor).toHaveValue('第一行\n');
+    expect(client.capture).not.toHaveBeenCalled();
+    await waitFor(()=>expect(document.activeElement).toBe(editor));
+    expect(editor.selectionStart).toBe(4);
+  });
+
+  it('uses the hardware-keyboard state only as the adaptive fallback',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const client=fakeClient();
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(editor,{target:{value:'触摸输入'}});
+
+    fireEvent.keyDown(editor,{key:'Enter'});
+    expect(editor).toHaveValue('触摸输入');
+    expect(client.capture).not.toHaveBeenCalled();
+
+    act(()=>setHardwareKeyboard(true));
+    fireEvent.keyDown(editor,{key:'Enter'});
+    await waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(editor,{target:{value:'外接键盘'}});
+    act(()=>setHardwareKeyboard(false));
+    fireEvent.keyDown(editor,{key:'Enter'});
+    expect(editor).toHaveValue('外接键盘');
+    expect(client.capture).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(editor,{key:'Enter',ctrlKey:true});
+    await waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(2));
+
+    act(()=>setBetaInputSendMode('ctrl-enter-send'));
+    act(()=>setHardwareKeyboard(true));
+    fireEvent.change(editor,{target:{value:'显式选择优先'}});
+    fireEvent.keyDown(editor,{key:'Enter'});
+    expect(editor).toHaveValue('显式选择优先');
+    expect(client.capture).toHaveBeenCalledTimes(2);
+    fireEvent.keyDown(editor,{key:'Enter',ctrlKey:true});
+    await waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(3));
+  });
+
   it('B14-A01: dropping a file anywhere in Now mounts it without submitting or replacing typed text',async()=>{
     Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
     const blobs=new Map<string,Blob>();
@@ -47,13 +121,83 @@ describe('Beta original composer uses the shared Alpha input',()=>{
     expect(await screen.findByText('unknown.custom')).toBeInTheDocument();
     await waitFor(()=>expect(screen.getByRole('button',{name:'发送'})).toBeEnabled());
     editor.focus();fireEvent.click(screen.getByRole('button',{name:'发送'}));
-    expect(document.activeElement).not.toBe(editor);
     await waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
+    await waitFor(()=>expect(document.activeElement).toBe(editor));
     expect(client.capture.mock.calls[0][0].text).toBe('');
     expect(client.capture.mock.calls[0][0].originals?.map(item=>item.file_name)).toEqual(['unknown.custom']);
     expect(await screen.findByText('本机已保存')).toBeInTheDocument();
   });
-  it('closes the keyboard immediately and cancels an unsubmitted pre-send when new text arrives',async()=>{
+  it('queues an explicit pre-send while the local attachment copy is still preparing',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const blobs=new Map<string,Blob>();
+    const copyStarted=deferred<void>(),copyGate=deferred<void>();
+    const sourceStore:FileSourceStore={
+      put:async(key,blob)=>{copyStarted.resolve();await copyGate.promise;blobs.set(key,blob.slice());},
+      get:async key=>blobs.get(key)??null,
+      remove:async key=>{blobs.delete(key);},
+    };
+    let stage:BetaStage|undefined;
+    const originals:BetaOriginalClient={
+      begin:async input=>stage??={stage_id:input.stage_id,profile_id:input.profile_id,original:{original_id:input.original_id,sha256:input.expected_sha256,byte_length:input.byte_length,file_name:input.file_name,media_type:input.media_type},state:'uploading',next_offset:0,generation:1},
+      status:async()=>stage!,
+      write:async(_profile,id,offset,bytes)=>{stage={...stage!,next_offset:offset+bytes.length};return stage;},
+      verify:async()=>({...stage!,state:'verified'}),
+      readStage:async()=>new Uint8Array(),
+      readOriginal:async()=>new Uint8Array(),
+    };
+    const client={...fakeClient(),originals};
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} sourceStore={sourceStore}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(editor,{target:{value:'等待附件但先预发送'}});
+    fireEvent.change(screen.getByLabelText('选择原件'),{target:{files:[new File(['attachment body'],'waiting.txt',{type:'text/plain'})]}});
+    await copyStarted.promise;
+
+    const send=screen.getByRole('button',{name:'发送'});
+    expect(send).toBeEnabled();
+    fireEvent.click(send);
+    expect((await screen.findAllByText(/预发送已排队.*等待附件本机校验完成/)).length).toBeGreaterThan(0);
+    expect(client.capture).not.toHaveBeenCalled();
+
+    copyGate.resolve();
+    await waitFor(()=>expect(client.capture).toHaveBeenCalledTimes(1));
+    expect(client.capture.mock.calls[0][0].text).toBe('等待附件但先预发送');
+    expect(client.capture.mock.calls[0][0].originals?.map(item=>item.file_name)).toEqual(['waiting.txt']);
+  });
+  it('cancels a preparing pre-send without sending old text when the draft changes',async()=>{
+    Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
+    const blobs=new Map<string,Blob>();
+    const copyStarted=deferred<void>(),copyGate=deferred<void>();
+    const sourceStore:FileSourceStore={
+      put:async(key,blob)=>{copyStarted.resolve();await copyGate.promise;blobs.set(key,blob.slice());},
+      get:async key=>blobs.get(key)??null,
+      remove:async key=>{blobs.delete(key);},
+    };
+    let stage:BetaStage|undefined;
+    const originals:BetaOriginalClient={
+      begin:async input=>stage??={stage_id:input.stage_id,profile_id:input.profile_id,original:{original_id:input.original_id,sha256:input.expected_sha256,byte_length:input.byte_length,file_name:input.file_name,media_type:input.media_type},state:'uploading',next_offset:0,generation:1},
+      status:async()=>stage!,
+      write:async(_profile,id,offset,bytes)=>{stage={...stage!,next_offset:offset+bytes.length};return stage;},
+      verify:async()=>({...stage!,state:'verified'}),
+      readStage:async()=>new Uint8Array(),
+      readOriginal:async()=>new Uint8Array(),
+    };
+    const client={...fakeClient(),originals};
+    render(<BetaApp intentJournal={memoryIntentJournal()} client={client} sourceStore={sourceStore}/>);
+    const editor=await screen.findByRole('textbox',{name:'记录当下'});
+    fireEvent.change(editor,{target:{value:'不应误发的旧文本'}});
+    fireEvent.change(screen.getByLabelText('选择原件'),{target:{files:[new File(['attachment body'],'cancel.txt',{type:'text/plain'})]}});
+    await copyStarted.promise;
+    fireEvent.click(screen.getByRole('button',{name:'发送'}));
+    expect((await screen.findAllByText(/预发送已排队.*等待附件本机校验完成/)).length).toBeGreaterThan(0);
+
+    fireEvent.change(editor,{target:{value:'不应误发的旧文本\n\n新的当前意图'}});
+    expect(await screen.findByText(/预发送已取消.*当前输入未发送/)).toBeInTheDocument();
+    copyGate.resolve();
+    await waitFor(()=>expect(screen.getByText(/附件已校验就绪 · 记录尚未提交/)).toBeInTheDocument());
+    expect(editor).toHaveValue('不应误发的旧文本\n\n新的当前意图');
+    expect(client.capture).not.toHaveBeenCalled();
+  });
+  it('keeps the composer focused while queued and cancels an unsubmitted pre-send when new text arrives',async()=>{
     Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
     const bytes=new Uint8Array([1,2,3,4]);
     const blobs=new Map<string,Blob>();
@@ -78,7 +222,7 @@ describe('Beta original composer uses the shared Alpha input',()=>{
       editor.focus();
       fireEvent.keyDown(editor,{key:'Enter',ctrlKey:true});
 
-      expect(document.activeElement).not.toBe(editor);
+      await waitFor(()=>expect(document.activeElement).toBe(editor));
       expect(await screen.findByText('已固定的原文')).toBeInTheDocument();
       expect(screen.getByRole('progressbar',{name:'附件准备进度 queued.apk'})).toBeInTheDocument();
       expect(client.capture).not.toHaveBeenCalled();

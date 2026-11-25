@@ -239,7 +239,7 @@ describe('Beta build request validation', () => {
 
   it('validates the exact current Beta config file through the immutable request identity', () => {
     const request = resolveBetaBuildRequest(dispatchInput({
-      dispatchInputs: { ...candidateRequest, expected_version: '0.6.0-beta26' },
+      dispatchInputs: { ...candidateRequest, expected_version: '0.6.0-beta27' },
     }));
     const config = JSON.parse(readFileSync(resolve('src-tauri/tauri.beta.conf.json'), 'utf8')) as unknown;
     expect(validateBetaCandidateIdentity(request, CANDIDATE_SHA, config)).toBeUndefined();
@@ -299,6 +299,18 @@ describe('Beta build request validation', () => {
     const config = { ...beta16Config(), version: '0.6.0-beta26', bundle: { android: { versionCode: 6026 } } };
     expect(validateBetaCandidateIdentity(request, CANDIDATE_SHA, config)).toBeUndefined();
     for (const versionCode of [6024, 6025, 6027]) {
+      expectCode(() => validateBetaCandidateIdentity(request, CANDIDATE_SHA, {
+        ...config, bundle: { android: { versionCode } },
+      }), 'version_code_mismatch');
+    }
+  });
+  it('accepts Beta27 only with Android versionCode 6027 and rejects adjacent codes', () => {
+    const request = resolveBetaBuildRequest(dispatchInput({
+      dispatchInputs: { ...candidateRequest, expected_version: '0.6.0-beta27' },
+    }));
+    const config = { ...beta16Config(), version: '0.6.0-beta27', bundle: { android: { versionCode: 6027 } } };
+    expect(validateBetaCandidateIdentity(request, CANDIDATE_SHA, config)).toBeUndefined();
+    for (const versionCode of [6025, 6026, 6028]) {
       expectCode(() => validateBetaCandidateIdentity(request, CANDIDATE_SHA, {
         ...config, bundle: { android: { versionCode } },
       }), 'version_code_mismatch');

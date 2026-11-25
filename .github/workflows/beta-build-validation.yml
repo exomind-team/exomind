@@ -263,7 +263,7 @@ jobs:
         run: |
           $binary = Join-Path $env:CARGO_TARGET_DIR "$env:BUILD_TARGET/debug/exomind.exe"
           $identity = (Get-Item -LiteralPath $binary).VersionInfo
-          if ($identity.ProductName -ne 'Exomind 0.6 beta') { throw 'Built PE is not the locked Beta26 app' }
+          if ($identity.ProductName -ne 'Exomind 0.6 beta') { throw 'Built PE is not the locked Exomind 0.6 beta app' }
           if ($identity.ProductVersion -ne $env:BETA_VERSION -or $identity.FileVersion -ne $env:BETA_VERSION) { throw 'Built PE version does not match the exact Beta candidate' }
           # The Beta-only resource seam must override shared Alpha Cargo
           # metadata. Record and verify the actual PE, not only the config.
