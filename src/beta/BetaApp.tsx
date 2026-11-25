@@ -561,7 +561,7 @@ function ProfileWorkspace({ workspace, client, shareHandoffs, shareQueue, refres
       .find(row=>row.dataset.eventId===item.record.event_id&&row.dataset.timelineKind===kind);
     if(!target)return;
     followTail.current=false;
-    target.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'});
+    target.scrollIntoView?.({block:'center',inline:'nearest',behavior:'auto'});
     readingTop.current=scroll.current?.scrollTop??readingTop.current;
   },[messageLocation]);
   useEffect(() => {
