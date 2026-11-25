@@ -389,6 +389,8 @@ describe('Invitation preview connectivity and membership labels',()=>{
     });
     render(<BetaPeersPage {...props} peers={client} onJoined={vi.fn(async()=>{})}/>);
     expect(await screen.findByText('记录与原件已补齐')).toBeInTheDocument();
+    expect(screen.getByText('Tablet')).toBeInTheDocument();
+    expect(screen.getByText(/实例名来源：自定义名称/)).toBeInTheDocument();
     expect(screen.getAllByText(/名称与设备身份已通过完整同步确认/).length).toBeGreaterThan(0);
     expect(screen.queryByText('连接成功')).not.toBeInTheDocument();
   });
