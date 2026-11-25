@@ -93,13 +93,23 @@ fn configure(
     base: &str,
     expected: Option<Uuid>,
 ) -> crate::SummaryModelConfiguration {
+    configure_with_enabled(host, owner, p, base, expected, true)
+}
+fn configure_with_enabled(
+    host: &BetaHost,
+    owner: &Session,
+    p: ProfileId,
+    base: &str,
+    expected: Option<Uuid>,
+    enabled: bool,
+) -> crate::SummaryModelConfiguration {
     host.configure_summary_model(
         owner,
         p,
         &SummaryModelConfigurationCommand {
             command_id: Uuid::new_v4(),
             expected_revision: expected,
-            enabled: true,
+            enabled,
             base_url: base.into(),
             model: "synthetic-requested-model".into(),
             api_key: SummaryModelSecretUpdate::Set {
@@ -208,6 +218,18 @@ async fn wait_manual_task(
         tokio::time::sleep(Duration::from_millis(40)).await;
     }
 }
+async fn assert_no_provider_requests(server: &Mock, observation_window: Duration) {
+    assert!(
+        tokio::time::timeout(observation_window, server.reached.notified())
+            .await
+            .is_err(),
+        "Synthetic provider received an outbound request"
+    );
+    assert!(
+        server.requests.lock().unwrap().is_empty(),
+        "Synthetic provider recorded an outbound request"
+    );
+}
 fn control(task: &SummaryTaskView, action: SummaryControlAction) -> SummaryControlCommand {
     SummaryControlCommand {
         command_id: CommandId::new(),
@@ -249,7 +271,7 @@ async fn no_configuration_waits_then_real_worker_publishes_once_with_exact_input
         Duration::from_secs(8),
     )
     .await;
-    assert!(server.requests.lock().unwrap().is_empty());
+    assert_no_provider_requests(&server, Duration::from_millis(1100)).await;
     assert!(waiting.latest_artifact_id.is_none());
     configure(&host, &owner, p, &server.base, None);
     let done = wait_task(
@@ -294,6 +316,123 @@ async fn no_configuration_waits_then_real_worker_publishes_once_with_exact_input
     );
     tokio::time::sleep(Duration::from_millis(1100)).await;
     assert_eq!(server.requests.lock().unwrap().len(), 1);
+    host.stop().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn disabled_profile_configuration_waits_without_provider_egress() {
+    let server = mock(0).await;
+    let (_directory, host, owner, human, p, _) = setup();
+    let disabled = configure_with_enabled(&host, &owner, p, &server.base, None, false);
+    assert!(!disabled.enabled);
+    assert!(disabled.has_api_key);
+    completed(&host, &human, p);
+
+    host.start_services().unwrap();
+    let waiting = wait_task(
+        &host,
+        &human,
+        p,
+        SummaryState::WaitingConfiguration,
+        Duration::from_secs(8),
+    )
+    .await;
+    assert_eq!(waiting.profile_id, p);
+    assert!(waiting.latest_artifact_id.is_none());
+    assert_no_provider_requests(&server, Duration::from_millis(1100)).await;
+    host.stop().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn configured_q_provider_is_never_borrowed_by_unconfigured_p() {
+    let q_provider = mock(0).await;
+    let (_directory, host, owner, human, p, q) = setup();
+    let q_configuration = configure(&host, &owner, q, &q_provider.base, None);
+    assert!(q_configuration.enabled);
+    completed(&host, &human, p);
+
+    host.start_services().unwrap();
+    let waiting = wait_task(
+        &host,
+        &human,
+        p,
+        SummaryState::WaitingConfiguration,
+        Duration::from_secs(8),
+    )
+    .await;
+    assert_eq!(waiting.profile_id, p);
+    assert!(waiting.latest_artifact_id.is_none());
+    assert_no_provider_requests(&q_provider, Duration::from_millis(1100)).await;
+    host.stop().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn running_worker_observes_timeblock_completion_without_configuration_and_sends_nothing() {
+    let server = mock(0).await;
+    let (_directory, host, _owner, human, p, _) = setup();
+    host.start_services().unwrap();
+
+    // An idle worker has no reason to call a provider before any eligible
+    // summary task exists.
+    assert_no_provider_requests(&server, Duration::from_millis(1100)).await;
+    completed(&host, &human, p);
+    let waiting = wait_task(
+        &host,
+        &human,
+        p,
+        SummaryState::WaitingConfiguration,
+        Duration::from_secs(8),
+    )
+    .await;
+    assert_eq!(waiting.profile_id, p);
+    assert!(waiting.latest_artifact_id.is_none());
+    assert_no_provider_requests(&server, Duration::from_millis(1100)).await;
+    host.stop().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn missing_initialized_model_store_is_a_non_egress_recovery_state() {
+    let server = mock(0).await;
+    let (directory, host, owner, human, p, _) = setup();
+    configure(&host, &owner, p, &server.base, None);
+    completed(&host, &human, p);
+
+    // The initialized marker distinguishes a genuinely empty config store
+    // from a store whose database disappeared and needs recovery.
+    let root = directory.path().join("host");
+    std::fs::rename(
+        root.join(crate::model_config::DATABASE),
+        root.join("summary-models.removed-synthetic.sqlite3"),
+    )
+    .unwrap();
+    assert!(matches!(
+        host.summary_model_configuration(&owner, p),
+        Err(HostError::ModelConfigurationRecoveryRequired)
+    ));
+
+    host.start_services().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = host.summary_service_status(&owner).unwrap();
+        if status.last_error_code.as_deref() == Some("model_configuration_recovery_required") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Missing config store did not report its recovery state"
+        );
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
+    let task = host
+        .summary_tasks_page(&human, p, None, 25)
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|task| task.profile_id == p)
+        .expect("the generated summary task remains inspectable");
+    assert_eq!(task.state, SummaryState::Queued);
+    assert!(task.latest_artifact_id.is_none());
+    assert_no_provider_requests(&server, Duration::from_millis(1100)).await;
     host.stop().unwrap();
 }
 
