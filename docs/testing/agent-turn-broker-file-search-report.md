@@ -4,10 +4,10 @@
 
 关联文件：
 
-- Rust 真实上游测试：[crates/exomind-runtime/tests/agent_api_rt.rs#L683](/data/data/com.termux/files/home/A137442/exomind/crates/exomind-runtime/tests/agent_api_rt.rs#L683)
-- 外部文件系统工具 helper：[crates/exomind-runtime/tests/agent_api_rt.rs#L926](/data/data/com.termux/files/home/A137442/exomind/crates/exomind-runtime/tests/agent_api_rt.rs#L926)
-- HTTP 验证方法：[docs/testing/agent-turn-broker-http-file-search.md#L1](/data/data/com.termux/files/home/A137442/exomind/docs/testing/agent-turn-broker-http-file-search.md#L1)
-- 设计说明：[docs/superpowers/specs/2026-04-03-agent-file-search-tools-design.md](/data/data/com.termux/files/home/A137442/exomind/docs/superpowers/specs/2026-04-03-agent-file-search-tools-design.md)
+- Rust 真实上游测试：[crates/exomind-runtime/tests/agent_api_rt.rs#L683](../../crates/exomind-runtime/tests/agent_api_rt.rs#L683)
+- 外部文件系统工具 helper：[crates/exomind-runtime/tests/agent_api_rt.rs#L926](../../crates/exomind-runtime/tests/agent_api_rt.rs#L926)
+- HTTP 验证方法：[docs/testing/agent-turn-broker-http-file-search.md#L1](agent-turn-broker-http-file-search.md#L1)
+- 设计说明：[docs/superpowers/specs/2026-04-03-agent-file-search-tools-design.md](../superpowers/specs/2026-04-03-agent-file-search-tools-design.md)
 
 ## 1. 实验目标
 
@@ -115,7 +115,7 @@ cargo test -p exomind-runtime \
 
 入口文档：
 
-- [docs/testing/agent-turn-broker-http-file-search.md#L138](/data/data/com.termux/files/home/A137442/exomind/docs/testing/agent-turn-broker-http-file-search.md#L138)
+- [docs/testing/agent-turn-broker-http-file-search.md#L138](agent-turn-broker-http-file-search.md#L138)
 
 测试策略：
 

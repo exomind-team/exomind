@@ -1,7 +1,8 @@
 # SPEC-401: 移动端 WebSocket 客户端
 
 ## 概述
-在移动端实现 WebSocket 客户端，用于连接桌面端 WebSocket 服务端
+
+本规格记录早期移动客户端连接桌面 WebSocket 服务的方案。维护 0.6 Beta 的设备链路时，从[发现与加入](../development/beta-nearby-discovery.md)和[多来源复制合同](../development/beta-multiorigin-sync.md)进入。
 
 ## 设计理由
 - 移动端需要与桌面端实时通信

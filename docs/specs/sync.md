@@ -1,6 +1,6 @@
 # 多设备同步规格（RT-only）
 
-> 说明：本文件已从旧的 `PouchDB Server + PouchSyncAdapter` 设计切换为当前主路径。旧方案仅保留为历史背景，不再代表现行实现。
+> 历史范围为旧 Runtime 从 PouchDB 向 Mesh/Signal 和 RT SQLite 的迁移。维护 0.6 Beta 的同档案复制、来源证明与回执，请使用[多来源复制合同](../development/beta-multiorigin-sync.md)。
 
 ## 1. 当前主路径
 

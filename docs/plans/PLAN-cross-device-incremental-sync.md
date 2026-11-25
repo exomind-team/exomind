@@ -1,7 +1,7 @@
 # [已归档] RT Mesh + RT SQLite Cross-Device Sync Replacement Plan
 
 > **状态**：历史计划，自 2026-04-13 起不再作为现行实现规范。
-> **现行规范**：
+> **旧 Runtime 阶段的后续规范**（0.6 Beta 见[复制合同](../development/beta-multiorigin-sync.md)）：
 > - [sync.md](../specs/sync.md)
 > - [2026-04-13-multi-domain-reconciliation-design.md](2026-04-13-multi-domain-reconciliation-design.md)
 > - [2026-04-13-task-sync-reconciliation-solution-plan.md](2026-04-13-task-sync-reconciliation-solution-plan.md)
@@ -23,11 +23,11 @@
 
 1. 它只覆盖了 `Task / completed TimeBlock` 新复制 topic，没有把 `Pouch` 的残留主路径一起迁出。
    当前仓库里仍有：
-   - [sync-store.ts](D:/project/exomind/src/ui/stores/sync-store.ts)
-   - [TaskSyncCoordinator.tsx](D:/project/exomind/src/ui/app/components/TaskSyncCoordinator.tsx)
-   - [ReminderSyncCoordinator.tsx](D:/project/exomind/src/ui/app/components/ReminderSyncCoordinator.tsx)
-   - [event-storage.ts](D:/project/exomind/src/lib/storage/event-storage.ts)
-   - [reminder-storage.ts](D:/project/exomind/src/lib/storage/reminder-storage.ts)
+   - [sync-store.ts](../../src/ui/stores/sync-store.ts)
+   - [TaskSyncCoordinator.tsx](../../src/ui/app/components/TaskSyncCoordinator.tsx)
+   - [ReminderSyncCoordinator.tsx](../../src/ui/app/components/ReminderSyncCoordinator.tsx)
+   - [event-storage.ts](../../src/lib/storage/event-storage.ts)
+   - [reminder-storage.ts](../../src/lib/storage/reminder-storage.ts)
 
 2. 它把“signal topic 到达 UI”误当成“数据同步完成”。
    真正完成标准必须是：
@@ -37,8 +37,8 @@
 
 3. 它假设 `Task` 应先新增 `version` 列，再做复制。
    这不是当前最小可行路径。现有 RT `TaskStore` 已有：
-   - [upsert_scoped() in store.rs](D:/project/exomind/crates/exomind-runtime/src/task/store.rs#L501)
-   - [upsert_scoped() in sqlite_store.rs](D:/project/exomind/crates/exomind-runtime/src/task/sqlite_store.rs#L294)
+   - [upsert_scoped() in store.rs](../../crates/exomind-runtime/src/task/store.rs#L501)
+   - [upsert_scoped() in sqlite_store.rs](../../crates/exomind-runtime/src/task/sqlite_store.rs#L294)
    因此首选应该是复用 `updated_at + terminal precedence（终态优先） + origin_host_id` 做第一版冲突裁决，而不是先扩数据库 schema。
 
 4. 它把“离线补偿”降成了 P1 非目标。
@@ -110,7 +110,7 @@
 
 ### 2.4 路由表策略
 
-当前 [signal-routes.default.json](D:/project/exomind/config/signal-routes.default.json) 已有：
+当前 [signal-routes.default.json](../../config/signal-routes.default.json) 已有：
 
 - `* -> frontend:ui`
 
@@ -124,8 +124,8 @@
 ### 3.1 EventLog
 
 现状：
-- 已有 [ecs-eventlog-replication.service.ts](D:/project/exomind/src/lib/services/ecs-eventlog-replication.service.ts)
-- 已有 [useSignalStream.ts](D:/project/exomind/src/ui/hooks/useSignalStream.ts#L244)
+- 已有 [ecs-eventlog-replication.service.ts](../../src/lib/services/ecs-eventlog-replication.service.ts)
+- 已有 [useSignalStream.ts](../../src/ui/hooks/useSignalStream.ts#L244)
 
 结论：
 - EventLog 不重做协议
@@ -163,8 +163,8 @@
 ### 3.4 Reminder
 
 现状：
-- [reminder.service.ts](D:/project/exomind/src/lib/services/reminder.service.ts) 仍直接使用 `ReminderPouchAdapter`
-- [ReminderSyncCoordinator.tsx](D:/project/exomind/src/ui/app/components/ReminderSyncCoordinator.tsx) 仍依赖 remote DB URL
+- [reminder.service.ts](../../src/lib/services/reminder.service.ts) 仍直接使用 `ReminderPouchAdapter`
+- [ReminderSyncCoordinator.tsx](../../src/ui/app/components/ReminderSyncCoordinator.tsx) 仍依赖 remote DB URL
 
 结论：
 - 如果本轮目标是“完全去除 Pouch 主链路”，Reminder 不能被跳过

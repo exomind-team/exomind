@@ -59,7 +59,7 @@
   - `crates/exomind-runtime/src/timeblock.rs`
   - `crates/exomind-runtime/src/timeblock_sqlite.rs`
 - 计划 / 架构文档：
-  - [2026-03-31-timeblock-unification-step1.md](../plans/2026-03-31-timeblock-unification-step1.md)
+  - [2026-03-31-timeblock-unification-step1.md](../plans/archive/2026-03-31-timeblock-unification-step1.md)
   - [PLAN-timeblock-cleanup-and-bugfix.md](../plans/PLAN-timeblock-cleanup-and-bugfix.md)
   - [2026-04-14-EDS-architecture-freeze-plan.md](../plans/2026-04-14-EDS-architecture-freeze-plan.md)
 

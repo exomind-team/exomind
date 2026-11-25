@@ -4,11 +4,7 @@
 
 ## Agent 身份边界
 
-1. 在源码工作目录里，Agent 的默认身份是**辅助开发者的工程协作者**，不是外心产品本体，也不是面向终端用户的成长助手。
-2. 产品使命、愿景、世界观属于产品层，必读 [docs/product/vision.md](docs/product/vision.md)。
-3. 系统原则、命名语义、invariant / affordance 属于架构层，必读 [docs/architecture/principles.md](docs/architecture/principles.md)。
-4. 用户侧人格、运行时 prompt 契约只在处理 runtime agent 时生效，见 [docs/agents/runtime-agent-contract.md](docs/agents/runtime-agent-contract.md)。
-5. [docs/AI-CONTEXT.md](docs/AI-CONTEXT.md) 是索引型必读：先读摘要与目录，再按任务展开。
+源码工作目录中的 Agent 是辅助开发者的工程协作者。下表列出默认阅读顺序。用户侧人格与提示词契约只在处理相应任务时加载。
 
 ## 默认必读
 
@@ -69,7 +65,7 @@
 
 ### 仓库治理
 
-1. `dev` 是开发主线；`main` 只用于可发布版本分发。
+1. `dev` 是通用开发主线，`main` 用于可发布版本分发。维护 0.6 时以任务指定的候选分支、锁定源码及对应工作流为准。
 2. 一条分支只处理一个主要目标，禁止把无关改动混在同一 PR。
 3. 提交前必须完成与你改动相关的关键验证；若有功能行为变更，补充并运行相关测试。
 4. 不提交调试产物、临时报告、截图缓存等非源代码资产。
@@ -94,7 +90,7 @@
 
 | 任务类型 | 必读文档 | 为什么 |
 |----------|----------|--------|
-| 任意源码任务起步 | `docs/AI-CONTEXT.md` | 建立仓库索引、文档地图和技术栈全局视图 |
+| 选择运行入口、确认当前候选与计划 | [版本与维护入口](docs/AI-CONTEXT.md) | 区分 Beta、Alpha／旧 Runtime 与 `next/`，按应用源码、构建请求、实际制品与宿主结果判定 |
 | 前端页面、组件、样式、交互、导航 | `docs/development/ui-spec.md`、`docs/plans/2026-04-02-issue-807-ui-unification-implementation-plan.md` | 避免破坏现有 UI 统一化边界 |
 | 系统命名、行为语义、产品语义映射 | `docs/architecture/principles.md`；0.6 读 `src/beta/README.md`，旧主线读 `docs/architecture/overview.md` | 区分当前所有者与历史分层，保持 invariant / affordance 一致 |
 | Runtime agent、prompt、用户侧助理行为 | `docs/agents/runtime-agent-contract.md`、`docs/development/exomind-runtime-agents-api.md` | 区分源码开发合同与用户侧 agent 契约 |
@@ -104,16 +100,4 @@
 | Windows 下 Tauri MCP 调试、验证、排障 | `docs/development/tauri-mcp-windows-playbook.md` | 这是当前桌面现场经验库 |
 | Issue 去重、追加、评论模板、审核证据 | `docs/development/issue-tracking-compass.md`、`docs/development/pr-review-evidence-template.md` | 保持 issue / PR 治理与证据格式统一 |
 
-## 文档拓扑
-
-```text
-AGENTS.md                         # 源码工作目录 Agent 单真源
-CLAUDE.md                         # 兼容入口，跳回 AGENTS
-docs/product/vision.md            # 产品使命 / 愿景 / 世界观
-docs/architecture/principles.md   # invariant / affordance / 生命判据
-docs/AI-CONTEXT.md                # 索引型必读
-docs/agents/runtime-agent-contract.md
-                                 # 用户侧 runtime agent 契约
-docs/development/repo-agent-workflow.md
-                                 # 技术操作细节与命令
-```
+跨模块查找使用[文档导航](docs/README.md)。按工作状态与历史候选回查使用[计划索引](docs/plans/README.md)。

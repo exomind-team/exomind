@@ -1,6 +1,6 @@
 # ARCH-SYNC: 多设备同步模块架构分析
 
-> 分析日期：2026-02-10
+> 本文记录 2026-02-10 的 v4 同步分析。0.6 Beta 设备、档案和数据复制的维护入口见[架构导览](README.md)与[多来源复制合同](../development/beta-multiorigin-sync.md)。
 > 分析人：Architect
 
 ---

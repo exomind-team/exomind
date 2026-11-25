@@ -1,8 +1,6 @@
 # Beta 单档案往返包
 
-2026-11-20：Core/Host 公共 API 已完成首轮回归；前端入口与 IPC 客户端已有组合回归。
-Native 档案往返命令、私有路径边界与持久任务已接线，旧 Native 仍会明确显示不支持。
-此文不代表已打包候选或 Android 文件链路通过。历史 Beta19 不含本功能。
+本页供维护者核对一份 `.exomind-profile` 带走了哪些事实、证明和原件，以及目标设备已经接纳了哪些内容。用户从「管理档案 → 档案备份与导入」进入。2026-11-20 的首轮回归覆盖 Core、Host 和前端／IPC 接线。Native 负责系统选取和持久任务，系统文件链路按实际制品与设备核验。[选择导出方式](beta-user-exports.md) · [候选版本与验证](../AI-CONTEXT.md)
 
 ## 用户动作和数据边界
 
@@ -59,7 +57,7 @@ cargo test --locked -p exomind-core --test summaries
 cargo test --locked -p exomind-core --test replication
 ```
 
-本轮实际执行分别为 3、6、20、17 项，全部通过。公共 API 组包括跨 105 条事实分页、
+2026-11-20 首轮按上述顺序实际执行了 3、6、20、17 项，全部通过。公共 API 组包括跨 105 条事实分页、
 跨多个 256 KiB 分块的原件往返、重复与冲突、损坏包、预览后换包、缺证明、取消和
 预算失败。Windows Job 终态为退出 0 且自有进程清理确认；这不代替完整 Native/UI
 或真实 Android 文件系统验收。后续新增回归以实际运行记录为准。

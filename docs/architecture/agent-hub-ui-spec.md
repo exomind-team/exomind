@@ -1,7 +1,7 @@
 # Agent Hub UI 规范文档
 
 > **版本**: v0.1 — 2026-03-05
-> **状态**: 草稿（基于今日设计讨论，待用户评审）
+> **状态**：2026-03-05 讨论的 Agent Hub UI 草案，原属 ECS 方案。0.6 Beta 的界面责任见[Native 工作区](../development/beta-native-workspace.md)。
 > **来源**: ECS 协议审计（coder）+ 架构设计讨论（architect/team-lead）
 
 ---

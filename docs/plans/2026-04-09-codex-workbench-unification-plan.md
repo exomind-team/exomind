@@ -41,9 +41,9 @@
 - Windows 下命令 shim、trusted directory、审批/沙箱语义都可能分裂
 
 对应代码：
-- [codex.rs](/D:/project/exomind/crates/exomind-runtime/src/agent/codex.rs)
-- [mod.rs](/D:/project/exomind/crates/exomind-runtime/src/pty/mod.rs)
-- [pty.rs](/D:/project/exomind/crates/exomind-runtime/src/routes/pty.rs)
+- [codex.rs](../../crates/exomind-runtime/src/agent/codex.rs)
+- [mod.rs](../../crates/exomind-runtime/src/pty/mod.rs)
+- [pty.rs](../../crates/exomind-runtime/src/routes/pty.rs)
 
 对应 issue：
 - `#385`
@@ -58,9 +58,9 @@
 - 历史会话卡片命名和会话主键语义割裂
 
 对应代码：
-- [pty-session-recovery.ts](/D:/project/exomind/src/ui/app/pages/agents/pty-session-recovery.ts)
-- [AgentsPage.tsx](/D:/project/exomind/src/ui/app/pages/AgentsPage.tsx)
-- [session.ts](/D:/project/exomind/src/lib/types/session.ts)
+- [pty-session-recovery.ts](../../src/ui/app/pages/agents/pty-session-recovery.ts)
+- [AgentsPage.tsx](../../src/ui/app/pages/AgentsPage.tsx)
+- [session.ts](../../src/lib/types/session.ts)
 
 对应 issue：
 - `#821`
@@ -75,10 +75,10 @@
 - 新旧 transport contract（传输契约）尚未统一
 
 对应代码：
-- [PtyTerminal.tsx](/D:/project/exomind/src/ui/app/components/PtyTerminal.tsx)
-- [pty-input.ts](/D:/project/exomind/src/ui/app/components/pty-input.ts)
-- [pty-terminal-preferences.ts](/D:/project/exomind/src/config/pty-terminal-preferences.ts)
-- [pty.rs](/D:/project/exomind/crates/exomind-runtime/src/routes/pty.rs)
+- [PtyTerminal.tsx](../../src/ui/app/components/PtyTerminal.tsx)
+- [pty-input.ts](../../src/ui/app/components/pty-input.ts)
+- [pty-terminal-preferences.ts](../../src/config/pty-terminal-preferences.ts)
+- [pty.rs](../../crates/exomind-runtime/src/routes/pty.rs)
 
 对应 issue：
 - `#843`
@@ -92,9 +92,9 @@
 - 快捷键分区与终端心智割裂
 
 对应代码：
-- [PtySpawnDialog.tsx](/D:/project/exomind/src/ui/app/components/PtySpawnDialog.tsx)
-- [settings-registry.ts](/D:/project/exomind/src/ui/app/config/settings/settings-registry.ts)
-- [SessionCard.tsx](/D:/project/exomind/src/ui/app/pages/agents/SessionCard.tsx)
+- [PtySpawnDialog.tsx](../../src/ui/app/components/PtySpawnDialog.tsx)
+- [settings-registry.ts](../../src/ui/app/config/settings/settings-registry.ts)
+- [SessionCard.tsx](../../src/ui/app/pages/agents/SessionCard.tsx)
 
 对应 issue：
 - `#875`
@@ -349,8 +349,8 @@
 ### 验收门禁
 
 1. 必须保留真实桌面验收，不接受只跑单测。
-2. 所有与 `#821` 相关的改动，都应在 [tauri-mcp-windows-playbook.md](/D:/project/exomind/docs/development/tauri-mcp-windows-playbook.md) 留下证据。
-3. `#894` 的关闭口径继续以 [2026-04-09-pty-websocket-latency-remediation-plan.md](/D:/project/exomind/docs/plans/2026-04-09-pty-websocket-latency-remediation-plan.md) 为准。
+2. 所有与 `#821` 相关的改动，都应在 [tauri-mcp-windows-playbook.md](../development/tauri-mcp-windows-playbook.md) 留下证据。
+3. `#894` 的关闭口径继续以 [2026-04-09-pty-websocket-latency-remediation-plan.md](archive/2026-04-09-pty-websocket-latency-remediation-plan.md) 为准。
 
 ## 7. 推荐执行顺序
 

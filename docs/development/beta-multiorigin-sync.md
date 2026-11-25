@@ -1,6 +1,6 @@
 # Beta 多来源复制合同
 
-> 工作区 Core8 / Host auth5 / `exomind-peer-sync/2`。本合同描述源码行为；设备候选与验收以[执行记录](../plans/2026-11-13-v0.6-beta-execution.md)为准。当前现场平板仍为 Beta10/Core7，不能移用本轮隔离回归的结果。
+> 多来源复制合同始于 Core8／Host auth5。β27 采用 Core11、Host auth7 和 `exomind-peer-sync/2`。本文解释事件、投影、来源证明与原件的各项结果。按[版本状态](../AI-CONTEXT.md)找到对应制品和设备验证。[B1a 连接配置与实际选路边界](../plans/2026-11-22-beta26-b1a-connection-store.md)
 
 ## 要解决的缺口
 

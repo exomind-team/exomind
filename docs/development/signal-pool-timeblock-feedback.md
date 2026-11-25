@@ -1,6 +1,6 @@
 # 时间块停止/结束 → Agent 自动反馈
 
-> Issue #323 | PR #324 | 2026-03-04（2026-06-06 重构为 timeblock_summary Agent）
+> 旧 Runtime 的时间块反馈链路，Issue #323 / PR #324，2026-06-06 演化为内置 `timeblock_summary` Agent。0.6 Beta 的回顾任务按档案模型配置及来源材料执行。[Beta 回顾与选件](beta-summary-originals.md)
 
 ## 概述
 

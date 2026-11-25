@@ -1,6 +1,6 @@
 # Beta Native 工作区：窗口只是客户端
 
-2026-11-18 用户确认：悬浮窗的状态只与底层数据和信息绑定，不与主窗口状态绑定。本轮目标 Beta13；构建、宿主与设备结果见 [本轮记录](../plans/2026-11-18-beta13-shell-and-desktop-feedback.md)。
+主窗和浮窗是两个客户端。Native 工作区持有共享草稿、档案绑定和在途命令，主窗关闭后浮窗仍可使用它自己的档案。这个约定来自 2026-11-18 的用户决定。Beta13 的窗口验收和后续候选记录可分别查阅。[Beta13 窗口记录](../plans/2026-11-18-beta13-shell-and-desktop-feedback.md) · [当前版本状态](../AI-CONTEXT.md)
 
 ```mermaid
 flowchart TB

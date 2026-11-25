@@ -1,7 +1,8 @@
 # ADR-003: 统一使用 Tauri IPC + Rust 后端架构
 
 ## 状态
-已接受
+
+2026-02-04 针对当时的 SignalPool／移动 WebSocket 方案接受此决策。0.6 Beta 的 Native IPC 和档案 HTTP 共用 Host，现行职责见[架构导览](../architecture/README.md)。
 
 ## 背景
 存在架构冲突：

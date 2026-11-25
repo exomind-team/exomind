@@ -14,10 +14,10 @@
 
 Current ExoMind already has enough infrastructure to run Codex inside the product:
 
-- `runtime agent` mode exists in [codex.rs](/D:/project/exomind/crates/exomind-runtime/src/agent/codex.rs)
-- `PTY terminal` mode exists across [mod.rs](/D:/project/exomind/crates/exomind-runtime/src/pty/mod.rs) and [pty.rs](/D:/project/exomind/crates/exomind-runtime/src/routes/pty.rs)
-- desktop recovery and historical binding exist in [pty-session-recovery.ts](/D:/project/exomind/src/ui/app/pages/agents/pty-session-recovery.ts) and [AgentsPage.tsx](/D:/project/exomind/src/ui/app/pages/AgentsPage.tsx)
-- terminal interaction exists in [PtyTerminal.tsx](/D:/project/exomind/src/ui/app/components/PtyTerminal.tsx)
+- `runtime agent` mode exists in [codex.rs](../../crates/exomind-runtime/src/agent/codex.rs)
+- `PTY terminal` mode exists across [mod.rs](../../crates/exomind-runtime/src/pty/mod.rs) and [pty.rs](../../crates/exomind-runtime/src/routes/pty.rs)
+- desktop recovery and historical binding exist in [pty-session-recovery.ts](../../src/ui/app/pages/agents/pty-session-recovery.ts) and [AgentsPage.tsx](../../src/ui/app/pages/AgentsPage.tsx)
+- terminal interaction exists in [PtyTerminal.tsx](../../src/ui/app/components/PtyTerminal.tsx)
 
 The migration problem is no longer "how do we connect Codex?" The real problem is that Codex currently lives across three overlapping but not fully unified systems:
 
@@ -38,18 +38,18 @@ Do not start by inventing a new grand architecture. First freeze contracts aroun
 
 This plan is based on current code and current issue/doc state, especially:
 
-- [codex.rs](/D:/project/exomind/crates/exomind-runtime/src/agent/codex.rs)
-- [mod.rs](/D:/project/exomind/crates/exomind-runtime/src/pty/mod.rs)
-- [pty.rs](/D:/project/exomind/crates/exomind-runtime/src/routes/pty.rs)
-- [PtyTerminal.tsx](/D:/project/exomind/src/ui/app/components/PtyTerminal.tsx)
-- [PtySpawnDialog.tsx](/D:/project/exomind/src/ui/app/components/PtySpawnDialog.tsx)
-- [AgentsPage.tsx](/D:/project/exomind/src/ui/app/pages/AgentsPage.tsx)
-- [pty-session-recovery.ts](/D:/project/exomind/src/ui/app/pages/agents/pty-session-recovery.ts)
-- [settings-registry.ts](/D:/project/exomind/src/ui/app/config/settings/settings-registry.ts)
-- [pty-terminal-preferences.ts](/D:/project/exomind/src/config/pty-terminal-preferences.ts)
-- [tauri-mcp-windows-playbook.md](/D:/project/exomind/docs/development/tauri-mcp-windows-playbook.md)
-- [2026-03-07-issue-385-agent-hub-claude-codex-runtime-plan.md](/D:/project/exomind/docs/plans/2026-03-07-issue-385-agent-hub-claude-codex-runtime-plan.md)
-- [2026-04-09-pty-websocket-latency-remediation-plan.md](/D:/project/exomind/docs/plans/2026-04-09-pty-websocket-latency-remediation-plan.md)
+- [codex.rs](../../crates/exomind-runtime/src/agent/codex.rs)
+- [mod.rs](../../crates/exomind-runtime/src/pty/mod.rs)
+- [pty.rs](../../crates/exomind-runtime/src/routes/pty.rs)
+- [PtyTerminal.tsx](../../src/ui/app/components/PtyTerminal.tsx)
+- [PtySpawnDialog.tsx](../../src/ui/app/components/PtySpawnDialog.tsx)
+- [AgentsPage.tsx](../../src/ui/app/pages/AgentsPage.tsx)
+- [pty-session-recovery.ts](../../src/ui/app/pages/agents/pty-session-recovery.ts)
+- [settings-registry.ts](../../src/ui/app/config/settings/settings-registry.ts)
+- [pty-terminal-preferences.ts](../../src/config/pty-terminal-preferences.ts)
+- [tauri-mcp-windows-playbook.md](../development/tauri-mcp-windows-playbook.md)
+- [2026-03-07-issue-385-agent-hub-claude-codex-runtime-plan.md](archive/2026-03-07-issue-385-agent-hub-claude-codex-runtime-plan.md)
+- [2026-04-09-pty-websocket-latency-remediation-plan.md](archive/2026-04-09-pty-websocket-latency-remediation-plan.md)
 
 Key GitHub issues already define much of the scope:
 
@@ -71,15 +71,15 @@ Key GitHub issues already define much of the scope:
 
 #### Layer A: Provider execution
 
-- Runtime agent Codex has its own process contract in [codex.rs](/D:/project/exomind/crates/exomind-runtime/src/agent/codex.rs).
-- PTY Codex has a different spawn/resume contract in [mod.rs](/D:/project/exomind/crates/exomind-runtime/src/pty/mod.rs).
+- Runtime agent Codex has its own process contract in [codex.rs](../../crates/exomind-runtime/src/agent/codex.rs).
+- PTY Codex has a different spawn/resume contract in [mod.rs](../../crates/exomind-runtime/src/pty/mod.rs).
 - These two paths already diverge in CLI argument policy and stream semantics.
 
 #### Layer B: Terminal transport
 
 - Current PTY interaction is still `POST /pty/:id/input` + `GET /pty/:id/stream`
-- This is visible in [PtyTerminal.tsx](/D:/project/exomind/src/ui/app/components/PtyTerminal.tsx)
-- The dedicated WebSocket migration plan already exists in [2026-04-09-pty-websocket-latency-remediation-plan.md](/D:/project/exomind/docs/plans/2026-04-09-pty-websocket-latency-remediation-plan.md)
+- This is visible in [PtyTerminal.tsx](../../src/ui/app/components/PtyTerminal.tsx)
+- The dedicated WebSocket migration plan already exists in [2026-04-09-pty-websocket-latency-remediation-plan.md](archive/2026-04-09-pty-websocket-latency-remediation-plan.md)
 
 #### Layer C: Session identity
 
@@ -88,7 +88,7 @@ Key GitHub issues already define much of the scope:
   - historical `inner_session_id`
   - live `pty_id`
   - `source_host_id`
-- Recovery depends heavily on `inner_session_id` + normalized workdir in [pty-session-recovery.ts](/D:/project/exomind/src/ui/app/pages/agents/pty-session-recovery.ts)
+- Recovery depends heavily on `inner_session_id` + normalized workdir in [pty-session-recovery.ts](../../src/ui/app/pages/agents/pty-session-recovery.ts)
 - This identity model is already powerful enough to recover sessions, but not yet stable enough to survive every `/resume` and every UI path consistently.
 
 #### Layer D: Workbench presentation
@@ -96,7 +96,7 @@ Key GitHub issues already define much of the scope:
 - `PtySpawnDialog` owns entry, historical selection, agent choice, naming hints
 - `AgentsPage` owns session list, duplicate redirection, reconnect, tiled/fullscreen coordination
 - `PtyTerminal` owns actual transport and terminal widget behavior
-- Settings and wording are split across [settings-registry.ts](/D:/project/exomind/src/ui/app/config/settings/settings-registry.ts)
+- Settings and wording are split across [settings-registry.ts](../../src/ui/app/config/settings/settings-registry.ts)
 
 ### 3.2 Unified Abstraction to Target
 
@@ -124,23 +124,23 @@ Any implementation work that does not clearly map to one of these four contracts
 These are not theoretical:
 
 1. Codex runtime agent exists and is not just a stub:
-   - [codex.rs](/D:/project/exomind/crates/exomind-runtime/src/agent/codex.rs)
+   - [codex.rs](../../crates/exomind-runtime/src/agent/codex.rs)
 
 2. PTY spawn/resume/stream/input lifecycle exists:
-   - [pty.rs](/D:/project/exomind/crates/exomind-runtime/src/routes/pty.rs)
+   - [pty.rs](../../crates/exomind-runtime/src/routes/pty.rs)
 
 3. Codex historical session discovery already parses local history/title metadata:
-   - [mod.rs](/D:/project/exomind/crates/exomind-runtime/src/pty/mod.rs)
+   - [mod.rs](../../crates/exomind-runtime/src/pty/mod.rs)
 
 4. `inner_session_id` persistence and recovery already exist:
-   - [pty-session-recovery.ts](/D:/project/exomind/src/ui/app/pages/agents/pty-session-recovery.ts)
+   - [pty-session-recovery.ts](../../src/ui/app/pages/agents/pty-session-recovery.ts)
 
 5. Desktop verification evidence already exists in the playbook:
-   - [tauri-mcp-windows-playbook.md](/D:/project/exomind/docs/development/tauri-mcp-windows-playbook.md)
+   - [tauri-mcp-windows-playbook.md](../development/tauri-mcp-windows-playbook.md)
 
 6. Terminal replay limit already partially exists as a configurable preference:
-   - [pty-terminal-preferences.ts](/D:/project/exomind/src/config/pty-terminal-preferences.ts)
-   - [settings-registry.ts](/D:/project/exomind/src/ui/app/config/settings/settings-registry.ts)
+   - [pty-terminal-preferences.ts](../../src/config/pty-terminal-preferences.ts)
+   - [settings-registry.ts](../../src/ui/app/config/settings/settings-registry.ts)
 
 This means the next plan should not re-open the question of viability. It should treat viability as proven and focus on consolidation.
 
@@ -150,8 +150,8 @@ This means the next plan should not re-open the question of viability. It should
 
 Evidence:
 
-- runtime Codex hardcodes `--skip-git-repo-check` and `--dangerously-bypass-approvals-and-sandbox` in [codex.rs](/D:/project/exomind/crates/exomind-runtime/src/agent/codex.rs)
-- PTY resume path for Codex uses separate argument assembly in [mod.rs](/D:/project/exomind/crates/exomind-runtime/src/pty/mod.rs)
+- runtime Codex hardcodes `--skip-git-repo-check` and `--dangerously-bypass-approvals-and-sandbox` in [codex.rs](../../crates/exomind-runtime/src/agent/codex.rs)
+- PTY resume path for Codex uses separate argument assembly in [mod.rs](../../crates/exomind-runtime/src/pty/mod.rs)
 
 Meaning:
 
@@ -162,7 +162,7 @@ Meaning:
 
 Evidence:
 
-- `inner_session_id` is central in [pty-session-recovery.ts](/D:/project/exomind/src/ui/app/pages/agents/pty-session-recovery.ts)
+- `inner_session_id` is central in [pty-session-recovery.ts](../../src/ui/app/pages/agents/pty-session-recovery.ts)
 - `AgentsPage.tsx` uses it for occupancy and recovery decisions
 - `#849` explicitly tracks `/resume` causing stale `inner_session_id`
 
@@ -174,8 +174,8 @@ Meaning:
 
 Evidence:
 
-- [PtyTerminal.tsx](/D:/project/exomind/src/ui/app/components/PtyTerminal.tsx) still sends input over HTTP
-- [2026-04-09-pty-websocket-latency-remediation-plan.md](/D:/project/exomind/docs/plans/2026-04-09-pty-websocket-latency-remediation-plan.md) already defines the WS migration
+- [PtyTerminal.tsx](../../src/ui/app/components/PtyTerminal.tsx) still sends input over HTTP
+- [2026-04-09-pty-websocket-latency-remediation-plan.md](archive/2026-04-09-pty-websocket-latency-remediation-plan.md) already defines the WS migration
 
 Meaning:
 
@@ -198,7 +198,7 @@ Meaning:
 Evidence:
 
 - `#875`, `#876`, `#878`
-- settings live in [settings-registry.ts](/D:/project/exomind/src/ui/app/config/settings/settings-registry.ts)
+- settings live in [settings-registry.ts](../../src/ui/app/config/settings/settings-registry.ts)
 
 Meaning:
 
@@ -219,11 +219,11 @@ Deliverables:
 - issue-to-contract matrix
 
 Key files:
-- [codex.rs](/D:/project/exomind/crates/exomind-runtime/src/agent/codex.rs)
-- [mod.rs](/D:/project/exomind/crates/exomind-runtime/src/pty/mod.rs)
-- [pty.rs](/D:/project/exomind/crates/exomind-runtime/src/routes/pty.rs)
-- [AgentsPage.tsx](/D:/project/exomind/src/ui/app/pages/AgentsPage.tsx)
-- [pty-session-recovery.ts](/D:/project/exomind/src/ui/app/pages/agents/pty-session-recovery.ts)
+- [codex.rs](../../crates/exomind-runtime/src/agent/codex.rs)
+- [mod.rs](../../crates/exomind-runtime/src/pty/mod.rs)
+- [pty.rs](../../crates/exomind-runtime/src/routes/pty.rs)
+- [AgentsPage.tsx](../../src/ui/app/pages/AgentsPage.tsx)
+- [pty-session-recovery.ts](../../src/ui/app/pages/agents/pty-session-recovery.ts)
 
 Exit condition:
 - No further Codex fixes land without naming which contract they change
@@ -395,7 +395,7 @@ git commit -m "fix(codex): align runtime and pty launch policy"
 This phase should reuse, not rewrite, the existing WS migration plan.
 
 **Files:**
-- Reuse: [2026-04-09-pty-websocket-latency-remediation-plan.md](/D:/project/exomind/docs/plans/2026-04-09-pty-websocket-latency-remediation-plan.md)
+- Reuse: [2026-04-09-pty-websocket-latency-remediation-plan.md](archive/2026-04-09-pty-websocket-latency-remediation-plan.md)
 - Modify: `src/ui/app/components/PtyTerminal.tsx`
 - Modify: `crates/exomind-runtime/src/routes/pty.rs`
 

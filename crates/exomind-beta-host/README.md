@@ -1,89 +1,48 @@
-# Beta Host
+# 0.6 Beta Host
 
-这是独立 Rust Beta Core 的宿主和传输适配器，不创建旧 Runtime、旧 `AppState` 或兼容写入路径。当前实现档案管理、按档案授权、文字/原件整组提交、分页/搜索和稳定回执；时间块 Core/Host 接缝已加入；Native/UI/通知、peer 同步与模型另行验证。
+`exomind-beta-host` 将本机 Core 暴露给独立的 `exomind-beta` 服务、可信 Native 窗口和已授权 peer。Host 判定一个调用者能否在指定档案上执行操作。Core 在同一 SQLite 事务中保存事实和本机命令回执。追踪一条记录可从 `BetaHost::capture` 读到 `Core::submit`。[Host 实现](src/lib.rs) · [Core 提交](../exomind-core/src/store.rs) · [架构导览](../../docs/architecture/README.md)
 
-```powershell
-cargo run -p exomind-beta-host --bin exomind-beta -- --data-dir <新的绝对独立目录> --port 0
-# 独立 Web 前端必须显式列入允许的 loopback origin；可重复指定。
-cargo run -p exomind-beta-host --bin exomind-beta -- --data-dir <新的绝对独立目录> --port 0 --frontend-origin http://localhost:1420
-```
+## 在隔离档案上启动
 
-CLI 不打开浏览器，不打印 token 或带凭据 URL。实际地址写入私有 `connection.beta.json` 的 `url`；owner token 只在该描述符中持久化，不能加入源码、日志或外发材料。显式 data root 下保存 `core/`、宿主授权库和 OS 持有的 SQLite 锁库；第二个 Host 拒绝同一 root，不依据 PID 文件抢占或清理进程。退出通过 Ctrl+C 停止自有 listener 和 Core。
+按[开发快速上手](../../docs/development/quickstart.md)创建独立的绝对数据根。`--port 0` 由系统分配空闲端口，独立 Web 前端用 `--frontend-origin` 指定精确的 loopback HTTP 源。CLI 在终端显示实际监听地址。`Ctrl+C` 关闭该实例。Native 通过 Rust 直接调用 Host，同一应用内的主窗和浮窗各自访问 Native 工作区。[CLI 入口](src/main.rs) · [Native 工作区](../../docs/development/beta-native-workspace.md)
 
-Unix 使用私有目录/文件权限；Windows 实际设置受保护、当前用户 FullControl 的 DACL，测试会读取 ACL 验证，不把 `chmod` 当成 Windows 认证。该隔离依赖 OS，不防同一登录用户的恶意代码或管理员接管。未宣称物理掉电安全。
+同一根只允许一个 Host 持锁。私有 `connection.beta.json` 保存本机管理凭据与服务地址，授权库存 token hash 和撤销状态。已有身份的根如果缺库、凭据受损或换入另一设备的 Core，应保留现场，按恢复错误查证。重启同一根后，尚有效的持久 grant 可重新认证取得新 `Session`。`runtime_id` 随进程变化。描述符和 Agent handoff 都只在授权环境内交付。[存储与身份绑定](src/storage.rs) · [进程重启与恢复测试](tests/recovery.rs)
 
-## 共享 Facade
+## 谁能执行什么
 
-`BetaHost` 持有一个 Core；所有真实提交、撤销、停机都经过同一资格 gate。`Session` 是不可由请求体反序列化的私有能力，绑定当前宿主运行代次，每次操作重新检查撤销状态和档案范围。停机后旧排队工作不能提交，重启后的旧 Session 无效；相同持久 token 可以重新认证取得新 Session。
-
-`request_stop()` 是原生关闭回调可立即调用的非阻塞准入围栏，status 随即不再显示 running；后续取得 gate 的新工作与晚到 listener 启动均被拒绝。此前已经取得资格并进入 gate 的事务可以完成，`stop()` 等待它并清理资源，`RunningServer.stop().await` 再确认自有 listener 退出。不能把等待异步关闭任务开始之前的窗口当成已停止准入。
-
-原件 hash 不占上述 gate：`verify_stage` 在 gate 内冻结 stage 并登记自有工作，使用 Core 私有 ticket 在独立只读连接中分块校验，再进 gate 重验运行代次、当前授权和 stage generation 后 seal。最多同时四项验证；撤销对应 grant 会取消其验证。停止先取消，再在 gate 外最多等待五秒；尚有自有验证未退出时返回关闭错误并保留 Core/root 锁，不把旧只读连接遗留给新 Host。私有 proof 不经 HTTP 或 IPC 反序列化。
-
-可信 Tauri 代码可调用 `owner_session()`，再通过 `native_human_session(owner, profile)` 获取本机 UI 写会话；这些工厂不能映射为匿名 HTTP/任意 WebView 作者选择。HTTP 和未来 IPC 都调用同一组 `profiles/provision_profile/grant/revoke_grant/capture/events_page/receipt/stop`，不会另养一份业务真相。
-
-## HTTP
-
-默认只绑定 loopback。Host header 必须是实际监听地址（或对应 localhost:port），Origin 默认只允许监听器本身的源。显式前端 origin 仅接受无路径、凭据、query、fragment 的 loopback HTTP 源；CORS/OPTIONS 精确匹配，不反射其他源，也不放宽 Host。Vite 代理需要把 Host 改写为目标监听地址。HTTP 的 SQLite 工作在 `spawn_blocking` 执行，最终资格检查在同步 gate 内，而非只在 await 前检查。
-
-除最小 `GET /beta/v1/hello`，其余路由都要求 `Authorization: Bearer <token>`：
-
-| 路由 | 凭据与语义 |
+| 调用者 | 作用域与操作 |
 |---|---|
-| `GET /beta/v1/profiles` | owner，列档案 |
-| `PUT /beta/v1/profiles/{uuid}` `{name}` | owner，稳定 UUID 幂等创建；同 UUID 异名冲突 |
-| `POST /beta/v1/grants` `{profile_id,kind,agent_id?}` | owner；kind 为 observer/human/agent_note；agent_note 必须有 agent_id，其他类别不允许冒领 agent_id |
-| `DELETE /beta/v1/grants/{uuid}` | owner，撤销已签发能力 |
-| `POST /beta/v1/capture` | profile human/agent_note，输入为 Core `CaptureCommand`；不能自报作者 |
-| `GET /beta/v1/profiles/{uuid}/events?before=&through=&limit=&q=` | 同档案 grant，冻结 highwater 的分页与字面搜索 |
-| `GET /beta/v1/profiles/{uuid}/receipts/{command_uuid}` | 同档案 grant，回读原回执；未知为 404 |
-| `PUT /beta/v1/profiles/{uuid}/stages/{stage_uuid}` | creator writer，元数据 `{original_id,expected_sha256,byte_length,file_name,media_type}`；同 stage 同元数据幂等 |
-| `GET /beta/v1/profiles/{uuid}/stages/{stage_uuid}` | creator writer，回读私有 stage 状态与确认 offset |
-| `PUT /beta/v1/profiles/{uuid}/stages/{stage_uuid}/chunks?offset=` | creator writer，`application/octet-stream` 二进制块，最多 256 KiB；相同块重试幂等，冲突拒绝 |
-| `POST /beta/v1/profiles/{uuid}/stages/{stage_uuid}/verify` | creator writer，冻结、hash、重新授权 seal；返回 StageStatus |
-| `GET /beta/v1/profiles/{uuid}/stages/{stage_uuid}/bytes?offset=&length=` | creator writer，预览已暂存原始字节；状态尚未 verified 时不是真实性声明 |
-| `GET /beta/v1/profiles/{uuid}/originals/{original_uuid}/bytes?offset=&length=` | 同档案读 grant；必须已有本档案事实引用，UUID/hash 不是读取凭据 |
+| 本机 owner | 列出或创建档案、签发和撤销 grant、管理模型配置。可信 Native 可为本机用户取得指定档案的 Human 会话。 |
+| `human` | 读取本档案，写人类记录与更正、暂存原件、控制时间块和回顾。 |
+| `observer` | 读取本档案的已公开记录、回执和已发布原件，使用有界等待与 bundle。 |
+| `agent_note` | 同档案读取，另可用绑定的 Agent 身份暂存原件、追加 Agent Note。 |
+| `summary_producer` | 同档案读取，另可用绑定的 Agent 身份和有据可查的来源追加外部回顾。 |
+| 设备成员 | 通过 peer 通道，按档案、密钥、成员代次与能力复制。邀请和来源证明属于这条通道。 |
 
-owner 不是隐式 human writer，必须先签发档案能力。observer 不能写，普通接入不能自行选 human；作者由已认证 grant 映射。签发 token 仅在响应中返回一次，授权库存 hash；撤销持久保留。body 有 1 MiB 上界，未知字段/作者字段拒绝；错误为 `{error:{code,message}}`，不回显正文、token、原始 SQLite 或文件路径错误。
+HTTP `hello` 给出协议、设备和当前运行实例。`access/check` 用实际 bearer 核验档案，返回 `grant_kind`、适用的 `agent_id` 与 `allowed`。Native handoff 含 `grant_id`，此字段的来源是签发材料。要求的能力缺失时，Host 返回 403。真正读取或提交时，Host 再次检查资格。[作用域与能力](src/agent_access.rs) · [Native 签发与撤销](../../docs/development/beta-agent-grants.md)
 
-hello 的 `capabilities` 声明 `originals: true` 与 `max_original_chunk_bytes: 262144`。原件读取是有界查询，不采用整文件/base64 body；length 必须为 1…262144，响应为二进制且 `Cache-Control: no-store`。stage 的状态、元数据和字节均为作者私有草稿，observer 即使可读档案事实也不可读 stage。verified 尚未被事实引用时仍保持私有；坏 hash 保留原字节供查证，不能自动转为可引用原件。
+## HTTP 路由速查
 
-CaptureCommand 可携带稳定有序的 `originals` 元数据组；任一成员未 verified 时整个事实与回执均不提交。省略或留空 originals 保留既有纯文字路径。原件原始字节、长度、hash 与事实引用均以 Core SQLite 为权威，不由传输层猜测。
+下表省略前缀 `/beta/v1`，`P` 是授权档案的 UUID。`GET /hello` 提供最小发现信息。业务请求使用 Bearer 凭据。HTTP listener 只接受 loopback，浏览器另按实际 Host header 和已允许的精确 Origin 检查。[路由装配](src/http.rs)
 
-首次启动先完整写入并原子替换私有描述符，再提交 owner hash；中断后复用已持久化 token。已有 owner hash 而描述符缺失/损坏时拒绝启动，不静默轮换权限。宿主 auth 当前为 schema 2；合法 schema 1 在保留 owner/grants/core/key bindings 的同一 FULL 事务中添加成员与加入 ledger。旧 Host binary 拒绝 auth schema 2 是预期行为，不能通过降版本或删表回退。Core schema 独立校验。
+| 操作 | 方法与路径 | 接收结果或适用范围 |
+|---|---|---|
+| 管理档案与授权 | `GET /profiles`、`PUT /profiles/P`、`POST /grants`、`DELETE /grants/{id}` | owner。签发 `agent_note` 或 `summary_producer` 时绑定 Agent ID。 |
+| 预检档案授权 | `POST /profiles/P/access/check` | 请求体中的 `required` 指定这次业务所需能力。 |
+| 发送及查证 | `POST /capture`、`GET /profiles/P/receipts/{command}` | Human 或 Agent Note 角色写入。原命令的本机回执可由同档案读 grant 查证，未找到回执返回 404。 |
+| 读历史与更正 | `GET /profiles/P/timeline`、`GET /profiles/P/timeline/events/{event}`、`GET /profiles/P/events`、`GET /profiles/P/corrections` | `timeline` 提供 capture、时间块与两类摘要。`events` 是 capture 视图。更正另有分页和精确读取。`POST /profiles/P/corrections` 限 Human。 |
+| 时间块与回顾 | `GET /profiles/P/timeblocks/current`、`GET /profiles/P/timeblocks/recent`、`POST /profiles/P/timeblocks/commands`、`GET /profiles/P/summaries/tasks`、`POST /profiles/P/external-summaries` | 时间块控制限 Human，外部摘要追加限 producer。节点、区间、回顾控制与结果的其余入口见[时间块路由](src/timeblocks_http.rs)、[回顾路由](src/summary_jobs_http.rs)和[外部回顾](src/external_summaries_http.rs)。 |
+| 等变化、取 bundle | `POST /profiles/P/wait`、`POST /profiles/P/export-bundle` | 等待返回高水位。bundle 声明所含类型、完成范围与后续游标。[等待与 bundle 合同](../../docs/development/beta-agent-read-tools.md) |
+| 暂存和读取原件 | `PUT` / `GET /profiles/P/stages/{stage}`、`PUT …/chunks?offset=`、`POST …/verify`、`GET …/bytes?offset=&length=`、`GET /profiles/P/originals/{id}/bytes?offset=&length=` | 暂存和暂存预览归创建作者。读已发布原件须有同档案事实引用及可读字节，单次最多 256 KiB。[原件路由](src/originals_http.rs) |
 
-Core 自行处理 schema-1 到 schema-2 的备份迁移；宿主在打开前拒绝 core 树内 symlink/reparse point，并在 Core 完成所有权校验后按真实文件/目录递归应用私有权限，包括 `core/backups/`。这不会读取或导入 0.5/Alpha 的业务库。
+首个历史页给出本副本的 `highwater`。后续页固定 `through`，按该 feed 的 `before` 读完。写入结果未知时，保留原 `command_id`，查回执后用 `event_id` 核对实际记录。跨端结论另看目标副本对该来源的 ACK。带原件的记录还需在目标端读到字节、核对长度与 SHA-256。[读取合同](../../docs/development/beta-core11-history-and-review.md) · [复制合同](../../docs/development/beta-multiorigin-sync.md)
 
-成功打开 Core 后，auth schema-1 内兼容新增的 `core_binding` 表持久绑定 device；后续通过 `Core::open_bound` 在迁移前核验，不自动重绑替换库。已有 owner/初始化证据而 Core 主库或 auth 库丢失/空白时拒绝重新创建，CLI/HTTP 明确报告 `recovery_required`；备份不自动恢复或覆盖。旧 Host 的合法现存 Core 可在首次升级时建立绑定；已有 owner 却没有合法 Core 的半初始化现场需显式恢复。描述符已存但首次 owner 插入失败、且从未创建 Core 的状态仍可复用原凭据完成初始化。
+## 后台作业和恢复
 
-## 验证边界
+- `request_stop()` 立即停止接纳新工作。`stop()` 等待已经取得资格的工作并释放资源。原件校验在资格检查之外分块计算 hash，返回时复核运行代次、stage generation、授权与撤销。整组原件通过验证后，`capture` 才能提交。[Host](src/lib.rs) · [原件测试](tests/originals.rs)
+- Host 的 Scheduler 接手已接受的本机计时意图。原生声音和系统通知由对应平台交付。内部回顾 worker 只为已启用相应模型配置的档案发起请求，外部 producer 的追加另由自己的授权结算。[时间块测试](tests/timeblocks.rs) · [回顾 worker](src/summary_jobs.rs) · [材料与同意](../../docs/development/beta-summary-originals.md)
+- β27 使用 Core11、Host auth7 和多来源复制协议 `exomind-peer-sync/2`。Native 已接入首配，peer 服务负责发现、重连、来源复制和原件传输。B1a 保存连接配置及本端启停，实际 worker 从档案／设备路由选拨号地址。定位「停用后是否还会拨」时检查实际拨号，定位「可以关闭源设备了吗」时检查接收端已持有的事实和原件。[peer 维护图](src/peers/README.md) · [连接配置范围](../../docs/plans/2026-11-22-beta26-b1a-connection-store.md)
 
-```powershell
-cargo test -p exomind-beta-host --offline -j 1 -- --test-threads=1
-```
+## 验证
 
-测试使用全新合成目录、真实 Axum HTTP 与 SQLite，覆盖鉴权、档案隔离、来源、回执重试、重启、根目录互斥、撤销/stop 晚提交、Host/Origin/CORS、请求体上界和凭据初始化失败恢复。另有真实 `exomind-beta` 子进程验收：通过 HTTP 建档、签发能力和提交，随后只对自己创建的 Child 强制终止并 wait，再验证 root 锁释放、身份/凭据/事件与回执恢复。这证明进程崩溃恢复，不是物理掉电保证。Windows ACL 案例只在 Windows 执行；使用 WinPS5.1 的 .NET ACL API，避免跨版本 PSModulePath 导致 `Get-Acl` 模块自动加载失败。源代码和这些测试不等于正式 Tauri UI、Android 本机、跨设备同步或真实模型已验收；具体执行结果由主代理保存。
-
-## B1.3 时间块与自有 Scheduler
-
-`open_with_clock(root, Arc<dyn HostClock>)` 仅供受信 Rust 注入时钟，默认 open 使用系统时钟。`start_services(&ArcHost)` 幂等启动同一 Core 的后台 Scheduler，Native 无 HTTP/无浏览器也可工作；CLI 启动时显式调用。clock sample 在资格 gate 外读取，返回后才进 gate 复验；request_stop 先禁止新提交并唤醒停止，stop 在 gate 外有界等待自有服务/验证退出，再放 root。
-
-已接受 human Start 的 deadline 是独立 Scheduler 负责的既定用户意图，撤销该 human grant 只拒绝其后续控制；不借撤销回改已提交动作。pause/end/rotate、显式 Scheduler owner 撤销、停止或 Core lifecycle 更换使旧 ticket 失效。通知可读取 deadline_envelope（含档案、运行代次、projection revision、nullable deadline），但本文不代表原生通知层已接通。
-
-新增 GET `/beta/v1/profiles/{p}/timeblocks/current|nodes|intervals`，POST同前缀 `/commands`；body 仅 command_id/event_id/expected_revision/action，profile 取 path，不接受 clock/source/scheduler 字段。observer/agent_note 可读，只有 human 可控制。`GET /beta/v1/profiles/{p}/timeline` 是统一 typed capture/timeblock 完整分页；旧 events 仅兼容 capture，不用于完整 coverage。
-
-## B2 成员与一次邀请的宿主边界
-
-Host 的持久设备 Ed25519 key 与 TLS 1.3 RPK/pin 只证明密钥持有。按 `(profile_id, device_id)` 保存的 pin、能力、generation、撤销和授权阶段是独立成员记录，不能转换为本机 Owner/Grant Session。旧 loopback HTTP 和 Native 私有草稿/原件缓存没有挂到 peer listener。
-
-Owner 可为本机档案创建签名完整邀请，包含 issuer key/device、P、protocol/schema、能力、候选地址、有效期与一次性随机材料。原 secret 只在首次邀请结果和已 pin 的 TLS claim 中传递；auth 仅保存 hash，status/Debug 不包含 secret。相同创建 ID 重试返回原公开状态，不重新发 secret；若首次返回丢失，应撤销后显式生成新邀请。候选地址不是身份，未知能力/协议/schema 拒绝。`PEER_CORE_SCHEMA` 是当前 Core wire 版本的单一接缝，随真实升级同步修改，不隐式降级。
-
-同一条真实 TLS 通道完成 Claim → Claimed → Confirm → Ready → FinishedACK。接受方先保存 pending/fixed claim，再保存 accepted 证据，签发方最后确认本机授权，接受方可靠保存 ready 后发送固定 ACK。签发方只有持久观察到该 ACK 才把 join/invitation status 标为 Ready；`remote_ready_observed` 区分已观察对端状态与仅本机授权。`PeerMember.state=Ready` 仅表示本机授权阶段，不能独自宣称双端配对完成。丢失 Claimed/Ready/Finished 响应可按原 claim ID 查证、重放同一签名回执；改 body、另一个 claim 领取同邀请、旧 generation 或撤销后的旧证据均不能悄悄恢复资格。pending 未获得 Claimed 前重启，需要用户再次提供原完整邀请，因为原 secret 不落盘。
-
-加入保留原有其他档案；P 的空白本机 profile 按固定 ID 幂等 provision。Core 与 auth 是两个数据库，pending 可以先持久化，provision 失败会显式返回并保留 pending，不能显示 ready。成员、邀请、claim、pending 的 JSON 和数量均有界；auth schema 2 缺表/缺 layout 或损坏记录明确要求恢复，不重新初始化。expiry 在最终 gate 内取可信 clock，持久 wall 高水位防止已观察过期的邀请因回拨复活。
-
-远端成员撤销拒绝 `device_id == local device`；离开本机档案还涉及 Scheduler 和 pending 资格，留给独立显式生命周期接口。单边撤销后的重新配对需要双方 Owner 明确批准：签发方用 `approve_peer_invitation_replacement` 对旧 claim/代次做 CAS，接收方用 `prepare_peer_rejoin` 核对自己两条旧成员绑定。批准保留 P、原事实和历史 ledger，立即暂停旧网络资格；普通后台 prepare 或另一份旧邀请不能重新授权。重试原批准不会重复推进代次，改 body 明确冲突，两端使用各自实际代次而不强迫计数相同；key/pin 变化仍需独立身份恢复。
-
-原签名 offer/receipt/ready 的标准字节保持不变。合法旧版本证据可读，当前版本的新建或恢复加入另查 protocol/schema，不兼容返回 `PeerProtocolMismatch`，不能把版本差异当损坏删除或改写记录。peer scope 绑定 Host/runtime、实际 TLS 连接以及本机/远端成员代次；每个最终 Core 操作都在 Host gate 内重验当前能力。原件读取另外要求本档案已提交事实引用，不能用 UUID/hash 读取私有上传或其他档案。
-
-本单元提供 Host ledger 和单邀请 TLS exchange，尚无 Native 首配 UI、自动 peer listener/discovery/routes/reconnect 或业务事实/原件 replication。generation 复验现覆盖加入各步骤及其恢复；尚未有业务导入提交入口，不能据此声称撤销在途事实提交已经实测。完整 B2.1 和跨设备同步仍待后续实现与验收。
+从仓库根运行 `cargo test --locked -p exomind-beta-host --test host real_http_authentication_scope_author_and_receipts`，使用合成档案、真实 loopback HTTP 与 SQLite 检查角色、提交及回读。按问题另选[授权](tests/agent_access.rs)、[外部回顾](tests/external_summaries.rs)、[Native 工作区](tests/native_workspace.rs)或[网络回归](src/peers/network_tests.rs)。精确制品与目标设备的结果在[版本状态](../../docs/AI-CONTEXT.md)查阅。早期 auth2、单邀请 TLS 与直接来源阶段的详细设计保存在[旧版 Host 手册](https://github.com/exomind-team/exomind/blob/4a241cebe19078305e751cc4293db98ae9a90f7d/crates/exomind-beta-host/README.md)。

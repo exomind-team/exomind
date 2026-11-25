@@ -382,7 +382,7 @@ cargo test -p exomind-runtime routes::pty::tests --lib
 
 不在本计划中写死工具级点击细节。
 实际执行时遵循：
-1. [tauri-mcp-windows-playbook.md](/H:/A137442/Develop/AGI/exomind/docs/development/tauri-mcp-windows-playbook.md)
+1. [tauri-mcp-windows-playbook.md](../../development/tauri-mcp-windows-playbook.md)
 2. 下述“全过程 + 测试项 + 验收标准”
 
 #### 9.3.1 执行顺序（必须按序）

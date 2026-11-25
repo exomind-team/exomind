@@ -1,6 +1,6 @@
 # Alpha UI/UX 复用参考：供 Beta 前端持续使用
 
-> 后续应用：本参考的Alpha/Beta固定基线保持不变。2026-11-18新增工作区显隐、图片直接预览、固定反馈快捷键及Web交互验证，当前实现进展见[前端工作区迭代](../plans/2026-11-18-beta-ui-workspace-iteration.md)，不以本参考旧Beta对照栏覆盖新实现。
+> 后续应用：本参考的Alpha/Beta固定基线保持不变。2026-11-18新增工作区显隐、图片直接预览、固定反馈快捷键及Web交互验证，该批变化见[前端工作区迭代](../plans/2026-11-18-beta-ui-workspace-iteration.md)。应用版本与已交付范围查[版本状态](../AI-CONTEXT.md)。
 
 > 2026-11-17。研究基线：Alpha05 `99b6b6480e810d6cff8559650387db4adfd45386`（下称 **A**）；Beta 对照 `aefa5223cfc431e88a3ef1f673f67e3c84cca4e1`（下称 **B**）。本文整理现有任务、呈现与操作合同，不批准新的视觉改版，也不表示 Beta 已验收。
 
@@ -290,7 +290,7 @@ Alpha 的价值是已经形成的完整使用组合：暖石主题、导航、�
 | B03 | [BetaFocusTimer](../../src/beta/BetaFocusTimer.tsx)、[FocusTimerView](../../src/ui/app/components/FocusTimerView.tsx)、[timeblocks-controller](../../src/beta/timeblocks-controller.ts) | 共享呈现；readOnly改名缺口；反馈仍跟发送偏好；权威快照/回执/时钟 |
 | B04 | [BetaApp](../../src/beta/BetaApp.tsx) `ProfileWorkspace`、[NowInputRowView](../../src/ui/app/components/NowInputRowView.tsx)、[drafts](../../src/beta/drafts.ts)、[input-preferences](../../src/beta/input-preferences.ts) | capture纯文本/无行操作；readingTop/followTail；本机草稿/整组原件资格 |
 | B05 | [BetaSettingsPage](../../src/beta/BetaSettingsPage.tsx)、[Beta registry](../../src/beta/settings-registry.tsx)、[portable-settings](../../src/ui/app/config/settings/portable-settings.ts)、[preferences](../../src/beta/preferences.ts) | 共用引擎和元数据，自有持久化/Native setter；不导旧整表 |
-| B06 | [NowWorkbenchOverlayView](../../src/ui/app/components/NowWorkbenchOverlayView.tsx)、[MainOverlayBridge](../../src/beta/overlay/MainOverlayBridge.tsx)、[main-owner](../../src/beta/overlay/main-owner.ts) | live呈现、owner/session、分支生命周期 |
+| B06 | [NowWorkbenchOverlayView](../../src/ui/app/components/NowWorkbenchOverlayView.tsx)、[MainOverlayBridge](../../src/beta/overlay/MainOverlayBridge.tsx)、[main-owner](https://github.com/exomind-team/exomind/blob/b6ee76a9fefd01141880bc41b31570e31765caf5/src/beta/overlay/main-owner.ts) | live呈现、owner/session、分支生命周期 |
 | B07 | [BetaPeersPage](../../src/beta/BetaPeersPage.tsx)、[peers-client](../../src/beta/peers-client.ts) | 授权/连接/事件/原件状态，不等同潜在设备发现 |
 | B08 | [timeblocks-types](../../src/beta/timeblocks-types.ts)、[timeblocks-controller](../../src/beta/timeblocks-controller.ts) | typed action不含rename，nodes/intervals/snapshot、expected_revision |
 | B09 | [beta-main](../../src/beta-main.tsx)、[beta.html](../../beta.html) | 独立入口；index.css/系统栏恢复；字体是否等价需宿主核对 |

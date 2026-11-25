@@ -38,6 +38,8 @@ bun run website:preview
 
 ## Release Metadata Sync / 发布元数据同步
 
+The download site uses published GitHub Release metadata. Development builds have separate Actions artifacts and build information. [0.6 candidate status](../docs/AI-CONTEXT.md) · [GitHub Releases](https://github.com/exomind-team/exomind/releases)
+
 ```bash
 # 从 GitHub Releases 拉取 metadata，写入 website/public/releases
 bun run release:pages:sync -- --repo exomind-team/exomind

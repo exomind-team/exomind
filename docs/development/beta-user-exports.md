@@ -1,6 +1,6 @@
 # Beta 用户导出与档案往返
 
-源码支持以下两种导出。候选是否包含这些实现，以固定 source SHA、recipe SHA 和实际构建证据为准；冻结 Beta19 不包含本轮完整 Native 归档与范围导出接线。
+要在另一台设备继续使用同一档案，选择档案备份与导入。要把几条记录交给其他工具，选择内容导出。下表列出入口与产物。运行环境能否完成系统选取和保存，按对应制品与设备记录核对。[首次使用](../product/beta-first-session.md) · [版本状态](../AI-CONTEXT.md)
 
 | 用户目的 | 入口与产物 | 内容边界 |
 |---|---|---|
@@ -43,4 +43,4 @@ Native 范围导出回执最多保留 32 个终态和一个在途任务，位于
 - 范围导出 IPC：`beta_user_range_export_capabilities`、`beta_export_user_range`、`beta_user_range_export_status`、`beta_cancel_user_range_export`。
 - 反复问题的执行规则见 [Beta 迭代门禁](beta-iteration-guards.md)。原件单独另存的 Android 恢复合同见 [原件导出恢复](beta-original-export-recovery.md)。
 
-源码回归、真实 Host HTTP、生产 Web 构建、Native 单测、精确候选窗口、系统选择器和物理设备分别记录。733 项 Beta 前端及 90 项 Native 回归已在本轮工作树通过；这些数量不证明系统选择器、最终候选或升级态已验收。
+归档与范围导出接线时的工作树记录了 733 项 Beta 前端与 90 项 Native 回归通过。复查系统保存时，记录候选版本、设备、系统选择器结果、目标文件及重新打开后的内容。

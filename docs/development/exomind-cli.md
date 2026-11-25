@@ -1,4 +1,6 @@
-# ExoMind CLI（RT Client Shell，RT 客户端外壳）
+# ExoMind CLI（旧 Runtime 客户端外壳）
+
+这里的 `crates/exomind-cli` 依赖旧 `exomind-runtime`。0.6 Beta 的独立宿主是 [`exomind-beta`](../../crates/exomind-beta-host/README.md)，外部 Agent 的档案访问使用[公共监控 Skill](agent-skills.md)。
 
 ## 目标
 

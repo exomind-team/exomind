@@ -22,10 +22,10 @@
 主要查看了以下几类资料：
 
 - 架构/计划/规格文档：
-  - [docs/plans/2026-03-19-batch-b-task-timeline-plan.md](../plans/2026-03-19-batch-b-task-timeline-plan.md)
-  - [docs/plans/2026-03-31-timeblock-unification-step1.md](../plans/2026-03-31-timeblock-unification-step1.md)
-  - [docs/plans/2026-03-31-timeblock-unification-step2.md](../plans/2026-03-31-timeblock-unification-step2.md)
-  - [docs/plans/2026-04-09-issue-780-timeblock-unification-tauri-validation-charter.md](../plans/2026-04-09-issue-780-timeblock-unification-tauri-validation-charter.md)
+  - [docs/plans/2026-03-19-batch-b-task-timeline-plan.md](../plans/archive/2026-03-19-batch-b-task-timeline-plan.md)
+  - [docs/plans/2026-03-31-timeblock-unification-step1.md](../plans/archive/2026-03-31-timeblock-unification-step1.md)
+  - [docs/plans/2026-03-31-timeblock-unification-step2.md](../plans/archive/2026-03-31-timeblock-unification-step2.md)
+  - [docs/plans/2026-04-09-issue-780-timeblock-unification-tauri-validation-charter.md](../plans/archive/2026-04-09-issue-780-timeblock-unification-tauri-validation-charter.md)
   - [docs/plans/2026-04-14-EDS-architecture-freeze-plan.md](../plans/2026-04-14-EDS-architecture-freeze-plan.md)
   - [docs/plans/2026-04-14-EDS-blueprint-handoff.md](../plans/2026-04-14-EDS-blueprint-handoff.md)
   - [docs/plans/PLAN-timeblock-cleanup-and-bugfix.md](../plans/PLAN-timeblock-cleanup-and-bugfix.md)
@@ -119,7 +119,7 @@
 
 但 `任务/时间线` 的实施计划本身，在更早阶段就明确保留了旧 fallback：
 
-- [2026-03-19-batch-b-task-timeline-plan.md](../plans/2026-03-19-batch-b-task-timeline-plan.md) 把模型分成两条来源：
+- [2026-03-19-batch-b-task-timeline-plan.md](../plans/archive/2026-03-19-batch-b-task-timeline-plan.md) 把模型分成两条来源：
   - 有 `task.*` 事件时走精确事件流
   - 老任务无事件时，直接“从时间块推导”
 
@@ -198,9 +198,9 @@
 
 `#780` 的目标不是多加一个字段，而是把时间块从旧结构改成统一结构：
 
-- [2026-03-31-timeblock-unification-step1.md](../plans/2026-03-31-timeblock-unification-step1.md)：先加 `transitions` 和 derive 函数，再 service 双写，最后迁消费者并删除旧字段。
-- [2026-03-31-timeblock-unification-step2.md](../plans/2026-03-31-timeblock-unification-step2.md)：让 Rust RT 成为 `transitions` 的唯一真相源。
-- [2026-04-09-issue-780-timeblock-unification-tauri-validation-charter.md](../plans/2026-04-09-issue-780-timeblock-unification-tauri-validation-charter.md)：把“单一语义源：`transitions`”列为桌面验收对象。
+- [2026-03-31-timeblock-unification-step1.md](../plans/archive/2026-03-31-timeblock-unification-step1.md)：先加 `transitions` 和 derive 函数，再 service 双写，最后迁消费者并删除旧字段。
+- [2026-03-31-timeblock-unification-step2.md](../plans/archive/2026-03-31-timeblock-unification-step2.md)：让 Rust RT 成为 `transitions` 的唯一真相源。
+- [2026-04-09-issue-780-timeblock-unification-tauri-validation-charter.md](../plans/archive/2026-04-09-issue-780-timeblock-unification-tauri-validation-charter.md)：把“单一语义源：`transitions`”列为桌面验收对象。
 
 这里最重要的一句话其实是 Step 1 里已经写出来的：
 

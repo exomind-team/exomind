@@ -1,6 +1,6 @@
 # 外心 · 上下文缓冲区
 
-**0.6.0-rebuild.1 · 独立 Web-first 搬迁候选，不是正式发行版。**
+**0.6.0-rebuild.1 · 独立 Web-first 搬迁候选。** 维护产品开发线 0.6 Beta 时从[版本状态](../docs/AI-CONTEXT.md)与[快速上手](../docs/development/quickstart.md)进入。
 
 先记下，再整理。文字、图片与文件进入同一个本地空间；时间块表达工作、休息与生活状态。其他设备补齐记录，模型在有限证据上生成回顾，WinCraft 只读投影当前状态。
 

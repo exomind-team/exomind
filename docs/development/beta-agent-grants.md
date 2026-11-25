@@ -1,7 +1,6 @@
 # Beta 外部 Agent 授权
 
-这是冻结 Beta16 之后的源码增量。源码、Native 接线、实际剪贴板与候选验收分别记账，
-当前进度见[持续完成计划](../plans/2026-11-19-beta16-frozen-and-beta-completion.md)。
+本文解释 `exomind-beta/1` 中 Native 签发、档案授权、持久凭据与访问结果。首次接入可从[公共监控 Skill](agent-skills.md)开始，源码与候选验证记录见[版本状态](../AI-CONTEXT.md)。
 
 ## 权限与所有者
 
@@ -32,8 +31,9 @@ Renderer 只能取得 metadata 与 opaque handle，不能取得 bearer。
 “复制接入信息”由 Native 将 `exomind-beta/1`、运行中的实际 `/beta/v1` 地址、设备 ID、
 当前档案真实显示名/UUID、grant ID/角色/Agent ID 与 bearer 凭据组合为 JSON，并直接写入
 系统剪贴板。Renderer 仍只拿 opaque handle 和 metadata；复制失败保留材料供同一 handle 重试。
-listener 仅绑定 loopback，其他设备不能直接访问该 API。复制成功只确认剪贴板写入，不代表
-外部 Agent 已连接或已读取。
+listener 仅绑定 loopback，接入工具应在受信机器上使用。复制完成后，Agent 对已登记的档案执行 `access/check`，
+核对角色、适用的 Agent ID 和所需能力。该接口的响应字段见[Host 能力定义](../../crates/exomind-beta-host/src/agent_access.rs)。
+`grant_id` 在 Native 签发材料中提供。一次真实业务读取由对应端点的返回结果确认。
 
 Host 的 `access/check` 现在把 `wait` 与 `export_bundle` 列为真实支持能力。Wait 只等待
 同一档案的 profile local sequence 前进，最多 30 秒、全 Host 同时最多 4 个请求；它不模拟

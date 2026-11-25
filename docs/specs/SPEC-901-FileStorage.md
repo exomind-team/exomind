@@ -1,5 +1,7 @@
 # SPEC-901: FileStorage 存储模块重构
 
+本文保留旧 TypeScript 模块的设计。0.6 Beta 通过 [Rust Core](../../crates/exomind-core/README.md)提交本机事实。后续可移植档案与内存／持久化来源的验收由[批注后计划](../plans/2026-11-25-beta-iteration-after-user-review.md)维护。
+
 ## 设计理由
 
 当前存储实现缺乏统一抽象，导致：

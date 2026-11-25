@@ -8,7 +8,7 @@
 
 ## 背景
 
-当前 [AgentsPage.tsx](D:/project/exomind/src/ui/app/pages/AgentsPage.tsx) 中的 `TopologyView` 只消费 [agents-signal-topology.ts](D:/project/exomind/src/ui/app/pages/agents-signal-topology.ts) 生成的基础节点坐标。页面刷新、切换筛选组合、切换视图后都不会记住用户手工摆放的位置，也不会记住视口和缩放。
+当前 [AgentsPage.tsx](../../src/ui/app/pages/AgentsPage.tsx) 中的 `TopologyView` 只消费 [agents-signal-topology.ts](../../src/ui/app/pages/agents-signal-topology.ts) 生成的基础节点坐标。页面刷新、切换筛选组合、切换视图后都不会记住用户手工摆放的位置，也不会记住视口和缩放。
 
 这会带来两个明显问题：
 

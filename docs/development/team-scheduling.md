@@ -1,6 +1,6 @@
 # Team Scheduling（RT-only）
 
-当前开发排班默认基于以下服务：
+本页记录旧 Runtime 的团队联调布局。0.6 Beta 联调请按[快速上手](quickstart.md)和[Host 边界](../../crates/exomind-beta-host/README.md)选择实例。旧版服务如下。
 
 ```text
 web-dev       — Vite 前端开发服务器

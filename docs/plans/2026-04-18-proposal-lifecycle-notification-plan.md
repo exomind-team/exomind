@@ -131,7 +131,7 @@
 
 新增一个最小 Proposal 服务层，位置固定为：
 
-- [src/lib/services/proposal.service.ts](../../src/lib/services/proposal.service.ts)
+- 原提案路径 `src/lib/services/proposal.service.ts`，已存在的变化通知实现见[proposal-data-change.service.ts](../../src/lib/services/proposal-data-change.service.ts)
 
 职责：
 

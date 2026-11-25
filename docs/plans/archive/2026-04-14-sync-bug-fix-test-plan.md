@@ -2,7 +2,7 @@
 
 **创建日期：** 2026-04-14
 **状态：** 待执行
-**关联验证章程：** [2026-04-14-two-client-full-domain-sync-validation-charter](2026-04-14-two-client-full-domain-sync-validation-charter.md)
+**关联验证章程：** [2026-04-14-two-client-full-domain-sync-validation-charter](../../verification/2026-04-14-two-client-full-domain-sync-validation-charter.md)
 
 ---
 
@@ -194,9 +194,9 @@ curl "http://127.0.0.1:9244/api/proposals?user_id=profile-tmcp-fullsync-20260414
 
 ## 5. 参考资料
 
-- [验证章程](./2026-04-14-two-client-full-domain-sync-validation-charter.md)
-- [Tauri MCP Windows Playbook](../development/tauri-mcp-windows-playbook.md)
-- [多 Worktree 端口配置](../development/port-env-configuration.md)
+- [验证章程](../../verification/2026-04-14-two-client-full-domain-sync-validation-charter.md)
+- [Tauri MCP Windows Playbook](../../development/tauri-mcp-windows-playbook.md)
+- [多 Worktree 端口配置](../../development/port-env-configuration.md)
 - Bulk-sync 脚本：`scripts/dev/tauri-full-domain-bulk-sync.ts`
 - Backfill 服务：`src/lib/services/rt-domain-backfill.service.ts`
 - EventLog backup 服务：`src/lib/services/eventlog-backup.service.ts`

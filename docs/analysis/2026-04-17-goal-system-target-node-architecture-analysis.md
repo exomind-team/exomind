@@ -40,7 +40,7 @@
 - [docs/specs/SPEC-goal-system-design-v0.2.md](../specs/SPEC-goal-system-design-v0.2.md)
 - [docs/specs/SPEC-goal-system-v0.3-logic.md](../specs/SPEC-goal-system-v0.3-logic.md)
 - [docs/specs/SPEC-goal-system-v0.3-ui.md](../specs/SPEC-goal-system-v0.3-ui.md)
-- [docs/plans/2026-03-26-goal-system-v0.3-implementation.md](../plans/2026-03-26-goal-system-v0.3-implementation.md)
+- [docs/plans/2026-03-26-goal-system-v0.3-implementation.md](../plans/archive/2026-03-26-goal-system-v0.3-implementation.md)
 
 再看的相关 issue：
 

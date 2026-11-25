@@ -1,6 +1,6 @@
 # ExoMind Communication Stack (ECS) - 通信协议栈架构
 
-> **Status**: v1.0 (Confirmed)
+> 本文是 2026-03-04 确认的 ECS 设计 v1.0。0.6 Beta 的设备事实传播与传输资格另见[多来源复制合同](../development/beta-multiorigin-sync.md)。
 > **Date**: 2026-03-04
 > **Author**: Architect Agent (Claude Opus 4.6)
 > **Origin**: @HailayLin + @ARCJ137442 集体架构讨论 → 软总线 vs Pub/Sub 辩证分析 → 协议栈设计

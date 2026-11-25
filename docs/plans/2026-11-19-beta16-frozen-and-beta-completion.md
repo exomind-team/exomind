@@ -1,5 +1,7 @@
 # Beta16 冻结与 Beta 持续完成计划
 
+本文件保留 β16 起逐轮追加的源码、失败与候选验证记录，各项状态以所在章节日期为限。开发队列与可运行制品从[计划索引](README.md)和[版本状态](../AI-CONTEXT.md)查阅。
+
 ## Beta20 构建失败与 Beta21 修复
 
 Beta20 固定 source `6ad7869dcec271bbc3f103dbacc2d6d512d2d7ca`、recipe

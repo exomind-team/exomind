@@ -45,7 +45,7 @@
 
 已在真实 Tauri 桌面窗口中补完“未打开档案 / anonymous scope”任务时间线验收，记录见：
 
-- [2026-04-19-anonymous-task-timeline-tauri-mcp-validation.md](../verification/2026-04-19-anonymous-task-timeline-tauri-mcp-validation.md)
+- [2026-04-19-anonymous-task-timeline-tauri-mcp-validation.md](../../verification/2026-04-19-anonymous-task-timeline-tauri-mcp-validation.md)
 
 这轮真窗补证确认了三件关键事实：
 
@@ -57,8 +57,8 @@
 
 本计划建立在两份已有分析之上：
 
-- [2026-04-18-task-status-history-authority-analysis.md](../analysis/2026-04-18-task-status-history-authority-analysis.md)
-- [2026-04-18-timeblock-unification-gap-closeout-feasibility-plan.md](../analysis/2026-04-18-timeblock-unification-gap-closeout-feasibility-plan.md)
+- [2026-04-18-task-status-history-authority-analysis.md](../../analysis/2026-04-18-task-status-history-authority-analysis.md)
+- [2026-04-18-timeblock-unification-gap-closeout-feasibility-plan.md](../../analysis/2026-04-18-timeblock-unification-gap-closeout-feasibility-plan.md)
 
 同时复核了以下关键 issue 与代码：
 
@@ -67,14 +67,14 @@
   - `#585`：最初的 `task.*` EventLog 事件
   - `#735`：结束时间块默认挂起关联任务
 - 关键代码：
-  - [src/ui/app/pages/TaskTimelinePage.tsx](../../src/ui/app/pages/TaskTimelinePage.tsx)
-  - [src/ui/app/pages/task-timeline-model.ts](../../src/ui/app/pages/task-timeline-model.ts)
-  - [src/lib/services/task-timer.service.ts](../../src/lib/services/task-timer.service.ts)
-  - [src/lib/services/timeblock.service.ts](../../src/lib/services/timeblock.service.ts)
-  - [src/ui/app/overlay/use-now-workbench-overlay-controller.ts](../../src/ui/app/overlay/use-now-workbench-overlay-controller.ts)
-  - [src/lib/types/task.ts](../../src/lib/types/task.ts)
-  - [crates/exomind-runtime/src/task/types.rs](../../crates/exomind-runtime/src/task/types.rs)
-  - [crates/exomind-runtime/src/routes/timeblocks.rs](../../crates/exomind-runtime/src/routes/timeblocks.rs)
+  - [src/ui/app/pages/TaskTimelinePage.tsx](../../../src/ui/app/pages/TaskTimelinePage.tsx)
+  - [src/ui/app/pages/task-timeline-model.ts](../../../src/ui/app/pages/task-timeline-model.ts)
+  - [src/lib/services/task-timer.service.ts](../../../src/lib/services/task-timer.service.ts)
+  - [src/lib/services/timeblock.service.ts](../../../src/lib/services/timeblock.service.ts)
+  - [src/ui/app/overlay/use-now-workbench-overlay-controller.ts](../../../src/ui/app/overlay/use-now-workbench-overlay-controller.ts)
+  - [src/lib/types/task.ts](../../../src/lib/types/task.ts)
+  - [crates/exomind-runtime/src/task/types.rs](../../../crates/exomind-runtime/src/task/types.rs)
+  - [crates/exomind-runtime/src/routes/timeblocks.rs](../../../crates/exomind-runtime/src/routes/timeblocks.rs)
 
 ## 结论先行
 
@@ -320,13 +320,13 @@ type TaskStatusTransition = {
 
 关键改动：
 
-- [crates/exomind-runtime/src/lib.rs](../../crates/exomind-runtime/src/lib.rs)
-- [crates/exomind-runtime/src/routes/tasks.rs](../../crates/exomind-runtime/src/routes/tasks.rs)
-- [src/lib/environment/interfaces/task.port.ts](../../src/lib/environment/interfaces/task.port.ts)
-- [src/lib/adapters/task-rt-adapter.ts](../../src/lib/adapters/task-rt-adapter.ts)
-- [src/lib/services/ecs-task-replication.service.ts](../../src/lib/services/ecs-task-replication.service.ts)
-- [src/lib/services/task-backup.service.ts](../../src/lib/services/task-backup.service.ts)
-- [src/lib/services/task-reconciliation.service.ts](../../src/lib/services/task-reconciliation.service.ts)
+- [crates/exomind-runtime/src/lib.rs](../../../crates/exomind-runtime/src/lib.rs)
+- [crates/exomind-runtime/src/routes/tasks.rs](../../../crates/exomind-runtime/src/routes/tasks.rs)
+- [src/lib/environment/interfaces/task.port.ts](../../../src/lib/environment/interfaces/task.port.ts)
+- [src/lib/adapters/task-rt-adapter.ts](../../../src/lib/adapters/task-rt-adapter.ts)
+- [src/lib/services/ecs-task-replication.service.ts](../../../src/lib/services/ecs-task-replication.service.ts)
+- [src/lib/services/task-backup.service.ts](../../../src/lib/services/task-backup.service.ts)
+- [src/lib/services/task-reconciliation.service.ts](../../../src/lib/services/task-reconciliation.service.ts)
 
 完成条件：
 
@@ -345,18 +345,18 @@ type TaskStatusTransition = {
 
 关键改动：
 
-  - [src/lib/types/task.ts](../../src/lib/types/task.ts)
-  - [src/lib/environment/interfaces/task.port.ts](../../src/lib/environment/interfaces/task.port.ts)
-  - [src/lib/adapters/task-rt-adapter.ts](../../src/lib/adapters/task-rt-adapter.ts)
-  - [src/lib/adapters/mock/task-mock-adapter.ts](../../src/lib/adapters/mock/task-mock-adapter.ts)
-  - [src/lib/adapters/task-pouch-adapter.ts](../../src/lib/adapters/task-pouch-adapter.ts)
-  - [crates/exomind-runtime/src/task/types.rs](../../crates/exomind-runtime/src/task/types.rs)
-  - [crates/exomind-runtime/src/task/store.rs](../../crates/exomind-runtime/src/task/store.rs)
-  - [crates/exomind-runtime/src/task/sqlite_store.rs](../../crates/exomind-runtime/src/task/sqlite_store.rs)
-  - [crates/exomind-runtime/src/routes/tasks.rs](../../crates/exomind-runtime/src/routes/tasks.rs)
-  - [src/lib/services/task-backup.service.ts](../../src/lib/services/task-backup.service.ts)
-  - [src/lib/services/task-reconciliation.service.ts](../../src/lib/services/task-reconciliation.service.ts)
-  - [src/ui/components/MigrationDialogController.tsx](../../src/ui/components/MigrationDialogController.tsx)
+  - [src/lib/types/task.ts](../../../src/lib/types/task.ts)
+  - [src/lib/environment/interfaces/task.port.ts](../../../src/lib/environment/interfaces/task.port.ts)
+  - [src/lib/adapters/task-rt-adapter.ts](../../../src/lib/adapters/task-rt-adapter.ts)
+  - [src/lib/adapters/mock/task-mock-adapter.ts](../../../src/lib/adapters/mock/task-mock-adapter.ts)
+  - [src/lib/adapters/task-pouch-adapter.ts](../../../src/lib/adapters/task-pouch-adapter.ts)
+  - [crates/exomind-runtime/src/task/types.rs](../../../crates/exomind-runtime/src/task/types.rs)
+  - [crates/exomind-runtime/src/task/store.rs](../../../crates/exomind-runtime/src/task/store.rs)
+  - [crates/exomind-runtime/src/task/sqlite_store.rs](../../../crates/exomind-runtime/src/task/sqlite_store.rs)
+  - [crates/exomind-runtime/src/routes/tasks.rs](../../../crates/exomind-runtime/src/routes/tasks.rs)
+  - [src/lib/services/task-backup.service.ts](../../../src/lib/services/task-backup.service.ts)
+  - [src/lib/services/task-reconciliation.service.ts](../../../src/lib/services/task-reconciliation.service.ts)
+  - [src/ui/components/MigrationDialogController.tsx](../../../src/ui/components/MigrationDialogController.tsx)
   - 对应 schema migration
 
 完成条件：
@@ -378,13 +378,13 @@ type TaskStatusTransition = {
 
 关键改动：
 
-  - [crates/exomind-runtime/src/routes/timeblocks.rs](../../crates/exomind-runtime/src/routes/timeblocks.rs)
-  - [crates/exomind-runtime/src/routes/tasks.rs](../../crates/exomind-runtime/src/routes/tasks.rs)
-  - [src/lib/services/timeblock.service.ts](../../src/lib/services/timeblock.service.ts)
-  - [src/lib/services/task-timer.service.ts](../../src/lib/services/task-timer.service.ts)
-  - [src/ui/app/components/FocusTimerWidget.tsx](../../src/ui/app/components/FocusTimerWidget.tsx)
-  - [src/ui/app/overlay/use-now-workbench-overlay-controller.ts](../../src/ui/app/overlay/use-now-workbench-overlay-controller.ts)
-  - [src/ui/app/pages/TaskDagPage.tsx](../../src/ui/app/pages/TaskDagPage.tsx)
+  - [crates/exomind-runtime/src/routes/timeblocks.rs](../../../crates/exomind-runtime/src/routes/timeblocks.rs)
+  - [crates/exomind-runtime/src/routes/tasks.rs](../../../crates/exomind-runtime/src/routes/tasks.rs)
+  - [src/lib/services/timeblock.service.ts](../../../src/lib/services/timeblock.service.ts)
+  - [src/lib/services/task-timer.service.ts](../../../src/lib/services/task-timer.service.ts)
+  - [src/ui/app/components/FocusTimerWidget.tsx](../../../src/ui/app/components/FocusTimerWidget.tsx)
+  - [src/ui/app/overlay/use-now-workbench-overlay-controller.ts](../../../src/ui/app/overlay/use-now-workbench-overlay-controller.ts)
+  - [src/ui/app/pages/TaskDagPage.tsx](../../../src/ui/app/pages/TaskDagPage.tsx)
 
 完成条件：
 
@@ -406,8 +406,8 @@ type TaskStatusTransition = {
 
 关键改动：
 
-  - [src/ui/app/pages/TaskTimelinePage.tsx](../../src/ui/app/pages/TaskTimelinePage.tsx)
-  - [src/ui/app/pages/task-timeline-model.ts](../../src/ui/app/pages/task-timeline-model.ts)
+  - [src/ui/app/pages/TaskTimelinePage.tsx](../../../src/ui/app/pages/TaskTimelinePage.tsx)
+  - [src/ui/app/pages/task-timeline-model.ts](../../../src/ui/app/pages/task-timeline-model.ts)
 
 完成条件：
 
@@ -416,7 +416,7 @@ type TaskStatusTransition = {
 - 不再存在 “events-first / no-events fallback” 分支
 - timeline reader 只影响任务时间线页，不宣称全局停写 `timeBlockIds`
 - 至少补齐：
-  - [src/ui/app/pages/task-timeline-model.ts](../../src/ui/app/pages/task-timeline-model.ts) 专项单测
+  - [src/ui/app/pages/task-timeline-model.ts](../../../src/ui/app/pages/task-timeline-model.ts) 专项单测
   - 新旧数据回放测试
   - 无 EventLog 情况下的页面构图测试
 

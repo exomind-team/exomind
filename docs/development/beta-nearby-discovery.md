@@ -1,6 +1,8 @@
 # Beta 附近设备：发现与加入
 
-附近设备只表示收到 `exomind-discovery/1` 广播。Host 在与受信 route 分离的内存缓存中
+本页描述被动发现缓存。Beta Host 还提供用户主动启动的有界范围扫描，显示候选服务、探测阶段和取消结果。连接可达、身份验证、档案成员和数据补齐分别判定。[扫描与网络实现](../../crates/exomind-beta-host/src/peers/network.rs) · [多来源复制](beta-multiorigin-sync.md)
+
+被动发现是在本机收到 `exomind-discovery/1` 广播。Host 在与受信 route 分离的内存缓存中
 保留设备 ID 和源 IP/监听端口，不读档案名、正文或权限。候选最多保留 30 秒、64 台设备、
 每设备 4 个地址；停止或切换网络 generation 时清空。该缓存不进入复制、自动同步队列、
 membership 或 grant，也不为探测设备而拨号。

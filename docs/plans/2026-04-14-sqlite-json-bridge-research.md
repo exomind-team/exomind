@@ -307,7 +307,7 @@ tasks (主表)
 
 ## 6. 建议下一步
 
-1. **✅ 实验已完成**：SQLite JSON 函数验证通过，详见 [实验报告](./research/SQLite-JSON-Functions-实验报告-2026-04-14.md)
+1. **✅ 实验已完成**：SQLite JSON 函数验证通过，详见 [实验报告](../research/SQLite-JSON-Functions-实验报告-2026-04-14.md)
 2. **确定 crate 边界**：独立 crate 还是现有模块增强？路径在哪？
 3. **设计 Phase 1 详细 API**：确定 JSON CRUD 接口的输入输出格式
 4. **原型验证**：SchemaRegistry 最小实现跑通后再扩展
@@ -317,6 +317,6 @@ tasks (主表)
 ## 7. 参考资料
 
 - [SQLite JSON Functions 文档](https://www.sqlite.org/json1.html)
-- [实验报告（含完整脚本）](./research/SQLite-JSON-Functions-实验报告-2026-04-14.md)
-- [rusqlite JSON 存储模式（现有代码）](./crates/exomind-runtime/src/task/sqlite_store.rs)
-- [schema-on-read 迁移模式（现有代码）](./crates/exomind-runtime/src/agent/session.rs#L320-L336)
+- [实验报告（含完整脚本）](../research/SQLite-JSON-Functions-实验报告-2026-04-14.md)
+- [rusqlite JSON 存储模式（现有代码）](../../crates/exomind-runtime/src/task/sqlite_store.rs)
+- [schema-on-read 迁移模式（现有代码）](../../crates/exomind-runtime/src/agent/session.rs#L320-L336)

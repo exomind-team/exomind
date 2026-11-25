@@ -460,9 +460,9 @@
 
 当前已存在：
 
-- 默认静态路由：[config/signal-routes.default.json](/H:/A137442/Develop/AGI/exomind/config/signal-routes.default.json#L2)
-- 基础路由编辑 UI：[src/components/RouteEditPanel.tsx](/H:/A137442/Develop/AGI/exomind/src/components/RouteEditPanel.tsx#L16)
-- node-first 设备 / 节点叙事计划：[docs/plans/2026-03-30-network-node-first-implementation-plan.md](/H:/A137442/Develop/AGI/exomind/docs/plans/2026-03-30-network-node-first-implementation-plan.md#L5)
+- 默认静态路由：[config/signal-routes.default.json](../../config/signal-routes.default.json#L2)
+- 基础路由编辑 UI：[src/components/RouteEditPanel.tsx](../../src/components/RouteEditPanel.tsx#L16)
+- node-first 设备 / 节点叙事计划：[docs/plans/2026-03-30-network-node-first-implementation-plan.md](2026-03-30-network-node-first-implementation-plan.md#L5)
 
 当前近邻 issue：
 
@@ -480,11 +480,11 @@
 
 当前已存在：
 
-- Agent workspace 与长期知识目录：[crates/exomind-runtime/src/agent/workspace.rs](/H:/A137442/Develop/AGI/exomind/crates/exomind-runtime/src/agent/workspace.rs#L95)
-- cognition 的知识操作抽象：[crates/exomind-runtime/src/agent/cognition.rs](/H:/A137442/Develop/AGI/exomind/crates/exomind-runtime/src/agent/cognition.rs#L32)
-- 提案系统设计：[docs/plans/2026-04-01-agent-api-and-proposal-system-design.md](/H:/A137442/Develop/AGI/exomind/docs/plans/2026-04-01-agent-api-and-proposal-system-design.md#L21)
-- proposal tools：[crates/exomind-runtime/src/agent/proposal_tools.rs](/H:/A137442/Develop/AGI/exomind/crates/exomind-runtime/src/agent/proposal_tools.rs#L13)
-- life agent 内部工具执行已可落到 proposal store：[crates/exomind-runtime/src/agent/life.rs](/H:/A137442/Develop/AGI/exomind/crates/exomind-runtime/src/agent/life.rs#L467)
+- Agent workspace 与长期知识目录：[crates/exomind-runtime/src/agent/workspace.rs](../../crates/exomind-runtime/src/agent/workspace.rs#L95)
+- cognition 的知识操作抽象：[crates/exomind-runtime/src/agent/cognition.rs](../../crates/exomind-runtime/src/agent/cognition.rs#L32)
+- 提案系统设计：[docs/plans/2026-04-01-agent-api-and-proposal-system-design.md](2026-04-01-agent-api-and-proposal-system-design.md#L21)
+- proposal tools：[crates/exomind-runtime/src/agent/proposal_tools.rs](../../crates/exomind-runtime/src/agent/proposal_tools.rs#L13)
+- life agent 内部工具执行已可落到 proposal store：[crates/exomind-runtime/src/agent/life.rs](../../crates/exomind-runtime/src/agent/life.rs#L467)
 
 当前近邻 issue：
 
@@ -517,9 +517,9 @@
 
 当前已存在：
 
-- heartbeat demo agent：[crates/exomind-runtime/src/agent/heartbeat.rs](/H:/A137442/Develop/AGI/exomind/crates/exomind-runtime/src/agent/heartbeat.rs#L8)
-- life agent 能量门槛与 tick：[crates/exomind-runtime/src/agent/life.rs](/H:/A137442/Develop/AGI/exomind/crates/exomind-runtime/src/agent/life.rs#L48)
-- energy HTTP 路由：[crates/exomind-runtime/src/routes/energy.rs](/H:/A137442/Develop/AGI/exomind/crates/exomind-runtime/src/routes/energy.rs#L23)
+- heartbeat demo agent：[crates/exomind-runtime/src/agent/heartbeat.rs](../../crates/exomind-runtime/src/agent/heartbeat.rs#L8)
+- life agent 能量门槛与 tick：[crates/exomind-runtime/src/agent/life.rs](../../crates/exomind-runtime/src/agent/life.rs#L48)
+- energy HTTP 路由：[crates/exomind-runtime/src/routes/energy.rs](../../crates/exomind-runtime/src/routes/energy.rs#L23)
 
 缺口：
 
@@ -531,9 +531,9 @@
 
 - 同步 epic：[#532](https://github.com/exomind-team/exomind/issues/532)
 - 受管 tauri dev 工作流：[#518](https://github.com/exomind-team/exomind/issues/518)
-- manager 设计文档：[docs/plans/2026-03-15-tauri-dev-manager-daemon-design.md](/H:/A137442/Develop/AGI/exomind/docs/plans/2026-03-15-tauri-dev-manager-daemon-design.md#L1)
-- README 中的 manager 用法：[README.md](/H:/A137442/Develop/AGI/exomind/README.md#L79)
-- node-first 设备视图：[src/ui/app/pages/agents/DeviceView.tsx](/H:/A137442/Develop/AGI/exomind/src/ui/app/pages/agents/DeviceView.tsx#L151)
+- manager 设计文档：[docs/plans/2026-03-15-tauri-dev-manager-daemon-design.md](2026-03-15-tauri-dev-manager-daemon-design.md#L1)
+- README 中的 manager 用法：[README.md](../../README.md#L79)
+- node-first 设备视图：[src/ui/app/pages/agents/DeviceView.tsx](../../src/ui/app/pages/agents/DeviceView.tsx#L151)
 
 缺口：
 
@@ -543,7 +543,7 @@
 
 当前已存在：
 
-- 对外 README 叙事：[README.md](/H:/A137442/Develop/AGI/exomind/README.md#L26)
+- 对外 README 叙事：[README.md](../../README.md#L26)
 - 商业线 issue：[#242](https://github.com/exomind-team/exomind/issues/242)
 
 缺口：
@@ -554,7 +554,7 @@
 
 当前近邻：
 
-- 身份 / 用户系统混合架构文档：[docs/plans/2026-03-07-user-system-hybrid-identity-architecture.md](/H:/A137442/Develop/AGI/exomind/docs/plans/2026-03-07-user-system-hybrid-identity-architecture.md)
+- 身份 / 用户系统混合架构文档：[docs/plans/2026-03-07-user-system-hybrid-identity-architecture.md](2026-03-07-user-system-hybrid-identity-architecture.md)
 - 同步 epic：[#532](https://github.com/exomind-team/exomind/issues/532)
 
 缺口：

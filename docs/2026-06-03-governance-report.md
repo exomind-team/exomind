@@ -1,7 +1,7 @@
 # ExoMind 仓库治理规则报告
 
 > **调查日期**：2026-06-03
-> **仓库**：exomind-team/exomind（dev 分支）
+> **调查对象**：exomind-team/exomind 的 `dev` 分支在 2026-06-03 的配置。执行仓库操作时从[工作流规范](development/repo-agent-workflow.md)及[现有 CI 工作流](../.github/workflows/)核对适用规则。
 
 ---
 

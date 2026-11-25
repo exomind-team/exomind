@@ -29,7 +29,7 @@ This note does **not** retroactively claim any evidence that was not collected i
   - `/pty/:id/resize`
   - `/pty/:id/stop`
 - Source:
-  - [pty.rs](H:/A137442/Develop/AGI/exomind/crates/exomind-runtime/src/routes/pty.rs#L1637)
+  - [pty.rs](../../crates/exomind-runtime/src/routes/pty.rs#L1637)
 
 ### Legacy PTY endpoints are expected to be gone
 
@@ -39,9 +39,9 @@ This note does **not** retroactively claim any evidence that was not collected i
 - Integration test:
   - `legacy_pty_http_endpoints_return_not_found`
 - Sources:
-  - [pty.rs](H:/A137442/Develop/AGI/exomind/crates/exomind-runtime/src/routes/pty.rs#L2046)
-  - [pty.rs](H:/A137442/Develop/AGI/exomind/crates/exomind-runtime/src/routes/pty.rs#L2071)
-  - [pty_agent.rs](H:/A137442/Develop/AGI/exomind/crates/exomind-runtime/tests/pty_agent.rs#L994)
+  - [pty.rs](../../crates/exomind-runtime/src/routes/pty.rs#L2046)
+  - [pty.rs](../../crates/exomind-runtime/src/routes/pty.rs#L2071)
+  - [pty_agent.rs](../../crates/exomind-runtime/tests/pty_agent.rs#L994)
 
 ### Frontend PTY transport uses WebSocket
 
@@ -49,13 +49,13 @@ This note does **not** retroactively claim any evidence that was not collected i
 - PTY output transport builds `ws://.../pty/:id/ws?mode=output`
 - PTY frontend entry points use `sendPtyWsTextInput`
 - Sources:
-  - [pty-input.ts](H:/A137442/Develop/AGI/exomind/src/ui/app/components/pty-input.ts#L158)
-  - [pty-input.ts](H:/A137442/Develop/AGI/exomind/src/ui/app/components/pty-input.ts#L983)
-  - [PtyTerminal.tsx](H:/A137442/Develop/AGI/exomind/src/ui/app/components/PtyTerminal.tsx#L187)
-  - [PtyTerminal.tsx](H:/A137442/Develop/AGI/exomind/src/ui/app/components/PtyTerminal.tsx#L922)
-  - [AgentsPage.tsx](H:/A137442/Develop/AGI/exomind/src/ui/app/pages/AgentsPage.tsx#L8346)
-  - [PtyTerminalPage.tsx](H:/A137442/Develop/AGI/exomind/src/ui/app/pages/agents/PtyTerminalPage.tsx#L198)
-  - [PtyPromptComposer.tsx](H:/A137442/Develop/AGI/exomind/src/ui/app/components/PtyPromptComposer.tsx#L41)
+  - [pty-input.ts](../../src/ui/app/components/pty-input.ts#L158)
+  - [pty-input.ts](../../src/ui/app/components/pty-input.ts#L983)
+  - [PtyTerminal.tsx](../../src/ui/app/components/PtyTerminal.tsx#L187)
+  - [PtyTerminal.tsx](../../src/ui/app/components/PtyTerminal.tsx#L922)
+  - [AgentsPage.tsx](../../src/ui/app/pages/AgentsPage.tsx#L8346)
+  - [PtyTerminalPage.tsx](../../src/ui/app/pages/agents/PtyTerminalPage.tsx#L198)
+  - [PtyPromptComposer.tsx](../../src/ui/app/components/PtyPromptComposer.tsx#L41)
 
 ## Executed Local Validation
 

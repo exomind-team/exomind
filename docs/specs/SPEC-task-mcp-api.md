@@ -3,7 +3,7 @@
 > **规格文档**: 任务系统 MCP API 设计
 > **关联 Issue**: #459
 > **版本**: v1.0 (MVP Phase 1)
-> **状态**: Draft
+> **状态**：旧任务系统的设计草案。0.6 Beta 外部 Agent 的已实现接口见[档案授权](../development/beta-agent-grants.md)与[读取工具](../development/beta-agent-read-tools.md)。
 
 ---
 

@@ -22,7 +22,7 @@
 
 这份计划建立在以下已完成分析与最新收口结论之上：
 
-- [2026-04-18-task-status-history-authority-analysis.md](../analysis/2026-04-18-task-status-history-authority-analysis.md)
+- [2026-04-18-task-status-history-authority-analysis.md](../../analysis/2026-04-18-task-status-history-authority-analysis.md)
 - [2026-04-19-task-timeline-status-history-closeout-plan.md](./2026-04-19-task-timeline-status-history-closeout-plan.md)
 - GitHub issue：
   - [#929](https://github.com/exomind-team/exomind/issues/929)
@@ -34,12 +34,12 @@
 
 复核的关键代码包括：
 
-- [crates/exomind-runtime/src/task/store.rs](../../crates/exomind-runtime/src/task/store.rs)
-- [crates/exomind-runtime/src/task/sqlite_store.rs](../../crates/exomind-runtime/src/task/sqlite_store.rs)
-- [crates/exomind-runtime/src/task/types.rs](../../crates/exomind-runtime/src/task/types.rs)
-- [src/lib/types/task.ts](../../src/lib/types/task.ts)
-- [src/ui/app/pages/task-timeline-model.ts](../../src/ui/app/pages/task-timeline-model.ts)
-- [src/ui/components/MigrationDialogController.tsx](../../src/ui/components/MigrationDialogController.tsx)
+- [crates/exomind-runtime/src/task/store.rs](../../../crates/exomind-runtime/src/task/store.rs)
+- [crates/exomind-runtime/src/task/sqlite_store.rs](../../../crates/exomind-runtime/src/task/sqlite_store.rs)
+- [crates/exomind-runtime/src/task/types.rs](../../../crates/exomind-runtime/src/task/types.rs)
+- [src/lib/types/task.ts](../../../src/lib/types/task.ts)
+- [src/ui/app/pages/task-timeline-model.ts](../../../src/ui/app/pages/task-timeline-model.ts)
+- [src/ui/components/MigrationDialogController.tsx](../../../src/ui/components/MigrationDialogController.tsx)
 
 ## 结论先行
 
@@ -95,7 +95,7 @@
 
 ### 1. timeline 已经只读取任务域状态历史
 
-[src/ui/app/pages/task-timeline-model.ts](../../src/ui/app/pages/task-timeline-model.ts) 当前直接按 `task.statusTransitions` 生成 segment / terminal：
+[src/ui/app/pages/task-timeline-model.ts](../../../src/ui/app/pages/task-timeline-model.ts) 当前直接按 `task.statusTransitions` 生成 segment / terminal：
 
 - 若 transition 为空，则返回空 segment / 空 terminal
 - 最终这类任务不会进入时间线
@@ -104,7 +104,7 @@
 
 ### 2. 旧空历史任务当前仍被保留，但不会被 repair
 
-[crates/exomind-runtime/src/task/store.rs](../../crates/exomind-runtime/src/task/store.rs) 目前明确保留两条测试：
+[crates/exomind-runtime/src/task/store.rs](../../../crates/exomind-runtime/src/task/store.rs) 目前明确保留两条测试：
 
 - `sqlite_init_preserves_empty_status_history_from_legacy_schema`
 - `sqlite_init_preserves_empty_in_progress_history_from_legacy_schema`
@@ -117,7 +117,7 @@
 
 ### 3. import 链路当前没有“历史重建”步骤
 
-[src/ui/components/MigrationDialogController.tsx](../../src/ui/components/MigrationDialogController.tsx) 当前只负责：
+[src/ui/components/MigrationDialogController.tsx](../../../src/ui/components/MigrationDialogController.tsx) 当前只负责：
 
 - 读取 legacy events / tasks / timeblocks
 - 导入 RT
@@ -396,8 +396,8 @@ regenerate 指：
 
 关键改动：
 
-- [crates/exomind-runtime/src/task/sqlite_store.rs](../../crates/exomind-runtime/src/task/sqlite_store.rs)
-- [crates/exomind-runtime/src/task/store.rs](../../crates/exomind-runtime/src/task/store.rs)
+- [crates/exomind-runtime/src/task/sqlite_store.rs](../../../crates/exomind-runtime/src/task/sqlite_store.rs)
+- [crates/exomind-runtime/src/task/store.rs](../../../crates/exomind-runtime/src/task/store.rs)
 
 完成条件：
 
@@ -427,7 +427,7 @@ regenerate 指：
 
 关键改动：
 
-- [src/ui/components/MigrationDialogController.tsx](../../src/ui/components/MigrationDialogController.tsx)
+- [src/ui/components/MigrationDialogController.tsx](../../../src/ui/components/MigrationDialogController.tsx)
 - runtime 内部任务域引导链路
 
 完成条件：

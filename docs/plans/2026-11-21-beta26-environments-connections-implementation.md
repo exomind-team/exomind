@@ -10,9 +10,7 @@ ExoMind environments, independently controllable multi-path connections,
 profile-scoped memberships, actionable discovery/invitation flows, and bounded
 sync diagnostics without letting any waiting or error state become a dead end.
 
-**Architecture:** The existing Core remains the only fact and membership
-authority. Host gains environment and connection records above profile
-membership; Native and UI expose those records through fixed commands. ACP is
+**Architecture.** Core owns immutable facts and their proofs. Host owns device identity, profile membership and the connection ledger. Native and UI expose scoped operations. See the [B1a implementation boundary](2026-11-22-beta26-b1a-connection-store.md) and the [reviewed iteration plan](2026-11-25-beta-iteration-after-user-review.md) for delivery status. ACP is
 outside this plan. The selected Beta26 path is incremental. The full T3-like
 connection supervisor remains a documented long-term option and is not
 implemented here.

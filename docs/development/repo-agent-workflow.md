@@ -5,15 +5,15 @@
 ## 默认开发环境（Termux / Web-first）
 
 1. 默认开发环境是 **Termux**，默认执行链路是 **Web-first**（先保证 Web 端功能正确）。
-2. 日常开发与联调优先使用 Node 工具链（`node` / `npx`），先完成 Web + 同步服务验证。
-3. Tauri / Android 构建验证属于后置环节，在 Web 链路通过后再执行。
-4. 默认联调端口：Web `5173`，同步服务 `6984`（多 worktree 并行时按约定分配独立端口）。
+2. 0.6 Beta 的前端改动先使用 Vite 与合成内存档案，涉及提交、复制或文件字节时再使用独立数据根的 Beta Host。
+3. 涉及原生能力时，在目标 Windows／Android 候选上继续验证。
+4. 按本次启动输出核实 Web 和 Host 的监听地址。多实例分配独立端口和数据根。见[快速上手](quickstart.md)。
 
 ## Issue 修复标准链路
 
 1. 先在 issue 评论中给出方案与验收链路，再开始编码。
 2. 新功能必须先补失败测试（单测 / E2E），再写实现，再跑通过。
-3. 新建 worktree 开发后，先执行依赖安装；`server/` 子项目使用 `bun install --omit optional`。
+3. 在已获准的 worktree 中按该产品线的[快速上手](quickstart.md)准备依赖，Beta Web 验证使用根项目的 Bun 工具链。
 4. 端到端测试优先使用 `tests/e2e/playwright.issue*.config.ts` 的独立端口配置，避免污染主开发端口。
 5. 完成后给出测试证据（命令 + 通过结果）并同步到 PR / Issue 评论。
 6. 执行中必须维护任务清单，持续更新进行中 / 完成状态。
@@ -58,20 +58,11 @@ bun scripts/dev/supervised-command.ts cancel --dir <同一产物目录>
 
 ### 联调服务启动（Web-first）
 
-```bash
-# Web
-npx vite --host 0.0.0.0 --port 5173
-
-# Sync
-EXOMIND_POUCHDB_HOST=0.0.0.0 EXOMIND_POUCHDB_PORT=6984 node server/pouchdb-server.js
-```
+从[开发快速上手](quickstart.md)选择内存档案或真实 Beta Host。前端显示合成档案标识后可开始界面走查。需要服务端行为时，在明确的独立测试根启动 [Beta Host](../../crates/exomind-beta-host/README.md)。
 
 ### 服务可用性验证
 
-```bash
-curl -sS -D - -o /dev/null http://127.0.0.1:5173 | head -n 8
-curl -sS -D - -o /dev/null http://127.0.0.1:6984 | head -n 8
-```
+对该实例实际公布的 loopback 地址请求 `GET /beta/v1/hello`，确认协议、设备和本次 runtime。业务验证使用目标档案的合法授权与实际读回。跨端和原件验收另查[复制合同](beta-multiorigin-sync.md)。
 
 ## GitHub 评论发布与纠错章程（Windows / PowerShell）
 
@@ -126,7 +117,7 @@ curl -sS -D - -o /dev/null http://127.0.0.1:6984 | head -n 8
 
 ## 发布流程
 
-具体发布治理以 [skills/release-governance](../../skills/release-governance/SKILL.md) 为准。本节只保留源码工作目录里的操作入口提醒；如果这里和 release-governance 冲突，先按 release-governance 执行并回头修本文档。
+0.6 Beta 验证制品使用[构建指南](../../BUILD.md)中的候选锁和 Beta Build Validation。公开版本采用下列 tag 流程，规则维护在[发布治理 Skill](../../skills/release-governance/SKILL.md)。
 
 | Tag 格式 | 产出 | Release 类型 |
 |---------|------|-------------|

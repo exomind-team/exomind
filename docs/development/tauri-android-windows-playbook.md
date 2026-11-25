@@ -1,6 +1,6 @@
 # Tauri Android Windows Playbook
 
-> 持续更新。用于沉淀在 Windows 宿主机下，调试 ExoMind Android APK 的构建、安装、ADB、Tauri MCP 与系统层验收经验。
+> Windows 宿主下的 ADB、APK、Tauri MCP 与系统层验收手册。下文的 2026 年 4 月命令和端口用于复查当时的候选。0.6 Beta 的构建入口、ABI、签名和设备测试范围见[构建指南](../../BUILD.md)与[版本状态](../AI-CONTEXT.md)。
 
 > 桌面真窗 / raw bridge 经验见 [Tauri MCP Windows Playbook](tauri-mcp-windows-playbook.md)。
 

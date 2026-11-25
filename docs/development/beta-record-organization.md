@@ -1,7 +1,6 @@
 # Beta 标签与只增更正
 
-Core9 是冻结 Beta16/Core8 之后的源码增量，尚未代表完整新候选验收。
-当前进度和设备边界见[持续完成计划](../plans/2026-11-19-beta16-frozen-and-beta-completion.md)。
+Core9 引入标签和只增更正。Core11 的读取窗口、精确来源与回顾冻结见[Core11 合同](beta-core11-history-and-review.md)，应用候选见[版本状态](../AI-CONTEXT.md)。
 
 ## 数据语义
 

@@ -2,7 +2,7 @@
 
 ## 状态
 
-已批准
+历史 FileStorage 重构决策，适用于下文列举的旧 TypeScript 数据模块。0.6 Beta 的持久提交见[Core 合同](../../development/v0.6-beta-core-contract.md)，β28 的存储方案见[评审与计划入口](../../plans/README.md)。
 
 ## 背景
 

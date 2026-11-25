@@ -1,6 +1,6 @@
 # ExoMind MVP - 外心最小验证版
 
-> 记录生命中的每一个事件
+> 早期独立 TypeScript 事件日志原型，数据保存在本地 JSON。开发 0.6 Beta 请从[快速上手](../docs/development/quickstart.md)进入。
 
 ## 简介
 

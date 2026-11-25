@@ -1,6 +1,6 @@
 # 局域网节点优先（node-first）与单 RT 兼容指南
 
-> 更新日期：2026-03-30
+> 2026-03-30 旧 Runtime 的 node-first 联调资料。0.6 Beta 使用独立 Host、按档案成员验权并复制来源链。[Beta 网络入口](../../crates/exomind-beta-host/src/peers/README.md) · [监控 Skill](agent-skills.md)
 > 关联 issue：[#773](https://github.com/exomind-team/exomind/issues/773)、[#682](https://github.com/exomind-team/exomind/issues/682)
 > 说明：文件路径仍保留 `lan-single-rt-guide.md`，用于兼容旧链接；正文已经切换到 node-first 产品叙事。
 
@@ -278,7 +278,7 @@ curl.exe -sS http://192.168.1.204:9124/health
 
 无论你走主路径还是兼容路径，本质上最终仍然是访问某个 RT 的 HTTP API。
 
-原始 RT curl / HTTP 联调内容请直接看 [`../../skills/exomind-rt-agent-access/SKILL.md`](../../skills/exomind-rt-agent-access/SKILL.md)。本节只保留入口级说明，不再重复维护完整端点契约。
+本节列出该时期 Runtime 的 HTTP 端点。联调旧监控脚本可查阅对应版本，接入 0.6 Beta 则按档案授权选择工具。[旧监控脚本固定源码](https://github.com/exomind-team/exomind-monitor-skill/tree/113ba8c2d44fa7b79de51f427bf2f4b1998294c1/scripts) · [Beta Agent 接入](agent-skills.md)
 
 ### 快速健康检查
 

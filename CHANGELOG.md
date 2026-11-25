@@ -1,5 +1,18 @@
 # Changelog
 
+以下保留随历史版本整理的面向用户的发布说明。发行资产查 [GitHub Releases](https://github.com/exomind-team/exomind/releases)，0.6 Beta 验证制品、源码检查及交付范围查[版本与候选记录](docs/AI-CONTEXT.md)。
+
+## 0.5 与 0.4 系列后续记录
+
+| 公开日期 | 版本 | 该次交付 |
+|---|---|---|
+| 2026-08-24 | [Preview v0.5.1](https://github.com/exomind-team/exomind/releases/tag/v0.5.1) | Windows x64 预览版恢复桌面悬浮工作台，支持操作时间块与快速记录。 |
+| 2026-07-01 | [Preview v0.5.0](https://github.com/exomind-team/exomind/releases/tag/v0.5.0) | 0.5 系列精简日用界面与旧语音入口。 |
+| 2026-06-29 | [v0.4.23](https://github.com/exomind-team/exomind/releases/tag/v0.4.23) | 移除已失效的 TypeScript reviewer／classifier。 |
+| 2026-06-10 | [Preview v0.4.22](https://github.com/exomind-team/exomind/releases/tag/v0.4.22) | 改善时间块的键盘启动、改名及 Android 过期提醒。 |
+
+公开日期按北京时间；各次发行的资产范围见相应发布页。
+
 ## [0.4.21] - 2026-06-09
 
 0.4.21 是 0.4.x 预览线收束成的正式版。我们这次不是只把一个版本号挂到 `main` 上，而是把从 0.3.4 以来反复试用过的时间块、任务推进、事件记录、Agent Hub、设备网络和浮动工作台，整理成一条更能坐下来试一整天的工作流。

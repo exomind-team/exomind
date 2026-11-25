@@ -1,10 +1,10 @@
 # ExoMind Runtime Agents API（运行时 Agent 接口）
 
-> 适用范围（Scope，范围）: `crates/exomind-runtime`
->  
-> 目标（Goal，目标）: 基于当前代码，给出可直接联调的接口说明。
+> 适用范围为旧 `crates/exomind-runtime` 的 `/agents/*`。0.6 Beta 的入口为 `/beta/v1`。[Host 路由](../../crates/exomind-beta-host/README.md) · [Agent 授权](beta-agent-grants.md) · [等待／bundle](beta-agent-read-tools.md)
 >
-> 边界：非 `/agents/*` 的 raw RT 端点，请看 [`../../skills/exomind-rt-agent-access/SKILL.md`](../../skills/exomind-rt-agent-access/SKILL.md)。
+> 以下请求与响应供维护旧 Runtime 时联调。
+>
+> 本文末节另记录旧 Runtime 的 `/eventlog/watch`。配套的 0.5 工具可查[固定版本的监控脚本](https://github.com/exomind-team/exomind-monitor-skill/tree/113ba8c2d44fa7b79de51f427bf2f4b1998294c1/scripts)。
 
 ---
 

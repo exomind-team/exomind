@@ -2,7 +2,7 @@
 
 **审计时间**: 2026-04-08
 **审计团队**: 6维度并行审计 + Team Lead 汇总
-**审计范围**: ExoMind AI Provider 架构全扫描
+**审计范围**：2026-04-08 的 AI Registry、Voice Runtime 与旧 Provider 管线。0.6 Beta 的模型选件与外发资格见[模型材料合同](development/beta-summary-originals.md)。
 
 ---
 

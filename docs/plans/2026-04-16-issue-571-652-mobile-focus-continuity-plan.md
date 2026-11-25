@@ -31,14 +31,14 @@
 
 ### `#652` 现状
 
-- `当下 / 专注` 入口是 [src/ui/app/pages/NowPage.tsx](../ui/app/pages/NowPage.tsx) 中的 `focus` tab，页面本体挂载 [src/ui/app/components/FocusTimerWidget.tsx](../ui/app/components/FocusTimerWidget.tsx)。
+- `当下 / 专注` 入口是 [src/ui/app/pages/NowPage.tsx](../../src/ui/app/pages/NowPage.tsx) 中的 `focus` tab，页面本体挂载 [src/ui/app/components/FocusTimerWidget.tsx](../../src/ui/app/components/FocusTimerWidget.tsx)。
 - 当前运行态 UI 只有背景音、暂停/继续、结束等控制，没有 keep-awake 开关，也没有常亮状态反馈。
 - Android 侧已有 RT keepalive 插件与前台服务，但它们服务于后台 RT 连通，不服务于前台页面阻止熄屏。
 
 ### `#571` 现状
 
-- 倒计时结束现在仍由 [src/ui/app/components/FocusTimerWidget.tsx](../ui/app/components/FocusTimerWidget.tsx) 的 `requestAnimationFrame` 驱动，在本地跑到 `remaining <= 0` 时才 `new Audio(...)` 播放结束音。
-- [src/lib/services/timeblock.service.ts](../lib/services/timeblock.service.ts) 管的是时间块状态迁移，不负责 Android 原生后台调度；`updateElapsed()` 当前也是空实现。
+- 倒计时结束现在仍由 [src/ui/app/components/FocusTimerWidget.tsx](../../src/ui/app/components/FocusTimerWidget.tsx) 的 `requestAnimationFrame` 驱动，在本地跑到 `remaining <= 0` 时才 `new Audio(...)` 播放结束音。
+- [src/lib/services/timeblock.service.ts](../../src/lib/services/timeblock.service.ts) 管的是时间块状态迁移，不负责 Android 原生后台调度；`updateElapsed()` 当前也是空实现。
 - Android Manifest 还没有 `POST_NOTIFICATIONS`、`USE_EXACT_ALARM` / `SCHEDULE_EXACT_ALARM`、`WAKE_LOCK`、`RECEIVE_BOOT_COMPLETED`、`FOREGROUND_SERVICE_MEDIA_PLAYBACK` 等相关权限。
 - `MainActivity` 现在只处理键盘状态桥接，没有 `onNewIntent()` 路由 handoff。
 
@@ -342,9 +342,9 @@ Track C: Optional Auto Foreground
 
 ### 前端
 
-- [src/ui/app/components/FocusTimerWidget.tsx](../ui/app/components/FocusTimerWidget.tsx)
-- [src/ui/app/pages/NowPage.tsx](../ui/app/pages/NowPage.tsx)
-- [src/config/timer-preferences.ts](../config/timer-preferences.ts)
+- [src/ui/app/components/FocusTimerWidget.tsx](../../src/ui/app/components/FocusTimerWidget.tsx)
+- [src/ui/app/pages/NowPage.tsx](../../src/ui/app/pages/NowPage.tsx)
+- [src/config/timer-preferences.ts](../../src/config/timer-preferences.ts)
 - 新增：
   - `src/config/focus-keep-awake.ts`
   - `src/ui/app/components/FocusKeepAwakeButton.tsx`
@@ -353,13 +353,13 @@ Track C: Optional Auto Foreground
 
 ### TypeScript service
 
-- [src/lib/services/timeblock.service.ts](../lib/services/timeblock.service.ts)
-- [src/lib/timeblock/countdown-progress.ts](../lib/timeblock/countdown-progress.ts)
+- [src/lib/services/timeblock.service.ts](../../src/lib/services/timeblock.service.ts)
+- [src/lib/timeblock/countdown-progress.ts](../../src/lib/timeblock/countdown-progress.ts)
 
 ### Android / Tauri
 
-- [src-tauri/gen/android/app/src/main/AndroidManifest.xml](../../src-tauri/gen/android/app/src/main/AndroidManifest.xml)
-- [src-tauri/gen/android/app/src/main/java/com/exomind/app/MainActivity.kt](../../src-tauri/gen/android/app/src/main/java/com/exomind/app/MainActivity.kt)
+- `src-tauri/gen/android/app/src/main/AndroidManifest.xml`（本机生成物）
+- 历史方案的生成路径 `src-tauri/gen/android/app/src/main/java/com/exomind/app/MainActivity.kt`，Beta 源码入口见[Android 准备器](../../scripts/dev/beta-android-prepare.ts)
 - [src-tauri/src/lib.rs](../../src-tauri/src/lib.rs)
 - 可新增：
   - `src-tauri/gen/android/app/src/main/java/com/exomind/app/FocusKeepAwakePlugin.kt`

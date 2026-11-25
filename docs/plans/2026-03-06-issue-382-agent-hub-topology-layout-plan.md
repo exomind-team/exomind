@@ -4,7 +4,7 @@
 
 **Goal:** 为 Agent Hub 拓扑图实现第一阶段 `manual layout（手动布局）` 持久化与 `auto:flow（自动布局）` 隔离机制。
 
-**Architecture:** 新增一个纯函数模块负责 `datasetKey/filterKey/layoutStore`、手动布局合并与自动布局生成；[AgentsPage.tsx](D:/project/exomind/src/ui/app/pages/AgentsPage.tsx) 里的 `TopologyView` 只负责 React Flow 事件接线、模式切换和持久化触发。持久化层先使用 `localStorage`，按 `datasetKey -> scopeKey -> filterKey` 分层存储。
+**Architecture:** 新增一个纯函数模块负责 `datasetKey/filterKey/layoutStore`、手动布局合并与自动布局生成；[AgentsPage.tsx](../../src/ui/app/pages/AgentsPage.tsx) 里的 `TopologyView` 只负责 React Flow 事件接线、模式切换和持久化触发。持久化层先使用 `localStorage`，按 `datasetKey -> scopeKey -> filterKey` 分层存储。
 
 **Tech Stack:** React 18, TypeScript, React Flow (`@xyflow/react`), Vitest, Testing Library, localStorage
 

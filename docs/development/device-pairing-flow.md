@@ -1,6 +1,6 @@
 # 设备配对流程技术文档（Device Pairing Flow / Node-First Pairing）
 
-> 更新日期：2026-03-31  
+> 历史范围为 2026-03-31 的旧 Runtime 设备配对。0.6 Beta 的签名邀请、档案成员与实际拨号入口见[Beta peer 模块](../../crates/exomind-beta-host/src/peers/README.md)。
 > 关联 issue / PR：[#773](https://github.com/exomind-team/exomind/issues/773)、[#774](https://github.com/exomind-team/exomind/pull/774)  
 > 目标读者：前端 / Runtime / QA / 联调同学
 

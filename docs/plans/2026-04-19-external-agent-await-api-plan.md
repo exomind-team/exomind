@@ -6,7 +6,7 @@
 > **相关文档**：
 > - [docs/development/runtime-external-access-contract.md](../development/runtime-external-access-contract.md)
 > - [docs/development/exomind-runtime-agents-api.md](../development/exomind-runtime-agents-api.md)
-> - [skills/exomind-rt-agent-access/SKILL.md](../../skills/exomind-rt-agent-access/SKILL.md)
+> - [skills/exomind-rt-agent-access/SKILL.md](https://github.com/exomind-team/exomind/blob/4a241cebe19078305e751cc4293db98ae9a90f7d/skills/exomind-rt-agent-access/SKILL.md)
 
 ---
 

@@ -1,6 +1,6 @@
 # 0.6 Beta 维护入口
 
-> 当前实现地图，更新于 2026-11-19。完整候选、设备和能源验收尚未完成。
+> 本页按用户任务定位源码和回归。当前候选、制品和设备证据见[版本状态](../../docs/AI-CONTEXT.md)。
 > 候选身份来自 `src-tauri/tauri.beta.conf.json`，不是本 README 或默认 package 版本。
 
 ## 接手先区分三条来源
@@ -13,7 +13,7 @@
 
 ### 纯前端内存测试档案
 
-开发态可用 `bun run dev -- --host 127.0.0.1 --port 4300 --strictPort` 启动 Vite，打开
+开发态可用 `bun run dev --host 127.0.0.1 --port 4300 --strictPort` 启动 Vite，打开
 `/beta.html?mock=1` 使用合成档案。该入口动态加载内存 `BetaClient`，不连接 Beta Host、真实档案、Tauri IPC 或 peer 服务；事件、附件、时间块与草稿保留在当前页面实例内，刷新或点“重置测试档案”会重新生成。生产构建会忽略此查询参数。
 
 这个档案用于验证前端行为和状态呈现，不构成 Core、Host、Native、同步、身份验证、系统通知或设备验收证据。`createBetaMockProfile` 可接收 `clientOverrides` 以及 peers、deadline handoff、share handoff 客户端 fixture，供各自 UI 场景隔离测试；基础样本不会伪造网络身份或系统通知。
@@ -94,8 +94,7 @@ snapshot digest 或 selection，也不会因读取触发模型重跑。冻结后
 目标索引缩小查询范围。Core11 已按用户决定将冻结前的原文与匹配更正分别放入新回顾
 材料，旧摘要保值；匹配索引、候选/正文预算及精确来源读取边界见
 [Core11 合同](../../docs/development/beta-core11-history-and-review.md)。外部 Agent summary
-和 bundle 的既有证据/排除合同保留，完整历史需分页读取。冻结 Beta19 仍为 Core10，
-这些源码能力须随下一匹配候选另做实测。
+和 bundle 的既有证据/排除合同保留，完整历史需分页读取。Beta19 冻结于 Core10。β27 使用 Core11，查验时按版本页找到设备实际安装的候选。
 
 ## 最容易误读的名称
 
@@ -121,11 +120,6 @@ snapshot digest 或 selection，也不会因读取触发模型重跑。冻结后
 [迭代门禁](../../docs/development/beta-iteration-guards.md)只保护一个源码切片；
 默认不把旧任务路径白名单套给所有新功能。Windows 重步骤串行，证据和缓存放仓库外。
 
-当前状态：[执行记录](../../docs/plans/2026-11-13-v0.6-beta-execution.md)、
-[Beta09以来盘点](../../docs/plans/2026-11-19-beta09-beta14-work-audit.md)、
-[Beta14](../../docs/plans/2026-11-18-beta14-attachments-and-field-sync.md)、
-[Beta15](../../docs/plans/2026-11-19-beta15-overlay-network-routes.md)。
+按应用提交、制品与设备签收查询[版本状态](../../docs/AI-CONTEXT.md)。β27 日用交付、β28 的提审条件和历史候选分别见[批注后迭代计划](../../docs/plans/2026-11-25-beta-iteration-after-user-review.md)、[代码简化提案](../../docs/plans/2026-11-25-beta28-maintainer-simplification.md)和[计划索引](../../docs/plans/README.md)。
 
-旧来源缺证明、间歇身份失败、其他黑影、能源归因和完整 Android/EasyTier 矩阵仍未闭合。
-早期 B1 README 的 Main-only、peer/model 未实现等说明已失效；历史原文由 Git 保留，
-不能据其旧状态重新实现或删除当前能力。
+排查设备页时，B1a 的本端启停与地址顺序写入连接配置；worker 从档案／设备 route 与合格候选决定实际拨号。用目标副本的事实回读、来源证明、时间块可解释度及原件实际可读性核验同步结果。[peer 维护图](../../crates/exomind-beta-host/src/peers/README.md)

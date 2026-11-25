@@ -1,204 +1,35 @@
-<div align="center">
-
 # ExoMind
 
-**Your life growth assistant.**
+ExoMind helps you keep a local record of events, attachments and time blocks, then pick up that record on another authorized device. Computer, tablet and phone can each hold a copy of a profile. The project combines a Rust/SQLite core with React, TypeScript and Tauri 2.
 
-Local-first · Event-driven · AI-powered · Cross-platform
+[中文](README-zh.md) · [Website](https://exo-mind.ai) · [Public downloads](https://github.com/exomind-team/exomind/releases) · [License](LICENSE)
 
-[![License: CCOPL-1.0](https://img.shields.io/badge/License-CCOPL--1.0-blue.svg)](https://github.com/exomind-team/ccopl)
-[![Build](https://img.shields.io/github/actions/workflow/status/exomind-team/exomind/release.yml?branch=dev&label=build)](https://github.com/exomind-team/exomind/actions)
-[![Website](https://img.shields.io/badge/website-exo--mind.ai-orange)](https://exo-mind.ai)
-[![Download](https://img.shields.io/badge/download-latest-green)](https://exo-mind.ai/download)
+## Try the 0.6 Beta
 
-[中文文档](./README-zh.md) · [Website](https://exo-mind.ai) · [Download](https://exo-mind.ai/download)
-
-[![QQ Group](https://img.shields.io/badge/QQ群-外心ExoMind-blue?logo=tencentqq)](https://qm.qq.com/q/cmPIiH5BpS)
-[![WeChat](https://img.shields.io/badge/WeChat-join-green?logo=wechat)](./docs/wechat.md)
-
-</div>
-
-> [!WARNING]
-> **Pre-1.0 — Expect breaking changes.** ExoMind is under active development with daily updates. APIs, data formats, and features may change without notice. We welcome contributors — come build with us!
-
----
-
-## What is ExoMind
-
-ExoMind is a cross-platform personal AI assistant built with Tauri v2 (Windows/macOS/Linux/Android). It focuses on event logging, time blocks, and multi-device sync — helping you record, reflect, and grow.
-
-<div align="center">
-<img src="docs/assets/signal-network.png" alt="ExoMind Signal Network" width="800">
-<br>
-<em>Signal Network — agents, actors, and signal topics working together</em>
-<br><br>
-<img src="docs/assets/voice-input.png" alt="ExoMind Voice Input" width="800">
-<br>
-<em>Voice Input — real-time speech recognition with event logging</em>
-</div>
-
-## macOS: first launch (unsigned build)
-
-The macOS build is currently **unsigned** (no Apple Developer account yet), so the first launch needs one extra step — this is Gatekeeper, **not** a corrupted file.
-
-- **Quick fix (Intel, or as a first try):** right-click `ExoMind.app` → **Open**, or run `sudo xattr -cr "/Applications/ExoMind.app"`.
-- **Apple Silicon (M1–M4), if it still says _"ExoMind is damaged"_:** macOS forces arm64 binaries to carry *a* signature, so ad-hoc self-sign it — free, no Apple account:
-
-```bash
-sudo codesign --force --deep --sign - "/Applications/ExoMind.app"
-sudo xattr -cr "/Applications/ExoMind.app"
-open "/Applications/ExoMind.app"
-```
-
-Full guide (all methods + troubleshooting): **[docs/macos-install.md](docs/macos-install.md)**.
-
-## Tech Stack
-
-| Category | Technology |
-|----------|-----------|
-| Runtime | Bun |
-| Frontend | React 18 + TypeScript + Vite |
-| Desktop/Mobile | Tauri v2 |
-| UI | Tailwind CSS + Radix UI + Lucide |
-| State | Zustand |
-| Storage | PouchDB (IndexedDB) |
-| Router | TanStack Router |
-| Test | Vitest + Playwright |
+For an installable candidate, check the application source, build recipe, platform and artifact in the [version and delivery record](docs/AI-CONTEXT.md). The build workflow publishes validation artifacts. Public releases have their own [release pages](https://github.com/exomind-team/exomind/releases). For your first session, create a profile, save a short note and a picture, and open both on the receiving device. [First session guide](docs/product/beta-first-session.md) · [macOS installation](docs/macos-install.md)
 
 ## Quick Start
 
-### Prerequisites
+With Node and Bun installed, run from the repository root:
 
-- Bun (required)
-- Rust stable toolchain (required)
-- Node.js 20+ (recommended)
-- Windows: Visual Studio Build Tools (C++)
-- Android: Android SDK (API 34+) + JDK 17
-
-### Install & Run
-
-```bash
-# Install dependencies
+```sh
 bun install
-
-# Web development
-bun run dev
-
-# Tauri desktop development
-bun run tauri dev
-
-# Tauri Android development
-bun run tauri android dev
+bun run dev --host 127.0.0.1 --port 4300 --strictPort
 ```
 
-### Multi-instance development
+Open `http://127.0.0.1:4300/beta.html?mock=1`. The banner identifies the in-memory test profile. Reloading the page resets this example. To verify persistence, use a real Beta Host with a new absolute data directory. The development guide includes the exact commands and a first check. [Developer quick start](docs/development/quickstart.md)
 
-```bash
-# Start desktop instance
-bun tauri:manager start --name desktop
-
-# Start Android instance
-bun tauri:manager start --name phone --target android
-
-# List running instances
-bun tauri:manager list
-
-# View logs
-bun tauri:manager logs --name desktop --follow
-```
-
-## Common Commands
-
-| Command | Description |
-|---------|-------------|
-| `bun run dev` | Start Vite dev server |
-| `bun run server` | Start PouchDB sync server |
-| `bun run tauri dev` | Desktop development |
-| `bun run tauri android dev` | Android development |
-| `bun run build` | TypeScript + Vite build |
-| `bun run test` | Run unit tests |
-| `bun run test:e2e` | Run E2E tests |
-| `bun run build:tag` | Create build tag and trigger CI |
-
-## Environment Variables
-
-Copy `.env.example` to `.env` and adjust:
-
-```bash
-cp .env.example .env
-```
-
-Key variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `EXOMIND_WEB_PORT` | auto | Vite dev port (default 1420) |
-| `EXOMIND_POUCHDB_PORT` | `6984` | Sync server port |
-| `EXOMIND_ASR_PORT` | `1949` | ASR service port |
-
-See `.env.example` for the full list.
-
-## Project Structure
-
-```
-exomind/
-├─ src/                 # React frontend & business logic
-├─ src-tauri/           # Tauri Rust backend & config
-├─ crates/              # Rust crates (exomind-runtime)
-├─ server/              # PouchDB sync server
-├─ scripts/             # PowerShell/Bun automation
-├─ tests/               # Vitest + Playwright tests
-├─ docs/                # Documentation (architecture, specs, plans)
-└─ website/             # Public website source
-```
-
-## Ecosystem
-
-ExoMind is part of a larger ecosystem of open-source projects:
-
-| Project | Description |
-|---------|-------------|
-| [ExoMind Cell](https://github.com/exomind-team/exomind-cell) | Operational closure VM for Cognitive Life Science experiments (Rust) |
-| [Wattson](https://github.com/exomind-team/wattson) | Digital PSU monitoring — energy sensing layer (Rust) |
-| [CCOPL](https://github.com/exomind-team/ccopl) | Contributors' Collective Ownership Public License |
-
-## Documentation
-
-> Documentation is primarily written in Chinese. English translations are provided where available.
-
-- [Docs index](docs/README.md)
-- [macOS install guide](docs/macos-install.md) (unsigned build: first-launch & ad-hoc self-sign)
-- [Development log](https://exomind-team.github.io/exomind-devlog/) (Chinese · AI-generated · experimental)
-- [Architecture overview](docs/architecture/overview.md)
-- [Product requirements](docs/product/PRD.md)
-- [Product roadmap](docs/product/roadmap.md)
-- [Development guide](CLAUDE.md)
-- [Scripts guide](scripts/README.md)
-- [Git workflow](docs/development/git-spec.md)
-
-## Build & Release
-
-```bash
-# Daily build (auto-generates tag, uploads to R2)
-bun run build:tag
-
-# Formal release
-git tag release/v0.3.3 && git push origin release/v0.3.3
-```
-
-## Community
-
-| Platform | Link |
-|----------|------|
-| **QQ Group** | [外心 ExoMind 用户交流群](https://qm.qq.com/q/cmPIiH5BpS) |
-| **WeChat** | [Scan QR to join](./docs/wechat.md) |
+| Goal | Entry point |
+|---|---|
+| Beta application UI | [`src/beta`](src/beta/README.md), loaded by [`beta.html`](beta.html) |
+| Durable local records, time blocks and receipts | [Beta Core](crates/exomind-core/README.md) |
+| Authorized API, peer sync and original files | [Beta Host](crates/exomind-beta-host/README.md) · [Architecture guide](docs/architecture/README.md) |
+| Native desktop or Android build | [Build guide](BUILD.md) · [Runtime and platform checks](docs/development/beta-iteration-guards.md) |
+| Existing Alpha or 0.5 software | The default `index.html` and default Tauri features serve the Alpha/legacy line. [Historical architecture](docs/architecture/overview.md) |
+| Standalone migration prototype | [`next/`](next/README.md) has its own Node runtime and data directory. |
 
 ## Contributing
 
-We welcome contributions! Please read our development guide in [CLAUDE.md](CLAUDE.md) for coding conventions and workflow.
+Most technical documentation is in Chinese. Start with the [documentation index](docs/README.md), [repository contributor rules](AGENTS.md) and [iteration plans](docs/plans/README.md). Related projects include [ExoMind Cell](https://github.com/exomind-team/exomind-cell) and [Wattson](https://github.com/exomind-team/wattson).
 
-## License
-
-This project is licensed under the [Contributors' Collective Ownership Public License v1.0 (CCOPL-1.0)](https://github.com/exomind-team/ccopl).
-
-See [LICENSE](LICENSE) and [LICENSE-zh](LICENSE-zh) for details.
+[QQ community](https://qm.qq.com/q/cmPIiH5BpS) · [WeChat](docs/wechat.md) · [CCOPL-1.0](LICENSE) · [中文许可证](LICENSE-zh)

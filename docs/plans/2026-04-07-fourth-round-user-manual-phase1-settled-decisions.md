@@ -30,7 +30,7 @@
 
 对应既有种子文档：
 
-- [src/docs/user-guide.md](../../src/docs/user-guide.md)
+- [src/docs/user-guide.md](https://github.com/exomind-team/exomind/blob/29580499033030ec5a3661b004f39d9cca2692be/src/docs/user-guide.md)
 
 ### 2.1 真相源与交付表面
 

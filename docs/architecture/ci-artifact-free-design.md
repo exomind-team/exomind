@@ -1,5 +1,7 @@
 # CI 无 Artifact 存储方案设计
 
+本文保留早期的构建存储提案。0.6 Beta 的验证制品由 [Beta Build Validation](../../.github/workflows/beta-build-validation.yml)上传到对应 Actions run，用户下载及构建来源见[版本状态](../AI-CONTEXT.md)。
+
 ## 背景
 
 当前 CI 使用 GitHub Actions Artifact 在 Job 之间传递构建产物，占用存储配额。本方案设计如何完全不使用 Artifact 存储。

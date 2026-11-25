@@ -2,7 +2,7 @@
 
 ## Goal
 
-This project uses a unified E2E runtime dispatcher:
+This guide covers the issue-specific web suites and their runtime dispatcher. For the Beta development page and synthetic profile, start with the [quick start](quickstart.md) and [Beta verification guide](beta-iteration-guards.md).
 
 - Prefer Bun when Bun is available.
 - Fallback to Node only when Bun is not available.

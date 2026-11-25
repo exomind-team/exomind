@@ -1,6 +1,6 @@
 # Beta26 一键邀请投递
 
-> 状态：待连接层 B1a 完成后实施。日期：2026-11-22。
+> 设计日期 2026-11-22。B1a 的持久化部分已有[独立交付记录](2026-11-22-beta26-b1a-connection-store.md)。双向发起与接收的产品工作排入 [β28 计划](2026-11-25-beta-iteration-after-user-review.md#rt-身份link-与事件接力)。
 > 上游设计：[Beta26 外心环境与多连接设计](2026-11-21-beta26-environments-connections-design.md)
 
 ## 用户确认的交互

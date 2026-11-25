@@ -55,4 +55,4 @@ Compress-Archive -Path * -DestinationPath ExoMind-NLS-Guardian-v1.0.0.zip -Force
 
 ## 更多信息
 
-详细文档：[../../DOCS/ExoMind-Notification-Permission-Guard.md](../../DOCS/ExoMind-Notification-Permission-Guard.md)
+详细文档：[../../DOCS/ExoMind-Notification-Permission-Guard.md](../../docs/plans/archive/ExoMind-Notification-Permission-Guard.md)

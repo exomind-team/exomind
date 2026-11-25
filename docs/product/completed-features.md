@@ -10,7 +10,7 @@
 
 本文档将早期多设备同步功能的已完成工作拆分为独立需求模块。
 
-当前现行主路径已经切换为：
+旧 Runtime 在该阶段采用以下路径。0.6 Beta 的实现与分层验收见[版本状态](../AI-CONTEXT.md)和[复制合同](../development/beta-multiorigin-sync.md)。
 
 - `device pairing`
 - `RT net / mesh relay`

@@ -25,9 +25,9 @@ HV-Analysis + Cross-Analysis
 [横纵交汇](#cross)
 [参考文献](#references)
 
-Part I
+<a id="overview"></a>
 
-研究概述
+## Part I · 研究概述
 
 概念来源、分析框架与核心问题定义
 
@@ -66,7 +66,9 @@ Part I
 
 「DSON深度研究报告」（2026-04-13）—— 分析 DSON（Delta-State CRDT）的墓碑无关设计与 helsing-ai 的工程化路径。
 
-Part II · 纵轴
+<a id="vertical"></a>
+
+## Part II · 纵轴
 
 Diachronic Analysis
 历时性分析：概念的演化脉络
@@ -230,7 +232,9 @@ Cyber Foraging 研究早在 1990 年代就系统性地遇到了"什么状态可�
 | 降级运行（degraded operation） | NotOwned 状态的显式残缺态 | PinState::NotOwned(runtime\_id) |
 | 不可迁移资源（immovable resource） | Pinned-To-One-RT | Codex 进程 ID / PTY 句柄 |
 
-Part III · 横轴
+<a id="horizontal"></a>
+
+## Part III · 横轴
 
 Synchronic Analysis
 共时性分析：当代对照与概念映射
@@ -381,7 +385,9 @@ Raft 共识算法（Ongaro & Ousterhout, 2014）是分布式系统领域最重�
 
 Jujutsu（jj）是 2020 年代兴起的 Git-like 版本控制系统，其 operation log + conflict object 模型对 EDS 的 ConflictObject 设计有直接参照价值（见 `skills/cross-analysis/references/source-jj.md`）。jj 将冲突提升为第一类对象（Conflict Object），与 EDS Governance Layer 的 ConflictObject 概念高度共鸣：两者都是将"无法自动合并的情况"显式建模为独立对象，而非掩盖在模糊的 merge 行为中。
 
-Part IV · 横纵交汇
+<a id="cross"></a>
+
+## Part IV · 横纵交汇
 
 Cross-Section Analysis
 交叉洞察：Pinned/Unpinned 的学术定位与三个未来剧本
@@ -514,9 +520,9 @@ EDS 冻结计划要求"全字段显式覆盖"的 Schema 合同，但当前代码
 
 本报告的核心建议：**在继续扩展同步域（EventLog / TimeBlock）之前，应优先完成 Pin 分类与依赖契约表的正式定义**。否则，EventLog Reconciliation 的实现将面临"哪些字段应该进入 DSON，哪些应该 Pinned"的判断困境——而这正是 Pinned/Unpinned 框架存在的首要意义。
 
-Part V
+<a id="references"></a>
 
-参考来源
+## Part V · 参考来源
 
 本报告引用的所有学术论文、技术文档与代码实现
 

@@ -226,15 +226,15 @@ About 才负责第三层披露，解释这些“为什么”：
 
 - 用户提供的 MiniMax 汇总
 - 官网与竞品分析：
-  - [docs/product/exomind-content-design-principles.md](H:/A137442/Develop/AGI/exomind/docs/product/exomind-content-design-principles.md)
-  - [docs/product/exomind-website-competitive-analysis.md](H:/A137442/Develop/AGI/exomind/docs/product/exomind-website-competitive-analysis.md)
-  - [website/src/i18n/index.ts](H:/A137442/Develop/AGI/exomind/website/src/i18n/index.ts)
+  - [docs/product/exomind-content-design-principles.md](exomind-content-design-principles.md)
+  - [docs/product/exomind-website-competitive-analysis.md](exomind-website-competitive-analysis.md)
+  - [website/src/i18n/index.ts](../../website/src/i18n/index.ts)
 - 产品与架构：
-  - [docs/product/PRD.md](H:/A137442/Develop/AGI/exomind/docs/product/PRD.md)
-  - [docs/architecture/overview.md](H:/A137442/Develop/AGI/exomind/docs/architecture/overview.md)
-  - [docs/architecture/agent-workbench-shared-graph-spec.md](H:/A137442/Develop/AGI/exomind/docs/architecture/agent-workbench-shared-graph-spec.md)
+  - [docs/product/PRD.md](PRD.md)
+  - [docs/architecture/overview.md](../architecture/overview.md)
+  - [docs/architecture/agent-workbench-shared-graph-spec.md](../architecture/agent-workbench-shared-graph-spec.md)
 - 同步与组网：
-  - [docs/specs/sync.md](H:/A137442/Develop/AGI/exomind/docs/specs/sync.md)
-  - [docs/architecture/ECS-communication-stack.md](H:/A137442/Develop/AGI/exomind/docs/architecture/ECS-communication-stack.md)
-  - [docs/architecture/ECS-EDS-discussion-2026-03-04.md](H:/A137442/Develop/AGI/exomind/docs/architecture/ECS-EDS-discussion-2026-03-04.md)
-  - [docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md](H:/A137442/Develop/AGI/exomind/docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md)
+  - [docs/specs/sync.md](../specs/sync.md)
+  - [docs/architecture/ECS-communication-stack.md](../architecture/ECS-communication-stack.md)
+  - [docs/architecture/ECS-EDS-discussion-2026-03-04.md](../architecture/ECS-EDS-discussion-2026-03-04.md)
+  - [docs/plans/2026-04-06-multi-archive-and-collective-settled-decisions.md](../plans/2026-04-06-multi-archive-and-collective-settled-decisions.md)

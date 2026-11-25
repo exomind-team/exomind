@@ -1,7 +1,7 @@
 # timeblock_summary Agent 开发经验与规范
 
 > 来源：2026-06-05 会话实战总结
-> 适用范围：ExoMind Runtime 内置 Agent 开发、Broker API 设计、Session 录制、能量系统
+> 适用范围为旧 Runtime 的内置 Agent、Broker、Session 录制和能量系统。0.6 Beta 的回顾执行依据独立的[模型材料合同](beta-summary-originals.md)。
 
 ---
 

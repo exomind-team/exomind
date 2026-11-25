@@ -1,4 +1,6 @@
-# 多 Worktree 端口配置指南（RT-only）
+# 多 Worktree 端口配置指南（旧 Runtime）
+
+本页的 `EXOMIND_RT_PORT` 等变量用于旧 Runtime。0.6 Beta 的本机 Native 测试采用独立 `EXOMIND_BETA_DATA_DIR`，HTTP listener 默认由系统选择端口，显式配置使用 `EXOMIND_BETA_PORT`。独立 Host 的参数与 UI 联调方式见[Beta Host](../../crates/exomind-beta-host/README.md)与[开发快速上手](quickstart.md)。
 
 ## 背景
 

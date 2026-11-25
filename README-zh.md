@@ -1,194 +1,35 @@
-<div align="center">
+# 外心 ExoMind
 
-# ExoMind
+外心用于在本机记录事件、图片、文件和时间块，让你在另一台已授权的设备上接着使用同一份档案。0.6 Beta 使用 Rust 和 SQLite 持久化记录，通过 React、TypeScript 和 Tauri 2 提供界面及系统能力。
 
-**你的生命成长助手。**
+[English](README.md) · [官网](https://exo-mind.ai) · [公开下载](https://github.com/exomind-team/exomind/releases) · [许可证](LICENSE-zh)
 
-本地优先 · 事件驱动 · AI 赋能 · 全平台
+## 试用 0.6 Beta
 
-[![License: CCOPL-1.0](https://img.shields.io/badge/许可证-CCOPL--1.0-blue.svg)](https://github.com/exomind-team/ccopl)
-[![Build](https://img.shields.io/github/actions/workflow/status/exomind-team/exomind/release.yml?branch=dev&label=构建)](https://github.com/exomind-team/exomind/actions)
-[![Website](https://img.shields.io/badge/官网-exo--mind.ai-orange)](https://exo-mind.ai)
-[![Download](https://img.shields.io/badge/下载-最新版-green)](https://exo-mind.ai/download)
-
-[English](./README.md) · [官网](https://exo-mind.ai) · [下载](https://exo-mind.ai/download)
-
-[![QQ群](https://img.shields.io/badge/QQ群-外心ExoMind-blue?logo=tencentqq)](https://qm.qq.com/q/cmPIiH5BpS)
-[![微信](https://img.shields.io/badge/微信-扫码加群-green?logo=wechat)](./docs/wechat.md)
-
-</div>
-
-> [!WARNING]
-> **尚未到 1.0 版本 — 存在破坏性变更。** ExoMind 正在活跃开发中，每天都有大量更新。API、数据格式和功能可能随时变化。欢迎参与建设！
-
----
-
-## 什么是 ExoMind
-
-ExoMind 是一个基于 Tauri v2 的跨平台个人 AI 助手（Windows/macOS/Linux/Android），聚焦事件日志、时间块与多端同步 — 帮助你记录、反思、成长。
-
-<div align="center">
-<img src="docs/assets/signal-network.png" alt="ExoMind 信号网络" width="800">
-<br>
-<em>信号网络 — Agent、Actor 与信号主题协同工作</em>
-<br><br>
-<img src="docs/assets/voice-input.png" alt="ExoMind 语音输入" width="800">
-<br>
-<em>语音输入 — 实时语音识别与事件日志记录</em>
-</div>
-
-## macOS 首次启动（未签名版）
-
-macOS 安装包目前是**未签名**的（暂无 Apple Developer 账号），首次打开需要多一步 —— 这是 Gatekeeper 拦截，**不是文件真的损坏**。
-
-- **快速解法（Intel，或先试这个）：** 右键 `ExoMind.app` →「打开」，或执行 `sudo xattr -cr "/Applications/ExoMind.app"`。
-- **Apple Silicon（M1–M4），若仍提示「ExoMind 已损坏」：** macOS 强制 arm64 二进制必须带签名，所以做一次 ad-hoc 自签 —— 免费、无需 Apple 账号：
-
-```bash
-sudo codesign --force --deep --sign - "/Applications/ExoMind.app"
-sudo xattr -cr "/Applications/ExoMind.app"
-open "/Applications/ExoMind.app"
-```
-
-完整说明（全部方案 + 排障）：**[docs/macos-install.md](docs/macos-install.md)**。
-
-## 技术栈
-
-| 分类 | 技术 |
-|------|------|
-| 运行时 | Bun |
-| 前端 | React 18 + TypeScript + Vite |
-| 桌面/移动 | Tauri v2 |
-| UI | Tailwind CSS + Radix UI + Lucide |
-| 状态管理 | Zustand |
-| 存储 | PouchDB (IndexedDB) |
-| 路由 | TanStack Router |
-| 测试 | Vitest + Playwright |
+需要安装包时，先核对候选的应用提交、构建批次和目标平台。Beta 验证制品位于对应的 GitHub Actions run，正式发行资产在 GitHub Releases。第一次使用可先建档、记一条文字并附上一张图片，再从另一端找到原文并打开原图。[版本与候选证据](docs/AI-CONTEXT.md) · [首次使用指南](docs/product/beta-first-session.md) · [macOS 安装](docs/macos-install.md)
 
 ## 快速开始
 
-### 环境要求
+安装 Node 和 Bun 后，从仓库根执行：
 
-- Bun（必需）
-- Rust stable toolchain（必需）
-- Node.js 20+（推荐）
-- Windows 构建需要 Visual Studio Build Tools (C++)
-- Android 开发需要 Android SDK (API 34+) + JDK 17
-
-### 安装与运行
-
-```bash
-# 安装依赖
+```sh
 bun install
-
-# Web 开发
-bun run dev
-
-# Tauri 桌面开发
-bun run tauri dev
-
-# Tauri Android 开发
-bun run tauri android dev
+bun run dev --host 127.0.0.1 --port 4300 --strictPort
 ```
 
-### 多实例开发
+打开 `http://127.0.0.1:4300/beta.html?mock=1`。页面上的「内存测试档案」标识对应合成数据，刷新即可重置。要验证重启后的记录，使用独立绝对目录启动真实 Beta Host。[开发快速上手](docs/development/quickstart.md)
 
-```bash
-# 启动桌面端实例
-bun tauri:manager start --name desktop
+| 要做的事 | 从哪里进入 |
+|---|---|
+| 维护 Beta 前端 | [`beta.html`](beta.html) → [Beta 前端维护入口](src/beta/README.md) |
+| 验证记录、时间块和事务回执 | [Beta Core](crates/exomind-core/README.md) |
+| 接入 API、同步设备、取得原件 | [Beta Host](crates/exomind-beta-host/README.md) · [架构导览](docs/architecture/README.md) |
+| 构建桌面或 Android 候选 | [构建指南](BUILD.md) · [验证层级](docs/development/beta-iteration-guards.md) |
+| 维护 Alpha／0.5 | 默认 `index.html` 和 Tauri 默认特性服务于 Alpha／旧 Runtime。[历史架构](docs/architecture/overview.md) |
+| 研究独立迁移样本 | [`next/`](next/README.md) 使用自己的 Node 入口和数据根。 |
 
-# 启动 Android 端实例
-bun tauri:manager start --name phone --target android
+## 贡献与社区
 
-# 查看运行中的实例
-bun tauri:manager list
+维护工作从[文档导航](docs/README.md)、[项目协作规则](AGENTS.md)和[计划索引](docs/plans/README.md)进入。相关项目包括 [ExoMind Cell](https://github.com/exomind-team/exomind-cell) 和 [Wattson](https://github.com/exomind-team/wattson)。
 
-# 查看日志
-bun tauri:manager logs --name desktop --follow
-```
-
-## 常用命令
-
-| 命令 | 说明 |
-|------|------|
-| `bun run dev` | 启动 Vite 开发服务器 |
-| `bun run server` | 启动 PouchDB 同步服务 |
-| `bun run tauri dev` | 桌面端开发 |
-| `bun run tauri android dev` | Android 开发 |
-| `bun run build` | TypeScript + Vite 构建 |
-| `bun run test` | 运行单元测试 |
-| `bun run test:e2e` | 运行 E2E 测试 |
-| `bun run build:tag` | 创建构建标签并触发 CI |
-
-## 环境变量
-
-从 `.env.example` 复制并调整：
-
-```bash
-cp .env.example .env
-```
-
-核心变量：
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `EXOMIND_WEB_PORT` | 自动 | Vite 开发端口（默认 1420） |
-| `EXOMIND_POUCHDB_PORT` | `6984` | 同步服务端口 |
-| `EXOMIND_ASR_PORT` | `1949` | ASR 服务端口 |
-
-完整列表见 `.env.example`。
-
-## 项目结构
-
-```
-exomind/
-├─ src/                 # React 前端与业务逻辑
-├─ src-tauri/           # Tauri Rust 后端与配置
-├─ crates/              # Rust crates (exomind-runtime)
-├─ server/              # PouchDB 同步服务
-├─ scripts/             # PowerShell/Bun 自动化脚本
-├─ tests/               # Vitest + Playwright 测试
-├─ docs/                # 文档（架构、规格、计划）
-└─ website/             # 官网源码
-```
-
-## 文档
-
-> 文档以中文为主，部分内容提供英文版本。
-
-- [文档索引](docs/README.md) — 全部文档导航
-- [macOS 安装说明](docs/macos-install.md) — 未签名版首次启动 & ad-hoc 自签
-- [开发日志](https://exomind-team.github.io/exomind-devlog/)（中文 · AI 生成 · 实验性）
-- [架构概览](docs/architecture/overview.md) — 系统架构设计
-- [产品需求](docs/product/PRD.md) — 产品需求文档
-- [产品路线图](docs/product/roadmap.md) — 版本规划
-- [开发指南](CLAUDE.md) — 开发规范与工作流
-- [脚本指南](scripts/README.md) — 脚本使用说明
-- [Git 工作流](docs/development/git-spec.md) — Git 分支与提交规范
-
-## 构建与发布
-
-```bash
-# 日常构建（自动生成标签，上传到 R2）
-bun run build:tag
-
-# 正式发版
-git tag release/v0.3.3 && git push origin release/v0.3.3
-```
-
-## 社区
-
-| 平台 | 链接 |
-|------|------|
-| **QQ 群** | [外心 ExoMind 用户交流群](https://qm.qq.com/q/cmPIiH5BpS) |
-| **微信** | [扫码加群](./docs/wechat.md) |
-
-## 贡献
-
-欢迎参与贡献！请阅读 [CLAUDE.md](CLAUDE.md) 了解开发规范和工作流程。
-
-## 许可证
-
-本项目采用[贡献者集体所有制公共许可证 v1.0 (CCOPL-1.0)](https://github.com/exomind-team/ccopl)。
-
-详见 [LICENSE](LICENSE) 和 [LICENSE-zh](LICENSE-zh)。
+[QQ 交流群](https://qm.qq.com/q/cmPIiH5BpS) · [微信](docs/wechat.md) · [CCOPL-1.0](LICENSE) · [中文许可证](LICENSE-zh)

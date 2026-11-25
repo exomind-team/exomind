@@ -1,6 +1,6 @@
 # ExoMind RT 外部接入契约草案
 
-> 状态：Draft
+> 旧 Runtime 的 `/act` 接入设计草案。0.6 Beta 使用档案级 grant 和 `/beta/v1`，实际接入从[Agent Skills](agent-skills.md)与[授权合同](beta-agent-grants.md)开始。
 >
 > 目的：
 > - 收敛外心 RT 的对外功能定位

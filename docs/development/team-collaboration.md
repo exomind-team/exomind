@@ -190,7 +190,7 @@
 ## 相关文档
 
 - [多 Agent 团队调度经验](./team-scheduling.md)
-- [Ralph Loop 工作流程](../../CLAUDE.md#工作流程)
+- [仓库协作与发布规则](../../AGENTS.md#协作与发布行为)
 
 ---
 

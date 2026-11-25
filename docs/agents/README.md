@@ -5,7 +5,8 @@
 ## 目录职责
 
 - 源码工作目录里的开发 Agent 合同：项目根目录 [AGENTS.md](../../AGENTS.md)
-- 用户侧 / runtime agent 契约： [runtime-agent-contract.md](runtime-agent-contract.md)
+- 用户侧 / runtime agent 的行为契约见 [runtime-agent-contract.md](runtime-agent-contract.md)
+- 为外部 Agent 接入 0.6 Beta 档案，阅读[公共 Skill 使用入口](../development/agent-skills.md)与[档案级授权](../development/beta-agent-grants.md)
 - 专项 agent 文档：例如 [Review Agent 索引](../../agents/review-agent/references/index.md)
 
 ## 与 `/agents`、`/skills` 的关系

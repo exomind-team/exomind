@@ -2,7 +2,7 @@
 
 > **合并自**: SPEC-304（用户认证模块重构，19K）+ SPEC-302（密码哈希模块，15K）
 >
-> 本文档是 ExoMind 用户认证模块的权威规格，涵盖认证架构重构、密码哈希实现、Service 层设计与验收标准。
+> 本规格记录旧用户登录／本地 profile 的设计与验收。0.6 Beta 的数据作用域、设备成员与外部 Agent 权限从[架构导览](../architecture/README.md)和[Agent 授权合同](../development/beta-agent-grants.md)查阅。
 
 ---
 

@@ -1,6 +1,6 @@
 # ExoMind Vision
 
-> 产品层宣言。源码工作目录 Agent 的执行合同见项目根目录 [AGENTS.md](../../AGENTS.md)。
+> 产品层宣言。实际体验见[第一次在 Beta 记一件事](beta-first-session.md)，源码协作约定见[项目规则](../../AGENTS.md)。
 
 ## 定位
 

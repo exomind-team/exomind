@@ -1,6 +1,6 @@
 # 时间块 RT 收尾 + 任务联动状态复核
 
-> **For Claude:** 开工前先复核当前 GitHub issue 状态与代码现状，尤其不要先验认定 `#761` 的根因就是数组 append 写错。
+> 旧 Runtime 时间块与任务联动的收尾计划，证据对应下列历史 issue。0.6 Beta 维护者从[计划索引](README.md)定位待办及其所用的候选。
 > **Issue**: #749（仅本轮处理 timeblock 子集）, #745
 > **Verify / Sync State**: #735
 > **Related / Needs Recheck**: #761

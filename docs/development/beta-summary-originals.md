@@ -1,6 +1,6 @@
 # Beta 回顾原件与本机外发同意
 
-状态：源码已接通，并通过本机 Host、HTTP、Native 和 Web 验证；后继候选尚待冻结验收。依据是已批准决定 Q27：文字自动，原件按需选择给模型。
+根据 Q27，文字进入回顾材料，原件由用户按需选择并授权外发。本页记录本机 Host、HTTP、Native 和 Web 的实现与验证范围，制品身份查[版本状态](../AI-CONTEXT.md)。
 
 Core 的 selection、冻结材料、来源头和 artifact 保持原合同。选件 ID 与输出中记录的
 `read_original_ids` 是可复制事实；provider 配置与向它发送原件的同意属于本机 Host。

@@ -1,6 +1,6 @@
 # Today Planner API（今日计划器接口）
 
-本文件记录本轮 `Today Planner / 今日计划` 的 runtime API 合同。
+本文件记录旧 Runtime 的 `Today Planner / 今日计划` 接口。0.6 Beta 的服务、档案与对外 API 可从[架构导览](../architecture/README.md)查阅。
 
 本轮范围只覆盖：
 
