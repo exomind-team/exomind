@@ -4,15 +4,15 @@
 
 ## 当前阶段
 
-`dev-0.6` 的日用反馈基线是 **β26**，开发线程已获准推进 **β27** 的紧要日用功能。**β28** 的架构与代码简化处于提案阶段，未来的 β28 Agent 负责按实际基线复核后提请用户审阅。产品优先级、32 条批注及验收条件由[批注后迭代计划](plans/2026-11-25-beta-iteration-after-user-review.md)维护。
+`dev-0.6` 的日用反馈基线是 **β26**，开发线程已获准推进 **β27** 的紧要日用功能。**β28** 的架构与代码简化处于提案阶段，未来的 β28 Agent 负责按实际基线复核后提请用户审阅。产品优先级、32 条批注及验收条件由[批注后迭代计划](plans/2026-11-25-beta-iteration-after-user-review.md)维护。β27 第一轮已收束并暂停，等待实测；可测构建 #31 的应用源码是 `14c34093`，第二批源码 `a47974cf` 尚未出包。见[第一轮实测清单](plans/2026-11-25-beta27-round1-closeout.md)。
 
 | 核对对象 | 可复查的版本 | 证据能回答的问题 |
 |---|---|---|
 | β26 日用基线 | `0.6.0-beta26`，应用源码 `87d510bc`，构建请求 `7438a0ae`，Android versionCode `6026` | 四平台构建和该批次交付记录。[构建 #27](https://github.com/exomind-team/exomind/actions/runs/45320820956) · [冻结基线](plans/2026-11-24-beta27-feedback-investigation.md#β26-冻结基线) |
 | β27 首个焦点修复 | 应用源码 `f0ab0fbf`，构建请求 `7cfa90f8` | 四平台构建，Windows EXE 已按该批次的来源、build-info 和 SHA-256 核验交付。[构建 #28](https://github.com/exomind-team/exomind/actions/runs/45537104031) |
 | β27 键盘更新候选 | `0.6.0-beta27`，应用源码 `5e704ec8`，构建请求 `ac682eab`，Android versionCode `6027` | Windows x64、macOS arm64、Linux x64、Android 构建均成功。同一构建请求的源码 CI #101 失败，后续 `4a241ceb` 的 #102 通过。设备验收按实际制品记录。[构建 #29](https://github.com/exomind-team/exomind/actions/runs/45548377937) · [源码 CI #101](https://github.com/exomind-team/exomind/actions/runs/45548377895) · [#102](https://github.com/exomind-team/exomind/actions/runs/45553925101) |
-| β27 后续源码 | `e5c61220` 支持读取剪贴板期间预发送，`dfb2b73c` 接入从事件附件分享已校验原件 | 两项改动分别通过源码 CI #103 和 #104。以上改动均晚于构建 #29 所选源码。系统分享、剪贴板和软键盘／IME 的设备结果按制品核对。[源码 CI #103](https://github.com/exomind-team/exomind/actions/runs/45588938602) · [源码 CI #104](https://github.com/exomind-team/exomind/actions/runs/45596484811) · [分层验收](development/beta-iteration-guards.md) |
-| β27 第二批日用改动 | 当前源码 `a47974cf`，源码合同 CI `45624555297`；构建验证 `45624168457`（工作流提交 `2d4e166f`，构建锁应用源码 `14c34093`，仅差 `scrollIntoView` 保护） | 完整 Beta UI 回归、消息就地定位/标签/引用 Markdown、时间块名称+备注与提醒重试、运行范围持久化、外置监控 Skill 的源码证据。四平台构建成功；设备验收仍按宿主单列。[源码合同](https://github.com/exomind-team/exomind/actions/runs/45624555297) · [构建验证](https://github.com/exomind-team/exomind/actions/runs/45624168457) |
+| β27 第一轮可测构建 | 应用源码 `14c34093`；构建验证 `45624168457`（工作流提交 `2d4e166f`，制品名带该 SHA） | 图片分享（`dfb2b73c`）、预发送（`e5c61220`）、时间块结束提示与通知文案（`8077d0f7`）、快捷退出作用域（`14c34093`）、键盘 fallback（`5e704ec8`）。四平台构建成功；设备待验。[构建 #31](https://github.com/exomind-team/exomind/actions/runs/45624168457) · [源码 CI #103](https://github.com/exomind-team/exomind/actions/runs/45588938602) · [#104](https://github.com/exomind-team/exomind/actions/runs/45596484811)
+| β27 第二批源码（尚未出包） | 源码 `a47974cf`，源码合同 CI `45624555297` | 消息就地定位/标签/引用 Markdown（`401d8d7e`）、时间块名称+备注/提醒重试（`a42ea51f`）、运行范围持久化（`e95083a6`）、别名测试（`27e22949`）、`scrollIntoView` 保护（`a47974cf`）。只有源码证据；待下一候选出包后再做设备验收。[源码合同](https://github.com/exomind-team/exomind/actions/runs/45624555297) · [分层验收](development/beta-iteration-guards.md)
 
 源码版本看 [Beta 配置](../src-tauri/tauri.beta.conf.json)，请求打包的应用提交看[构建锁](../.github/beta-build-candidate.json)，已构建的包以对应 run 的产物及 build-info 为准。日用验收看具体设备、操作和回读。公开分发单独查 [GitHub Releases](https://github.com/exomind-team/exomind/releases)：在上述核对日，Latest 标记为 `v0.4.23`，`v0.5.1` 标记为 prerelease，β27 通过 Actions 分发验证制品。跨批次更新时应同时核对这四类证据。
 

@@ -6,6 +6,7 @@
 
 | 用途 | 阅读材料 |
 |---|---|
+| β27 第一轮收束与实测 | [可测构建 #31、实测清单与暂停](2026-11-25-beta27-round1-closeout.md) · [整体包与 β28 计划](2026-11-25-beta-iteration-after-user-review.md) |
 | β27 日用迭代 | [交付顺序、责任与设备验收](2026-11-25-beta-iteration-after-user-review.md) · [问题调查和原始验收条件](2026-11-24-beta27-feedback-investigation.md) |
 | 核对需求出处 | [A01–A32 的主题与映射](2026-11-25-beta-iteration-after-user-review.md) · [反馈索引与覆盖范围](2026-11-25-beta27-beta28-roadmap-feedback-synthesis.md) |
 | β28 架构提案 | [同步、档案、界面与 Agent 接入的研究底稿](2026-11-25-beta28-architecture-decisions.md) · [代码简化审阅计划](2026-11-25-beta28-maintainer-simplification.md) |
