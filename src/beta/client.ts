@@ -6,6 +6,7 @@ import { nativeTimeblockFeatures, webTimeblockFeatures } from './timeblocks-clie
 import type { BetaTimeblockClient, BetaTimelinePage, BetaTimelinePeriodQuery } from './timeblocks-types';
 import { nativeOriginalExports, type BetaOriginalExportsClient } from './original-export';
 import { nativeOriginalOpener, type BetaOriginalOpener } from './original-open';
+import { nativeOriginalSharer, type BetaOriginalSharer } from './original-share';
 import { nativeOriginalAcquisition, type BetaOriginalAcquisitionClient } from './original-acquisition';
 import {nativeSummaryModelConfigurationService,webSummaryModelConfigurationService} from './summary-model-client';
 import type {SummaryModelConfigurationService} from './summary-model-config';
@@ -67,6 +68,7 @@ export interface BetaClient {
   userRangeExports?: UserRangeExportClient;
   originalExports?: BetaOriginalExportsClient;
   originalOpener?: BetaOriginalOpener;
+  originalSharer?: BetaOriginalSharer;
   originals?: BetaOriginalClient;
   timeblocks?: BetaTimeblockClient;
   recordOrganization?: BetaRecordOrganizationClient;
@@ -162,6 +164,7 @@ function identityGuard() {
 }
 export function nativeBetaClient(call: NativeInvoke = invoke): BetaClient {
   const check = identityGuard();
+  const androidSystemShare = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
   async function checked<T>(name: string, args?: Record<string, unknown>): Promise<T> {
     check(await call('beta_status'));
     return call<T>(name, args);
@@ -169,6 +172,7 @@ export function nativeBetaClient(call: NativeInvoke = invoke): BetaClient {
   return {
     serviceScope: 'tauri-native-beta-v1',
     originalOpener: nativeOriginalOpener(checked),
+    originalSharer: androidSystemShare ? nativeOriginalSharer(checked, call) : undefined,
     summaries:nativeSummaryClient(call,async()=>check(await call('beta_status'))),
     timelineEvent:nativeTimelineEventReader(call,async()=>check(await call('beta_status'))),
     correctionSource:nativeCorrectionSourceReader(call,async()=>check(await call('beta_status'))),

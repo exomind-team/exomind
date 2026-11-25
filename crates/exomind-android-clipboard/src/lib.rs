@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "android")]
 use tauri::Manager;
-use tauri::{Runtime, plugin::TauriPlugin};
+use tauri::{plugin::TauriPlugin, Runtime};
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,4 +116,39 @@ pub async fn open_file<R: Runtime>(
     })
     .await
     .map_err(|_| "系统打开中断".to_string())?
+}
+
+/// Opens Android's Sharesheet for a Native-verified private original copy.
+#[cfg(target_os = "android")]
+pub async fn share_file<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    path: String,
+    media_type: String,
+) -> Result<(), String> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Args {
+        path: String,
+        media_type: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Response {
+        chooser_opened: bool,
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = app
+            .state::<AndroidClipboard<R>>()
+            .0
+            .run_mobile_plugin::<Response>("shareFile", Args { path, media_type })
+            .map_err(|_| "系统分享选择器未能打开".to_string())?;
+        if response.chooser_opened {
+            Ok(())
+        } else {
+            Err("系统未接受分享请求".to_string())
+        }
+    })
+    .await
+    .map_err(|_| "系统分享请求中断".to_string())?
 }

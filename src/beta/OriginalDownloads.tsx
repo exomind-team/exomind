@@ -1,6 +1,6 @@
 import { Tooltip } from '@/components/ui/tooltip';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Download, FileText, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronUp, Download, FileText, RefreshCw, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { BetaClient } from './client';
 import { BetaApiError } from './api-error';
@@ -8,9 +8,10 @@ import { errorMessage } from './drafts';
 import { betaUuid } from './initialization';
 import { exportOriginalDownload, MAX_BASIC_DOWNLOAD_BYTES } from './original-download';
 import type { BetaOriginal } from './original-types';
+import type { BetaOriginalShareOutcome } from './original-share';
 import { originalAcquisitionError, originalTransferActive, sameOriginal, type BetaOriginalSources, type BetaOriginalTransferStatus } from './original-acquisition';
 import { collectOriginalDownload } from './original-download';
-import { BetaImagePreview } from './BetaImagePreview';
+import { BetaImagePreview, canPreviewImage, MAX_IMAGE_PREVIEW_BYTES } from './BetaImagePreview';
 import { BetaMediaPreview } from './BetaMediaPreview';
 import { originalExportTasks } from './original-export-tasks';
 import { FieldSelect } from '@/components/ui/field-select';
@@ -61,6 +62,7 @@ export function OriginalDownloads({ client, profileId, originals, deviceId = 'lo
 }
 
 type Lifetime={active:boolean};
+type ShareFlight={requestId:string;life:Lifetime;promise:Promise<BetaOriginalShareOutcome>};
 function OriginalAttachment({client,deviceId,visible,profileId,original,exporting,onDownload}:{client:BetaClient;deviceId:string;visible:boolean;profileId:string;original:BetaOriginal;exporting:boolean;onDownload:()=>void}){
   const acquisition=client.originalAcquisition;
   const deviceNames=useBetaDeviceNames(deviceId);
@@ -68,11 +70,14 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
   const [lifecycleRevision,setLifecycleRevision]=useState(0);
   const [statusError,setStatusError]=useState(false);
   const [expanded,setExpanded]=useState(false);
+  const [detailsExpanded,setDetailsExpanded]=useState(false);
   const [sources,setSources]=useState<BetaOriginalSources|null>(null);
   const [source,setSource]=useState('');const [sourcesBusy,setSourcesBusy]=useState(false);
   const [fetching,setFetching]=useState(false);const [cancelling,setCancelling]=useState(false);
   const [error,setError]=useState('');const [notice,setNotice]=useState('');
   const [opening,setOpening]=useState(false);const openRequest=useRef<object|null>(null);
+  const [sharing,setSharing]=useState(false);const [shareCancelBusy,setShareCancelBusy]=useState(false);
+  const shareFlight=useRef<ShareFlight|null>(null);
   const life=useRef<Lifetime>({active:false});const checkSequence=useRef(0);
   const operation=useRef<{id:string;life:Lifetime}|null>(null);
   const cancelFlight=useRef<object|null>(null);
@@ -88,10 +93,14 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
   }
   useEffect(()=>{
     const owner={active:true};life.current=owner;operation.current=null;cancelFlight.current=null;
-    setStatus(null);setStatusError(false);setExpanded(false);setSources(null);setSource('');setSourcesBusy(false);setFetching(false);setCancelling(false);setError('');setNotice('');openRequest.current=null;setOpening(false);
+    setStatus(null);setStatusError(false);setExpanded(false);setDetailsExpanded(false);setSources(null);setSource('');setSourcesBusy(false);setFetching(false);setCancelling(false);setError('');setNotice('');openRequest.current=null;setOpening(false);setSharing(false);setShareCancelBusy(false);shareFlight.current=null;
     // Fetch jobs belong to the Host. Leaving this row stops observation, not
     // the durable partial transfer; explicit Cancel targets its exact UUID.
-    return()=>{owner.active=false;++checkSequence.current;};
+    return()=>{
+      owner.active=false;++checkSequence.current;
+      const pending=shareFlight.current;
+      if(pending?.life===owner){shareFlight.current=null;void client.originalSharer?.cancel(pending.requestId).catch(()=>{});}
+    };
   },[client,acquisition,deviceId,profileId,original.original_id,original.sha256,original.byte_length,original.file_name,original.media_type]);
   useEffect(()=>{if(visible)void inspect(life.current);},[client,acquisition,deviceId,profileId,original.original_id,original.sha256,original.byte_length,original.file_name,original.media_type,visible]);
   useEffect(()=>{
@@ -149,6 +158,40 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
     finally{if(current(owner)&&cancelFlight.current===flight){cancelFlight.current=null;setCancelling(false);}}
   }
   const readable=!acquisition||!!status&&!statusError&&status.availability==='complete'&&!running;
+  function beginNativeShare():Promise<BetaOriginalShareOutcome>{
+    const sharer=client.originalSharer;
+    if(!sharer)return Promise.reject(new BetaApiError('share_unavailable','当前环境没有系统分享入口；可下载原件后再分享'));
+    if(!readable)return Promise.reject(new BetaApiError('original_not_ready','本机原件尚未完整校验，暂不能分享'));
+    const owner=life.current;const pending=shareFlight.current;
+    if(pending&&pending.life===owner)return pending.promise;
+    let requestId:string;
+    try{requestId=betaUuid();}catch(failure){return Promise.reject(failure);}
+    const promise=Promise.resolve().then(()=>sharer.share(profileId,original.original_id,requestId));
+    const flight={requestId,life:owner,promise};shareFlight.current=flight;setSharing(true);setShareCancelBusy(false);
+    const finish=()=>{if(current(owner)&&shareFlight.current===flight){shareFlight.current=null;setSharing(false);setShareCancelBusy(false);}};
+    void promise.then(finish,finish);
+    return promise;
+  }
+  async function shareOriginal(){
+    if(!client.originalSharer||!readable||sharing)return;
+    const owner=life.current;setError('');setNotice('');
+    try{
+      const outcome=await beginNativeShare();if(!current(owner))return;
+      setNotice(outcome==='system_chooser_opened'?'已打开系统分享；接收应用尚未确认发送':'分享准备已取消；原件保持不变');
+    }catch(failure){if(current(owner))setError(errorMessage(failure));}
+  }
+  async function cancelSharePreparation(){
+    const flight=shareFlight.current,sharer=client.originalSharer;
+    if(!flight||!sharer||shareCancelBusy)return;
+    const owner=flight.life;setShareCancelBusy(true);setError('');
+    try{
+      const accepted=await sharer.cancel(flight.requestId);
+      if(!current(owner)||shareFlight.current!==flight)return;
+      setNotice(accepted?'已请求取消分享准备；正在确认本机状态':'分享已进入系统阶段；如选择器已打开，请在系统界面取消');
+    }catch(failure){if(current(owner)&&shareFlight.current===flight)setError(errorMessage(failure));}
+    finally{if(current(owner)&&shareFlight.current===flight)setShareCancelBusy(false);}
+  }
+  async function shareFromPreview():Promise<BetaOriginalShareOutcome>{return beginNativeShare();}
   async function openOriginal(){
     if(!client.originalOpener||!readable||openRequest.current)return;
     const owner=life.current,request={};openRequest.current=request;setOpening(true);setError('');setNotice('');
@@ -160,6 +203,7 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
   const transferLabel=status?.transfer_state==='verifying'?'正在校验原件…':status?.transfer_state==='confirming'?'本机已校验，正在确认传输…':'正在获取原件…';
   const statusFailure=!running&&status?.last_error_code?originalAcquisitionError(status.last_error_code):'';
   const mediaFormat = resolveMediaPreviewFormat(original.file_name, original.media_type);
+  const compactImagePreview = canPreviewImage(original.media_type) && original.byte_length > 0 && original.byte_length <= MAX_IMAGE_PREVIEW_BYTES;
   const canDownloadOriginal = !!client.originalExports || original.byte_length <= MAX_BASIC_DOWNLOAD_BYTES;
   const fallbackActionMessage = client.originalOpener
     ? canDownloadOriginal
@@ -171,13 +215,21 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
   const diagnostics = (client.originalAcquisition||client.originalAutoDiagnostics)
     ? <OriginalTransferDiagnostics client={client} profileId={profileId} original={original} visible={visible} />
     : null;
+  const shareAction=client.originalSharer
+    ? sharing
+      ? <Button type="button" variant="ghost" size="sm" aria-label={`取消分享准备 ${original.file_name}`} disabled={shareCancelBusy} onClick={()=>{void cancelSharePreparation();}}>{shareCancelBusy?'正在取消…':'取消分享准备'}</Button>
+      : <Button type="button" variant="ghost" size="sm" aria-label={`分享 ${original.file_name}`} disabled={!readable||exporting||opening} onClick={()=>{void shareOriginal();}}><Share2 size={14} aria-hidden="true"/>分享</Button>
+    : null;
   return <div className="space-y-2 rounded-2xl border border-border-page bg-surface px-3 py-2">
-    {readable && <BetaImagePreview identity={`${deviceId}:${profileId}:${original.original_id}:${original.sha256}`} sourceScope={client} visible={visible} inline fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={() => collectOriginalDownload(client, profileId, original)} />}
-    <div className="flex items-center gap-2"><Tooltip content={client.originalOpener?readable?'使用系统打开':'自动获取原件后用系统打开':'系统打开需要独立应用；仍可下载原件'}><Button size="icon" variant="ghost" className="shrink-0" aria-label={`打开 ${original.file_name}`}  disabled={!client.originalOpener||!readable&&!acquisition?.fetchAny||opening||running} onClick={()=>{void(readable?openOriginal():findOriginal(true));}}><FileText size={16} className="text-brand-accent" aria-hidden="true" /></Button></Tooltip>
+    {compactImagePreview && <BetaImagePreview identity={`${deviceId}:${profileId}:${original.original_id}:${original.sha256}`} sourceScope={client} visible={visible} inline fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={() => collectOriginalDownload(client, profileId, original)} onShare={client.originalSharer?shareFromPreview:undefined} shareDisabled={!readable||sharing||exporting} />}
+    {(compactImagePreview||shareAction)&&<div className="flex flex-wrap items-center gap-1">{shareAction}{compactImagePreview&&<Button type="button" variant="ghost" size="sm" className="justify-start" aria-label={`${detailsExpanded?'收起':'展开'}文件信息 ${original.file_name}`} aria-expanded={detailsExpanded} onClick={()=>setDetailsExpanded(value=>!value)}>
+      {detailsExpanded?<ChevronUp size={14}/>:<ChevronDown size={14}/>}文件信息
+    </Button>}</div>}
+    {(!compactImagePreview || detailsExpanded) && <div className="flex items-center gap-2"><Tooltip content={client.originalOpener?readable?'使用系统打开':'自动获取原件后用系统打开':'系统打开需要独立应用；仍可下载原件'}><Button size="icon" variant="ghost" className="shrink-0" aria-label={`打开 ${original.file_name}`}  disabled={!client.originalOpener||!readable&&!acquisition?.fetchAny||opening||running} onClick={()=>{void(readable?openOriginal():findOriginal(true));}}><FileText size={16} className="text-brand-accent" aria-hidden="true" /></Button></Tooltip>
       {readable&&isTextPreviewCandidate(original.file_name,original.media_type)&&<BetaTextPreview identity={JSON.stringify([deviceId,profileId,original.original_id,original.sha256,original.byte_length])} sourceScope={client} visible={visible} fileName={original.file_name} mediaType={original.media_type} byteLength={original.byte_length} load={()=>collectOriginalDownload(client,profileId,original)}/>}
       <div className="min-w-0 flex-1"><p className="break-all text-xs font-medium">{original.file_name}</p><p className="text-[10px] text-muted">{formatBytes(original.byte_length)}</p></div>
       <Button variant="ghost" size="icon" aria-label={`下载 ${original.file_name}`} disabled={exporting||!readable||!client.originalExports&&original.byte_length>MAX_BASIC_DOWNLOAD_BYTES} onClick={onDownload}><Download size={14}/></Button>
-    </div>
+    </div>}
     {readable && mediaFormat?.kind === 'audio' && <BetaMediaPreview
       identity={JSON.stringify([deviceId, profileId, original.original_id, original.sha256, original.byte_length, original.file_name, original.media_type])}
       sourceScope={client}
@@ -191,6 +243,7 @@ function OriginalAttachment({client,deviceId,visible,profileId,original,exportin
     />}
     <BetaOriginalLifecyclePanel profileId={profileId} originalId={original.original_id} fileName={original.file_name} deviceLabel={deviceNames.label} visible={visible} revision={lifecycleRevision} />
     {opening&&<p role="status" className="text-xs text-muted">正在准备系统打开…</p>}
+    {sharing&&<p role="status" className="text-xs text-muted">正在校验并准备系统分享；原件不会被修改。</p>}
     {acquisition&&<div className="mt-1 space-y-1 text-xs text-muted"><p role="status">{label}</p>
       {running&&<><p role="status">{transferLabel}</p>{status&&<Progress className="h-1 w-full" aria-label={`原件获取进度 ${original.file_name}`} value={status.next_offset} max={Math.max(1,status.byte_length)}/>}</>}
       <div className="flex flex-wrap items-center gap-1">

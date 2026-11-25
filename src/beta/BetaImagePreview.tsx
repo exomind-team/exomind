@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Image as ImageIcon } from 'lucide-react';
+import { Image as ImageIcon, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { readFileSource, type FileSource } from './file-source-store';
 import { ORIGINAL_CHUNK_BYTES } from './original-types';
 import { errorMessage } from './drafts';
+import type { BetaOriginalShareOutcome } from './original-share';
 
 export const MAX_IMAGE_PREVIEW_BYTES = 16 * 1024 * 1024;
 const MAX_IMAGE_PREVIEW_PIXELS = 16 * 1024 * 1024;
@@ -86,19 +87,29 @@ let previewQueue: Promise<unknown> = Promise.resolve();
 function enqueuePreview<T>(read: () => Promise<T>): Promise<T> {
   const result = previewQueue.then(read); previewQueue = result.catch(() => {}); return result;
 }
-type PreviewState = { identity: string; scope?: object; status: 'idle' | 'loading' | 'ready' | 'error'; url?: string; error?: string };
+type PreviewState = { identity: string; scope?: object; status: 'idle' | 'loading' | 'ready' | 'error'; url?: string; blob?: Blob; error?: string };
+type FileShareNavigator = Navigator & {
+  share?: (data: { title: string; text?: string; files: File[] }) => Promise<void>;
+  canShare?: (data?: { files?: File[] }) => boolean;
+};
 
 /** Identity includes device/profile and immutable file identity. Inline reads
  * require viewport attention; explicit previews have a separate byte budget. */
-export function BetaImagePreview({ identity, fileName, mediaType, byteLength, load, thumbnail = false, inline = false, visible = true, sourceScope }: {
+export function BetaImagePreview({ identity, fileName, mediaType, byteLength, load, thumbnail = false, inline = false, visible = true, sourceScope, onShare, shareDisabled = false }: {
   identity: string; fileName: string; mediaType: string; byteLength: number;
   load: () => Promise<FileSource | null>; thumbnail?: boolean; inline?: boolean; visible?: boolean; sourceScope?: object;
+  /** When provided, the owning original row performs the same Native share action. */
+  onShare?: () => Promise<BetaOriginalShareOutcome>;
+  shareDisabled?: boolean;
 }) {
   const loader = useRef(load); loader.current = load;
   const region = useRef<HTMLDivElement>(null); const trigger = useRef<HTMLButtonElement>(null);
   const [nearViewport, setNearViewport] = useState(false);
   const [open, setOpen] = useState(false); const [revision, setRevision] = useState(0);
   const [state, setState] = useState<PreviewState>({ identity, status: 'idle' });
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState('');
+  const [shareNotice, setShareNotice] = useState('');
   useEffect(() => {
     if (!inline || !visible || !region.current || typeof IntersectionObserver === 'undefined') { setNearViewport(false); return; }
     let active = true;
@@ -117,19 +128,53 @@ export function BetaImagePreview({ identity, fileName, mediaType, byteLength, lo
         if (!active) return;
         const blob = await previewBlob(await read(), mediaType, byteLength, () => active, automatic);
         if (!active) return;
-        url = URL.createObjectURL(blob); setState({ identity, scope: sourceScope, status: 'ready', url });
+        url = URL.createObjectURL(blob); setState({ identity, scope: sourceScope, status: 'ready', url, blob });
       }).catch(failure => { if (active) setState({ identity, scope: sourceScope, status: 'error', error: errorMessage(failure) }); });
     }
     return () => { active = false; if (url) URL.revokeObjectURL(url); };
     // Opening an already decoded inline image reuses its URL. An explicit
     // retry increments revision and may use the larger manual-read budget.
   }, [identity, sourceScope, mediaType, byteLength, requested, supported, revision]);
-  useEffect(() => { setOpen(false); }, [identity, sourceScope, visible]);
+  useEffect(() => {
+    setOpen(false); setShareBusy(false); setShareError(''); setShareNotice('');
+  }, [identity, sourceScope, visible]);
   if (!canPreviewImage(mediaType)) return null;
   const bound = state.identity === identity && state.scope === sourceScope && visible ? state : null;
   const imageUrl = bound?.status === 'ready' ? bound.url : undefined;
   const failImage = () => setState(current => current.identity === identity && current.scope === sourceScope && current.url === imageUrl
     ? { identity, scope: sourceScope, status: 'error', error: '图片无法解码；原件保留，可重新预览或导出' } : current);
+  async function shareImage() {
+    if (!bound?.blob || shareBusy || shareDisabled) return;
+    setShareError(''); setShareNotice('');
+    setShareBusy(true);
+    try {
+      if (onShare) {
+        const outcome = await onShare();
+        setShareNotice(outcome === 'system_chooser_opened'
+          ? '已打开系统分享；接收应用尚未确认发送'
+          : '分享准备已取消；原件保持不变');
+        return;
+      }
+      const shareApi = navigator as FileShareNavigator;
+      const file = new File([bound.blob], fileName, { type: mediaType });
+      const payload = { title: fileName, text: '分享外心图片原件', files: [file] };
+      if (!shareApi.share) {
+        setShareError('当前环境不支持系统分享；可先下载原件，再从下载位置分享到微信或其他应用');
+        return;
+      }
+      if (shareApi.canShare && !shareApi.canShare({ files: [file] })) {
+        setShareError('当前系统不接受图片文件分享；可先下载原件后再分享');
+        return;
+      }
+      await shareApi.share(payload);
+      if (visible) setShareNotice('已交给系统分享');
+    } catch (failure) {
+      if ((failure as { name?: string })?.name === 'AbortError') setShareNotice('已取消分享');
+      else setShareError(errorMessage(failure));
+    } finally {
+      setShareBusy(false);
+    }
+  }
   return <div ref={region} className="space-y-1">
     <Button ref={trigger} type="button" variant="ghost" size={thumbnail ? 'icon' : 'sm'} className={inline ? 'h-auto min-h-28 w-full overflow-hidden rounded-xl border border-input bg-surface p-0' : thumbnail ? 'h-16 w-16 overflow-hidden rounded-xl border border-input bg-surface p-0' : 'h-8 text-xs'}
       aria-label={`预览图片 ${fileName}`} disabled={!supported} onClick={() => { setOpen(true); if (bound?.status !== 'ready') setRevision(value => value + 1); }}>
@@ -144,7 +189,12 @@ export function BetaImagePreview({ identity, fileName, mediaType, byteLength, lo
       {imageUrl ? <img src={imageUrl} alt={fileName} className="mx-auto max-h-[70dvh] max-w-full object-contain" onError={failImage} />
         : bound?.status === 'error' ? <p role="alert" className="text-sm text-destructive">{bound.error}</p>
           : <p role="status" className="text-sm text-muted">正在读取本机图片…</p>}
-      {bound?.status === 'error' && <Button variant="outline" onClick={() => setRevision(value => value + 1)}>重新预览</Button>}
+      <div className="flex flex-wrap gap-2">
+        {imageUrl && <Button type="button" aria-label={`分享图片 ${fileName}`} disabled={shareBusy||shareDisabled} onClick={() => { void shareImage(); }}><Share2 size={14}/>{shareBusy||shareDisabled ? '正在准备分享…' : '分享'}</Button>}
+        {bound?.status === 'error' && <Button variant="outline" onClick={() => setRevision(value => value + 1)}>重新预览</Button>}
+      </div>
+      {shareError && <p role="alert" className="text-sm text-destructive">{shareError}</p>}
+      {shareNotice && <p role="status" className="text-sm text-secondary">{shareNotice}</p>}
     </DialogContent></Dialog>
   </div>;
 }

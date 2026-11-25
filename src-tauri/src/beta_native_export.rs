@@ -217,6 +217,35 @@ fn map_open_copy_failure(error: Failure) -> Failure {
         _ => error,
     }
 }
+fn share_copy_io_failure() -> Failure {
+    failure(
+        "share_copy_failed",
+        "分享副本准备失败；本机原件未修改，可重试或下载后分享",
+    )
+}
+fn map_share_copy_failure(error: Failure) -> Failure {
+    match error.code {
+        "open_copy_failed" => share_copy_io_failure(),
+        "open_copy_incomplete" => failure(
+            "share_copy_incomplete",
+            "分享副本完整性校验未完成；本机原件未修改，请重试",
+        ),
+        "export_cancelled" => failure(
+            "share_interrupted",
+            "分享准备已中断；本机原件未修改，请重试",
+        ),
+        _ => error,
+    }
+}
+fn map_share_begin_failure(error: Failure) -> Failure {
+    match error.code {
+        "export_busy" | "original_busy" => failure(
+            "original_share_busy",
+            "已有原件操作正在进行，请完成或取消后重试",
+        ),
+        _ => error,
+    }
+}
 #[cfg(any(target_os = "android", target_os = "linux"))]
 fn rename_no_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
     use std::{ffi::CString, os::unix::ffi::OsStrExt};
@@ -976,6 +1005,106 @@ pub(super) async fn beta_open_original(
     Ok(())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum OriginalShareOutcome {
+    SystemChooserOpened,
+    Cancelled,
+}
+
+#[tauri::command]
+pub(super) async fn beta_share_original(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    profile_id: ProfileId,
+    original_id: OriginalId,
+    request_id: Uuid,
+) -> Result<OriginalShareOutcome, Failure> {
+    trusted_window(&window, state.inner())?;
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, state, profile_id, original_id, request_id);
+        return Err(failure(
+            "share_unavailable",
+            "系统应用分享仅支持 Android；仍可下载或使用系统打开原件",
+        ));
+    }
+    #[cfg(target_os = "android")]
+    {
+        let lease = state
+            .exports
+            .begin(request_id, profile_id.clone(), original_id.clone())
+            .map_err(map_share_begin_failure)?;
+        let cache = app
+            .path()
+            .app_cache_dir()
+            .map_err(|_| share_copy_io_failure())?
+            .join("beta-open")
+            .join(profile_id.to_string())
+            .join(original_id.to_string());
+        let native = state.inner().clone();
+        let prepared = tauri::async_runtime::spawn_blocking(move || {
+            if let Err(error) = lease.check() {
+                return if lease.explicitly_cancelled() {
+                    Ok(None)
+                } else {
+                    Err(map_share_copy_failure(error))
+                };
+            }
+            let session = native.human(profile_id.clone())?;
+            let source = Source::begin(native.host.clone(), session, profile_id, original_id)?;
+            let path = match prepare_open_copy(
+                &cache,
+                &source.original,
+                |offset, length| source.read(offset, length),
+                &lease,
+            ) {
+                Ok(path) => path,
+                Err(_) if lease.explicitly_cancelled() => return Ok(None),
+                Err(error) => return Err(map_share_copy_failure(error)),
+            };
+            source.finish()?;
+            if let Err(error) = lease.admit_publish() {
+                return if lease.explicitly_cancelled() {
+                    Ok(None)
+                } else {
+                    Err(map_share_copy_failure(error))
+                };
+            }
+            Ok(Some((path, source.original.media_type.clone(), lease)))
+        })
+        .await
+        .map_err(|_| share_copy_io_failure())??;
+        let Some((path, media_type, _lease)) = prepared else {
+            return Ok(OriginalShareOutcome::Cancelled);
+        };
+        exomind_android_clipboard::share_file(
+            &app,
+            path.to_string_lossy().into_owned(),
+            media_type,
+        )
+        .await
+        .map_err(|_| {
+            failure(
+                "system_share_failed",
+                "系统分享选择器未能打开；本机原件未修改，可重试或下载后分享",
+            )
+        })?;
+        Ok(OriginalShareOutcome::SystemChooserOpened)
+    }
+}
+
+#[tauri::command]
+pub(super) fn beta_cancel_original_share(
+    window: WebviewWindow,
+    state: State<'_, Arc<NativeState>>,
+    request_id: Uuid,
+) -> Result<bool, Failure> {
+    trusted_window(&window, state.inner())?;
+    state.exports.cancel(request_id)
+}
+
 fn prepare_open_copy(
     cache: &Path,
     original: &OriginalRef,
@@ -1140,6 +1269,38 @@ mod tests {
     use super::*;
     use std::{sync::Arc, time::Duration};
 
+    #[test]
+    fn original_share_outcomes_have_explicit_wire_names() {
+        assert_eq!(
+            serde_json::to_string(&OriginalShareOutcome::SystemChooserOpened).unwrap(),
+            "\"system_chooser_opened\""
+        );
+        assert_eq!(
+            serde_json::to_string(&OriginalShareOutcome::Cancelled).unwrap(),
+            "\"cancelled\""
+        );
+    }
+
+    #[test]
+    fn share_copy_failures_are_actionable_and_not_mislabeled_as_save_errors() {
+        let io = map_share_copy_failure(open_copy_io_failure());
+        assert_eq!(io.code, "share_copy_failed");
+        assert!(io.message.contains("原件未修改"));
+        assert!(io.message.contains("重试"));
+        assert!(!io.message.contains("所选位置"));
+
+        let integrity = map_share_copy_failure(open_copy_integrity_failure());
+        assert_eq!(integrity.code, "share_copy_incomplete");
+        assert!(integrity.message.contains("完整性校验"));
+    }
+
+    #[test]
+    fn an_existing_original_operation_has_a_share_specific_retry_message() {
+        let error = map_share_begin_failure(failure("export_busy", "legacy text"));
+        assert_eq!(error.code, "original_share_busy");
+        assert!(error.message.contains("取消后重试"));
+    }
+
     fn test_lease(manager: &Arc<ExportManager>, request: Uuid) -> Result<ExportLease, Failure> {
         manager.begin(request, ProfileId::new(), OriginalId::new())
     }
@@ -1290,7 +1451,10 @@ mod tests {
             test_rename_no_replace,
         )
         .unwrap();
-        assert_eq!(recovered.canonicalize().unwrap(), path.canonicalize().unwrap());
+        assert_eq!(
+            recovered.canonicalize().unwrap(),
+            path.canonicalize().unwrap()
+        );
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         assert_eq!(
             std::fs::read(&stale_spool).unwrap(),

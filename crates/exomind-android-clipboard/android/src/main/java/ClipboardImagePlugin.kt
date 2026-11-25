@@ -30,6 +30,12 @@ class OpenFileArgs {
     lateinit var mediaType: String
 }
 
+@InvokeArg
+class ShareFileArgs {
+    lateinit var path: String
+    lateinit var mediaType: String
+}
+
 /** Reads only the current system clipboard's content URI, never arbitrary URLs. */
 @TauriPlugin
 class ClipboardImagePlugin(private val activity: Activity) : Plugin(activity) {
@@ -84,9 +90,7 @@ class ClipboardImagePlugin(private val activity: Activity) : Plugin(activity) {
         activity.runOnUiThread {
             try {
                 val args = invoke.parseArgs(OpenFileArgs::class.java)
-                val file = File(args.path).canonicalFile
-                val root = File(activity.cacheDir, "beta-open").canonicalFile
-                require(file.isFile && file.path.startsWith(root.path + File.separator))
+                val file = verifiedOriginalCacheFile(args.path)
                 val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.beta.originals", file)
                 val inferred = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase())
                 val mediaType = if (args.mediaType == "application/octet-stream") inferred ?: "*/*" else args.mediaType
@@ -99,6 +103,37 @@ class ClipboardImagePlugin(private val activity: Activity) : Plugin(activity) {
                 invoke.reject("系统无法打开此格式，请安装相应应用或另存为后打开")
             }
         }
+    }
+
+    @Command
+    fun shareFile(invoke: Invoke) {
+        activity.runOnUiThread {
+            try {
+                val args = invoke.parseArgs(ShareFileArgs::class.java)
+                val file = verifiedOriginalCacheFile(args.path)
+                val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.beta.originals", file)
+                val inferred = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase())
+                val mediaType = if (args.mediaType == "application/octet-stream") inferred ?: "*/*" else args.mediaType
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType(mediaType)
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                send.clipData = ClipData.newRawUri(file.name, uri)
+                val chooser = Intent.createChooser(send, "分享原件")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                activity.startActivity(chooser)
+                invoke.resolve(JSObject().put("chooserOpened", true))
+            } catch (_: Exception) {
+                invoke.reject("系统分享选择器未能打开；原件保持不变，可重试或下载后分享")
+            }
+        }
+    }
+
+    private fun verifiedOriginalCacheFile(path: String): File {
+        val file = File(path).canonicalFile
+        val root = File(activity.cacheDir, "beta-open").canonicalFile
+        require(file.isFile && file.path.startsWith(root.path + File.separator))
+        return file
     }
 
     @Command

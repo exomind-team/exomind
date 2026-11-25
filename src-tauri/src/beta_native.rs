@@ -1270,6 +1270,8 @@ pub fn run(mut context: tauri::Context<tauri::Wry>) {
             export::beta_export_original,
             export::beta_original_export_history,
             export::beta_open_original,
+            export::beta_share_original,
+            export::beta_cancel_original_share,
             export::beta_cancel_original_export,
             profile_archive::beta_profile_archive_capabilities,
             profile_archive::beta_profile_archive_history,

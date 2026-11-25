@@ -13,7 +13,12 @@ beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:local-fixture');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => {
+  Reflect.deleteProperty(navigator, 'share');
+  Reflect.deleteProperty(navigator, 'canShare');
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 const intersect = (visible: boolean) => act(() => intersection([{ isIntersecting: visible } as IntersectionObserverEntry], {} as IntersectionObserver));
 
 describe('saved image inline preview lifecycle', () => {
@@ -39,5 +44,43 @@ describe('saved image inline preview lifecycle', () => {
     view.rerender(<BetaImagePreview {...props} load={next} sourceScope={{}} visible={false} />);
     await act(async () => { first.resolve(blob); await first.promise; });
     expect(URL.createObjectURL).not.toHaveBeenCalled(); expect(next).not.toHaveBeenCalled();
+  });
+
+  it('uses the system share sheet for the already loaded image and reports refusal', async () => {
+    const blob = source(), load = vi.fn(async () => blob);
+    const share = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('synthetic share refusal'));
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share });
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+    render(<BetaImagePreview identity="device:profile:image:hash" fileName="图片.png" mediaType="image/png" byteLength={blob.size} load={load} inline visible />);
+    intersect(true);
+    await screen.findByAltText('图片.png');
+    fireEvent.click(screen.getByRole('button', { name: '预览图片 图片.png' }));
+
+    const button = await screen.findByRole('button', { name: '分享图片 图片.png' });
+    fireEvent.click(button);
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    const payload = share.mock.calls[0][0] as ShareData;
+    expect(payload.files).toHaveLength(1);
+    expect(payload.files?.[0]).toMatchObject({ name: '图片.png', type: 'image/png' });
+    expect(await screen.findByText('已交给系统分享')).toBeInTheDocument();
+
+    fireEvent.click(button);
+    expect(await screen.findByRole('alert')).toHaveTextContent('synthetic share refusal');
+  });
+
+  it('delegates an owned attachment share action to its Native owner', async () => {
+    const blob = source(); const load = vi.fn(async () => blob); const share = vi.fn(async () => 'system_chooser_opened' as const);
+    const webShare = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'share', { configurable: true, value: webShare });
+    render(<BetaImagePreview identity="device:profile:native-image:hash" fileName="owned.png" mediaType="image/png" byteLength={blob.size} load={load} onShare={share} inline visible />);
+    intersect(true);
+    await screen.findByAltText('owned.png');
+    fireEvent.click(screen.getByRole('button', { name: '预览图片 owned.png' }));
+    fireEvent.click(await screen.findByRole('button', { name: '分享图片 owned.png' }));
+
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    expect(webShare).not.toHaveBeenCalled();
   });
 });
