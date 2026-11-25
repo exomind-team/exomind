@@ -182,6 +182,31 @@ describe('shared Alpha focus presentation with real Beta commands',()=>{
       expect(client.timeblocks.command.mock.calls.every(([command])=>command.profile_id===P)).toBe(true);
     }finally{ui.unmount();await owner.close();}
   });
+  it('starts on Enter, reserves Shift+Enter for note text and shows the saved note below the running divider',async()=>{
+    const client=timeblockClient();let remote:BetaTimeblockSnapshot=snapshot();
+    client.timeblocks.snapshot.mockImplementation(async()=>structuredClone(remote));
+    client.timeblocks.command.mockImplementation(async command=>{
+      if(command.action.kind!=='start')throw new Error('unexpected action');
+      remote={...remote,active:{block_id:command.action.block_id,name:command.action.name,note:command.action.note,timer:command.action.timer,phase:'running',work_ms:0,deadline_reached:false,deadline:null}};
+      return receipt(command);
+    });
+    const owner=await BetaTimeblockController.open(client,D,P,{journal:memoryIntentJournal()});
+    const ui=render(<BetaFocusTimer controller={owner} client={client} profileId={P}/>);
+    try{
+      fireEvent.click(await screen.findByTestId('new-focus-idle-card'));
+      const input=screen.getByTestId('new-focus-task-input');
+      expect(input).toHaveAttribute('aria-label','时间块名称和备注');
+      expect(input).toHaveAttribute('aria-describedby','beta-timeblock-start-shortcut-help');
+      expect(screen.getByText(/Enter 快速开始；Shift\+Enter/)).toBeVisible();
+      fireEvent.keyDown(input,{key:'Enter',shiftKey:true});
+      expect(client.timeblocks.command).not.toHaveBeenCalled();
+      fireEvent.change(input,{target:{value:'写课程记录\n整理课堂观察'}});
+      fireEvent.keyDown(input,{key:'Enter'});
+      await waitFor(()=>expect(client.timeblocks.command).toHaveBeenCalledTimes(1));
+      expect(client.timeblocks.command.mock.calls[0][0].action).toMatchObject({kind:'start',name:'写课程记录',note:'整理课堂观察'});
+      expect(await screen.findByTestId('new-focus-running-note')).toHaveTextContent('整理课堂观察');
+    }finally{ui.unmount();await owner.close();}
+  });
   it('renders the mixed authoritative timeline rather than silently using the capture-only projection',async()=>{
     const locks=Object.getOwnPropertyDescriptor(navigator,'locks');Object.defineProperty(navigator,'locks',{configurable:true,value:asyncDraftLocks()});
     const client=timeblockClient();client.profiles.mockResolvedValue([{profile_id:P,display_name:'P'},{profile_id:Q,display_name:'Q'}]);

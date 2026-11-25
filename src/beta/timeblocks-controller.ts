@@ -216,8 +216,11 @@ export function timeblockClock(snapshot:BetaTimeblockSnapshot,elapsedSinceSample
   if(!active)return{text:'00:00',warning:false,stale};
   if(active.timer.mode==='count_up')return{text:format(work),warning:false,stale};
   const left=active.timer.duration_ms-work;const overtime=left<0&&active.timer.end_mode==='soft';
-  const endTimeText=snapshot.clock.epoch_changed||snapshot.clock.wall_clock_moved_back?'时钟已重新锚定，以服务状态为准'
+  const calibrated=snapshot.clock.epoch_changed||snapshot.clock.wall_clock_moved_back;
+  const endAt=active.deadline?new Date(active.deadline.due_at_ms).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}):null;
+  const endTimeText=calibrated
+    ?endAt?`时间已校准，预计 ${endAt} 结束`:'正在校准时间，结束时间待确认'
     :left<=0&&!active.deadline_reached&&active.phase==='running'?'等待服务确认到点状态'
-      :active.deadline?`预计 ${new Date(active.deadline.due_at_ms).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})} 结束`:undefined;
+      :endAt?`预计 ${endAt} 结束`:undefined;
   return{text:overtime?`+${format(-left)}`:format(left),warning:left<=60_000,endTimeText,stale};
 }

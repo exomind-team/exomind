@@ -38,6 +38,7 @@ export type FocusTimerViewModel =
   | {
       phase: "running";
       name: { text: string; draft: string; editing: boolean; saving: boolean; readOnly?: boolean };
+      note?: string;
       // The controller supplies these strings from its authoritative clock.
       // This presentation never advances time or submits an ending itself.
       clock: { text: string; warning: boolean; endTimeText?: string };
@@ -92,6 +93,7 @@ export interface FocusTimerViewProps {
   surface?: FocusTimerSurface;
   actionsDisabled?: boolean;
   startLabel?: string;
+  configNameDescriptionId?: string;
   overlayChrome?: FocusTimerOverlayChrome;
   slots?: { keepAwake?: ReactNode; dialogs?: ReactNode; configurationDetails?: ReactNode };
 }
@@ -135,6 +137,7 @@ export function FocusTimerView({
   surface = "default",
   actionsDisabled = false,
   startLabel = "开始计时",
+  configNameDescriptionId,
   overlayChrome: overlayRunningChrome,
   slots = {},
 }: FocusTimerViewProps) {
@@ -157,6 +160,7 @@ export function FocusTimerView({
   const feedbackOpen = running?.feedback.dialogOpen ?? false;
   const runningNameDisplayText = running?.name.text ?? "";
   const runningNameDraft = running?.name.draft ?? "";
+  const runningNote = running?.note?.trim() ?? "";
   const isRunningNameEditing = running?.name.editing ?? false;
   const isRunningNameSaving = running?.name.saving ?? false;
   const clockText = running?.clock.text ?? "";
@@ -190,9 +194,11 @@ export function FocusTimerView({
     : null;
   const hasIntegratedOverlayChrome = overlayChrome !== null;
   const hasRunningLinkedTasks = linkedTasks.length > 0;
+  const hasRunningNote = runningNote.length > 0;
+  const hasRunningSupplementaryContent = hasRunningLinkedTasks || hasRunningNote;
   const useAutoHeightConfigLayout = !isOverlaySurface;
   const useAutoHeightRunningLayout =
-    !isOverlaySurface || (hasIntegratedOverlayChrome && hasRunningLinkedTasks);
+    !isOverlaySurface || (hasIntegratedOverlayChrome && hasRunningSupplementaryContent);
   const baseStageHeightClass = isWorkspaceSurface ? "" : useAutoHeightConfigLayout
     ? "min-h-[200px] pb-4 pt-4"
     : hasIntegratedOverlayChrome
@@ -214,14 +220,14 @@ export function FocusTimerView({
       : hasIntegratedOverlayChrome
         ? "min-h-[246px]"
         : "min-h-[276px] pb-4 pt-4"
-    : hasRunningLinkedTasks
+    : hasRunningSupplementaryContent
       ? hasIntegratedOverlayChrome
         ? "h-[276px]"
         : "h-[252px]"
       : baseStageHeightClass;
   const runningGlowHeightClass = useAutoHeightRunningLayout
     ? "bottom-4"
-    : hasRunningLinkedTasks
+    : hasRunningSupplementaryContent
       ? hasIntegratedOverlayChrome
         ? "h-[240px]"
         : "h-[215px]"
@@ -230,7 +236,7 @@ export function FocusTimerView({
     ? useAutoHeightConfigLayout
       ? "min-h-[169px]"
       : "min-h-[246px]"
-    : hasRunningLinkedTasks
+    : hasRunningSupplementaryContent
       ? hasIntegratedOverlayChrome
         ? "h-[246px]"
         : "h-[221px]"
@@ -417,6 +423,8 @@ export function FocusTimerView({
                   onFocus={bindings.configName?.onFocus}
                   onBlur={bindings.configName?.onBlur}
                   onKeyDown={handleTaskInputKeyDown}
+                  aria-label="时间块名称和备注"
+                  aria-describedby={configNameDescriptionId}
                   placeholder="输入时间块名称..."
                   rows={1}
                   className="max-h-24 border-[#E7E5E4]/80 dark:border-[#FFFFFF20] bg-white/60 dark:bg-[#FFFFFF10] text-sm dark:text-[#FAFAF9]"
@@ -635,6 +643,17 @@ export function FocusTimerView({
                 </div>
               )}
               <div className="h-px w-full bg-[#D4785F30] dark:bg-[#D4785F20]" />
+              {hasRunningNote && (
+                <p
+                  data-testid="new-focus-running-note"
+                  aria-label="时间块备注"
+                  className={`whitespace-pre-wrap break-words px-1 text-[12px] leading-[1.45] ${
+                    isOverlaySurface ? "text-[#D6C2B8]" : "text-secondary"
+                  }`}
+                >
+                  {runningNote}
+                </p>
+              )}
               <div className="flex items-center justify-between px-1 pt-1">
                 <Button
                   type="button"

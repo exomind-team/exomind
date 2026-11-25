@@ -213,6 +213,7 @@ export function createBetaSettingsRegistry(bindings: BetaSettingsBindings): Sett
     },
     {
       ...PORTABLE_SETTINGS.sendMode, type: 'enum', options: INPUT_SEND_SETTING_OPTIONS,
+      description: '手动选择发送快捷键；尚未手动选择时，外接键盘默认 Enter 发送，纯触摸默认 Ctrl/Cmd+Enter 发送。',
       optionTestId: value => `new-settings-input-send-mode-${value}`,
       get: getBetaInputSendMode, set: setBetaInputSendMode, subscribe: subscribeBetaInputSendMode,
     },

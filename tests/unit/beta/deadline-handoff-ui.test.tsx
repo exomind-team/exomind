@@ -1,9 +1,9 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BetaApp } from '@/beta/BetaApp';
 import { rememberLastBetaProfile } from '@/beta/last-profile';
 import type { BetaDeadlineHandoff, BetaDeadlineHandoffsClient } from '@/beta/deadline-handoff-client';
-import { asyncDraftLocks } from './fixtures';
+import { asyncDraftLocks, deferred } from './fixtures';
 import { memoryIntentJournal } from './timeblock-ui-fixtures';
 import { B, C, D, P, Q, R, activeSnapshot, snapshot, timeblockClient } from './timeblock-fixtures';
 
@@ -57,6 +57,28 @@ describe('notification tap uses the real Beta profile/draft and mounted timebloc
     await waitFor(() => expect(taps.client.acknowledge).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByTestId('beta-deadline-handoff')).toHaveTextContent(/当前仍在运行/));
     expect(client.timeblocks.command).not.toHaveBeenCalled();
+  });
+  it('shows busy state immediately when retrying an unconfirmed handoff', async () => {
+    const client = timeblockClient();
+    client.profiles.mockResolvedValue([{ profile_id: P, display_name: 'P' }]);
+    client.timeblocks.snapshot.mockResolvedValue(activeSnapshot());
+    const taps = handoffs();
+    taps.client.acknowledge.mockResolvedValue(false);
+
+    render(<BetaApp client={client} handoffs={taps.client} intentJournal={memoryIntentJournal()}/>);
+    await screen.findByRole('textbox', { name: '记录当下' });
+    await act(async () => { taps.tap(target); });
+    await screen.findByText(/系统尚未确认入口已处理/);
+
+    const gate = deferred<BetaDeadlineHandoff | null>();
+    taps.client.pending.mockReturnValueOnce(gate.promise);
+    fireEvent.click(screen.getByRole('button', { name: '重试打开提醒' }));
+
+    const handoff = screen.getByTestId('beta-deadline-handoff');
+    expect(handoff).toHaveTextContent('正在重新打开提醒并确认入口');
+    expect(within(handoff).getByRole('button', { name: '重试打开提醒' })).toBeDisabled();
+
+    await act(async () => { gate.resolve(target); });
   });
   it('dispatches ACK for a pending source only after its real feedback form is mounted, while Q draft remains intact',async()=>{
     const client=timeblockClient();client.profiles.mockResolvedValue([{profile_id:P,display_name:'P'},{profile_id:Q,display_name:'Q'}]);

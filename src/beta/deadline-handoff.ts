@@ -18,7 +18,7 @@ function failure(error: unknown): string {
     case 'handoff_missing_block': return '通知对应时间块暂未在本机已读取记录中找到，请确认资料后重试';
     case 'handoff_draft_pending': return '当前草稿尚未完成本机暂存，未消费通知入口；请保留窗口并重试';
     case 'handoff_location_pending': return '来源档案尚未完成打开，通知入口仍保留，请重试';
-    case 'deadline_handoff_unconfirmed': return '提醒已打开，但系统尚未确认入口已处理，请重试';
+    case 'deadline_handoff_unconfirmed': return '提醒来源已打开，但系统尚未确认入口已处理。草稿和提醒入口会保留，可再次重试确认';
     default: return '通知入口尚未完成处理；当前草稿和入口会保留，请重试';
   }
 }
@@ -94,6 +94,12 @@ export function useBetaDeadlineHandoff(client: BetaDeadlineHandoffsClient | null
   return { ...view, retry() {
     const life = active.current;
     if (!life?.active) return;
+    setView({
+      pending: life.pending,
+      busy: true,
+      failed: false,
+      message: '正在重新打开提醒并确认入口…',
+    });
     if (!latest.current.ready) {
       setView({
         pending: life.pending,
