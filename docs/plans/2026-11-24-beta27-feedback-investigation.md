@@ -233,6 +233,45 @@ item 46047 当时覆盖焦点修复、推送、云构建和 Windows EXE 交付�
 - 归并：与 β28 A13“可以关掉这个实例了”相邻，按既有计划处理，不另开主题。
 - 边界：这是方向性构想，不是已实现能力；跨设备落地成功的具体字节/来源证明以当时现场为准。
 
+## 2026-11-28 外部 Agent 接入实测：原件字节单次长度上限
+
+> 来源：本机巡检的外部 Agent 接入实测。**上限本身是有意设计，不是缺陷**；只有超限时的错误不足以让调用方分辨原因。本节只补现场与源码事实。
+
+### 实测边界
+
+对本机实例 `127.0.0.1:10084`、同一 Profile 授权下，同一原件（`4088b40f…`，435,352 B）做单次 range 读取：
+
+| 请求 length | 结果 |
+|---:|---|
+| 16 / 65,536 / 131,072 / 262,143 / 262,144 | 200，返回字节数与请求一致 |
+| 262,145 / 300,000 / 400,000 / 435,352 | 400 `{"error":{"code":"invalid_request","message":"Invalid request"}}` |
+
+- 上限与源码一致：`crates/exomind-core/src/originals.rs:10` `MAX_ORIGINAL_CHUNK_BYTES = 256 * 1024`；同一常量也约束上传分块（`crates/exomind-beta-host/src/originals_http.rs:207` 的 body limit）与库内分块布局。
+- 超限判定：`crates/exomind-beta-host/src/originals.rs:139` 的 `valid_range` 对 `length == 0 || length > MAX_ORIGINAL_CHUNK_BYTES` 返回 `HostError::InvalidRequest`；`crates/exomind-beta-host/src/http.rs:175` 把 `InvalidRequest` 统一映射为 400 `invalid_request` / `Invalid request`。因此该错误**不区分**长度超限、零长度与其它无效请求，也不携带上限数值。
+- 现有客户端都没踩坑：公共 `exomind-monitor` adapter 已按 `MAX_ORIGINAL_CHUNK_BYTES = 262144` 分块（`scripts/beta-monitor-adapter.mjs:9`），并从 `access/check` 响应的 `max_original_chunk_bytes` 读实际上限（同文件 `:504`、`:790`）；本机 patrol skill 同样按 256 KiB 分块。**只影响第三方／未来的外部 Agent**。
+- 上限其实已经可发现：`/beta/v1/hello` 的 `capabilities.max_original_chunk_bytes`（`crates/exomind-beta-host/src/lib.rs:489`）与 `POST /profiles/P/access/check` 响应的 `max_original_chunk_bytes`（`crates/exomind-beta-host/src/agent_access.rs:106`）都返回该值，且有回归覆盖（`crates/exomind-beta-host/tests/originals.rs:90`、`tests/agent_access.rs:40`）。缺口不在“上限不可知”，而在超限错误不指向这条已有路径。
+- 文档现状：`crates/exomind-beta-host/README.md` 的路由表已写明“单次最多 256 KiB”，但对外 Agent 接入文档 `docs/development/beta-agent-read-tools.md` 未覆盖该字节读取路由及其上限。
+
+### 值得提一句的原因
+
+超长单次请求返回的是笼统 `invalid_request`，响应里既没有说明是长度超限、也没有给出上限数值。调用方据此一度把“原件未同步到本机”误判成事实，差点当成产品缺陷上报——实际字节一直在本地，只是请求太长。
+
+可选处置（二选一）：
+
+1. 在该错误的 `error` 里带上上限，例如 `max_length_bytes: 262144`；或
+2. 在对外的 API 合同文档里明确写出原件字节读取的单次上限与分块读法。
+
+这样外部 Agent 才能把“请求太长”与“原件确实不在本机”区分开——后者才是需要人看的状态。
+
+### 顺带的正面结论
+
+同一时段用 256 KiB 分块完整取回两份原件并逐块校验，SHA-256 均与记录一致：
+
+- seq 499 `mcs5v04r_listen.mp3`（**手机侧产生、经外心传到 PC**），11,207,618 B，43 块，hash 匹配；
+- seq 7 哈基米图片（本机产生），435,352 B，2 块，hash 匹配。
+
+即：手机发起的 10.7 MB 文件已完整落到 PC 且字节正确，跨设备原件补齐这一段是通的。转发送达不代表已修复。
+
 ## 2026-11-26 22:4x–23:0x 三端验收现场
 
 > 同一 Profile `2026-11-24`，完整 typed history 到 `through=472`。按 `event_id` 差分新增 13 条，其中 2 条与外心相关。本节只补现场与证据；结论另见下方两节核查。
