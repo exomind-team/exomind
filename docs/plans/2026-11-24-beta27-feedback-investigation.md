@@ -492,3 +492,26 @@ item 46047 当时覆盖焦点修复、推送、云构建和 Windows EXE 交付�
 - 本批只有 1 条产品诉求（seq 553）；只补现场与方向，不派工、不请求实现、不构建。
 - 敏感字段核对：命中仍为历史 3 条（seq 18 / 19 / 470），本批 4 条**未新增命中**；无附件。
 - 本批 4 条记 reviewed；seq 553 记 reported；未写 Agent Note（只读 grant）。
+
+## 2026-11-28 19:4x 发布身份提示：进程名随 CI 制品名变化
+
+> 来源：维护线程的只读现场提示，无 profile seq。**不是外心内部缺陷**，是「按进程名找实例」的外部集成与发布命名之间的契约问题；只用一条记录留待「下次发布要不要保持稳定进程名」。
+
+### 现场
+
+- 正在运行的进程：`ExoMind-0.6.0-beta27-windows-x64.exe`（PID 35320，2026-11-27 22:15 启动，路径 `G:\exomind-runs\beta27-candidate-2d4e166f\windows-x64\`）。Windows 的进程名就是 exe 文件名，因此从 0.5 的 `exomind` 变成了带版本号的全名。
+- 外部影响：日报侧 `discover` 写死 `Get-Process exomind`，于是误判「没有在运行」，β 读数静默降级；已改为前缀匹配。
+- 端口：β 面从 31123 换到 10084；peer 面仍是 43344。授权身份（device `b4ceb658…` / profile `c90da1ab…`）未变，六项核对全过——属路由变化，不是换实例。
+- `%APPDATA%\com.exomind.app.v06` 新目录出现，数据仍在 `com.exomind.app.v06.beta`。
+
+### 源码对照
+
+- 用户跑的是 CI 验证制品：Windows 二进制在构建工作流里被重命名为 `ExoMind-${BETA_VERSION}-${label}.exe`（`.github/workflows/beta-build-validation.yml:286`），β27 的 `BETA_VERSION` 是 `0.6.0-beta27`，文件名与进程名一致。安装版的 exe 名来自 productName：β 为 `Exomind 0.6 beta`（`src-tauri/tauri.beta.conf.json:3`），0.5 为 `ExoMind`（`src-tauri/tauri.conf.json:3`）——两者都不是裸 `exomind`，只是 0.5 的名字碰巧以它开头且大小写不敏感。
+- peer 端口 43344 与源码一致：`src-tauri/src/beta_native.rs:1634`–`:1639`（本地绑定 `127.0.0.1:43344`，局域网绑定 `0.0.0.0:43344`）。10084 是 β 面服务端口，仓库内无固定默认值记录，按现场只登记。
+- 数据目录：当前 β 配置的 identifier 是 `com.exomind.app.v06.beta`（`tauri.beta.conf.json:5`），因此数据在 `%APPDATA%\com.exomind.app.v06.beta`。`com.exomind.app.v06`（无 `.beta`）在现配置与代码里没有创建路径；该目录由谁创建，本轮**未核实**，只按现场登记，不外推。
+
+### 留待决定
+
+- 若后续发布继续用 `ExoMind-<version>-<platform>` 制品名，外部集成的稳定写法是 `ProcessName -like 'ExoMind*'`，而不是写死 `exomind`；或在 release note／一处「如何找到我」文档里写明匹配方式。
+- 备选是提供稳定的进程名／单实例名，让版本号只体现在制品名而不进入进程名。是否采用，留待下次发布决定，本轮不实现、不改文档。
+- 边界：本条不是缺陷，不派工；按用户要求无需回复。
